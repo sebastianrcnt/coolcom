@@ -44,7 +44,9 @@ ASM_OBJS := $(B)/Boot.o $(B)/Arch.o $(B)/Blob.o
 $(B)/%.o: os/Kernel/%.S os/Kernel/Asm.h | $(B)
 	aarch64-elf-gcc -c $< -o $@
 # Blob.S embeds the compiler seed and the shell prelude (.incbin).
-$(B)/Blob.o: coolc/seed/Compiler.BIN os/Kernel/KernelA.HH os/Kernel/ShellA.HH
+$(B)/Blob.o: coolc/seed/Compiler.BIN build/ShellPrelude.HH
+build/ShellPrelude.HH: $(KSRC) tools/mkprelude.py | build
+	python3 tools/mkprelude.py os/Kernel/Kernel.HC > $@
 
 # Pass 1: link the assembly alone (HolyC symbols unresolved) to learn where its
 # routines land; the addresses don't depend on the HolyC module. The unresolved

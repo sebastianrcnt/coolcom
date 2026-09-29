@@ -8,6 +8,13 @@ import struct, sys
 # followed by the zero-filled globals, which are not stored in the image:
 #   KBSS_START .. KBSS_END, cleared by Boot.S.
 #
+# Symbol table (KSYM_TABLE in syms.ld), after the relocation table: every
+# export and assembly symbol, sorted by address, for the shell (which registers
+# them all) and for FunSeg (address -> name+offset). Addresses are stored
+# relative to the table itself, so it needs no relocation:
+#   U64 count | count x {I64 addr - table, U32 name offset from table, U32 kind}
+#   | NUL-terminated names.  kind: 1 HolyC code, 2 HolyC data, 3 assembly.
+#
 # Relocation table (RELOC_TABLE in syms.ld). The Image is linked at a fixed
 # base but m1n1 may load it at another 2 MiB-aligned address. Every place in
 # the module that holds an absolute address is recorded exactly, so Boot.S can
@@ -149,6 +156,14 @@ image += bytes(align(len(image), 8) - len(image))
 reloc_table = ORG + len(image)
 image += struct.pack('<QII', ORG, len(sites), 0)
 image += b''.join(struct.pack('<I', off) for off in sorted(sites))
+image += bytes(align(len(image), 8) - len(image))
+glob_names = {n for n, _, _ in globs if n}
+ksym_names = sorted(n for n in set(syms) | glob_names
+                    if n.isidentifier() and (n in glob_names or syms[n][1] != CONST))
+ksym_table = ORG + len(image)
+pool = b''.join(n.encode() + b'\0' for n in ksym_names)
+ksym_at = len(image)
+image += bytes(8 + 16 * len(ksym_names)) + pool
 image += bytes(align(len(image)) - len(image))
 kbss_start = kbss = ORG + len(image)
 for name, init, refs in zeroed:
@@ -159,6 +174,16 @@ for name, init, refs in zeroed:
         struct.pack_into('<Q', image, patch_at, kbss + add)
     kbss += len(init)
 kbss_end = align(kbss)
+
+ksyms, name_off = [], 8 + 16 * len(ksym_names)
+for n in ksym_names:
+    kind = 3 if n in arch_names else 2 if n in glob_names or syms[n][1] == ADDR else 1
+    ksyms.append((addr(n, 'symbol table'), name_off, kind))
+    name_off += len(n) + 1
+ksyms.sort()
+struct.pack_into('<Q', image, ksym_at, len(ksyms))
+for k, (a, off, kind) in enumerate(ksyms):
+    struct.pack_into('<qII', image, ksym_at + 8 + 16 * k, a - ksym_table, off, kind)
 
 for off in abss:
     struct.pack_into('<Q', image, off, struct.unpack_from('<Q', image, off)[0] + ORG)
@@ -181,8 +206,9 @@ open(args[2], 'w').write(
     f'KMAIN = {addr("KMain", "boot"):#x};\n'
     f'MAIN_TABLE = {main_table:#x};\n'
     f'RELOC_TABLE = {reloc_table:#x};\n'
+    f'KSYM_TABLE = {ksym_table:#x};\n'
     f'KBSS_START = {kbss_start:#x};\n'
     f'KBSS_END = {kbss_end:#x};\n')
 print(f'binlink: code {len(code):#x} bytes, {len(mains)} init chunks, '
       f'{len(globs) - len(zeroed)} data + {len(zeroed)} zeroed globals, '
-      f'{len(sites)} relocation sites, image {ORG:#x}..{kbss_end:#x}')
+      f'{len(sites)} relocation sites, {len(ksyms)} symbols, image {ORG:#x}..{kbss_end:#x}')

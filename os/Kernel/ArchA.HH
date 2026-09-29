@@ -59,3 +59,4 @@ import I64 ArchSetJmp(I64 *ctx);
 import U0 ArchLongJmp(I64 *ctx);
 import U8 *ArchCompilerBin(I64 *size);         // embedded coolc/seed/Compiler.BIN (Blob.S)
 import U8 *ArchShellPrelude();                 // embedded shell prelude text
+import U8 *ArchKSyms();                        // kernel symbol table (KSym.HC)
