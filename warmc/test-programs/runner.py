@@ -58,8 +58,10 @@ class Test(object):
         self.directory = directory
         self.cli = cli
         ident: str = suite_name + "_" + name
-        self.c_path = "/tmp/austral_e2e_" + ident + ".c"
-        self.bin_path = "/tmp/austral_e2e_" + ident + ".bin"
+        test_tmp = os.environ.get("WARM_TEST_TMPDIR", "/tmp")
+        os.makedirs(test_tmp, exist_ok=True)
+        self.c_path = os.path.join(test_tmp, "austral_e2e_" + ident + ".c")
+        self.bin_path = os.path.join(test_tmp, "austral_e2e_" + ident + ".bin")
 
 
 class TestSuccess(Test):
@@ -376,6 +378,9 @@ def _test_cmd(test: Test) -> list[str]:
 def _run_success_test(test: TestSuccess) -> TestResult:
     # Find the source files.
     expected_output = test.expected_output
+    if expected_output:
+        recorded_bin = "/tmp/austral_e2e_" + test.suite_name + "_" + test.name + ".bin"
+        expected_output = expected_output.replace(recorded_bin, test.bin_path)
     suite_name: str = test.suite_name
     test_name: str = test.name
     # Construct the compiler command.

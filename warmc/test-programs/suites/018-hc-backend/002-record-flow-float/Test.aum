@@ -1,0 +1,37 @@
+module body Test is
+    record Triple: Free is
+        small: Nat8;
+        wide: Int64;
+        real: Float64;
+    end;
+    function change(input: Triple): Triple is
+        var local: Triple := input;
+        local.wide := local.wide + 1;
+        return local;
+    end;
+    function choose(flag: Bool): Int32 is
+        return if flag then 17 else 23;
+    end;
+    function unexpected(): Bool is
+        printLn("ERROR: short circuit evaluated RHS");
+        return true;
+    end;
+    function main(): ExitCode is
+        let original: Triple := Triple(small => 7, wide => 10000000000, real => 2.5);
+        let fun: Fn[Triple, Triple] := change;
+        let result: Triple := fun(original);
+        printLn(original.wide);
+        printLn(result.wide);
+        printLn(result.small);
+        printLn(result.real + 0.25);
+        printLn(false and unexpected());
+        printLn(true or unexpected());
+        printLn(choose(true));
+        printLn(choose(false));
+        case toFloat64(42 : Int64) of
+            when Some(value: Float64) do printLn(value);
+            when None do abort("conversion");
+        end case;
+        return ExitSuccess();
+    end;
+end module body.
