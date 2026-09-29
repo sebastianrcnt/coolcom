@@ -64,6 +64,8 @@ static void host_unimplemented(uint64_t id) {
     exit(1);
 }
 static void host_exit(int64_t status) { exit((int)status); }
+static int64_t host_float_to_int(double value) { return (int64_t)value; }
+static double host_int_to_float(int64_t value) { return (double)value; }
 
 static uintptr_t import_trap(size_t id) {
     if (id > UINT16_MAX)
@@ -331,6 +333,16 @@ static void register_host_symbols(Module *m) {
     HOST("FileNameAbs", host_file_name_abs);
     HOST("FileRead", host_file_read);
     HOST("FileWrite", host_file_write);
+    HOST("C2HFloor", floor);
+    HOST("C2HCeil", ceil);
+    HOST("C2HSqrt", sqrt);
+    HOST("C2HFabs", fabs);
+    HOST("C2HFmod", fmod);
+    HOST("C2HCos", cos);
+    HOST("C2HAcos", acos);
+    HOST("C2HPow", pow);
+    HOST("C2HFloatToInt", host_float_to_int);
+    HOST("C2HIntToFloat", host_int_to_float);
     HOST("FlushMsgs", host_zero);  // compiler errors are printed as they happen
 #undef HOST
 }
