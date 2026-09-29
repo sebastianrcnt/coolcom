@@ -113,9 +113,9 @@ fs_done:
 U0 DevTestInput()
 {
     I64 deadline = ArchCntVct + 3 * ArchCntFrq, f0 = kt_fails;
-    while (KbdPending < 7 && ArchCntVct < deadline)
+    while (KeyPending < 6 && ArchCntVct < deadline)
         Sleep(10);
-    if (KbdPending < 7) {
+    if (KeyPending < 6) {
         KTFail("scripted keys not received");
         return;
     }

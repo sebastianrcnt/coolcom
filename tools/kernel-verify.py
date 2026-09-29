@@ -290,7 +290,8 @@ def verify(d):
     print("kernel-verify: screen text/pixels, disk contents and FAT32 files OK")
 
 
-if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] in ("prepare", "verify", "verify-shell"):
-    {"prepare": prepare, "verify": verify, "verify-shell": verify_shell}[sys.argv[1]](pathlib.Path(sys.argv[2]))
-else:
-    sys.exit(__doc__)
+if __name__ == "__main__":  # tools/key-test.py imports typed() and keys_of()
+    if len(sys.argv) == 3 and sys.argv[1] in ("prepare", "verify", "verify-shell"):
+        {"prepare": prepare, "verify": verify, "verify-shell": verify_shell}[sys.argv[1]](pathlib.Path(sys.argv[2]))
+    else:
+        sys.exit(__doc__)

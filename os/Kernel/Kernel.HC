@@ -41,6 +41,7 @@
 #include "MultiCore.HC"
 #include "Sched.HC"
 #include "KHost.HC"
+#include "Key.HC"
 #include "Input.HC"
 #include "Blk.HC"
 #include "DskStrA.HC"

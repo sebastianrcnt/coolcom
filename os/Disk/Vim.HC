@@ -199,8 +199,8 @@ Bool VimCommand(U8 *cmd)
 
 U0 Vim(U8 *name)
 {
-    I64 n = 0, c, sc, a, b, g = 0, pending = 0;
-    U8 *file, ch;
+    I64 n = 0, c, ev, a, b, g = 0, pending = 0;
+    U8 *file, ch, u8[4];
     vim_name = name;
     vim_buf = CAlloc(VIM_CAP);
     vim_undo = MAlloc(VIM_CAP);
@@ -215,26 +215,32 @@ U0 Vim(U8 *name)
     ConsPutS("\x1b[?1049h\x1b[?25h");
     while (TRUE) {
         VimDraw;
-        c = GetKey(&sc, FALSE);
+        ev = GetKey;
+        c = ev & KEY_CODE;
+        if (ev & (KF_CTRL | KF_ALT)) c = 0;  // no Ctrl/Alt commands yet
         if (vim_mode == 2) {
-            if (c == 27) vim_mode = 0;
-            else if (c == '\n' || c == '\r') {
+            if (c == KEY_ESC) vim_mode = 0;
+            else if (c == KEY_ENTER) {
                 vim_cmd[vim_cmd_n] = 0;
                 if (VimCommand(vim_cmd)) break;
                 vim_mode = 0;
-            } else if (c == 8 || c == 127) {
+            } else if (c == KEY_BACKSPACE) {
                 if (vim_cmd_n) vim_cmd[--vim_cmd_n] = 0;
                 else vim_mode = 0;
-            } else if (c >= 32 && vim_cmd_n < 78) {vim_cmd[vim_cmd_n++] = c; vim_cmd[vim_cmd_n] = 0;}
+            } else if (c >= 32 && c < 127 && vim_cmd_n < 78) {vim_cmd[vim_cmd_n++] = c; vim_cmd[vim_cmd_n] = 0;}
         } else if (vim_mode == 1) {
-            if (c == 27) {vim_mode = 0; if (vim_pos) vim_pos = VimPrev(vim_pos);}
-            else if (c == 8 || c == 127) {if (vim_pos) VimDelete(VimPrev(vim_pos), vim_pos);}
-            else if (c == '\n' || c >= 32) {ch = c; VimInsert(&ch, 1);}
+            if (c == KEY_ESC) {vim_mode = 0; if (vim_pos) vim_pos = VimPrev(vim_pos);}
+            else if (c == KEY_BACKSPACE) {if (vim_pos) VimDelete(VimPrev(vim_pos), vim_pos);}
+            else if (c == KEY_LEFT) {if (vim_pos > VimLine(vim_pos)) vim_pos = VimPrev(vim_pos);}
+            else if (c == KEY_RIGHT) {if (vim_pos < VimEnd(vim_pos)) vim_pos = VimStep(vim_pos);}
+            else if (c == KEY_UP) VimMoveLine(-1);
+            else if (c == KEY_DOWN) VimMoveLine(1);
+            else if (c == KEY_ENTER || c == KEY_TAB || (c >= 32 && c < KEY_SPECIAL)) VimInsert(u8, Utf8Enc(u8, c));
         } else {
-            if (sc == SC_LEFT) c = 'h';
-            if (sc == SC_RIGHT) c = 'l';
-            if (sc == SC_UP) c = 'k';
-            if (sc == SC_DOWN) c = 'j';
+            if (c == KEY_LEFT) c = 'h';
+            if (c == KEY_RIGHT) c = 'l';
+            if (c == KEY_UP) c = 'k';
+            if (c == KEY_DOWN) c = 'j';
             if (pending == 'd' || pending == 'y') {
                 if (c == pending) {
                     a = VimLine(vim_pos);
