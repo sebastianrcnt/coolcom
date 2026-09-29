@@ -29,6 +29,16 @@ cases = {
         'B.aum': 'module body B is function value(r: R): Int32 is return r.x; end; end module body.',
         'Test.aum': 'import A(R); import B(value); ' + program(body='printLn(value(R(x => 42))); return ExitSuccess();'),
     }),
+    'public-parameter-name-mismatch': (False, {
+        'A.aui': 'module A is function value(x: Int32): Int32; end module.',
+        'A.aum': 'module body A is function value(y: Int32): Int32 is return y; end; end module body.',
+        'Test.aum': program(),
+    }),
+    'opaque-parameter-count-mismatch': (False, {
+        'A.aui': 'module A is type R[A: Free]: Free; end module.',
+        'A.aum': 'module body A is record R: Free is end; end module body.',
+        'Test.aum': program(),
+    }),
     'anonymous-region-escape': (False, program('function bad(): &[Int32, Static] is let x: Int32 := 10; return &x; end;')),
     'missing-record-payload': (False, program('record R: Linear is value: Int32; end;', 'let r: R := R(value => 7); let {} := r; return ExitSuccess();')),
     'missing-case-payload': (False, program('union U: Linear is case A is value: Int32; end;', 'let u: U := A(value => 7); case u of when A do skip; end case; return ExitSuccess();')),

@@ -49,6 +49,28 @@ Bool WSameSyntax(CWNode *a, CWNode *b)
     while (x && y) {if (!WSameSyntax(x, y)) return FALSE; x = x->next; y = y->next;}
     return !x && !y;
 }
+Bool WSameRole(CWNode *a, CWNode *b, U8 *role)
+{
+    CWNode *x = a->first, *y = b->first;
+    while (TRUE) {
+        while (x && !WEq(x->role, role)) x = x->next;
+        while (y && !WEq(y->role, role)) y = y->next;
+        if (!x || !y) return !x && !y;
+        if (!WSameSyntax(x, y)) return FALSE;
+        x = x->next; y = y->next;
+    }
+}
+U0 WPublicSignature(CWUnit *u, CWNode *decl, CWNode *def)
+{
+    Bool same = WSameRole(decl, def, "type-parameter");
+    if (WEq(decl->tag, "type")) {
+        same = same && (WEq(def->tag, "record") || WEq(def->tag, "union")) && WSameRole(decl, def, "universe");
+    } else {
+        same = same && WEq(decl->tag, def->tag) && WSameRole(decl, def, "type") &&
+                WSameRole(decl, def, "parameter") && WSameRole(decl, def, "result") && WSameRole(decl, def, "argument");
+    }
+    if (!same) WFail(u, def->token, "Declaration Error", "Implementation signature differs from interface");
+}
 U0 WIndex(CWUnit *u)
 {
     CWNode *m, *p, *d, *other, *c, *builtin, *prim;
@@ -74,14 +96,14 @@ U0 WIndex(CWUnit *u)
                         if (WEq(d->tag, "instance")) {
                             for (c = p->first; c; c = c->next) if (WEq(c->tag, "instance") && WEq(c->name, d->name) && WSameSyntax(WChild(c, "argument"), WChild(d, "argument"))) break;
                             if (!c) WFail(u, d->token, "Declaration Error", "Missing instance implementation");
-                            else {d->pair = c; c->pair = d;}
+                            else {WPublicSignature(u, d, c); d->pair = c; c->pair = d;}
                         } else {
                             other = WLocal(p->scope, d->name);
                             if (WEq(d->tag, "record") || WEq(d->tag, "union") || WEq(d->tag, "typeclass")) {
                                 if (other) WFail(u, other->token, "Declaration Error", "Public type declared again in body");
                                 else WIndexDecl(u, p->scope, d, m);
                             } else if (!other) WFail(u, d->token, "Declaration Error", "Missing implementation for public declaration");
-                            else {d->pair = other; other->pair = d;}
+                            else {WPublicSignature(u, d, other); d->pair = other; other->pair = d;}
                         }
                     }
             } else if (!WPrefix(m->name, "Austral.")) WFail(u, m->token, "Declaration Error", "Interface has no implementation");
