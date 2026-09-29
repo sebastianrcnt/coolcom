@@ -1,0 +1,153 @@
+module Warm.Kernel is
+
+type Filesystem: Linear;
+
+generic [R: Region]
+function acquireFilesystem(root: &![RootCapability, R]): Filesystem;
+
+function releaseFilesystem(cap: Filesystem): Unit;
+
+type Terminal: Linear;
+
+generic [R: Region]
+function acquireTerminal(root: &![RootCapability, R]): Terminal;
+
+function releaseTerminal(cap: Terminal): Unit;
+
+type Tasks: Linear;
+
+generic [R: Region]
+function acquireTasks(root: &![RootCapability, R]): Tasks;
+
+function releaseTasks(cap: Tasks): Unit;
+
+type Buffer: Linear;
+
+function now(): Int64;
+
+function unixNow(): Int64;
+
+function ticks(): Int64;
+
+function ticksHP(): Int64;
+
+generic [R: Region]
+function putByte(cap: &![Terminal, R], value: Int64): Int64;
+
+generic [R: Region]
+function putCodepoint(cap: &![Terminal, R], value: Int64): Int64;
+
+generic [R: Region]
+function getKey(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function keyPending(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function keyPop(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function clear(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function cursorHide(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function cursorShow(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function setColor(cap: &![Terminal, R], fg: Int64, bg: Int64): Int64;
+
+generic [R: Region]
+function fillRect(cap: &![Terminal, R], x: Int64, y: Int64, w: Int64, h: Int64, color: Int64): Int64;
+
+generic [R: Region]
+function scroll(cap: &![Terminal, R]): Int64;
+
+generic [R: Region]
+function screenCodepoint(cap: &![Terminal, R], value: Int64): Int64;
+
+generic [R: Region]
+function alternate(cap: &![Terminal, R], on: Int64): Int64;
+
+generic [R: Region]
+function yieldTask(cap: &![Tasks, R]): Int64;
+
+generic [R: Region]
+function sleep(cap: &![Tasks, R], ms: Int64): Int64;
+
+generic [R: Region]
+function sleepUntil(cap: &![Tasks, R], tick: Int64): Int64;
+
+generic [R: Region]
+function taskReport(cap: &![Tasks, R]): Int64;
+
+generic [R: Region]
+function isSilent(cap: &![Tasks, R]): Int64;
+
+function keyChar(event: Int64): Int64;
+
+function utf8Width(cp: Int64): Int64;
+
+function ansiColor(n: Int64): Int64;
+
+function dateToUnix(date: Int64): Int64;
+
+function unixToDate(stamp: Int64): Int64;
+
+generic [R: Region, S: Region]
+function write(cap: &![Terminal, R], text: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function dir(cap: &![Filesystem, R], text: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function mkdir(cap: &![Filesystem, R], text: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function cd(cap: &![Filesystem, R], text: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function exists(cap: &![Filesystem, R], text: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function delete(cap: &![Filesystem, R], text: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function validName(cap: &![Filesystem, R], text: Span[Nat8, S]): Int64;
+
+function allocate(size: Int64): Buffer;
+
+generic [R: Region, S: Region]
+function readFile(cap: &![Filesystem, R], path: Span[Nat8, S]): Buffer;
+
+generic [R: Region, S: Region, T: Region]
+function writeFile(cap: &![Filesystem, R], path: Span[Nat8, S], data: Span[Nat8, T]): Int64;
+
+generic [R: Region]
+function bufferSize(buffer: &![Buffer, R]): Int64;
+
+generic [R: Region]
+function bufferError(buffer: &![Buffer, R]): Int64;
+
+generic [R: Region]
+function readByte(buffer: &![Buffer, R], index: Int64): Int64;
+
+generic [R: Region]
+function storeByte(buffer: &![Buffer, R], index: Int64, value: Int64): Int64;
+
+generic [R: Region]
+function fill(buffer: &![Buffer, R], value: Int64): Int64;
+
+function close(buffer: Buffer): Unit;
+
+generic [R: Region]
+function stringLength(text: Span[Nat8, R]): Int64;
+
+generic [R: Region, S: Region]
+function stringCompare(left: Span[Nat8, R], right: Span[Nat8, S]): Int64;
+
+generic [R: Region, S: Region]
+function copyBytes(buffer: &![Buffer, R], data: Span[Nat8, S]): Int64;
+
+end module.

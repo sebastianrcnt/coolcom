@@ -83,16 +83,20 @@ runtime implements realloc with a private allocation-size header and memmove
 with overlap-aware byte copying. Output calls HolyC `Print` (bound to native
 printf). Abort writes stderr through `NativeErrPutS` and calls `NativeExit`.
 `NativeArgCount`/`NativeArg` supply CLI arguments; argument zero is the BIN path.
-These native imports need adapters before kernel-shell inclusion; kernel
-`#include` execution has not been tested.
+For kernel-shell inclusion, the kernel adapter selects console error output and
+an empty argument list; see the kernel bindings below.
 
 Current deliberate limits:
 
 - Float32 is rejected instead of silently widened to Float64.
 - `@embed` supports the builtin arithmetic, numeric casts, memory/span and
   printing patterns; arbitrary C syntax is rejected with a backend diagnostic.
-- Foreign calls currently support `putchar` and `puts` through Cool adapters.
-  Other C library/foreign APIs need explicit bindings.
+- Foreign imports call their HolyC symbol verbatim. Scalar integers, booleans,
+  Float64, pointers, references and span inputs are supported. The symbol must
+  already be declared by an included HolyC header or adapter. Span arguments
+  decay to pointers; pass their length explicitly. Aggregate/span returns need
+  an explicit adapter; arbitrary C libraries are not automatically available.
+  The native runtime still supplies libc-compatible `putchar`/`puts` shims.
 - The generated aggregate ABI and packed layouts are private to this backend;
   they are not C ABI compatible. Libraries retain generated symbol names.
 
@@ -143,3 +147,99 @@ TMPDIR="$PWD/build/tmp" WARM_TEST_TMPDIR="$PWD/build/tmp" \
   opam exec --switch=austral -- sh -c 'cd warmc && ./run-tests.sh'
 TMPDIR="$PWD/build/tmp" make test
 ```
+
+
+## Kernel bindings and capabilities
+
+`standard/src/Kernel/Kernel.aui,Kernel.aum` provides `Warm.Kernel`.
+Its 45 operations, plus resource/capability lifecycle functions, use the
+kernel's actual FAT32, console, Key.HC, framebuffer, clock and scheduler APIs.
+The HolyC boundary is `standard/src/Kernel/Adapter.HC`.
+
+| Area | Warm operations | Kernel implementation |
+| --- | --- | --- |
+| Memory | allocate, close, fill, copyBytes, readByte, storeByte, bufferSize, bufferError | CAlloc, Free, MemSet, MemCpy; bounds-checked owned bytes |
+| Strings | stringLength, stringCompare | StrLen, StrCmp |
+| Output | write, putByte, putCodepoint | PutS, ConsPut, ConsPutCp |
+| Filesystem | readFile, writeFile, dir, mkdir, cd, exists, delete, validName | FileRead, FileWrite, Dir, DirMk, Cd, FileFind, Del, FileNameChk |
+| Time | now, unixNow, ticks, ticksHP, dateToUnix, unixToDate | Now, UnixNow, __GetTicks, __GetTicksHP, CDate2Unix, Unix2CDate |
+| Keys | getKey, keyPending, keyPop, keyChar, utf8Width | Key.HC GetKey(FALSE), KeyPending, KeyPop, KeyChar; Utf8Width |
+| Screen | clear, cursorHide, cursorShow, setColor, fillRect, scroll, screenCodepoint, alternate, ansiColor | ConsClear, FbCursorHide/Show, FbSetColor, FbFillRect, FbScroll, FbPutCp, FbAlt, FbAnsiColor |
+| Tasks | yieldTask, sleep, sleepUntil, taskReport, isSilent | Yield, Sleep, SleepUntil, TaskRep, IsSilent |
+
+### Boundary and ownership decisions
+
+* This is a kernel-shell target, not a portable C standard module. Include the
+  adapter **before** generated source. It defines `WARM_KERNEL`; native CLI
+  imports are replaced with kernel-compatible helpers. CLI argument count is
+  zero. Warm abort/ExitFailure returns control through the kernel's NativeExit.
+* The generated private aggregate ABI stays inside Warm. The adapter accepts
+  integers, opaque pointers and explicit pointer/length pairs. No generated
+  class names, span layouts or allocation headers cross the boundary.
+* Text inputs accept spans in any region. Use `Standard.String.getSpan` for
+  heap strings. The adapter copies text into a temporary NUL-terminated
+  `U8*`, rejects embedded NUL and text longer than 4096 bytes, and frees the
+  copy on both success and caught exceptions. Binary file contents and
+  `copyBytes` preserve embedded zero bytes. Input pointers are never retained.
+* `readFile` uses the kernel's whole-file API, not a fictitious open file
+  descriptor. It returns an opaque **linear Buffer**, even on failure.
+  Read `bufferError`, borrow it for byte access, and consume it exactly once
+  with `close`. `allocate` returns the same owned resource. Neither raw
+  pointers nor escaping borrowed spans are exposed. Copies and indexes check
+  buffer bounds. Allocation and write sizes are capped at 256 MiB.
+* Error values are `-1` (caught HolyC throw), `-2` (invalid input/bounds),
+  `-3` (missing file/allocation or write failure), with zero for successful
+  commands. Query functions return their documented nonnegative value or a
+  negative error. Kernel boolean queries retain 0/1; `dir` and `delete`
+  retain counts. `stringCompare` returns 0/1/2 for less/equal/greater, reserving
+  negative values for errors. Date conversions retain signed kernel dates.
+  Exception identity is deliberately collapsed to -1; the catch marks the
+  exception handled and frees adapter-owned temporaries. The adapter cannot
+  repair internal allocations leaked by a kernel function before it throws.
+* `Filesystem`, `Terminal` and `Tasks` are opaque linear capability values.
+  Acquire each only through a mutable borrow of RootCapability, borrow the
+  capability for operations, and release it explicitly. Callers can pass a
+  restricted capability to a helper without handing over root. These are
+  Austral-style authority tokens, not path ACLs or exclusive device locks;
+  root can derive multiple tokens. Open buffers outlive filesystem tokens
+  because they own a detached memory snapshot.
+* Opaque constructors are now checked against module visibility, closing an
+  upstream hole that allowed constructing empty capability records outside
+  their defining module. Tests reject root/capability forgery, missing
+  capability arguments, leaked buffers and double close.
+* This is a language-level discipline for callers of the safe API. Unsafe
+  modules, arbitrary HolyC, and the existing Pervasive printing builtins are
+  outside its authority boundary. Task creation/kill and raw kernel pointers
+  are deliberately not exposed in this initial scheduler binding.
+
+### Build and run in the shell
+
+From the repository root:
+
+```sh
+./warmc/build.sh
+./warmc/warmc compile \
+  warmc/standard/src/Kernel/Kernel.aui,warmc/standard/src/Kernel/Kernel.aum \
+  warmc/examples/kernel/Files.aum \
+  --entrypoint=Files:main --target-type=hc --output=build/Files.HC
+# Put Adapter.HC and Files.HC on the FAT32 drive, then in the kernel shell:
+# #include "C:/Adapter.HC"
+# #include "C:/Files.HC"
+make warm-kernel-test
+```
+
+The automated harness prepends the adapter include, creates an isolated FAT32
+image under `build/warm-kernel`, and boots each example in a fresh shell.
+Files writes and reads Warm.txt (also checked with host mtools); Screen draws
+a rectangle whose exact pixels are checked in the VM screenshot; Key waits
+for a scripted 'x' through Key.HC. Errors injects a throwing FileWrite at the
+adapter boundary and checks exception conversion, missing files, memory
+bounds and string operations. Four negative compilation fixtures check
+capabilities and linear ownership. Logs, generated sources, disk and
+screenshots remain in `build/warm-kernel`.
+
+Root `make test` includes `warm-kernel-test`. The existing
+`warmc/run-tests.sh` includes a separate opaque RootCapability-constructor
+regression, and otherwise continues to run the portable C tests.
+The full `compare-hc.py` still reports the pre-existing unsupported Float32
+case (51 pass, 1 fail); this work does not skip or relabel that failure.
