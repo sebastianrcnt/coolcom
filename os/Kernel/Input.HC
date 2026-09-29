@@ -35,6 +35,7 @@
 #define LK_RIGHTCTRL  97
 #define LK_KPSLASH    98
 #define LK_RIGHTALT   100
+#define LK_HANGEUL    122
 
 I64 kbd_caps;
 U8 kbd_down[256], kbd_norm[128], kbd_shift[128];
@@ -91,11 +92,42 @@ I64 KbdSpecial(I64 code)
     return 0;
 }
 
+Bool ImeHotkey(I64 code, I64 value)
+{//Shift+Space, the Hangul key, or Right Alt pressed and released alone toggle Hangul input
+    //(Ime.HC). TRUE if the key was used up.
+    Bool shift = kbd_down[LK_LEFTSHIFT] || kbd_down[LK_RIGHTSHIFT];
+    Bool ctrl = kbd_down[LK_LEFTCTRL] || kbd_down[LK_RIGHTCTRL];
+    if (code == LK_RIGHTALT) {
+        if (value == 1)
+            ime_alt_clean = TRUE;
+        else if (!value && ime_alt_clean) {
+            ime_alt_clean = FALSE;
+            Ime(!ime_on);
+        }
+        return FALSE;
+    }
+    if (value)
+        ime_alt_clean = FALSE;  // another key: Right Alt was a modifier
+    if (code == LK_HANGEUL && value) {
+        if (value == 1)
+            Ime(!ime_on);
+        return TRUE;
+    }
+    if (code == 57 && shift && !ctrl && value) {
+        if (value == 1)
+            Ime(!ime_on);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 U0 KbdKey(I64 code, I64 value)
 {//A key changed (value 0 up, 1 down, 2 repeat).
-    I64 k = 0, f = 0;
+    I64 k = 0, f = 0, jamo;
     Bool shift, letter;
     if (code < 0 || code > 255)
+        return;
+    if (ImeHotkey(code, value))
         return;
     if (!value) {
         kbd_down[code] = FALSE;
@@ -114,6 +146,17 @@ U0 KbdKey(I64 code, I64 value)
     if (code == LK_C && value == 1 && (f & KF_CTRL) && (f & KF_ALT)) {
         break_req = TRUE;  // TempleOS Ctrl+Alt+C: acted on in KExcept, which has the frame
         return;
+    }
+    if (ime_on && !(f & (KF_CTRL | KF_ALT))) {
+        // Hangul input: the letter keys type jamo (the caps lock state does not matter)
+        if (code < 128 && kbd_norm[code] >= 'a' && kbd_norm[code] <= 'z' && (jamo = ImeJamo(kbd_norm[code], shift))) {
+            ImeType(jamo);
+            return;
+        }
+        if (code == LK_BACKSPACE && ImeComposing) {
+            ImeBackspace;
+            return;
+        }
     }
     if (code == LK_KPENTER)
         k = KEY_ENTER;
@@ -138,8 +181,11 @@ U0 KbdKey(I64 code, I64 value)
     }
     if (k == KEY_ESC || k == KEY_ENTER || k == KEY_BACKSPACE)
         f &= ~KF_CTRL;  // a terminal cannot send these with Ctrl
-    if (k)
+    if (k) {
+        if (ImeComposing)
+            ImeEnd;  // any other key ends the syllable being composed
         KeyPush(k | f);
+    }
 }
 
 U0 MouseEvent(I64 type, I64 code, I64 value)
