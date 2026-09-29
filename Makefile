@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed disk-kernel-src kernel-rebuild-test reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed kernel-rebuild-test reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -115,38 +115,28 @@ build/disk.img: | build
 	mkfile -n 64m $@
 	mformat -i $@ -F -v COOLDISK ::
 
-# make run only adds os/Disk files that are missing, so edits made inside the OS
+# make run only adds files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
+# tools/disk-files.sh copies os/Disk/*.HC and the kernel sources (C:/Kernel, for Man).
 # C:/Kernel.HH (the shell prelude) declares the kernel for programs compiled
 # with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
 # Cmp("C:/Compiler/Native.HC") in the OS rebuilds coolc/seed/Compiler.BIN.
-# C:/Kernel holds os/Kernel and C:/coolc the runtime files Kernel.HC includes as
-# ../../coolc/... (".." stops at the root), so Cmp("C:/Kernel/Kernel.HC") in
-# the OS reproduces build/Kernel.BIN; `MakeKernel` links it (docs/kernel-rebuild.md).
-KDISK ?= build/disk.img
-disk-kernel-src:
-	mmd -i $(KDISK) ::Kernel ::coolc ::coolc/Runtime ::coolc/Fmt 2>/dev/null || true
-	mcopy -o -i $(KDISK) os/Kernel/* ::Kernel/
-	mcopy -o -i $(KDISK) coolc/Runtime/*.HC ::coolc/Runtime/
-	mcopy -o -i $(KDISK) coolc/Fmt/HCTok.HC ::coolc/Fmt/
-
-DISK_FILES := os/Disk/Init.HC os/Disk/Vim.HC os/Disk/Tmux.HC os/Disk/Nyan.HC
-disk-install: build/disk.img build/ShellPrelude.HH
-	mcopy -o -i build/disk.img $(DISK_FILES) ::
+# tools/disk-files.sh puts os/Kernel in C:/Kernel and the runtime files it
+# includes as ../../coolc/... in C:/coolc (".." stops at the root), and the
+# prebuilt assembly C:/Kernel/BootStub.BIN, so `MakeKernel` in the OS rebuilds
+# build/kernel.Image (docs/kernel-rebuild.md).
+disk-install: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
+	tools/disk-files.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
 	tools/native/prepare.sh
 	mmd -i build/disk.img ::Compiler 2>/dev/null || true
 	mcopy -o -i build/disk.img build/native-src/* ::Compiler/
-	$(MAKE) disk-kernel-src
 
-disk-seed: build/disk.img build/ShellPrelude.HH
-	@for f in $(DISK_FILES); do \
-	  mdir -i build/disk.img ::$$(basename $$f) >/dev/null 2>&1 || mcopy -i build/disk.img $$f :: || exit 1; \
-	done
+disk-seed: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
+	tools/disk-files.sh build/disk.img -n
 	@mdir -i build/disk.img ::Kernel.HH >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
 	@mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
 	  mmd -i build/disk.img ::Compiler && mcopy -i build/disk.img build/native-src/* ::Compiler/; }
-	@mdir -i build/disk.img ::Kernel >/dev/null 2>&1 || $(MAKE) disk-kernel-src
 
 run: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
@@ -178,7 +168,10 @@ selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH
 kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm
 	tools/kernel-rebuild-test.sh $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test
+# Find, HexDump, Diff, Less and Man on C: (os/Disk); the kernel sources go to C:/Kernel (tools/disk-files.sh).
+text-test: build/kernel.Image coolvm
+	python3 tools/text-test.py $<
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

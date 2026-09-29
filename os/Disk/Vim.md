@@ -48,5 +48,5 @@ Syntax highlighting follows the file extension: Cool (`.HC`, `.HH`, with identif
 shell compiler's symbol table: functions, types, globals, `#define`s), Warm (`.aum`, `.aui`) and plain
 text. `:set ft=cool|warm|text` overrides it and `:hi GROUP COLOR` changes a group's Ansi color
 (groups: normal comment string number keyword type storage preproc label constant function global
-linenr nontext). Rules: `os/Kernel/Syntax.HC`; tokenizer shared with
+linenr nontext). `Vim("name", line)` opens at a line. Rules: `os/Kernel/Syntax.HC`; tokenizer shared with
 the formatter: `coolc/Fmt/HCTok.HC`; `make syntax-test`.

@@ -1,6 +1,6 @@
 #!/bin/sh
 # The OS rebuilds its own kernel (docs/kernel-rebuild.md): boot the Image with
-# the kernel sources on C: (make disk-kernel-src), the prebuilt assembly
+# the kernel sources on C: (tools/disk-files.sh), the prebuilt assembly
 # (build/BootStub.BIN) and the shell prelude, let C:/Init.HC run MakeKernel,
 # and require C:/Kernel.Image to equal the host's Image and C:/Kernel/Syms.ld
 # the host's syms.ld, byte for byte. Needs mtools. Extra arguments go to coolvm.
@@ -14,14 +14,14 @@ dir=$(mktemp -d build/kernel-rebuild-test.XXXXXX)
 disk=$dir/disk.img
 mkfile -n 64m "$disk"
 mformat -i "$disk" -F -v REBUILD ::
-make -s disk-kernel-src KDISK="$disk"
-mcopy -i "$disk" "$b/BootStub.BIN" ::Kernel/
+tools/disk-files.sh "$disk"
+mcopy -o -i "$disk" "$b/BootStub.BIN" ::Kernel/
 mcopy -i "$disk" "$b/ShellPrelude.HH" ::Kernel.HH
 cat >"$dir/Init.HC" <<'EOF'
 Print("makekernel %d\n", MakeKernel);
 Shutdown;
 EOF
-mcopy -i "$disk" "$dir/Init.HC" ::
+mcopy -o -i "$disk" "$dir/Init.HC" ::
 log=$dir/log
 status=0
 gtimeout -k 2 70 build/coolvm --headless --cpus 2 --mem 1024 --timeout 60 \
