@@ -67,3 +67,11 @@ vzprobe:
 	tools/vzprobe.sh
 vzprobe-gui:
 	tools/vzprobe.sh --gui --cfg "wait=9 postwait=8"
+
+# coolvm: VM monitor on macOS Hypervisor.framework emulating a subset of the Apple M1 (t8103)
+# for developing the M1 drivers (tools/coolvm). Guests run under a timeout.
+.PHONY: coolvm coolvm-test
+coolvm:
+	tools/coolvm/build.sh
+coolvm-test: coolvm
+	tools/coolvm/test/run.sh
