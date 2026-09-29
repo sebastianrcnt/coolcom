@@ -2335,8 +2335,6 @@ signed_cmp:
       }
       break;
     case BIC_BNOT:
-      if (rpn->raw_type == BRT_F64)
-        abort(); // TODO
       //MACRO BACKEND_UNOP(ARM_mvnRegX, ARM_mvnRegX)
       next = rpn->base.next;
       code_off = __OptPassFinal(cctrl, next, bin, code_off);
@@ -2345,7 +2343,10 @@ signed_cmp:
       } else into_reg = 0;
       code_off = PutICArgIntoReg(cctrl, &next->res, rpn->raw_type, 0, bin, code_off);
       if (rpn->raw_type == BRT_F64) {
-        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mvnRegX(MFR(cctrl, into_reg), next->res.reg));
+        // FIX(3): Complement the F64 bit pattern through an integer register.
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovI64F64(MIR(cctrl, 0), next->res.reg));
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mvnRegX(MIR(cctrl, 0), 0));
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, into_reg), 0));
       } else  code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mvnRegX(MIR(cctrl, into_reg), next->res.reg));
       if (rpn->res.mode != MD_REG) {
         tmp.raw_type = rpn->raw_type;
