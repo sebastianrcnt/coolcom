@@ -771,7 +771,14 @@ I64 ImplicitFunCall(CCmpCtrl *cc, CHashFun *fun, I64 start_idx = 0) {
                       cm,
                       last_c = cmp.internal_types[RT_U8] + 1
                       );
-        } else if (lst->flags & (MLF_DFT_AVAILABLE | MLF_STR_DFT_AVAILABLE)) {
+            // FIX(7): Lower a default string to a relocatable constant in AOT output.
+        } else if (lst->flags & MLF_STR_DFT_AVAILABLE) {
+            cm = COCMiscNew(cc, CMT_STR_CONST);
+            cc->flags |= CCF_HAS_MISC_DATA;
+            cm->str = StrNew(lst->dft_val);
+            cm->st_len = StrLen(lst->dft_val) + 1;
+            RPNAddNew(cc, IC_STR_CONST, cm, last_c = cmp.internal_types[RT_U8] + 1);
+        } else if (lst->flags & MLF_DFT_AVAILABLE) {
             last_c = lst->member_class;
             if (lst->member_class->raw_type == RT_F64) {
                 RPNAddNew(
@@ -1258,7 +1265,16 @@ typecast:
                                           last_c = cmp.internal_types[RT_U8] + 1
                                           );
                                 arity++;
-                            } else if (mlst->flags & (MLF_DFT_AVAILABLE | MLF_STR_DFT_AVAILABLE)) {
+                                // FIX(7): Emit the string through the AOT constant pool.
+                            } else if (mlst->flags & MLF_STR_DFT_AVAILABLE) {
+                                misc = COCMiscNew(cc, CMT_STR_CONST);
+                                cc->flags |= CCF_HAS_MISC_DATA;
+                                misc->str = StrNew(mlst->dft_val);
+                                misc->st_len = StrLen(mlst->dft_val) + 1;
+                                RPNAddNew(cc, IC_STR_CONST, misc,
+                                          last_c = cmp.internal_types[RT_U8] + 1);
+                                arity++;
+                            } else if (mlst->flags & MLF_DFT_AVAILABLE) {
                                 last_c = mlst->member_class;
                                 if (mlst->member_class->raw_type == RT_F64) {
                                     RPNAddNew(

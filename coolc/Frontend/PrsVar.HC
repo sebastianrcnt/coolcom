@@ -433,7 +433,7 @@ U0 PrsVarLst(CCmpCtrl *cc, CHashClass *tmpc, I64 mode, I64 union_base = 0)
     CMemberLst *tmpm;
     CMemberLstMeta *tmp_meta;
     U8 *(*machine_code)();
-    Bool undef_array_size, first;
+    Bool undef_array_size, first, str_default;
     cc->flags |= CCF_DONT_MAKE_RES;
     if (mode.u8[1] == PRS1B_CLASS)
         cc->flags |= CCF_CLASS_DOL_OFFSET;
@@ -657,6 +657,8 @@ pvl_restart3:
                             Lex(cc);
                         } else {
                             old_flags2 = cc->flags;
+                            // FIX(7): Remember literal defaults before expression parsing consumes the token.
+                            str_default = cc->token == TK_STR;
                             cc->flags &= ~CCF_HAS_MISC_DATA;
                             machine_code = LexExpression2Bin(cc, &type);
                             if (!machine_code)
@@ -670,14 +672,11 @@ pvl_restart3:
                                 if (type == RT_F64)
                                     tmpm->dft_val = tmpm->dft_val(F64);
                             }
-                            //Aiwnios LexEcpression doesnt preserve flags
-                            /*
-	      if (cc->flags & CCF_HAS_MISC_DATA) {
-		tmpm->dft_val=StrNew(tmpm->dft_val);
-		tmpm->flags|=MLF_STR_DFT_AVAILABLE;
-	      }
-	      Free(machine_code);
-	      */
+                            // FIX(7): Store the text for an AOT string relocation, not a JIT heap address.
+                            if (str_default) {
+                                tmpm->dft_val = StrNew(tmpm->dft_val);
+                                tmpm->flags |= MLF_STR_DFT_AVAILABLE;
+                            }
                             cc->flags |= old_flags2 & CCF_HAS_MISC_DATA;
                         }
                         tmpm->flags |= MLF_DFT_AVAILABLE;
