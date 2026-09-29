@@ -2,8 +2,9 @@
 // coolc/Host/native.c: copy the file to the heap, apply its patch table
 // (exports, absolute addresses, data heaps, imports), sync the I-cache and
 // run the module's initializers. Imports resolve against a caller-supplied
-// table of kernel routines first, then the module's own exports; an import
-// nothing defines gets a stub that reports its name when it is called.
+// table of kernel routines first, then the module's own exports, then an
+// optional lookup function (Load: the shell's symbols); an import nothing
+// defines gets a stub that reports its name when it is called.
 //
 // BIN layout: 32-byte header (U64 patch table offset at byte 16), code, patch
 // table. Patch entry: U8 type, U32 index, [I32 addend for types 2..12], name.
@@ -44,9 +45,8 @@ class CBinMod
     I64 nmains, max_mains;
     CBinSym *host;  // kernel routines, searched before the module's exports
     I64 nhost;
+    I64 (*find)(U8 *name);  // searched after the exports; 0 if not found
 };
-
-CBinMod *BinTrapMod() {return Fs->bin_module;}
 
 U8 *BinAlloc(I64 size)
 {//Zeroed heap memory for module code and data. The block start is kept
@@ -100,20 +100,23 @@ U0 BinSymAdd(CBinMod *m, U8 *name, I64 val)
 I64 BinSymFind(CBinMod *m, U8 *name)
 {//Kernel routines win over exports, and later exports over earlier ones.
     I64 i;
+    I64 (*find)(U8 *name);
     for (i = 0; i < m->nhost; i++)
         if (!StrCmp(m->host[i].name, name))
             return m->host[i].val;
     for (i = m->nsyms - 1; i >= 0; i--)
         if (!StrCmp(m->syms[i].name, name))
             return m->syms[i].val;
+    if (find = m->find)
+        return (*find)(name);
     return 0;
 }
 
 U0 (*bin_trap_hook)();  // the shell: return to its prompt instead of halting
 
-U0 BinTrap(I64 id)
+U0 BinTrap(U8 *name)
 {//Reached through an import stub: nothing defines the import.
-    Print("ERROR: unresolved import %s was called\n", BinTrapMod->imps[id].name);
+    Print("ERROR: unresolved import %s was called\n", name);
     if (bin_trap_hook)
         (*bin_trap_hook)();  // doesn't return on the shell task
     Print("bin: task halted\n");
@@ -123,15 +126,17 @@ U0 BinTrap(I64 id)
     }
 }
 
-U8 *BinTrapStub(I64 id)
-{//movz x0, #id; ldr x17, [pc + 8]; br x17; .quad BinTrap
-    U32 *s = MAlloc(24);
+U8 *BinTrapStub(U8 *name)
+{//ldr x0, name; ldr x17, BinTrap; br x17; nop; .quad name; .quad BinTrap
+    U32 *s = MAlloc(32);
     I64 target = &BinTrap;
-    s[0] = 0xD2800000 | (id << 5);
-    s[1] = 0x58000051;
+    s[0] = 0x58000080;
+    s[1] = 0x580000B1;
     s[2] = 0xD61F0220;
-    MemCpy(&s[3], &target, 8);
-    ArchICacheSync(s, 24);
+    s[3] = 0xD503201F;
+    MemCpy(&s[4], &name, 8);
+    MemCpy(&s[6], &target, 8);
+    ArchICacheSync(s, 32);
     return s;
 }
 
@@ -248,7 +253,7 @@ Bool BinResolve(CBinMod *m)
         if (val)
             rel = val;
         else
-            rel = BinTrapStub(i);
+            rel = BinTrapStub(imp->name);
         rel += imp->addend;
         width = 1 << ((imp->type - IET_REL_I8) >> 1);
         if (!(imp->type & 1)) {  // even types are pc-relative
@@ -268,7 +273,7 @@ Bool BinResolve(CBinMod *m)
     return TRUE;
 }
 
-CBinMod *BinLoad(U8 *bin, I64 size, CBinSym *host, I64 nhost)
+CBinMod *BinLoad(U8 *bin, I64 size, CBinSym *host, I64 nhost, I64 (*find)(U8 *name) = NULL)
 {//Load a BIN image; returns NULL on error. Call with x28 set if the module reads Fs.
     CBinMod *m;
     I64 patch, i;
@@ -292,7 +297,7 @@ CBinMod *BinLoad(U8 *bin, I64 size, CBinSym *host, I64 nhost)
     m->code_size = patch - 32;
     m->host = host;
     m->nhost = nhost;
-    Fs->bin_module = m;
+    m->find = find;
     if (!BinParse(m, patch) || !BinResolve(m))
         return NULL;
     ArchICacheSync(m->code, m->code_size);
