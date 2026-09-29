@@ -14,8 +14,8 @@
 //    other regardless of include order.  `static` C functions are ordinary functions here.
 
 #define ERR         0x7fFFffFFffFFffFF
-#define INVALID_PTR ERR
-#define STR_LEN     144
+#define BINVALID_PTR ERR
+#define BSTR_LEN     144
 #define STAR_CNT    5
 
 // ------------------------------------------------------------------ classes
@@ -244,8 +244,10 @@ class CBCodeMiscRef
   CBRPN *from_ic;
   I32 *add_to, offset;
   // For arm
-  I32 (*patch_cond_br)(I64, I64);
-  I32 (*patch_uncond_br)(I64);
+  // I32 (*)(I64, I64) and I32 (*)(I64), stored as U8 *: the C bootstrap compiler
+  // yields the member's address for p->fnptr_member. Call via BCallPatch*.
+  U8 *patch_cond_br;
+  U8 *patch_uncond_br;
   I64 user_data1;
   I64 user_data2;
   I8 is_abs64;
@@ -423,7 +425,7 @@ class CBOptMemberVar
 #define BCMT_RELOC_U64   6
 #define BCMT_STATIC_DATA 7 // integer is the offset(in the statics data) str/str_len is the data
 #define BCMT_SHORT_ADDR  8
-#define CMF_DEFINED             1 // Used with Labels to tell if already defined
+#define BCMF_DEFINED             1 // Used with Labels to tell if already defined
 #define CMF_JMP_TABLE_TAINTED   2 // Used with jump tables to tell if we tained the floating point registers
 
 // CCmpCtrl flags
@@ -633,23 +635,23 @@ class CBOptMemberVar
 // The C header picks these per OS; the Apple set is used by default so the output can be
 // compared byte-for-byte with the C backend on macOS.  Define BACKEND_LINUX_ABI before
 // including this header to get the Linux/BSD set (x18 as scratch instead of x16).
-#define AIWNIOS_IREG_START     19
-#define AIWNIOS_IREG_CNT       9  // (27 - 19 + 1)
-#define AIWNIOS_REG_FP         ARM_REG_FP
-#define AIWNIOS_REG_SP         ARM_REG_SP
-#define AIWNIOS_TMP_IREG_POOP2 17 // I use it as a second poo poo ALWAYS
-#define AIWNIOS_TMP_IREG_START 8
+#define BAIWNIOS_IREG_START     19
+#define BAIWNIOS_IREG_CNT       9  // (27 - 19 + 1)
+#define BAIWNIOS_REG_FP         ARM_REG_FP
+#define BAIWNIOS_REG_SP         ARM_REG_SP
+#define BAIWNIOS_TMP_IREG_POOP2 17 // I use it as a second poo poo ALWAYS
+#define BAIWNIOS_TMP_IREG_START 8
 #ifdef BACKEND_LINUX_ABI
-#define AIWNIOS_TMP_IREG_POOP  18 // Platform register,I use it as a poo poo
-#define AIWNIOS_TMP_IREG_CNT   9  // (16 - 8 + 1)
+#define BAIWNIOS_TMP_IREG_POOP  18 // Platform register,I use it as a poo poo
+#define BAIWNIOS_TMP_IREG_CNT   9  // (16 - 8 + 1)
 #else
-#define AIWNIOS_TMP_IREG_POOP  16
-#define AIWNIOS_TMP_IREG_CNT   8  // (15 - 8 + 1)
+#define BAIWNIOS_TMP_IREG_POOP  16
+#define BAIWNIOS_TMP_IREG_CNT   8  // (15 - 8 + 1)
 #endif
-#define AIWNIOS_FREG_START     8
-#define AIWNIOS_FREG_CNT       8  // (15 - 8 + 1)
-#define AIWNIOS_TMP_FREG_START 16
-#define AIWNIOS_TMP_FREG_CNT   16 // (31 - 16 + 1)
+#define BAIWNIOS_FREG_START     8
+#define BAIWNIOS_FREG_CNT       8  // (15 - 8 + 1)
+#define BAIWNIOS_TMP_FREG_START 16
+#define BAIWNIOS_TMP_FREG_CNT   16 // (31 - 16 + 1)
 
 // ---- LexTok / IC_ / ICF_ (enums in C) ----
 // ---- LexTok (enum) ----
@@ -1261,6 +1263,8 @@ extern U0 ICFree(CBRPN *ic);
 
 // Function-like macros of the C headers / files, as functions (bodies in IRBind.HC)
 extern U0 BAssert(Bool cond, U8 *what); // print `what` and halt when cond is FALSE (C assert())
+extern U8 *BCodeAlloc(I64 size,CBHeapCtrl *heap);
+extern U0 BCodeCommit(U8 *obin);
 extern U8 *MemGetWritePtr(U8 *ptr);     // identity outside OpenBSD/NetBSD
 extern U8 *MemGetExecPtr(U8 *ptr);      // identity outside OpenBSD/NetBSD
 extern I64 __builtin_ffsll(I64 x);      // 1+index of the lowest set bit, 0 if x==0
@@ -1282,11 +1286,11 @@ extern I64 MSize(U8 *ptr);
 extern I64 BSetWriteNP(I64 n);                                         //INTEGRATION: W^X toggle (Apple), identity elsewhere
 extern I64 BDoNothing();                                               //INTEGRATION
 #ifdef BACKEND_STANDALONE // Que*: kernel provides them
-extern U0 QueIns(CBQue *a, CBQue *to);
-extern U0 QueRem(CBQue *a);
-extern U0 QueInit(CBQue *i);
-extern U0 QueDel(CBQue *f);
-extern I64 QueCnt(CBQue *head);
+extern U0 BQueIns(CBQue *a, CBQue *to);
+extern U0 BQueRem(CBQue *a);
+extern U0 BQueInit(CBQue *i);
+extern U0 BQueDel(CBQue *f);
+extern I64 BQueCnt(CBQue *head);
 #endif
 extern I64 BFFICall2(U8 *fptr, I64 a, I64 b);                    //INTEGRATION
 extern U0 BQSort(U8 *base, I64 cnt, I64 sz, U8 *cmp);                  //INTEGRATION: libc BQSort (cmp takes two element pointers)
@@ -1297,9 +1301,9 @@ extern F64 BPow(F64 a, F64 b);                                         //INTEGRA
 // both halves. Each returns the new code_off.
 extern I64 AIWNIOS_ADD_CODE(U8 *bin,I64 code_off,I64 val);
 extern I64 TYPECAST_ASSIGN_BEGIN(CBCmpCtrl *cctrl,CBRPN **dst,CBRPN *src,
-	CBICArg *_orig,I64 *pop,I64 *pop2,U8 *bin,I64 code_off);
+                                 CBICArg *_orig,I64 *pop,I64 *pop2,U8 *bin,I64 code_off);
 extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl,I64 pop,CBICArg *_orig,
-	U8 *bin,I64 code_off);
+                               U8 *bin,I64 code_off);
 
 // ---- Kernel heap/string/print functions used by the port (INTEGRATION: provided by the CoolC kernel) ----
 // These are only declared for standalone syntax checks (#define BACKEND_STANDALONE): the backend is

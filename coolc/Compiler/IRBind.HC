@@ -21,16 +21,7 @@ U0 abort()
   throw('Abrt');
 }
 
-// C: #define MemGetWritePtr(x) (x)  (identity outside OpenBSD/NetBSD)
-U8 *MemGetWritePtr(U8 *ptr)
-{
-  return ptr;
-}
-// C: #define MemGetExecPtr(x) (x)
-U8 *MemGetExecPtr(U8 *ptr)
-{
-  return ptr;
-}
+// MemGetWritePtr/MemGetExecPtr are in BackendRT.HC (code-buffer mapping).
 
 I64 __builtin_ffsll(I64 x)
 {
@@ -90,8 +81,8 @@ CBCodeCtrl *CodeCtrlPush(CBCmpCtrl *ccmp)
   cctrl->ir_code = CAlloc(sizeof(CBRPN));
   cctrl->code_misc = CAlloc(sizeof(CBQue));
   cctrl->ir_code(CBRPN *)->type = BIC_NOP;
-  QueInit(cctrl->ir_code);
-  QueInit(cctrl->code_misc);
+  BQueInit(cctrl->ir_code);
+  BQueInit(cctrl->code_misc);
   ccmp->code_ctrl = cctrl;
   return cctrl;
 }
@@ -116,8 +107,8 @@ U0 CodeCtrlDel(CBCodeCtrl *ctrl)
         Free(misc->str);
     }
   }
-  QueDel(ctrl->ir_code);
-  QueDel(ctrl->code_misc);
+  BQueDel(ctrl->ir_code);
+  BQueDel(ctrl->code_misc);
   Free(ctrl);
 }
 
@@ -125,7 +116,7 @@ CBCodeMisc *CodeMiscNew(CBCmpCtrl *ccmp, I64 type)
 {
   CBCodeMisc *misc = CAlloc(sizeof(CBCodeMisc));
   misc->type = type;
-  QueIns(misc, ccmp->code_ctrl->code_misc->last);
+  BQueIns(misc, ccmp->code_ctrl->code_misc->last);
   return misc;
 }
 
@@ -311,7 +302,7 @@ CBRPN *ICFwd(CBRPN *rpn)
       goto swit;
       break;
     case BIC_UNBOUNDED_SWITCH:
-    swit:
+swit:
       return ICFwd(rpn->base.next);
       break;
     case BIC_SUB_CALL:
@@ -328,7 +319,7 @@ CBRPN *ICFwd(CBRPN *rpn)
       break;
     case BIC_NEG:
     case BIC_SQRT:
-    unop:
+unop:
       return ICFwd(rpn->base.next);
       break;
     case BIC_SQR:
@@ -345,7 +336,7 @@ CBRPN *ICFwd(CBRPN *rpn)
       return rpn->base.next;
       break;
     case BIC_POW:
-    binop:
+binop:
       return ICFwd(ICFwd(rpn->base.next));
       break;
     case BIC_ADD:
@@ -548,7 +539,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       return rpn->raw_type;
       break;
     case BIC_LOCK: // Lock means "lock *ptr++;",it operates on expressions as a
-                   // whole
+      // whole
       BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
       rpn->raw_type = BRT_U0; // dummy
       return rpn->raw_type;
@@ -618,7 +609,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
           ParseErr(ccmp, "Can't call this pointer."); // TODO add type name
       }
       fun = rpn->ic_fun;
-    got_fun:
+got_fun:
       if (!fun)
         ParseErr(ccmp, "Invalid type to call."); // TODO add type name
       if (arg > fun->argc && !(fun->base.flags & CLSF_VARGS)) {
@@ -681,7 +672,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       return rpn->raw_type;
       break;
     case BIC_NEG:
-    unop:
+unop:
       BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (BETWEEN(rpn->base.next(CBRPN *)->raw_type, BRT_I8i, BRT_U32i)) {
         // Promote to 64bit
@@ -762,7 +753,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto ret;
       break;
     case BIC_DIV:
-    binop:
+binop:
       a = BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
       b = BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (BETWEEN(a, BRT_I8i, BRT_U32i) && BETWEEN(b, BRT_I8i, BRT_U32i)) {
@@ -789,7 +780,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       if (!rpn->ic_dim)
         goto no_dim;
       if (!rpn->ic_dim->next) {
-      no_dim:
+no_dim:
         rpn->ic_class = rpn->base.next(CBRPN *)->ic_class - 1;
       } else {
         rpn->ic_dim = rpn->ic_dim->next;
@@ -875,7 +866,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto unop;
       break;
     case BIC_AND_AND:
-    cmp_rt:  // "cmp" trips the C bootstrap compiler
+cmp_rt:  // "cmp" trips the C bootstrap compiler
       rpn->raw_type = BRT_I64i;
       goto ret;
       break;
@@ -904,7 +895,7 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto binop;
       break;
     case BIC_ADD_EQ:
-    abinop:
+abinop:
       BAssignRawTypeToNode(ccmp, rpn->base.next);
       BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
       rpn->ic_class = ICFwd(rpn->base.next)->ic_class;
@@ -1022,7 +1013,7 @@ ret:
 
 U0 ICFree(CBRPN *ic)
 {
-  QueRem(ic);
+  BQueRem(ic);
   Free(ic);
 }
 
@@ -1035,7 +1026,7 @@ CBRPN *__HC_ICAdd_Sqr(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SQR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Lock(CBCodeCtrl *cc)
@@ -1043,7 +1034,7 @@ CBRPN *__HC_ICAdd_Lock(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LOCK;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Pow(CBCodeCtrl *cc)
@@ -1051,7 +1042,7 @@ CBRPN *__HC_ICAdd_Pow(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_POW;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Eq(CBCodeCtrl *cc)
@@ -1059,7 +1050,7 @@ CBRPN *__HC_ICAdd_Eq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Div(CBCodeCtrl *cc)
@@ -1067,7 +1058,7 @@ CBRPN *__HC_ICAdd_Div(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_DIV;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Sqrt(CBCodeCtrl *cc)
@@ -1075,7 +1066,7 @@ CBRPN *__HC_ICAdd_Sqrt(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SQRT;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Sub(CBCodeCtrl *cc)
@@ -1083,7 +1074,7 @@ CBRPN *__HC_ICAdd_Sub(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SUB;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Mul(CBCodeCtrl *cc)
@@ -1091,7 +1082,7 @@ CBRPN *__HC_ICAdd_Mul(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MUL;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Add(CBCodeCtrl *cc)
@@ -1099,7 +1090,7 @@ CBRPN *__HC_ICAdd_Add(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_ADD;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Comma(CBCodeCtrl *cc)
@@ -1107,7 +1098,7 @@ CBRPN *__HC_ICAdd_Comma(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_COMMA;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Addr(CBCodeCtrl *cc)
@@ -1115,7 +1106,7 @@ CBRPN *__HC_ICAdd_Addr(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_ADDR_OF;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Xor(CBCodeCtrl *cc)
@@ -1123,7 +1114,7 @@ CBRPN *__HC_ICAdd_Xor(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_XOR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Mod(CBCodeCtrl *cc)
@@ -1131,7 +1122,7 @@ CBRPN *__HC_ICAdd_Mod(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MOD;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Or(CBCodeCtrl *cc)
@@ -1139,7 +1130,7 @@ CBRPN *__HC_ICAdd_Or(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_OR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Lt(CBCodeCtrl *cc)
@@ -1147,7 +1138,7 @@ CBRPN *__HC_ICAdd_Lt(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LT;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Gt(CBCodeCtrl *cc)
@@ -1155,7 +1146,7 @@ CBRPN *__HC_ICAdd_Gt(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_GT;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Le(CBCodeCtrl *cc)
@@ -1163,7 +1154,7 @@ CBRPN *__HC_ICAdd_Le(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LE;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Ge(CBCodeCtrl *cc)
@@ -1171,7 +1162,7 @@ CBRPN *__HC_ICAdd_Ge(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_GE;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_LNot(CBCodeCtrl *cc)
@@ -1179,7 +1170,7 @@ CBRPN *__HC_ICAdd_LNot(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LNOT;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_BNot(CBCodeCtrl *cc)
@@ -1187,7 +1178,7 @@ CBRPN *__HC_ICAdd_BNot(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_BNOT;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_AndAnd(CBCodeCtrl *cc)
@@ -1195,7 +1186,7 @@ CBRPN *__HC_ICAdd_AndAnd(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_AND_AND;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_OrOr(CBCodeCtrl *cc)
@@ -1203,7 +1194,7 @@ CBRPN *__HC_ICAdd_OrOr(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_OR_OR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_XorXor(CBCodeCtrl *cc)
@@ -1211,7 +1202,7 @@ CBRPN *__HC_ICAdd_XorXor(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_XOR_XOR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_EqEq(CBCodeCtrl *cc)
@@ -1219,7 +1210,7 @@ CBRPN *__HC_ICAdd_EqEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_EQ_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Ne(CBCodeCtrl *cc)
@@ -1227,7 +1218,7 @@ CBRPN *__HC_ICAdd_Ne(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_NE;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Lsh(CBCodeCtrl *cc)
@@ -1235,7 +1226,7 @@ CBRPN *__HC_ICAdd_Lsh(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LSH;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Rsh(CBCodeCtrl *cc)
@@ -1243,7 +1234,7 @@ CBRPN *__HC_ICAdd_Rsh(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_RSH;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Neg(CBCodeCtrl *cc)
@@ -1251,7 +1242,7 @@ CBRPN *__HC_ICAdd_Neg(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_NEG;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_And(CBCodeCtrl *cc)
@@ -1259,7 +1250,7 @@ CBRPN *__HC_ICAdd_And(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_AND;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Ret(CBCodeCtrl *cc)
@@ -1267,7 +1258,7 @@ CBRPN *__HC_ICAdd_Ret(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_RET;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1277,7 +1268,7 @@ CBRPN *__HC_ICAdd_SetFrameSize(CBCodeCtrl *cc, I64 arg)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = __IC_SET_FRAME_SIZE;
   rpn->integer = arg;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Arg(CBCodeCtrl *cc, I64 arg)
@@ -1286,7 +1277,7 @@ CBRPN *__HC_ICAdd_Arg(CBCodeCtrl *cc, I64 arg)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = __IC_ARG;
   rpn->integer = arg;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_PostInc(CBCodeCtrl *cc, I64 amt)
@@ -1295,7 +1286,7 @@ CBRPN *__HC_ICAdd_PostInc(CBCodeCtrl *cc, I64 amt)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_POST_INC;
   rpn->integer = amt;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_PostDec(CBCodeCtrl *cc, I64 amt)
@@ -1304,7 +1295,7 @@ CBRPN *__HC_ICAdd_PostDec(CBCodeCtrl *cc, I64 amt)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_POST_DEC;
   rpn->integer = amt;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_PreInc(CBCodeCtrl *cc, I64 amt)
@@ -1313,7 +1304,7 @@ CBRPN *__HC_ICAdd_PreInc(CBCodeCtrl *cc, I64 amt)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_PRE_INC;
   rpn->integer = amt;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_PreDec(CBCodeCtrl *cc, I64 amt)
@@ -1322,7 +1313,7 @@ CBRPN *__HC_ICAdd_PreDec(CBCodeCtrl *cc, I64 amt)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_PRE_DEC;
   rpn->integer = amt;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_AddEq(CBCodeCtrl *cc)
@@ -1330,7 +1321,7 @@ CBRPN *__HC_ICAdd_AddEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_ADD_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_SubEq(CBCodeCtrl *cc)
@@ -1338,7 +1329,7 @@ CBRPN *__HC_ICAdd_SubEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SUB_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_MulEq(CBCodeCtrl *cc)
@@ -1346,7 +1337,7 @@ CBRPN *__HC_ICAdd_MulEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MUL_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_DivEq(CBCodeCtrl *cc)
@@ -1354,7 +1345,7 @@ CBRPN *__HC_ICAdd_DivEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_DIV_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_LshEq(CBCodeCtrl *cc)
@@ -1362,7 +1353,7 @@ CBRPN *__HC_ICAdd_LshEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LSH_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_RshEq(CBCodeCtrl *cc)
@@ -1370,7 +1361,7 @@ CBRPN *__HC_ICAdd_RshEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_RSH_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_AndEq(CBCodeCtrl *cc)
@@ -1378,7 +1369,7 @@ CBRPN *__HC_ICAdd_AndEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_AND_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_OrEq(CBCodeCtrl *cc)
@@ -1386,7 +1377,7 @@ CBRPN *__HC_ICAdd_OrEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_OR_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_XorEq(CBCodeCtrl *cc)
@@ -1394,7 +1385,7 @@ CBRPN *__HC_ICAdd_XorEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_XOR_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_ModEq(CBCodeCtrl *cc)
@@ -1402,7 +1393,7 @@ CBRPN *__HC_ICAdd_ModEq(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MOD_EQ;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_ToI64(CBCodeCtrl *cc)
@@ -1410,7 +1401,7 @@ CBRPN *__HC_ICAdd_ToI64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_TO_I64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_ToF64(CBCodeCtrl *cc)
@@ -1418,7 +1409,7 @@ CBRPN *__HC_ICAdd_ToF64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_TO_F64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Min_I64(CBCodeCtrl *cc)
@@ -1426,7 +1417,7 @@ CBRPN *__HC_ICAdd_Min_I64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MIN_I64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Max_I64(CBCodeCtrl *cc)
@@ -1434,7 +1425,7 @@ CBRPN *__HC_ICAdd_Max_I64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MAX_I64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Min_U64(CBCodeCtrl *cc)
@@ -1442,7 +1433,7 @@ CBRPN *__HC_ICAdd_Min_U64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MIN_U64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Max_U64(CBCodeCtrl *cc)
@@ -1450,7 +1441,7 @@ CBRPN *__HC_ICAdd_Max_U64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MAX_U64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Min_F64(CBCodeCtrl *cc)
@@ -1458,7 +1449,7 @@ CBRPN *__HC_ICAdd_Min_F64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MIN_F64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Max_F64(CBCodeCtrl *cc)
@@ -1466,7 +1457,7 @@ CBRPN *__HC_ICAdd_Max_F64(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_MAX_F64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1476,7 +1467,7 @@ CBRPN *__HC_ICAdd_I64(CBCodeCtrl *cc, I64 integer)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_I64;
   rpn->integer = integer;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_F64(CBCodeCtrl *cc, F64 f)
@@ -1485,7 +1476,7 @@ CBRPN *__HC_ICAdd_F64(CBCodeCtrl *cc, F64 f)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_F64;
   rpn->flt = f;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Switch(CBCodeCtrl *cc, CBCodeMisc *misc, CBCodeMisc *dft)
@@ -1495,7 +1486,7 @@ CBRPN *__HC_ICAdd_Switch(CBCodeCtrl *cc, CBCodeMisc *misc, CBCodeMisc *dft)
   rpn->type = BIC_BOUNDED_SWITCH;
   rpn->code_misc = misc;
   misc->dft_lab = dft;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 // The frontend imports the bounded switch under this name (main.c: STK___HC_ICAdd_Switch).
@@ -1509,7 +1500,7 @@ CBRPN *__HC_ICAdd_UnboundedSwitch(CBCodeCtrl *cc, CBCodeMisc *misc)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_UNBOUNDED_SWITCH;
   rpn->code_misc = misc;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1518,7 +1509,7 @@ CBRPN *__HC_ICAdd_SubRet(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SUB_RET;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_SubProlog(CBCodeCtrl *cc)
@@ -1526,7 +1517,7 @@ CBRPN *__HC_ICAdd_SubProlog(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SUB_PROLOG;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_SubCall(CBCodeCtrl *cc, CBCodeMisc *cm)
@@ -1535,7 +1526,7 @@ CBRPN *__HC_ICAdd_SubCall(CBCodeCtrl *cc, CBCodeMisc *cm)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_SUB_CALL;
   rpn->code_misc = cm;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 //INTEGRATION: rt2cls relies on BHashFind() returning the first of STAR_CNT consecutive
@@ -1590,7 +1581,7 @@ CBRPN *__HC_ICAdd_ShortAddr(CBCmpCtrl *acc, CBCodeCtrl *cc, U8 *name, CBCodeMisc
   rpn->ic_class = BHashFind("U8i", BFs->hash_table, BHTT_CLASS, 1);
   rpn->ic_class++;
   rpn->raw_type = BRT_PTR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Deref(CBCodeCtrl *cc, I64 rt, I64 ptr_cnt)
@@ -1600,7 +1591,7 @@ CBRPN *__HC_ICAdd_Deref(CBCodeCtrl *cc, I64 rt, I64 ptr_cnt)
   rpn->type = BIC_DEREF;
   rpn->ic_class = rt2cls(rt, ptr_cnt);
   rpn->raw_type = rpn->ic_class->raw_type;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1612,7 +1603,7 @@ CBRPN *__HC_ICAdd_Call(CBCodeCtrl *cc, I64 arity, I64 rt, I64 ptr_cnt)
   rpn->length = arity;
   rpn->ic_class = rt2cls(rt, ptr_cnt);
   rpn->raw_type = rpn->ic_class->raw_type;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_FReg(CBCodeCtrl *cc, I64 r)
@@ -1623,7 +1614,7 @@ CBRPN *__HC_ICAdd_FReg(CBCodeCtrl *cc, I64 r)
   rpn->integer = r;
   rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
   rpn->raw_type = BRT_F64;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_IReg(CBCodeCtrl *cc, I64 r, I64 rt, I64 ptr_cnt)
@@ -1636,7 +1627,7 @@ CBRPN *__HC_ICAdd_IReg(CBCodeCtrl *cc, I64 r, I64 rt, I64 ptr_cnt)
   if (ptr_cnt)
     rt = BRT_PTR;
   rpn->raw_type = rpn->ic_class->raw_type;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1650,7 +1641,7 @@ CBRPN *__HC_ICAdd_Frame(CBCodeCtrl *cc, I64 off, I64 rt, I64 ptr_cnt)
   if (ptr_cnt)
     rt = BRT_PTR;
   rpn->raw_type = rpn->ic_class->raw_type;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Typecast(CBCodeCtrl *cc, I64 rt, I64 ptr_cnt)
@@ -1662,7 +1653,7 @@ CBRPN *__HC_ICAdd_Typecast(CBCodeCtrl *cc, I64 rt, I64 ptr_cnt)
   if (ptr_cnt)
     rt = BRT_PTR;
   rpn->raw_type = rpn->ic_class->raw_type;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1724,11 +1715,11 @@ CBRPN *__HC_ICAdd_Label(CBCodeCtrl *cc, CBCodeMisc *misc)
   CBRPN *rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_NOP;
   // Label must consume something
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LABEL;
   rpn->code_misc = misc;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1738,7 +1729,7 @@ CBRPN *__HC_ICAdd_Goto(CBCodeCtrl *cc, CBCodeMisc *cm)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_GOTO;
   rpn->code_misc = cm;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1748,7 +1739,7 @@ CBRPN *__HC_ICAdd_GotoIf(CBCodeCtrl *cc, CBCodeMisc *cm)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_GOTO_IF;
   rpn->code_misc = cm;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1760,7 +1751,7 @@ CBRPN *__HC_ICAdd_RawBytes(CBCodeCtrl *cc, U8 *bytes, I64 cnt)
   rpn->length = cnt;
   rpn->raw_bytes = CAlloc(cnt);
   MemCpy(rpn->raw_bytes, bytes, cnt);
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1770,7 +1761,7 @@ CBRPN *__HC_ICAdd_Vargs(CBCodeCtrl *cc, I64 arity)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = __IC_VARGS;
   rpn->length = arity;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1780,7 +1771,7 @@ CBRPN *__HC_ICAdd_Str(CBCodeCtrl *cc, CBCodeMisc *cm)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_STR;
   rpn->code_misc = cm;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1810,7 +1801,7 @@ CBRPN *__HC_ICAdd_Reloc(CBCmpCtrl *cmpc, CBCodeCtrl *cc, I64 *pat_addr, U8 *sym,
   rpn->ic_class = rt2cls(rt, ptrs);
   rpn->code_misc = AddRelocMisc(cmpc, sym);
   rpn->code_misc->patch_addr = pat_addr;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1823,7 +1814,7 @@ CBRPN *__HC_ICAdd_RelocUnqiue(CBCmpCtrl *cmpc, CBCodeCtrl *cc, I64 *pat_addr, U8
   rpn->code_misc = CodeMiscNew(cmpc, BCMT_RELOC_U64);
   rpn->code_misc->patch_addr = pat_addr;
   rpn->code_misc->str = StrNew(sym);
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 // The frontend imports it under the correctly spelled name (main.c: STK___HC_ICAdd_RelocUnique).
@@ -1857,7 +1848,7 @@ CBRPN *__HC_ICAdd_StaticData(CBCmpCtrl *cmp, CBCodeCtrl *cc, I64 at, U8 *d, I64 
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = __IC_SET_STATIC_DATA;
   rpn->code_misc = misc;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1867,7 +1858,7 @@ CBRPN *__HC_ICAdd_SetStaticsSize(CBCodeCtrl *cc, I64 len)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = __IC_STATICS_SIZE;
   rpn->integer = len;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1879,7 +1870,7 @@ CBRPN *__HC_ICAdd_StaticRef(CBCodeCtrl *cc, I64 off, I64 rt, I64 ptrs)
   rpn->integer = off;
   rpn->ic_class = rt2cls(rt, ptrs);
   rpn->raw_type = rpn->ic_class->raw_type;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1892,7 +1883,7 @@ CBRPN *__HC_ICAdd_ToBool(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_TO_BOOL;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_BT(CBCodeCtrl *cc)
@@ -1900,7 +1891,7 @@ CBRPN *__HC_ICAdd_BT(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_BT;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_BTC(CBCodeCtrl *cc)
@@ -1908,7 +1899,7 @@ CBRPN *__HC_ICAdd_BTC(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_BTC;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_BTS(CBCodeCtrl *cc)
@@ -1916,7 +1907,7 @@ CBRPN *__HC_ICAdd_BTS(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_BTS;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_BTR(CBCodeCtrl *cc)
@@ -1924,7 +1915,7 @@ CBRPN *__HC_ICAdd_BTR(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_BTR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_LBTC(CBCodeCtrl *cc)
@@ -1932,7 +1923,7 @@ CBRPN *__HC_ICAdd_LBTC(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LBTC;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_LBTS(CBCodeCtrl *cc)
@@ -1940,7 +1931,7 @@ CBRPN *__HC_ICAdd_LBTS(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LBTS;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_LBTR(CBCodeCtrl *cc)
@@ -1948,7 +1939,7 @@ CBRPN *__HC_ICAdd_LBTR(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_LBTR;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1957,7 +1948,7 @@ CBRPN *__HC_ICAdd_Fs(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_FS;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 CBRPN *__HC_ICAdd_Gs(CBCodeCtrl *cc)
@@ -1965,7 +1956,7 @@ CBRPN *__HC_ICAdd_Gs(CBCodeCtrl *cc)
   CBRPN *rpn;
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_GS;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -1990,7 +1981,7 @@ CBRPN *__HC_ICAdd_GetVargsPtr(CBCodeCtrl *cc)
   rpn->type = BIC_GET_VARGS_PTR;
   rpn->ic_class = NULL;
   rpn->raw_type = BRT_I64i;
-  QueIns(rpn, cc->ir_code);
+  BQueIns(rpn, cc->ir_code);
   return rpn;
 }
 
@@ -2014,4 +2005,3 @@ U0 CacheRPNArgs(CBCmpCtrl *cctrl)
     rpn->tree2 = ICArgN(rpn, 2);
   }
 }
-

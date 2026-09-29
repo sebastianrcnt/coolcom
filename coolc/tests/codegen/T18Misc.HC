@@ -1,0 +1,88 @@
+#include "TestBase.HH"
+I64 g,h;U8 gb;F64 gf;I64 garr[8];
+class CL{I64 lockv;U8 c;F64 f;};
+CL gl;
+I64 L1(){lock{g++;}return g;}
+I64 L2(I64 *p){lock{*p+=1;}return *p;}
+I64 L3(I64 *p){lock{*p-=1;}return *p;}
+I64 L4(){lock{gl.lockv++;}return gl.lockv;}
+I64 L5(I64 *p,I64 v){lock{*p|=v;}lock{*p&=~1;}lock{*p^=v;}return *p;}
+I64 L6(I64 i){lock{garr[i]+=3;}return garr[i];}
+I64 L7(I64 *p){lock{--*p;}return *p;}
+U0 L8(I64 *p){lock{(*p)++;(*p)++;}}
+I64 T1(){I64 x=1;try{x=2;}catch{x=3;}return x;}
+I64 T2(I64 a){try{if(a)throw(a);g=1;}catch{g=2;}return g;}
+I64 T3(I64 a){I64 r=0;try{r=a*2;try{r+=1;}catch{r+=2;}}catch{r=-1;}return r;}
+I64 T4(I64 a){try{g=a;}catch{"caught\n";}return g;}
+I64 T5(I64 a,I64 b){I64 s=0,i;try{for(i=0;i<a;i++)s+=i*b;}catch{s=-1;}return s;}
+F64 T6(F64 a){try{gf=a*2;}catch{gf=0;}return gf;}
+I64 A1(I64 a,I64 b,I64 c){a=b=c=7;return a+b+c;}
+I64 A2(I64 a,I64 b){return (a=b)+1;}
+I64 A3(I64 *p,I64 a){return *p=a;}
+I64 A4(I64 a){return a+=3;}
+F64 A5(F64 a){return a+=3;}
+F64 A6(F64 a,F64 b){return a=b*2;}
+I64 A7(I64 a){I64 b;b=a=3;return b*a;}
+I64 A8(I64 *p,I64 *q){*p=*q=5;return *p+*q;}
+I64 A9(I64 a){U8 b;b=a=300;return b+a;}
+I64 A10(I64 a){I64 b=(a+=2)*(a+=3);return b;}
+I64 A11(I64 a){return (a<<=1)+(a>>=1);}
+I64 A12(I64 a,I64 b){return (a&=b)|(a|=b);}
+I64 A13(I64 *p,I64 i){return p[i]=p[i+1]=i;}
+I64 A14(I64 a){g=a;h=g;g+=h;h*=g;return g+h;}
+I64 A15(I64 a){garr[a]=garr[a+1]=a;return garr[a]+garr[a+1];}
+I64 A16(I64 a,I64 b){a^=b;b^=a;a^=b;return a*100+b;}
+F64 A17(F64 a,F64 b){F64 t=a;a=b;b=t;return a-b;}
+I64 A18(I64 a,I64 b,I64 c,I64 d){return (a=b)+(c=d)+(a=c);}
+I64 A19(I64 a){return a=a+1;}
+I64 A20(){return g=h=gb=7;}
+U0 A21(I64 a){g=a,h=a;}
+I64 A22(I64 *p){*p=*p+1;*p=*p*2;*p=*p-3;*p=*p/2;*p=*p%5;return *p;}
+I64 A23(I64 *p){*p+=*p;*p*=*p;*p-=*p;return *p;}
+I64 A24(I64 a){a+=a;a*=a;a-=a+1;return a;}
+I64 A25(I64 a,I64 b){a+=b+=1;return a+b;}
+I64 A26(I64 a,I64 b){a<<=b>>=1;return a+b;}
+I64 A27(I64 a,I64 b){return a/=b;}
+I64 A28(I64 a,I64 b){return a%=b;}
+I64 A29(U64 a,U64 b){return a/=b;}
+I64 A30(I64 *p,I64 v){return *p<<=v;}
+I64 B1(I64 a){I64 b=a;{I64 c=b*2;b=c+1;}return b;}
+I64 B2(I64 a){I64 r=0;if(a){r=1;}else{r=2;}{;}return r;}
+I64 B3(I64 a){I64 x=a;I64 y=x;I64 z=y;I64 w=z;return w;}
+I64 B4(){I64 a=1;I64 b=2;I64 c=a+b;a=b;b=c;return a*b;}
+I64 B5(I64 a){return -(-a);}
+I64 B6(I64 a){return ~~a;}
+I64 B7(I64 a){return !!!a;}
+I64 B8(I64 a){return - -a;}
+I64 B9(I64 a){return -a*-a;}
+I64 B10(I64 a){return (a);}
+I64 B11(I64 a){return ((((a))));}
+I64 B12(I64 a,I64 b){return (a+b)-(a-b)+(a*b)-(a/b);}
+I64 B13(I64 a){return a+a+a+a+a+a+a+a+a+a;}
+I64 B14(I64 a){return a*a+a*a+a*a;}
+I64 B15(I64 a){return (a+1)*(a+2)*(a+3)*(a+4)*(a+5);}
+I64 B16(I64 a){return a-(a-(a-(a-(a-1))));}
+I64 B17(I64 a){return a/(a/(a/(a+9)+1)+1);}
+I64 B18(U8 a,U8 b,U8 c){return a*b*c;}
+I64 B19(I8 a,I8 b,I8 c){return a*b*c;}
+U8 B20(U8 a,U8 b,U8 c){return a*b*c;}
+I8 B21(I8 a,I8 b){return a*b;}
+U16 B22(U16 a,U16 b){return a*b;}
+I16 B23(I16 a,I16 b){return a*b;}
+U32 B24(U32 a,U32 b){return a*b;}
+I32 B25(I32 a,I32 b){return a*b;}
+I64 B26(U32 a,U32 b){return a*b;}
+I64 B27(I32 a,I32 b){return a*b;}
+I64 B28(U32 a){return a<<31;}
+I64 B29(I32 a){return a<<31;}
+I64 B30(U8 a){return a+255;}
+I64 B31(I8 a){return a-128;}
+I64 B32(U16 a){return a==65535;}
+I64 B33(I16 a){return a==-1;}
+I64 B34(U32 a){return a==0xFFFFFFFF;}
+I64 B35(I32 a){return a==-1;}
+I64 B36(U8 a){if(a==255)return 1;return 0;}
+I64 B37(I8 a){if(a<0)return 1;return 0;}
+I64 B38(U8 a,I8 b){return a==b;}
+U0 B39(U8 *p,I64 v){*p=v;*p+=1;}
+U0 B40(I8 *p,I64 v){*p=v;*p-=1;}

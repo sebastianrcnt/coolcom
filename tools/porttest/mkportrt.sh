@@ -16,17 +16,19 @@ mkdir -p "$RT/Src/Port"
 cp "$ROOT"/coolc/Compiler/*.HC "$ROOT"/coolc/Compiler/*.HH "$RT/Src/Port/"
 python3 "$ROOT/tools/porttest/hostrename.py" "$RT"/Src/Port/*.HC "$RT"/Src/Port/*.HH > /dev/null
 [ -n "$PORT_STUBS" ] && cp "$PORT_STUBS"/* "$RT/Src/Port/"  # testing only: stand-ins for unfinished files
-# Use the extern (not import) declarations of the __HC_* functions and pull
-# the port in right after them.
-python3 - "$RT/Src/AIWNIOS_CodeGen.HC" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p, 'rb').read()
-s = s.replace(b'#ifdef IMPORT_AIWNIOS_SYMS', b'#ifdef PORT_BACKEND_NEVER', 1)
-i = s.index(b'#endif', s.index(b'#ifdef PORT_BACKEND_NEVER'))
-s = s[:i + 6] + b'\n#include "Port/Backend.HC"\n' + s[i + 6:]
-open(p, 'wb').write(s)
-PY
+# The port's bindings are renamed __HC_* -> __PB_*; the frontend calls go
+# through HCSel_* wrappers that pick the C backend or the port (b_use_port).
+for f in "$RT"/Src/Port/*.HC "$RT"/Src/Port/*.HH; do
+  perl -pi -e 's/\b__HC_/__PB_/g' "$f"
+done
+if [ -n "$PORT_INSTRUMENT" ]; then  # debug: trace every port function entry (see tracert.sh)
+  python3 "$ROOT/tools/porttest/addtrace.py" "$RT"/Src/Port/IRBind.HC "$RT"/Src/Port/OptPass.HC \
+    "$RT"/Src/Port/ArmBackendA.HC "$RT"/Src/Port/ArmBackendB.HC "$RT"/Src/Port/BQSort.HC \
+    "$RT"/Src/Port/Arm64Enc.HC "$RT"/Src/Port/BackendRT.HC
+  printf 'I64 b_trace_n;\nU0 BTrace(U8 *name)\n{\n  b_trace_n++;\n  if (b_trace_n<20000 || !(b_trace_n&0xFFFF))\n    Print("T %%d %%s\\n",b_trace_n,name);\n}\n' > "$RT/Src/Port/BTrace.HC"
+  perl -0pi -e 's/#include "BackendA.HH"\n/#include "BackendA.HH"\n#include "BTrace.HC"\n/' "$RT/Src/Port/Backend.HC"
+fi
+python3 "$ROOT/tools/porttest/mkswitch.py" "$RT/Src/AIWNIOS_CodeGen.HC" "$RT/Src/Port/Switch.HC" > /dev/null
 (cd "$RT" && gtimeout 120 "$BIN" -b -t . < /dev/null > "$ROOT/build/portrt-boot.log" 2>&1) || echo "bootstrap exited with $? (124 = timed out)"
 grep -a "Errs:" "$ROOT/build/portrt-boot.log" | tail -1
 grep -a -q "Errs:0" "$ROOT/build/portrt-boot.log" || {

@@ -1,0 +1,99 @@
+#include "TestBase.HH"
+class CA{I64 a;I64 b;};
+class CB{U8 c;I64 x;U16 w;I32 y;I8 z;};
+class CC{CA a;CB b;I64 n;};
+class CD{CA arr[4];I64 tail;};
+class CE{U8 buf[10];I16 v[3];F64 f;};
+class CF{I64 tag;CF *next;CF *prev;};
+class CG{F64 x;F64 y;F64 z;};
+class CH:CA{I64 c;};
+class CI{I64 kind;union{I64 i;F64 f;U8 *s;};};
+union UA{I64 q;U8 b[8];I16 h[4];};
+union UB{I64 i;F64 f;};
+class CJ{I64 pad;union{I64 whole;U8 bytes[8];};U8 last;};
+CA ga;CB gb;CC gc;CD gd;CE ge;CF gf;CG gg;CH gh;CI gi;UA gu;UB gub;CJ gj;
+CA gaa[3];CG ggg[3];
+I64 A1(){ga.a=1;ga.b=2;return ga.a+ga.b;}
+I64 A2(CA *p){return p->a*p->b;}
+U0 A3(CA *p,I64 x,I64 y){p->a=x;p->b=y;}
+I64 A4(){CA t;t.a=5;t.b=6;return t.a-t.b;}
+I64 A5(){CA t;A3(&t,3,4);return A2(&t);}
+I64 A6(CA *p){return p->a+=p->b;}
+I64 A7(CA *p){p->a<<=2;p->b>>=1;p->a|=p->b;return p->a;}
+I64 A8(CA *p,CA *q){*p=*q;return p->b;}
+I64 A9(CA *p){CA t=*p;t.a++;return t.a;}
+I64 A10(CA *p){return sizeof(CA)+sizeof(CB)+sizeof(CC)+sizeof(CD)+sizeof(CE);}
+I64 B1(){gb.c=1;gb.x=2;gb.w=3;gb.y=4;gb.z=5;return gb.c+gb.x+gb.w+gb.y+gb.z;}
+I64 B2(CB *p){return p->c+p->w+p->z;}
+U0 B3(CB *p,I64 v){p->c=v;p->x=v;p->w=v;p->y=v;p->z=v;}
+I64 B4(CB *p){p->c+=200;p->w*=300;p->y-=5;p->z-=100;return p->c+p->w+p->y+p->z;}
+I64 B5(){return offset(CB.c)+offset(CB.x)*10+offset(CB.w)*100+offset(CB.y)*1000+offset(CB.z)*10000;}
+I64 B6(CB *p){return &p->y-p;}
+F64 B7(CG *p){return p->x*p->y+p->z;}
+U0 B8(CG *p,F64 v){p->x=v;p->y=v*2;p->z=v*3;}
+F64 B9(){ggg[1].x=1.5;ggg[1].y=2.5;return ggg[1].x+ggg[1].y+ggg[0].z;}
+F64 B10(CG *p,I64 i){return p[i].x-p[i].y;}
+I64 C1(){gc.a.a=1;gc.a.b=2;gc.b.x=3;gc.b.c=4;gc.n=5;return gc.a.a+gc.a.b+gc.b.x+gc.b.c+gc.n;}
+I64 C2(CC *p){return p->a.a+p->b.x+p->n;}
+U0 C3(CC *p){p->a.b=p->b.y;p->b.z=p->a.a;}
+I64 C4(CC *p){CA *q=&p->a;CB *r=&p->b;return q->a+r->x;}
+I64 C5(){return offset(CC.b)+offset(CC.n)*100+offset(CC.a.b)*10000+offset(CC.b.w)*100000;}
+I64 C6(CC *p){p->a.a++;++p->b.x;p->n--;return p->n+p->a.a+p->b.x;}
+I64 C7(){CC t;t.a.a=1;t.b.x=2;t.n=t.a.a+t.b.x;return t.n;}
+I64 D1(CD *p,I64 i){return p->arr[i].a+p->arr[i].b;}
+U0 D2(CD *p,I64 i,I64 v){p->arr[i].a=v;p->arr[i].b=v+1;p->tail=i;}
+I64 D3(){gd.arr[2].b=9;return gd.arr[2].b+gd.tail;}
+I64 D4(){I64 i,s=0;for(i=0;i<4;i++){gd.arr[i].a=i;s+=gd.arr[i].a*i;}return s;}
+I64 D5(CD *p){CA *q=p->arr;q+=2;return q->a;}
+I64 D6(){return offset(CD.tail)+sizeof(CD);}
+I64 D7(CD *p){return p->arr[1].b+p->arr[3].a;}
+I64 D8(CA *arr,I64 n){I64 i,s=0;for(i=0;i<n;i++)s+=arr[i].a*arr[i].b;return s;}
+I64 D9(){gaa[0].a=1;gaa[1].b=2;gaa[2].a=3;return D8(gaa,3);}
+I64 E1(CE *p,I64 i){return p->buf[i];}
+U0 E2(CE *p,I64 i,I64 v){p->buf[i]=v;p->v[i%3]=v;}
+I64 E3(){ge.buf[9]=7;ge.v[2]=-3;ge.f=2.5;return ge.buf[9]+ge.v[2]+ge.f(I64);}
+I64 E4(CE *p){return p->v[0]+p->v[1]+p->v[2];}
+I64 E5(CE *p){return offset(CE.v)*100+offset(CE.f);}
+U8 *E6(CE *p){return p->buf;}
+I16 *E7(CE *p){return p->v;}
+I64 E8(CE *p){I16 *q=p->v;return q[1];}
+I64 E9(CE *p){return &p->v[2]-&p->v[0];}
+U0 E10(CE *p){I64 i;for(i=0;i<10;i++)p->buf[i]=i*3;}
+I64 F1(CF *p){I64 n=0;while(p){n+=p->tag;p=p->next;}return n;}
+U0 F2(CF *a,CF *b){a->next=b;b->prev=a;a->prev=NULL;b->next=NULL;}
+I64 F3(CF *p){return p->next->next->tag;}
+U0 F4(CF *p){p->next->tag=p->prev->tag+1;}
+I64 F5(CF *p){CF *q=p->next;p->next=q->next;return q->tag;}
+I64 F6(){F2(&gf,&gf);return gf.next==&gf;}
+I64 F7(CF *h){I64 n=0;CF *p=h;while(p->next){n++;p=p->next;}return n;}
+I64 G1(CH *p){return p->a+p->b+p->c;}
+U0 G2(CH *p){p->a=1;p->b=2;p->c=3;}
+I64 G3(){return sizeof(CH)+offset(CH.c);}
+I64 G4(CH *p){return A2(p);}
+I64 H1(CI *p){return p->i;}
+F64 H2(CI *p){return p->f;}
+U8 *H3(CI *p){return p->s;}
+U0 H4(CI *p){p->kind=1;p->i=5;p->f=1.5;}
+I64 H5(){return sizeof(CI);}
+I64 I1(UA *p){return p->b[3];}
+I64 I2(UA *p){return p->h[1];}
+U0 I3(UA *p){p->q=0x0102030405060708;p->b[0]=0xFF;p->h[3]=-1;}
+I64 I4(){gu.q=0x1122334455667788;return gu.b[0]+gu.b[7]+gu.h[2];}
+I64 I5(){gub.f=1.0;return gub.i;}
+F64 I6(){gub.i=0x4000000000000000;return gub.f;}
+I64 I7(){return sizeof(UA)+sizeof(UB);}
+I64 J1(I64 a){return a.u8[3];}
+I64 J2(I64 a){return a.i16[1]+a.u16[2];}
+I64 J3(I64 a){return a.i32[0]+a.u32[1];}
+I64 J4(I64 a){return a.u8[0]+a.u8[1]*256;}
+U0 J5(I64 *p){p->u8[2]=0xAB;p->u16[0]=0x1234;p->i32[1]=-1;}
+I64 J6(){I64 x=0;x.u8[1]=5;x.u8[2]=6;return x;}
+I64 J7(){I64 x=0x1122334455667788;x.i16[3]=0;return x;}
+I64 J8(U64 a){return a.u32[1];}
+I64 J9(U32 a){return a.u8[3]+a.u16[1];}
+I64 J10(I32 a){return a.i8[2];}
+I64 J11(I64 a){a.u8[0]++;a.u16[1]+=2;return a;}
+I64 J12(I64 *p){p->u8[0]++;return p->u8[0];}
+I64 K1(){return gj.whole+gj.bytes[3]+gj.last;}
+U0 K2(){gj.whole=0x0102;gj.bytes[7]=9;gj.last=1;}
+I64 K3(){return offset(CJ.whole)+offset(CJ.last)*10;}

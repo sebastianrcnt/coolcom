@@ -1,0 +1,74 @@
+#include "TestBase.HH"
+#define K 5
+#define L (K*2)
+#define BIG 0x123456789
+#ifdef K
+#define HAVEK 1
+#else
+#define HAVEK 0
+#endif
+extern I64 Ext1(I64 a,F64 b,I64 c);
+extern F64 Ext2(F64 a);
+extern I64 ExtV(...);
+extern I64 GExt;
+extern F64 GFExt;
+extern U8 GArr[100];
+extern I64 GArr2[10];
+class CV{I64 a;I64 b;};
+class CV4{I64 a;I64 b;I64 c;I64 d;};
+class CVF{F64 x;F64 y;};
+class CU{union{I64 a;U8 b[8];};I64 c;};
+class CW{CV u[3];I64 z;};
+class CN{I64 a;U8 name[16];CV v;};
+I64 Fx(I64 a){return a+1;}
+I64 (*gt)(I64 a)=&Fx;
+U0 X1(){Print("x\n");}
+I64 X2(){return Ext1(1,2.5,3);}
+I64 X3(I64 a,F64 b){return Ext1(a,b,a);}
+I64 X4(I64 a){return Ext1(a,a,a);}
+F64 X5(F64 x){return Ext2(x)+Ext2(x*2);}
+F64 X6(F64 x){return Ext2(Ext2(Ext2(x)));}
+I64 X7(I64 a){return ExtV(a,a+1,2.5(I64));}
+I64 X8(){return ExtV();}
+I64 X9(){return ExtV(1,2,3,4,5,6,7,8,9,10,11,12);}
+I64 X10(){GExt++;return GExt;}
+F64 X11(){GFExt*=2;return GFExt;}
+I64 X12(I64 i){return GArr[i];}
+U0 X13(I64 i,I64 v){GArr[i]=v;GArr2[i]=v;}
+I64 X14(I64 i){return GArr2[i]+GArr2[0];}
+I64 X15(){GExt=GExt+GArr2[3];return GExt;}
+I64 X16(){return &GExt;}
+I64 X17(){I64 *p=&GExt;return *p;}
+I64 X18(){return gt(5);}
+I64 X19(){return K+L+BIG+HAVEK;}
+CV Y1(CV v){return v;}
+I64 Y2(CV v){return v.a+v.b;}
+U0 Y3(CV *o,CV *i){*o=*i;}
+U0 Y4(CV4 *o,CV4 *i){*o=*i;}
+I64 Y5(CV *p){CV t;t=*p;t.a++;return t.a+t.b;}
+I64 Y6(){CV a,b;a.a=1;a.b=2;b=a;b.a+=5;return a.a+b.a;}
+I64 Y7(CV *p){return Y2(*p);}
+CV Y8(I64 a,I64 b){CV r;r.a=a;r.b=b;return r;}
+I64 Y9(){CV r=Y8(3,4);return r.a*r.b;}
+CVF Y10(CVF v){v.x+=1;return v;}
+F64 Y11(CVF v){return v.x*v.y;}
+I64 Y12(CU *p){return p->b[2]+p->c;}
+I64 Y13(CW *p,I64 i){return p->u[i].a+p->u[i].b+p->z;}
+I64 Y14(CN *p){return p->name[3]+p->v.b;}
+U0 Y15(CN *a,CN *b){*a=*b;}
+I64 Y16(CN *a,CN *b){return a->v.a==b->v.a&&a->a<b->a;}
+I64 Z1(F64 a){return a(I64)>>1;}
+F64 Z2(F64 a){return -a*-a;}
+F64 Z3(F64 a){return 1-a;}
+F64 Z4(F64 a){return a%3;}
+I64 Z5(F64 a){return a&1;}
+F64 Z6(F64 a){return a<<1;}
+F64 Z7(F64 a){return a>>1;}
+F64 Z8(F64 a,F64 b){return a|b;}
+F64 Z9(F64 a,I64 b){return b^a;}
+F64 Z10(F64 a,F64 b){return a%b;}
+I64 Z12(F64 a){return !a;}
+I64 Z13(F64 a){return -a(I64);}
+I64 Z14(I64 a){return a<<63>>63;}
+I64 Z15(I64 a){I64 b;if(a){b=1;}return b;}
+U0 Z16(F64 *p){*p%=2;}

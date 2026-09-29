@@ -63,8 +63,10 @@ mask or by assigning to a `U32`/`I32` variable.
 - `reg` is a keyword; rename such identifiers. A prototype without `extern`
   defines an empty function. Function addresses need `&`. Locals are
   function-scoped.
-- Arrays of function pointers don't parse: store them as `U8 *` and copy
-  into a local function-pointer variable to call.
+- Arrays of function pointers don't parse, and the C bootstrap compiler
+  returns the member's *address* for `p->fnptr_member`: store function
+  pointers in classes and arrays as `U8 *` and copy into a local
+  function-pointer variable (declared and assigned on separate lines) to call.
 - No `static` locals: use a global named `<Function>_<var>`.
 - `switch` builds a jump table over min..max case value; for sparse or huge
   case values use `if` chains (or HolyC's case ranges `case 1...5:` when dense).

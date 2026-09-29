@@ -13,8 +13,10 @@ TMP=CoolTmp.$$
 trap 'rm -rf "$AIW/$TMP"' EXIT
 mkdir -p "$AIW/$TMP"
 cp -R "$SRC/" "$AIW/$TMP/"
-printf 'Cd("%s");\nCmp("%s",NULL,"Out.BIN");\nExitAiwnios;\n' "$TMP" "$ENTRY" > "$AIW/$TMP/Run.HC"
-LOG=$(cd "$AIW" && "$BIN" -t . -c "$TMP/Run.HC" 2>&1 | grep -v -E "WARNING: Fun [Hh]eader|Headers.HH" || true)
+# AIWNIOS_PORT=1: compile with the CoolC backend port (only in build/portrt).
+[ -n "$AIWNIOS_PORT" ] && PRE='extern I64 b_use_port;\nb_use_port=TRUE;\n' || PRE=''
+printf "${PRE}"'Cd("%s");\nCmp("%s",NULL,"Out.BIN");\nExitAiwnios;\n' "$TMP" "$ENTRY" > "$AIW/$TMP/Run.HC"
+LOG=$(cd "$AIW" && gtimeout ${AIWCC_TIMEOUT:-60} "$BIN" -t . -c "$TMP/Run.HC" < /dev/null 2>&1 | grep -v -E "WARNING: Fun [Hh]eader|Headers.HH" || true)
 echo "$LOG" | grep -E "Errs:|ERROR|Unresolved" || true
 echo "$LOG" | grep -q "Errs:0" || { echo "$LOG"; exit 1; }
 cp "$AIW/$TMP/Out.BIN" "$OUT"

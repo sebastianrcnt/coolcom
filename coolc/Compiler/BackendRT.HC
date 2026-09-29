@@ -29,8 +29,8 @@ CBHash *BHashFind(U8 *str,CBHashTable *t,I64 type,I64 inst=1)
     h=t->body[hs&t->mask];
     while (h) {
       if ((h->type&type) && !StrCmp(h->str,str)) {
-	if (!--inst)
-	  return h;
+        if (!--inst)
+          return h;
       }
       h=h->next;
     }
@@ -46,6 +46,51 @@ U0 BHashAdd(CBHash *h,CBHashTable *t)
   *bucket=h;
 }
 
+// Queues with the C layout (CBQue is {last,next}; TempleOS CQue is
+// {next,last}) and C semantics (QueRem re-inits the entry, QueDel frees the
+// head too). Translated from Aiwnios c/cque.c.
+U0 BQueInit(CBQue *i)
+{
+  i->next=i;
+  i->last=i;
+}
+
+U0 BQueIns(CBQue *a,CBQue *to)
+{
+  a->next=to->next;
+  a->last=to;
+  a->last->next=a;
+  a->next->last=a;
+}
+
+U0 BQueRem(CBQue *a)
+{
+  CBQue *next=a->next,*last=a->last;
+  next->last=last;
+  last->next=next;
+  BQueInit(a);
+}
+
+I64 BQueCnt(CBQue *head)
+{
+  I64 r=0;
+  CBQue *q;
+  for (q=head->next;q!=head;q=q->next)
+    r++;
+  return r;
+}
+
+U0 BQueDel(CBQue *f)
+{
+  CBQue *next=f->next,*next2;
+  while (next!=f) {
+    next2=next->next;
+    Free(next);
+    next=next2;
+  }
+  Free(f);
+}
+
 CBHeapCtrl *BHeapCtrlInit(CBHeapCtrl *ct,CBTask *task,I64 is_code_heap)
 {//The port allocates with MAlloc/Free; heap controls are only tokens.
   if (!ct)
@@ -57,7 +102,7 @@ CBHeapCtrl *BHeapCtrlInit(CBHeapCtrl *ct,CBTask *task,I64 is_code_heap)
 
 U0 BHeapCtrlDel(CBHeapCtrl *ct)
 {//PORT-NOTE: the C heap control frees all its allocations at once; here
-//they are only freed individually, so a compile may leak what C would reclaim.
+  //they are only freed individually, so a compile may leak what C would reclaim.
   Free(ct);
 }
 
@@ -76,6 +121,71 @@ I64 BFFICall2(U8 *fptr,I64 a,I64 b)
   I64 (*fp)(I64 a,I64 b);
   fp=fptr;  // declare and assign separately: an initializer here doesn't parse
   return (*fp)(a,b);
+}
+
+// Code buffers. C's OptPassFinal allocates code from an executable heap
+// and writes it through MemGetWritePtr (a separate RW alias on OpenBSD). In
+// the Aiwnios runtime (BACKEND_HOSTED) code memory is W^X, so code is
+// generated into a scratch RW buffer and copied into the executable one by
+// BCodeCommit; the pointer maps translate between the two. In the kernel
+// all memory is RWX and the maps are the identity.
+U8 *b_code_ex,*b_code_wr;
+I64 b_code_sz;
+
+U8 *MemGetWritePtr(U8 *ptr)
+{
+  if (b_code_wr && b_code_ex<=ptr<b_code_ex+b_code_sz)
+    return ptr-b_code_ex+b_code_wr;
+  return ptr;
+}
+
+U8 *MemGetExecPtr(U8 *ptr)
+{
+  if (b_code_wr && b_code_wr<=ptr<b_code_wr+b_code_sz)
+    return ptr-b_code_wr+b_code_ex;
+  return ptr;
+}
+
+U8 *BCodeAlloc(I64 size,CBHeapCtrl *heap)
+{
+#ifdef BACKEND_HOSTED
+  // __MAlloc, not MAlloc: MAlloc writes caller info into the block header,
+  // which faults in write-protected code memory.
+  if (heap)  // the host heap control the frontend passed in
+    b_code_ex=__MAlloc(size,heap); //HOST
+  else
+    b_code_ex=__MAlloc(size,Fs->code_heap); //HOST: the Aiwnios task's executable heap
+  b_code_wr=CAlloc(size);
+  b_code_sz=size;
+  return b_code_ex;
+#else
+  return MAlloc(size);
+#endif
+}
+
+U0 BCodeCommit(U8 *obin)
+{
+#ifdef BACKEND_HOSTED
+  if (b_code_wr && obin==b_code_ex) {
+    WriteProtectMemCpy(b_code_ex,b_code_wr,b_code_sz);
+    Free(b_code_wr);
+    b_code_wr=NULL;
+  }
+#endif
+}
+
+I32 BCallPatchCond(U8 *fp,I64 a,I64 b)
+{//See CBCodeMiscRef: function-pointer members are stored as U8 *.
+  I32 (*f)(I64 a,I64 b);
+  f=fp;
+  return (*f)(a,b);
+}
+
+I32 BCallPatchUncond(U8 *fp,I64 a)
+{
+  I32 (*f)(I64 a);
+  f=fp;
+  return (*f)(a);
 }
 
 F64 BFMod(F64 a,F64 b)

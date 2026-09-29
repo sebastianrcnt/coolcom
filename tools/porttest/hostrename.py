@@ -10,7 +10,12 @@ MAP = {'Fs': 'BFs', 'HashFind': 'BHashFind', 'HashAdd': 'BHashAdd',
        # functions that clash with the Aiwnios HolyC frontend (found at integration)
        'AssignRawTypeToNode': 'BAssignRawTypeToNode', 'CmpCtrlNew': 'BCmpCtrlNew',
        'CmpCtrlDel': 'BCmpCtrlDel', 'MASKn': 'BMASKn', 'CondSel': 'BCondSel',
-       'COptMemberVar': 'CBOptMemberVar'}
+       'COptMemberVar': 'CBOptMemberVar',
+       # C-layout queues (CBQue is {last,next}, TempleOS CQue is {next,last})
+       'QueIns': 'BQueIns', 'QueRem': 'BQueRem', 'QueInit': 'BQueInit',
+       'QueDel': 'BQueDel', 'QueCnt': 'BQueCnt',
+       # #defines that clash with the frontend's (e.g. CMF_DEFINED is 1 here, 2 there)
+       'AIWNIOS_FREG_CNT': 'BAIWNIOS_FREG_CNT', 'AIWNIOS_FREG_START': 'BAIWNIOS_FREG_START', 'AIWNIOS_IREG_CNT': 'BAIWNIOS_IREG_CNT', 'AIWNIOS_IREG_START': 'BAIWNIOS_IREG_START', 'AIWNIOS_REG_FP': 'BAIWNIOS_REG_FP', 'AIWNIOS_REG_SP': 'BAIWNIOS_REG_SP', 'AIWNIOS_TMP_FREG_CNT': 'BAIWNIOS_TMP_FREG_CNT', 'AIWNIOS_TMP_FREG_START': 'BAIWNIOS_TMP_FREG_START', 'AIWNIOS_TMP_IREG_CNT': 'BAIWNIOS_TMP_IREG_CNT', 'AIWNIOS_TMP_IREG_POOP': 'BAIWNIOS_TMP_IREG_POOP', 'AIWNIOS_TMP_IREG_POOP2': 'BAIWNIOS_TMP_IREG_POOP2', 'AIWNIOS_TMP_IREG_START': 'BAIWNIOS_TMP_IREG_START', 'CMF_DEFINED': 'BCMF_DEFINED', 'INVALID_PTR': 'BINVALID_PTR', 'STR_LEN': 'BSTR_LEN'}
 pat = re.compile(r'(?<![A-Za-z0-9_])(' + '|'.join(MAP) + r')(?![A-Za-z0-9_])')
 for f in sys.argv[1:]:
     s = open(f, 'rb').read().decode('latin-1')
@@ -18,6 +23,8 @@ for f in sys.argv[1:]:
     out = []
     for line in s.split('\n'):
         code, sep, comment = line.partition('//')
+        if comment.startswith('HOST'):  # a line marked //HOST uses the real host names
+            out.append(line); continue
         out.append(pat.sub(lambda m: MAP[m.group(1)], code) + sep + comment)
     t = '\n'.join(out)
     if t != s:

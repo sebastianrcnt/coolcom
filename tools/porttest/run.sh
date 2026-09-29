@@ -13,7 +13,7 @@ for t in $TESTS; do
   n=${t%.HC}
   AIWNIOS_DIR=$AIW "$ROOT/tools/aiwcc.sh" "$T" "$t" "$OUT/$n.ref.BIN" > "$OUT/$n.ref.log" 2>&1 \
     || { echo "SKIP $t (stock compiler failed)"; continue; }
-  if AIWNIOS_DIR=$ROOT/build/portrt "$ROOT/tools/aiwcc.sh" "$T" "$t" "$OUT/$n.port.BIN" > "$OUT/$n.port.log" 2>&1 \
+  if AIWNIOS_PORT=1 AIWNIOS_DIR=$ROOT/build/portrt "$ROOT/tools/aiwcc.sh" "$T" "$t" "$OUT/$n.port.BIN" > "$OUT/$n.port.log" 2>&1 \
      && python3 "$ROOT/tools/porttest/bincmp.py" "$OUT/$n.ref.BIN" "$OUT/$n.port.BIN" > "$OUT/$n.diff" 2>&1; then
     pass=$((pass + 1)); echo "PASS $t"
   else
