@@ -44,6 +44,7 @@ static void *late_main(void *arg)
             now = late_q[i].ms;
         }
         input_push(late_q[i].type, late_q[i].code, late_q[i].value);
+        nanosleep(&(struct timespec){0, 200000}, NULL); /* pace them: the guest FIFO holds 255 */
     }
     return NULL;
 }

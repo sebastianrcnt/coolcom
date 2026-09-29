@@ -9,6 +9,8 @@ class CFb
 {
     U8 *base;
     I64 w, h, stride, cols, rows, cx, cy, fg, bg;
+    I64 cur_drawn;             // the cursor block is currently XORed onto the screen
+    I64 u8_left, u8_cp;        // UTF-8 sequence being received
 };
 
 CFb fb;
@@ -76,10 +78,42 @@ U0 FbGlyph(I64 col, I64 row, I64 ch)
     }
 }
 
+U0 FbCursorFlip()
+{//XOR the 8x8 cell under the text cursor (a block cursor); twice restores it.
+    U8 *p;
+    I64 x, y;
+    if (fb.cx >= fb.cols || fb.cy >= fb.rows)
+        return;
+    p = fb.base + fb.cy * 8 * fb.stride + fb.cx * 32;
+    for (y = 0; y < 8; y++) {
+        for (x = 0; x < 8; x++)
+            *(p + x * 4)(U32i *) ^= 0xFFFFFF;
+        p += fb.stride;
+    }
+}
+
+U0 FbCursorHide()
+{
+    if (fb.cur_drawn) {
+        FbCursorFlip;
+        fb.cur_drawn = FALSE;
+    }
+}
+
+U0 FbCursorShow()
+{
+    if (!fb.cur_drawn) {
+        FbCursorFlip;
+        fb.cur_drawn = TRUE;
+    }
+}
+
 U0 FbClear()
 {
+    fb.cur_drawn = FALSE;  // the fill wipes it
     FbFillRect(0, 0, fb.w, fb.h, fb.bg);
     fb.cx = fb.cy = 0;
+    FbCursorShow;
 }
 
 U0 FbScroll()
@@ -90,8 +124,24 @@ U0 FbScroll()
     fb.cy = fb.rows - 1;
 }
 
-U0 FbPutC(U8 c)
-{//Console output: \n \r \b \t are handled, other control codes are ignored.
+U0 FbPutC1(U8 c)
+{//Console output: \n \r \b \t are handled, other control codes are ignored. The font is
+    //ASCII only: a UTF-8 character is drawn as '?' in each column it takes on a terminal.
+    if (c >= 0x80) {
+        if (Utf8Len(c) > 1) {
+            fb.u8_left = Utf8Len(c) - 1;
+            fb.u8_cp = c & (0x7F >> Utf8Len(c));
+        } else if (fb.u8_left > 0) {
+            fb.u8_cp = (fb.u8_cp << 6) | (c & 0x3F);
+            if (!--fb.u8_left) {
+                c = Utf8Width(fb.u8_cp);
+                while (c-- > 0)
+                    FbPutC1('?');
+            }
+        }
+        return;
+    }
+    fb.u8_left = 0;
     if (c == '\n') {
         fb.cx = 0;
         fb.cy++;
@@ -116,6 +166,13 @@ U0 FbPutC(U8 c)
         FbScroll;
 }
 
+U0 FbPutC(U8 c)
+{
+    FbCursorHide;
+    FbPutC1(c);
+    FbCursorShow;
+}
+
 Bool FbInit()
 {//Map the framebuffer and add it as a console output. FALSE if the FDT has none.
     if (!fdt_fb_32bpp || !fdt_fb.base)
@@ -131,7 +188,7 @@ Bool FbInit()
     if (fb.cols < 1 || fb.rows < 2 || fb.stride < fb.w * 4)
         return FALSE;
     FbMapNC(fdt_fb.base, fb.stride * fb.h);
-    FbClear;
+    FbClear;  // also draws the cursor
     ConsAdd(&FbPutC);
     return TRUE;
 }

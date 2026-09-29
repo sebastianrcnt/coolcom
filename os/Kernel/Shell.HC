@@ -441,7 +441,7 @@ U0 ShellTask(U8 *data)
     Print("Cool shell: %d KB compiler loaded\n", shell_cmp->file_size >> 10);
     while (n) {
         Print("> ");
-        GetStr(shell_line, SHELL_LINE_LEN);
+        GetLine(shell_line, SHELL_LINE_LEN);
         ShellExe(shell_line);
         if (n > 0)
             n--;

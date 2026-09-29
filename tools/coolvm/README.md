@@ -112,7 +112,7 @@ The window sends key press/release, mouse button, relative movement, and wheel e
 loads up to 255 records before the guest starts, one `type code value` decimal triple per line; blank
 lines and `#` comments are allowed. A `delay MS` line holds back every record after it until MS
 milliseconds (cumulative) after coolvm loaded the script (to type at a program that is already running;
-delayed records are not part of the 255-record preload limit). Example:
+delayed records are fed one at a time, so they are not part of the 255-record preload limit). Example:
 
 ```
 1 30 1    # KEY_A down
