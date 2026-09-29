@@ -1,9 +1,9 @@
 // Device tests, run by KMain when booted with coolcom.test=1 under coolvm.
 // tools/kernel-test.sh supplies a 64 KiB disk (128 sectors, sector s byte j =
 // s*31 + j*7 mod 256), a FAT32 disk, a scripted input queue (mouse +5,-3,
-// wheel +2, left button, then the keys h x BACKSPACE i SHIFT+a ENTER, then two
-// shell lines) and a 640x480 framebuffer, and afterwards checks the disk
-// files, the screenshot and that the shell printed 49.
+// wheel +2, left button, then the keys h x BACKSPACE i SHIFT+a ENTER, then
+// seven shell lines) and a 640x480 framebuffer, and afterwards checks the
+// disk files, the screenshot and that the shell printed 49.
 
 U8 dt_line[64];
 
@@ -131,9 +131,14 @@ U0 DevTestShell()
 {//The shell reads the next two scripted lines:
     //  I64 Sq(I64 x) { return x * x; }
     //  Print("%d\n", Sq(7));
+    //  while (TRUE) {}               broken by Ctrl+Alt+C
+    //  Sleep(60000);                 broken by Ctrl+Alt+C
+    //  Print("%d\n", 51);
+    //  Print("%d\n", 7); edited to print 42 (Left, Left, Backspace, 4, 2)
+    //  Up, Up recalls the 51 line, which prints 51 again
     //then runs Sq(7) itself, so Sq must have persisted.
     I64 deadline = ArchCntVct + 20 * ArchCntFrq, f0 = kt_fails;
-    ShellStart(2);
+    ShellStart(7);
     while (shell_state < 2 && shell_state >= 0 && ArchCntVct < deadline)
         Sleep(10);
     if (shell_state != 2)
