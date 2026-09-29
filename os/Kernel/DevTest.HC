@@ -154,18 +154,19 @@ U0 DevTestShell()
 }
 
 U0 DevTestScreen()
-{//Leave a known picture: 4 text rows, then color bars and a gradient.
+{//Leave a known picture: 5 text rows (the last with Hangul and CJK), then color bars and a gradient.
     I64 i;
     ConsClear;
     "COOLCOM FB TEST\n";
     "input: %s\n", dt_line;
     "mouse: x=%d y=%d b=%d\n", mouse.mx, mouse.my, mouse.buttons;
     "0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz\n";
-    FbFillRect(16, 80, 32, 32, 0xFF0000);
-    FbFillRect(64, 80, 32, 32, 0x00FF00);
-    FbFillRect(112, 80, 32, 32, 0x0000FF);
+    "한글 테스트 漢字 Ünï\n";
+    FbFillRect(16, 112, 32, 32, 0xFF0000);
+    FbFillRect(64, 112, 32, 32, 0x00FF00);
+    FbFillRect(112, 112, 32, 32, 0x0000FF);
     for (i = 0; i < 256; i++)
-        FbFillRect(16 + i, 128, 1, 16, i * 0x010101);
+        FbFillRect(16 + i, 160, 1, 16, i * 0x010101);
 }
 
 U0 DevTest()

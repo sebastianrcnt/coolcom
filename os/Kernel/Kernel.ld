@@ -12,6 +12,7 @@ SECTIONS {
   ASSERT(__bss_end <= MODULE_BASE, "boot stub overlaps the kernel module")
   .kernel : { *(.kernel) }
   . = KBSS_END;
+  .fontdata : { *(.fontdata) }
   . = ALIGN(16384);
   image_end = .;
 }

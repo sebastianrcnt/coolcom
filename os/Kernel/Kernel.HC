@@ -9,7 +9,7 @@
 #include "StrA.HC"
 #include "KSym.HC"
 #include "Mem.HC"
-#include "Font8x8.HC"
+#include "Font.HC"
 #include "Fb.HC"
 #include "KTest.HC"
 #include "Timer.HC"
