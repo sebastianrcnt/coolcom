@@ -68,14 +68,35 @@ the host. Two other inputs are host-made: the shell prelude (`C:/Kernel.HH`,
 `tools/mkprelude.py`), embedded as `SHELL_PRELUDE` as it is, and the font
 (`os/Kernel/Unifont.BIN`, `make font`).
 
-### Check
+## Booting it: Reboot(image)
 
-`make kernel-rebuild-test` (part of `make test`) puts the sources, the stub
-and the prelude on a fresh disk, runs `MakeKernel` from `C:/Init.HC`, and
-requires `C:/Kernel.Image` to equal `build/kernel.Image` and
-`C:/Kernel/Syms.ld` to equal `build/syms.ld`, byte for byte; there are no
-allowed differences. 35 words of the stub differ from the final Image before
-MakeKernel relocates them.
+`Reboot("C:/Kernel.Image")` flushes the disks, reads the file into RAM
+(identity mapped, so its address is physical), checks the `ARM\x64` magic,
+writes the address and size to coolvm's finisher (offsets `0x8` and `0x10`)
+and resets (`0x7777`). coolvm writes those bytes to a temporary file in
+`$TMPDIR` and starts again with it as the kernel, with the same options (as
+for every reset, minus `--input-script`); a later plain `Reboot` boots the
+same Image again, and coolvm deletes the file when it exits or boots another.
+The repository's `build/kernel.Image` is untouched. This is VM-only: on a real
+M1 there is no finisher (`Reboot` says so and returns); there the Image would
+have to go through m1n1 (`make m1n1-payload`) or a kexec-like handoff, which
+does not exist yet.
+
+## Check
+
+`make kernel-rebuild-test` (part of `make test`, about 6 s) puts the sources,
+the stub and the prelude on a fresh disk, and `C:/Init.HC`:
+
+1. runs `MakeKernel`; the host later requires `C:/Kernel.Image` to equal
+   `build/kernel.Image` and `C:/Kernel/Syms.ld` to equal `build/syms.ld`,
+   byte for byte. There are no allowed differences. 35 words of the stub
+   differ from the final Image before MakeKernel relocates them.
+2. appends `I64 RebuildMark() { return 4242; }` to `C:/Kernel/Kernel.HC`,
+   runs `MakeKernel("C:/Kernel2.Image")` and `Reboot("C:/Kernel2.Image")`;
+3. on the second boot types, at the shell prompt, a line declaring
+   `RebuildMark` (bound to the new kernel's symbol) and printing its value,
+   then `Shutdown`. The host requires `mark 4242`, coolvm's message that it
+   booted the Image the guest passed, and no temporary Image left behind.
 
 Porting found a bug in `binlink.py`: an implicit string concatenation made the
 `KMAIN`..`KSYM_TABLE` lines of `syms.ld` the separator between the blob
