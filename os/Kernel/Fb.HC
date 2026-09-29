@@ -11,7 +11,9 @@ class CFb
     I64 w, h, stride, cols, rows, cx, cy, fg, bg;
     I64 cur_drawn;             // the cursor block is currently XORed onto the screen
     I64 u8_left, u8_cp;        // UTF-8 sequence being received
-    I64 esc, csi_n, csi_val[8], csi_private, bold;
+    I64 esc, csi_n, csi_val[16], csi_private, bold;
+    I64 sv_cx, sv_cy, sv_fg, sv_bg, sv_bold; // ESC 7 / CSI s
+    Bool cursor_off;                        // CSI ?25l
     U8 *saved_pixels, *saved_cw;
     I64 saved_cx, saved_cy, saved_fg, saved_bg, alternate;
     U8 *cw;                    // per cell: 1 = narrow or blank, 2 = left half of a wide glyph, 0 = its right half
@@ -153,7 +155,7 @@ U0 FbCursorHide()
 
 U0 FbCursorShow()
 {
-    if (!fb.cur_drawn) {
+    if (!fb.cur_drawn && !fb.cursor_off) {
         FbCursorFlip;
         fb.cur_drawn = TRUE;
     }
@@ -190,6 +192,26 @@ I64 FbAnsiColor(I64 n)
     }
     return 0;
 
+}
+
+I64 FbColor256(I64 n)
+{//Color n of the xterm 256-color palette in 0xRRGGBB: 16 ANSI colors, a 6x6x6 cube, 24 grays.
+    I64 r, g, b, v;
+    n &= 255;
+    if (n < 16)
+        return FbAnsiColor(n);
+    if (n >= 232) {
+        v = 8 + 10 * (n - 232);
+        return (v << 16) | (v << 8) | v;
+    }
+    n -= 16;
+    r = n / 36;
+    g = n / 6 % 6;
+    b = n % 6;
+    if (r) r = 55 + 40 * r;
+    if (g) g = 55 + 40 * g;
+    if (b) b = 55 + 40 * b;
+    return (r << 16) | (g << 8) | b;
 }
 
 I64 FbParam(I64 i, I64 def)
@@ -241,6 +263,10 @@ U0 FbCsi(U8 c)
     if (fb.csi_private) {
         if ((c == 'h' || c == 'l') && (n == 1049 || n == 47))
             FbAlt(c == 'h');
+        else if ((c == 'h' || c == 'l') && n == 25) {
+            FbCursorHide;
+            fb.cursor_off = c == 'l';
+        }
         return;
     }
     switch (c) {
@@ -256,7 +282,25 @@ U0 FbCsi(U8 c)
                 else if (n >= 40 && n <= 47) fb.bg = FbAnsiColor(n - 40);
                 else if (n >= 90 && n <= 97) fb.fg = FbAnsiColor(n - 90 + 8);
                 else if (n >= 100 && n <= 107) fb.bg = FbAnsiColor(n - 100 + 8);
+                else if (n == 38 || n == 48) {
+                    // 38;5;N (256-color palette) or 38;2;R;G;B (24-bit); 48 is the background.
+                    if (i + 2 <= fb.csi_n && fb.csi_val[i + 1] == 5) {
+                        x = FbColor256(fb.csi_val[i + 2]);
+                        i += 2;
+                    } else if (i + 4 <= fb.csi_n && fb.csi_val[i + 1] == 2) {
+                        x = ((fb.csi_val[i + 2] & 255) << 16) | ((fb.csi_val[i + 3] & 255) << 8) | (fb.csi_val[i + 4] & 255);
+                        i += 4;
+                    } else break;
+                    if (n == 38) fb.fg = x;
+                    else fb.bg = x;
+                }
             }
+            break;
+        case 's':
+            fb.sv_cx = fb.cx; fb.sv_cy = fb.cy; fb.sv_fg = fb.fg; fb.sv_bg = fb.bg; fb.sv_bold = fb.bold;
+            break;
+        case 'u':
+            fb.cx = fb.sv_cx; fb.cy = fb.sv_cy; fb.fg = fb.sv_fg; fb.bg = fb.sv_bg; fb.bold = fb.sv_bold;
             break;
         case 'H': case 'f':
             fb.cy = FbParam(0, 1) - 1;
@@ -302,13 +346,17 @@ U0 FbPutC1(U8 c)
             fb.esc = 2;
             fb.csi_n = fb.csi_private = 0;
             MemSet(fb.csi_val, 0, sizeof(fb.csi_val));
+        } else if (c == '7') {
+            fb.csi_n = fb.csi_private = 0; FbCsi('s');
+        } else if (c == '8') {
+            fb.csi_n = fb.csi_private = 0; FbCsi('u');
         }
         return;
     }
     if (fb.esc == 2) {
         if (c == '?' && !fb.csi_n && !fb.csi_val[0]) fb.csi_private = TRUE;
         else if (c >= '0' && c <= '9') fb.csi_val[fb.csi_n] = fb.csi_val[fb.csi_n] * 10 + c - '0';
-        else if (c == ';' && fb.csi_n < 7) fb.csi_n++;
+        else if (c == ';' && fb.csi_n < 15) fb.csi_n++;
         else {fb.esc = 0; FbCsi(c);}
         return;
     }

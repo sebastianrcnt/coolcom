@@ -123,38 +123,27 @@ U0 NyanFrame(I64 frame)
     NyanCat(cat_x, cat_y, frame);
 }
 
-U8 *NyanEmit(U8 *p, I64 c)
-{//SGR background for palette color c.
-    if (c < 8)
-        StrPrint(p, "\e[%dm", 40 + c);
-    else
-        StrPrint(p, "\e[%dm", 100 + c - 8);
-    return p + StrLen(p);
-}
-
 U0 NyanDraw(U8 *buf)
 {//The whole grid as one string: home, then each row with color changes only.
     I64 x, y, c, last;
     U8 *p = buf;
     for (y = 0; y < NYAN_H; y++) {
-        StrPrint(p, "\e[%d;1H", y + 1);
-        p += StrLen(p);
+        p = AnsiCursorS(p, y + 1, 1);
         last = -1;
         for (x = 0; x < NYAN_W; x++) {
             c = nyan_grid[y * NYAN_W + x];
             if (c != last) {
-                p = NyanEmit(p, c);
+                p = AnsiBgS(p, c);
                 last = c;
             }
             *p++ = ' ';
             *p++ = ' ';
         }
-        StrCpy(p, "\e[0m");
-        p += 4;
+        p = AnsiResetS(p);
     }
-    StrPrint(p, "\e[%d;1H\e[0m  Nyan Cool OS  (any key to stop)", NYAN_H + 2);
-    p += StrLen(p);
-    *p = 0;
+    p = AnsiCursorS(p, NYAN_H + 2, 1);
+    p = AnsiResetS(p);
+    StrCpy(p, "  Nyan Cool OS  (any key to stop)");
     Print("%s", buf);
 }
 
@@ -164,7 +153,8 @@ U0 Nyan()
     U8 *buf = MAlloc(NYAN_W * NYAN_H * 12 + 4096);
     while (KeyPending)
         KeyPop;
-    Print("\e[?1049h\e[2J");
+    AnsiAltScreen(TRUE);
+    AnsiClear;
     while (!KeyPending) {
         NyanFrame(frame++);
         NyanDraw(buf);
@@ -172,5 +162,6 @@ U0 Nyan()
     }
     KeyPop;
     Free(buf);
-    Print("\e[0m\e[?1049l");
+    AnsiReset;
+    AnsiAltScreen(FALSE);
 }

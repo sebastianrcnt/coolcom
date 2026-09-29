@@ -41,6 +41,7 @@
 #include "MultiCore.HC"
 #include "Sched.HC"
 #include "KHost.HC"
+#include "Ansi.HC"
 #include "Term.HC"
 #include "Key.HC"
 #include "Input.HC"

@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -122,7 +122,11 @@ key-test: build/kernel.Image coolvm
 tmux-test: build/kernel.Image coolvm
 	python3 tools/tmux-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test warm-kernel-test
+# 256-color/truecolor SGR, cursor save/restore and AnsiTermSize (os/Kernel/Ansi.HC), on the console and in Tmux.
+ansi-test: build/kernel.Image coolvm
+	python3 tools/ansi-test.py $<
+
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test warm-kernel-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

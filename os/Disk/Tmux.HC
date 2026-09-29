@@ -172,9 +172,9 @@ U0 TmDraw(CTmPane *p)
     else {
         TmDraw(p->a); TmDraw(p->b);
         if (p->vertical)
-            for (i = 0; i < p->h; i++) Print("\x1b[%d;%dH|", p->y + i + 1, p->b->x);
+            for (i = 0; i < p->h; i++) {AnsiCursor(p->y + i + 1, p->b->x); ConsPut('|');}
         else {
-            Print("\x1b[%d;%dH", p->b->y, p->x + 1);
+            AnsiCursor(p->b->y, p->x + 1);
             for (i = 0; i < p->w; i++) ConsPut('-');
         }
     }
@@ -197,23 +197,26 @@ U0 TmRender()
     StrCat(status, "  ^B %/\" split o/arrows move c:new n/p:window x:close d:detach");
     n = MinI64(StrLen(status), tm_session->cols);
     status[n] = 0;
-    Print("\x1b[%d;1H\x1b[37;44m\x1b[K%s\x1b[0m", tm_session->rows, status);
-    Print("\x1b[%d;%dH", p->y + p->term->cy + 1, p->x + MinI64(p->term->cx, p->w - 1) + 1);
+    AnsiCursor(tm_session->rows, 1);
+    AnsiSet(ANSI_WHITE, ANSI_BLUE);
+    AnsiClearEol;
+    Print("%s", status);
+    AnsiReset;
+    AnsiCursor(p->y + p->term->cy + 1, p->x + MinI64(p->term->cx, p->w - 1) + 1);
     tm_session->redraw = FALSE;
 }
 
 U0 Tmux()
 {
-    I64 key, prefix = FALSE, paint_at = 0;
+    I64 key, prefix = FALSE, paint_at = 0, rows, cols;
     CVTerm *old_focus = vt_focus;
     if (!tm_session) {
         tm_session = CAlloc(sizeof(CTmSession));
-        tm_session->cols = 80; tm_session->rows = 24;
-        if (VtCurrent) {tm_session->cols = VtCurrent->cols; tm_session->rows = VtCurrent->rows;}
-        else if (fb.base) {tm_session->cols = fb.cols; tm_session->rows = fb.rows;}
+        AnsiTermSize(&rows, &cols);
+        tm_session->cols = cols; tm_session->rows = rows;
         TmWindowNew;
     }
-    ConsPutS("\x1b[?1049h");
+    AnsiAltScreen(TRUE);
     TmFocus;
     while (tm_session->panes) {
         // Batch bursts of input/output instead of repainting the entire
@@ -242,5 +245,5 @@ tm_again:
     }
     if (!tm_session->panes) {Free(tm_session); tm_session = NULL;}
     vt_focus = old_focus;
-    ConsPutS("\x1b[?1049l");
+    AnsiAltScreen(FALSE);
 }
