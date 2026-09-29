@@ -3,6 +3,9 @@
 // Every block (free or used) starts with a 16-byte header:
 //   sz: total block size incl. header (multiple of 16) | 1 if in use
 //   pm: (HEAP_MAGIC << 32) | size of the physically previous block (0 if first)
+// Used blocks reserve bytes 16..63 for links, requested size, allocation PC
+// and a 16-byte front canary; the payload starts at byte 64. An 8-byte
+// canary follows the exact requested size (MSize returns that size).
 // Free blocks keep doubly-linked list pointers in their first payload words.
 // Free lists ("bins"): bins 0..30 hold exactly one block size each (32..512
 // bytes, the O(1) small-allocation path); bins 31.. hold power-of-two ranges
@@ -201,7 +204,8 @@ CMemBlk *HeapChk(CHeapCtrl *hc, U8 *p, U8 *who)
 {
     CMemBlk *b = p - HEAP_USER;
     if (p(I64) & 15 || p < hc->start + HEAP_USER || p >= hc->end ||
-            !BlkMagicOk(b) || !BlkUsed(b)) {
+            !BlkMagicOk(b) || !BlkUsed(b) || BlkSize(b) < HEAP_USER + 16 ||
+            BlkSize(b) > hc->end - HEAP_HDR - b(U8 *)) {
         RawPrint("%s: bad pointer %p (invalid or double free)\n", who, p);  // (heap locked)
         heap_errs++;
         return NULL;
