@@ -60,6 +60,9 @@ U0 KExcept(I64 vec, CExceptFrame *f)
     if (vec == EXC_CUR_SPX_SYNC && TaskStackFault(Fs, f)) {
         RawPrint("ERROR: stack overflow, task %s\n", Fs->task_name);
         if (Fs->stack_alloc) {
+            // A guard fault can interrupt exception entry itself. The dying
+            // task must not leave the next task with IRQ/FIQ masked.
+            f->spsr &= ~0xC0;
             f->sp = Fs->stack_end;
             f->elr = &StackOverflowExit;
             return;

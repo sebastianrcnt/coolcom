@@ -148,7 +148,7 @@ Bool HeapCanary(CMemBlk *b, U8 *who)
                 ok = FALSE;
     }
     if (!ok) {
-        RawPrint("%s: heap overflow block=%p size=%d allocated at %p\n",
+        RawPrint("%s: heap overflow block=%X size=%d allocated at %p\n",
                  who, b(U8 *) + HEAP_USER, b->requested, b->caller);
         heap_errs++;
     }

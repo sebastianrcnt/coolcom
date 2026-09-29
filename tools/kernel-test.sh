@@ -18,7 +18,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     --screenshot "$dir/screen.png" "$@" "$image" >"$log" 2>&1 \
     && grep -q 'SELFTEST PASS' "$log" && grep -q '2 cores online' "$log" \
     && grep -q 'Free: heap overflow block=.*allocated at' "$log" \
-    && grep -q 'stack overflow, task Shell' "$log" \
+    && [ "$(grep -c 'ERROR: stack overflow, task Shell' "$log")" = 2 ] \
     && grep -q 'ERROR: kernel text write' "$log" \
     && tr -d '\r' <"$log" | grep -qx 'MEMSAFE RECOVERED 81' \
     && grep -q 'KERNEL TEST PASS' "$log" && tr -d '\r' <"$log" | grep -qx '49' \

@@ -76,8 +76,8 @@ SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
 SHELL += [
     'U8 *over = MAlloc(13); over[13] ^= 1; Free(over);',
     'over[13] ^= 1; Free(over);',
-    'I64 Deep(I64 n) { U8 pad[1024]; MemSet(pad, n, 1024); return Deep(n+1)+pad[0]; }',
-    'Deep(0);',
+    r'Print("MEMSAFE START\n");',
+    'Deep(0); MaskDeep;',
     'U8 *text = &StrLen; *text = 0;',
     r'Print("MEMSAFE RECOVERED %d\n", Sq(9));',
 ]
@@ -118,6 +118,8 @@ def sector(s):
 FAT_SECTORS = 81920
 HOST_NOTE = b"Hello from the host\n"
 TEST_HC = b"// #include'd by the shell test\nI64 Tripled(I64 x)\n{\n    return 3 * x;\n}\n"
+TEST_HC += (b"I64 Deep(I64 n) { U8 pad[1024]; MemSet(pad, n, 1024); return Deep(n+1)+pad[0]; }\n"
+            b"U0 MaskDeep() { ArchIrqOff; Deep(0); }\n")
 
 
 def fs_data(n, seed):

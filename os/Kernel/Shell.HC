@@ -239,6 +239,7 @@ U0 RtExit(I64 status)
 }
 
 I64 shell_fault_ctx[32];  // ArchSetJmp context around each typed statement
+I64 shell_fault_daif, shell_line_daif;
 I64 shell_line_ctx[32];   // ... and around each whole line (compiling included)
 Bool shell_in_stmt, shell_line_active;
 CTask *shell_task;
@@ -302,9 +303,11 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
         RawPrint("\nERROR: stack overflow, task %s\n", Fs->task_name);
         // Return on the saved statement stack, never on the exhausted SP.
         if (shell_in_stmt) {
+            f->spsr = (f->spsr & ~0x3C0) | shell_fault_daif;
             f->sp = shell_fault_ctx[21];
             f->elr = &ShellFaultResume;
         } else {
+            f->spsr = (f->spsr & ~0x3C0) | shell_line_daif;
             f->sp = shell_line_ctx[21];
             f->elr = &ShellLineFaultResume;
         }
@@ -367,6 +370,7 @@ I64 ShellExeCmdLine(U8 *cc)
         code = (*stmt2bin)(cc, &type, CMPF_PRS_SEMICOLON);
         if (code && code != INVALID_PTR) {
             fp = code;
+            shell_fault_daif = ArchDaif & 0x3C0;
             if (!ArchSetJmp(shell_fault_ctx)) {
                 LBtr(&shell_task->task_flags, TASKf_PENDING_BREAK);
                 shell_in_stmt = TRUE;
@@ -511,6 +515,7 @@ U0 ShellTask(U8 *data)
     Print("Cool shell: %d KB compiler loaded\n", shell_cmp->file_size >> 10);
     if (DrvCur && FileFind("C:/Init.HC")) {
         Print("Running C:/Init.HC\n");
+        shell_line_daif = ArchDaif & 0x3C0;
         shell_line_active = TRUE;
         if (!ArchSetJmp(shell_line_ctx))
             ShellExe("#include \"C:/Init.HC\"");
@@ -519,6 +524,7 @@ U0 ShellTask(U8 *data)
     while (n) {
         Print("> ");
         GetLine(shell_line, SHELL_LINE_LEN);
+        shell_line_daif = ArchDaif & 0x3C0;
         shell_line_active = TRUE;
         if (!ArchSetJmp(shell_line_ctx))
             ShellExe(shell_line);
