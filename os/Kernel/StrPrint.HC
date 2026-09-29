@@ -232,7 +232,11 @@ U8 *StrPrint(U8 *dst, U8 *fmt, ...)
 }
 
 // Print to the UART. Bare string statements ("fmt", args;) compile to this.
+I64 print_lock;
+
 U0 Print(U8 *fmt, ...)
-{
+{//One core prints at a time so lines don't interleave.
+  I64 daif=SpinLockIrq(&print_lock);
   KFmt(NULL, fmt, argc, argv);
+  SpinUnlockIrq(&print_lock,daif);
 }

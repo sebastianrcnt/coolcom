@@ -26,7 +26,19 @@ _start:
   mrs x0, mpidr_el1
   and x0, x0, #3
   cbnz x0, park
+  ldr x19, =stack_top
+  adr x20, primary
+  b cpu_setup
 
+// Secondary cores arrive here from PSCI CPU_ON with x0 = their stack top.
+.global ap_start
+ap_start:
+  mov x19, x0
+  adr x20, secondary
+  // fall through
+
+// Per-core setup: EL1, stack from x19, FP/SIMD, vectors; then jump to x20.
+cpu_setup:
   mrs x0, CurrentEL
   lsr x0, x0, #2
   cmp x0, #2
@@ -43,18 +55,23 @@ _start:
   msr elr_el2, x0
   eret
 1:
-  ldr x0, =stack_top
-  mov sp, x0
-
-  // FP/SIMD on at EL1 and EL0.
-  mov x0, #(3 << 20)
+  mov sp, x19
+  mov x0, #(3 << 20) // FP/SIMD on at EL1 and EL0
   msr cpacr_el1, x0
-  isb
-
   ldr x0, =vectors
   msr vbar_el1, x0
   isb
+  br x20
 
+secondary:
+  bl mmu_enable
+  mrs x0, mpidr_el1
+  and x0, x0, #0xff
+  ldr x1, =HC_KMainAP
+  blr x1
+  b park
+
+primary:
   // Zero .bss (holds the page table).
   ldr x0, =__bss_start
   ldr x1, =__bss_end
@@ -64,7 +81,8 @@ _start:
   str xzr, [x0], #8
   b 2b
 3:
-  bl mmu_on
+  bl mmu_tables
+  bl mmu_enable
 
   // Zero the kernel module's zero-initialized globals.
   ldr x0, =KBSS_START
@@ -93,15 +111,19 @@ park:
   wfe
   b park
 
-// Identity map: [0,1GB) devices, [1GB,2GB) RAM.
-mmu_on:
+// Identity map: [0,1GB) devices, [1GB,2GB) RAM. Built once by the primary core.
+mmu_tables:
   adr x0, l1_table
   ldr x1, =(0x00000000 | BLK_DEVICE)
   str x1, [x0, #0]
   ldr x1, =(0x40000000 | BLK_NORMAL)
   str x1, [x0, #8]
-  dsb ishst
+  dsb ish
+  ret
 
+// Turn on the MMU and caches on the calling core.
+mmu_enable:
+  adr x0, l1_table
   ldr x1, =((0x04 << (8 * MT_DEVICE)) | (0xff << (8 * MT_NORMAL)))
   msr mair_el1, x1
   // T0SZ=25 (39-bit VA, walk starts at L1), inner/outer WB WA, inner shareable,

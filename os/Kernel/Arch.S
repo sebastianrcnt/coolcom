@@ -166,3 +166,80 @@ ArchIrqOff:
 ArchWfi:
   wfi
   ret
+
+.global ArchWfe
+ArchWfe:
+  wfe
+  ret
+
+.global ArchSev
+ArchSev:
+  sev
+  ret
+
+GETTER ArchTpidr, tpidr_el1
+SETTER ArchTpidrSet, tpidr_el1
+
+// ArchCpuNum(): core number from MPIDR Aff0.
+.global ArchCpuNum
+ArchCpuNum:
+  mrs x0, mpidr_el1
+  and x0, x0, #0xff
+  ret
+
+// ArchXchg(I64 *p, I64 v): atomically store v, return the old value.
+.global ArchXchg
+ArchXchg:
+  ldaxr x2, [x0]
+  stlxr w3, x1, [x0]
+  cbnz w3, ArchXchg
+  mov x0, x2
+  ret
+
+// ArchCas(I64 *p, I64 old, I64 new): if *p==old store new; returns the value seen.
+.global ArchCas
+ArchCas:
+  ldaxr x3, [x0]
+  cmp x3, x1
+  b.ne 1f
+  stlxr w4, x2, [x0]
+  cbnz w4, ArchCas
+  mov x0, x3
+  ret
+1:
+  clrex
+  mov x0, x3
+  ret
+
+// ArchAdd(I64 *p, I64 v): atomic add, returns the new value.
+.global ArchAdd
+ArchAdd:
+  ldaxr x2, [x0]
+  add x2, x2, x1
+  stlxr w3, x2, [x0]
+  cbnz w3, ArchAdd
+  mov x0, x2
+  ret
+
+// ArchStoreRel(I64 *p, I64 v): store with release semantics (lock release).
+.global ArchStoreRel
+ArchStoreRel:
+  stlr x1, [x0]
+  sev
+  ret
+
+// ArchPsciCpuOn(I64 mpidr, U8 *entry, I64 ctx): PSCI CPU_ON through HVC (QEMU virt).
+.global ArchPsciCpuOn
+ArchPsciCpuOn:
+  mov x3, x2
+  mov x2, x1
+  mov x1, x0
+  ldr x0, =0xc4000003
+  hvc #0
+  ret
+
+// ArchApEntry(): address for ArchPsciCpuOn to start secondary cores at.
+.global ArchApEntry
+ArchApEntry:
+  ldr x0, =ap_start
+  ret

@@ -19,14 +19,19 @@ U8 *irq_handlers[GIC_IRQS_NUM]; // U0 (*)(I64 irq); arrays of fun ptrs don't par
 I64 irq_unexpected;
 
 U0 GicInit()
-{
+{//Once, on the boot core.
   *(GICD_BASE+GICD_CTLR)(U32 *)=1;
+}
+
+U0 GicCpuInit()
+{//On every core: the CPU interface is banked per core.
   *(GICC_BASE+GICC_PMR)(U32 *)=0xFF;  // let every priority through
   *(GICC_BASE+GICC_CTLR)(U32 *)=1;
 }
 
 U0 IrqSet(I64 irq,U0 (*fp)(I64 irq))
 {//Route irq to this core and call fp when it fires.
+//SGIs/PPIs (irq<32) are banked, so call this on each core that wants them.
   irq_handlers[irq]=fp;
   *(GICD_BASE+GICD_IPRIORITYR+irq)(U8 *)=0x80;
   if (irq>=32)  // SPIs need a target; SGIs/PPIs are per-core

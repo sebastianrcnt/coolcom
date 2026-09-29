@@ -10,6 +10,17 @@ import I64 ArchDaif();
 import U0 ArchIrqOn();
 import U0 ArchIrqOff();
 import U0 ArchWfi();
+import U0 ArchWfe();
+import U0 ArchSev();
+import I64 ArchTpidr();
+import U0 ArchTpidrSet(I64 v);
+import I64 ArchCpuNum();
+import I64 ArchXchg(I64 *p,I64 v);          // atomic swap, returns old
+import I64 ArchCas(I64 *p,I64 old,I64 new); // compare-and-swap, returns seen
+import I64 ArchAdd(I64 *p,I64 v);           // atomic add, returns new
+import U0 ArchStoreRel(I64 *p,I64 v);       // store-release + sev
+import I64 ArchPsciCpuOn(I64 mpidr,U8 *entry,I64 ctx);
+import U8 *ArchApEntry();
 
 // Saved by the exception entry in Arch.S; layout must match FR_* there.
 class CExceptFrame

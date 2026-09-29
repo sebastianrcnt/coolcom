@@ -28,15 +28,23 @@ class CHeapCtrl
   I64 total;          // bytes in real blocks (range minus sentinel)
   I64 used;           // bytes in used blocks, headers included
   CMemBlk *bin[HEAP_NBINS];
+  I64 lock,lock_daif;
 };
 
 CHeapCtrl sys_heap;
 I64 heap_errs;   // count of detected misuses (bad/double Free)
 
-// No-ops until a second core runs kernel code; then make these a spinlock
-// (LDAXR/STXR) and everything below stays valid unchanged.
-U0 HeapLock(CHeapCtrl *hc) {}
-U0 HeapUnlock(CHeapCtrl *hc) {}
+// IRQs are masked while held, so the heap is safe from interrupt handlers too.
+U0 HeapLock(CHeapCtrl *hc)
+{
+  I64 daif=SpinLockIrq(&hc->lock);
+  hc->lock_daif=daif;
+}
+
+U0 HeapUnlock(CHeapCtrl *hc)
+{
+  SpinUnlockIrq(&hc->lock,hc->lock_daif);
+}
 
 I64 BlkSize(CMemBlk *b) {return b->sz & ~15;}
 Bool BlkUsed(CMemBlk *b) {return b->sz & 1;}
