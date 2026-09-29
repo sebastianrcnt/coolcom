@@ -1,0 +1,20 @@
+module body Test is
+    record Foo: Linear is
+        bar: Nat8;
+    end;
+
+    function main(): ExitCode is
+        -- Create a linear record.
+        let foo: Foo := Foo(bar => 'a');
+        -- Borrow it.
+        borrow fooref: &[Foo, rho] := &foo do
+            -- Borrow it again.
+            borrow fooref2: &[Foo, R] := &foo do
+                printLn(fooref2->bar);
+            end borrow;
+        end borrow;
+        -- Consume the record by destructuring.
+        let { bar: Nat8 } := foo;
+        return ExitSuccess();
+    end;
+end module body.

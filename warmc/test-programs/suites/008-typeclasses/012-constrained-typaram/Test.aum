@@ -1,0 +1,33 @@
+pragma Unsafe_Module;
+
+module body Test is
+    pragma Foreign_Import(External_Name => "putchar");
+    function Put_Character(character: Nat8): Int32 is
+    end;
+
+    pragma Foreign_Import(External_Name => "puts");
+    function Put_String(str: Span[Nat8, Static]): Int32 is
+    end;
+
+    typeclass Acceptable(T: Free) is
+        method Accept(value: T): Unit;
+    end;
+
+    instance Acceptable(Int32) is
+        method Accept(value: Int32): Unit is
+            Put_String("Hello, world!");
+            return nil;
+        end;
+    end;
+
+    generic [T: Free(Acceptable)]
+    function Foo(value: T): Unit is
+        Accept(value);
+        return nil;
+    end;
+
+    function main(): ExitCode is
+        Foo(10);
+        return ExitSuccess();
+    end;
+end module body.

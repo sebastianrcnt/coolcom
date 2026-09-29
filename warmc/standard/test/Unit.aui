@@ -1,0 +1,16 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+module Standard.Test.Unit is
+    function suiteHeading(heading: Span[Nat8, Static]): Unit;
+    function testHeading(heading: Span[Nat8, Static]): Unit;
+
+    function assertTrue(value: Bool, message: Span[Nat8, Static]): Unit;
+    function assertFalse(value: Bool, message: Span[Nat8, Static]): Unit;
+
+    function assertSuccess(message: Span[Nat8, Static]): Unit;
+    function assertFailure(message: Span[Nat8, Static]): Unit;
+end module.

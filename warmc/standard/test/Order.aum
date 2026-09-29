@@ -1,0 +1,30 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+import Standard.Order (
+    equal
+);
+import Standard.Test.Unit (
+    suiteHeading,
+    testHeading,
+    assertTrue,
+    assertFalse
+);
+
+module body Standard.Test.Order is
+    function orderTestSuite(): Unit is
+        suiteHeading("Standard.Order");
+        nat8Test();
+        return nil;
+    end;
+
+    function nat8Test(): Unit is
+        testHeading("Nat8");
+        let a: Nat8 := 0;
+        assertTrue(equal(&a, &a), "equal() works");
+        return nil;
+    end;
+end module body.

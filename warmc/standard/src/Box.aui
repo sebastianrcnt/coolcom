@@ -1,0 +1,56 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+"""
+This module implements the Box type, a linear pointer to a single object in the
+heap.
+"""
+module Standard.Box is
+    """
+    A box is a linear pointer to an object in the heap.
+    """
+    type Box[T: Type]: Linear;
+
+    """
+    Allocate a box and put the given value inside.
+
+    If allocation fails, returns the value in order to prevent leaks.
+    """
+    generic [T: Type]
+    function makeBox(val: T): Either[Box[T], T];
+
+    """
+    Deallocate the box and return its contents.
+    """
+    generic [T: Type]
+    function unbox(box: Box[T]): T;
+
+    """
+    If the box contains a free value, load that value through a reference to the
+    box.
+    """
+    generic [T: Free, R: Region]
+    function readFree(boxref: &[Box[T], R]): T;
+
+    """
+    If the box contains a free value, store a new value through a mutable
+    reference to the box, discarding the old one.
+    """
+    generic [T: Free, R: Region]
+    function storeFree(boxref: &![Box[T], R], value: T): Unit;
+
+    """
+    Store a new value in the box, returning the old one.
+    """
+    generic [T: Type, R: Region]
+    function boxSwap(boxref: &![Box[T], R], new: T): T;
+
+    """
+    Given a reference to a box, return a reference to its contents.
+    """
+    generic [T: Type, R: Region]
+    function unboxReadRef(ref: &[Box[T], R]): &[T, R];
+end module.

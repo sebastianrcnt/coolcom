@@ -1,0 +1,24 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+module Standard.Bounded is
+    typeclass Bounded(A: Type) is
+        method minBound(): A;
+
+        method maxBound(): A;
+    end;
+
+    instance Bounded(Bool);
+    instance Bounded(Nat8);
+    instance Bounded(Nat16);
+    instance Bounded(Nat32);
+    instance Bounded(Nat64);
+    instance Bounded(Int8);
+    instance Bounded(Int16);
+    instance Bounded(Int32);
+    instance Bounded(Int64);
+    instance Bounded(Index);
+end module.

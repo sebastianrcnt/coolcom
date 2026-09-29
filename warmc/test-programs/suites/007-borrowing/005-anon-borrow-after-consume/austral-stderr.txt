@@ -1,0 +1,23 @@
+{
+  "module": "Test",
+  "kind": "Linearity Error",
+  "text": [
+    { "type": "text", "content": "Cannot borrow (immutably) the variable " },
+    { "type": "code", "content": "foo" },
+    { "type": "text", "content": " because it is already " },
+    { "type": "text", "content": "consumed" },
+    { "type": "text", "content": "." }
+  ],
+  "span": {
+    "filename": "test-programs/suites/007-borrowing/005-anon-borrow-after-consume/Test.aum",
+    "startp": { "line": 10, "column": 8 },
+    "end": { "line": 10, "column": 33 }
+  },
+  "context": [
+    [ 8, "        let foo: Foo := Foo(bar => 'a');" ],
+    [ 9, "        -- Consume the record by destructuring." ],
+    [ 10, "        let { bar: Nat8 } := foo;" ],
+    [ 11, "        -- Try to borrow it." ],
+    [ 12, "        &foo;" ]
+  ]
+}

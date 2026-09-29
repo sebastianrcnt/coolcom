@@ -1,0 +1,149 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+module body Austral.Memory is
+    record Address[T: Type]: Free is end;
+    record Pointer[T: Type]: Free is end;
+
+    generic [T: Type]
+    function nullPointer(): Address[T] is
+        return @embed(Address[T], "NULL");
+    end;
+
+    generic [T: Type]
+    function nullCheck(address: Address[T]): Option[Pointer[T]] is
+        let n: Address[T] := nullPointer();
+        if address /= n then
+            let ptr: Pointer[T] := @embed(Pointer[T], "$1", address);
+            let opt: Option[Pointer[T]] := Some(value => ptr);
+            return opt;
+        else
+            let res: Option[Pointer[T]] := None();
+            return res;
+        end if;
+    end;
+
+    generic [T: Type]
+    function allocate(): Address[T] is
+        return allocateBuffer(1);
+    end;
+
+    generic [T: Type]
+    function allocateBuffer(count: Index): Address[T] is
+        if count = 0 then
+            abort("allocate called with count of zero");
+        end if;
+        return @embed(Address[T], "au_calloc($1, $2)", sizeof(T), count);
+    end;
+
+    generic [T: Type]
+    function load(pointer: Pointer[T]): T is
+        return @embed(T, "*($1)", pointer);
+    end;
+
+    generic [T: Type]
+    function store(pointer: Pointer[T], value: T): Unit is
+        @embed(Unit, "AU_STORE($1, $2)", pointer, value);
+        return nil;
+    end;
+
+    generic [T: Type]
+    function deallocate(pointer: Pointer[T]): Unit is
+        @embed(Unit, "au_free($1)", pointer);
+        return nil;
+    end;
+
+    generic [T: Type, R: Region]
+    function loadRead(ref: &[Pointer[T], R]): &[T, R] is
+        return @embed(&[T, R], "*($1)", ref);
+    end;
+
+    generic [T: Type, R: Region]
+    function loadWrite(ref: &![Pointer[T], R]): &![T, R] is
+        return @embed(&![T, R], "*($1)", ref);
+    end;
+
+    function sizeToIndex(size: ByteSize): Index is
+        -- Arguably this should be in `Pervasive`.
+        return @embed(Index, "$1", size);
+    end;
+
+    generic [T: Type]
+    function resizeArray(array: Pointer[T], size: Index): Address[T] is
+        let total: Index := sizeToIndex(sizeof(T)) * size;
+        return @embed(Address[T], "au_realloc($1, $2)", array, total);
+    end;
+
+    generic [T: Type, U: Type]
+    function memmove(source: Pointer[T], destination: Pointer[U], count: ByteSize): Unit is
+        @embed(Pointer[T], "au_memmove($1, $2, $3)", destination, source, count);
+        return nil;
+    end;
+
+    generic [T: Type, U: Type]
+    function memcpy(source: Pointer[T], destination: Pointer[U], count: ByteSize): Unit is
+        @embed(Pointer[T], "au_memcpy($1, $2, $3)", destination, source, count);
+        return nil;
+    end;
+
+    generic [T: Type]
+    function positiveOffset(pointer: Pointer[T], offset: Index): Pointer[T] is
+        return @embed(Pointer[T], "$1 + $2", pointer, offset);
+    end;
+
+    generic [T: Type]
+    function negativeOffset(pointer: Pointer[T], offset: Index): Pointer[T] is
+        return @embed(Pointer[T], "$1 - $2", pointer, offset);
+    end;
+
+    function arraySizeInBytes(elem_size: ByteSize, count: Index): ByteSize is
+        -- FIXME: Use a proper Index->ByteSize conversion function.
+        let count_bytes: ByteSize := @embed(ByteSize, "$1", count);
+        let size: ByteSize := elem_size * count_bytes;
+        return size;
+    end;
+
+    generic [T: Type, R: Region]
+    function span(ref: &[Pointer[T], R], start: Index, final: Index): Span[T, R] is
+        let size: Index := (final - start) + 1;
+        let p: Pointer[T] := !ref;
+        let poffset: Pointer[T] := positiveOffset(p, start);
+        return @embed(Span[T, R], "au_make_span($1, $2)", poffset, size);
+    end;
+
+    generic [T: Type, R: Region]
+    function spanWrite(ref: &![Pointer[T], R], start: Index, final: Index): Span![T, R] is
+        let size: Index := (final - start) + 1;
+        let p: Pointer[T] := !ref;
+        let poffset: Pointer[T] := positiveOffset(p, start);
+        return @embed(Span![T, R], "au_make_span($1, $2)", poffset, size);
+    end;
+
+    generic [A: Type, B: Type]
+    function pointerCast(ptr: Pointer[A]): Pointer[B] is
+        return @embed(Pointer[B], "$1", ptr);
+    end;
+
+    generic [T: Type, R: Region]
+    function refToPointer(ref: &[T, R]): Pointer[T] is
+        return @embed(Pointer[T], "$1", ref);
+    end;
+
+    generic [T: Type, R: Region]
+    function refMutToPointer(ref: &![T, R]): Pointer[T] is
+        return @embed(Pointer[T], "$1", ref);
+    end;
+
+    generic [T: Type, R: Region]
+    function spanToPointer(sp: Span[T, R]): Pointer[T] is
+        return @embed(Pointer[T], "($1).data", sp);
+    end;
+
+    generic [T: Type, R: Region]
+    function spanWriteToPointer(sp: Span![T, R]): Pointer[T] is
+        return @embed(Pointer[T], "($1).data", sp);
+    end;
+end module body.

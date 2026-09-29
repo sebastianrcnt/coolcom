@@ -1,0 +1,616 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+import Standard.Buffer (
+    Buffer,
+    allocateEmpty,
+    destroyEmpty,
+    initialize,
+    length,
+    nth,
+    destroyFree,
+    fill,
+    storeNth,
+    swapNth,
+    swapIndex,
+    insert,
+    insertFront,
+    insertBack,
+    remove,
+    removeFirst,
+    removeLast,
+    reverse,
+    swapTransform,
+    inPlaceMap,
+    map,
+    getSpan,
+    getSpanMut
+);
+import Standard.Test.Unit (
+    assertTrue,
+    assertSuccess,
+    assertFailure,
+    suiteHeading,
+    testHeading
+);
+
+module body Standard.Test.Buffer is
+    function bufferTestSuite(): Unit is
+        suiteHeading("Standard.Buffer");
+        basicLifecycleTest();
+        initializeTest();
+        initializeEmptyTest();
+        storeTest();
+        swapNthTest();
+        swapIndexTest();
+        swapTransformTest();
+        fillTest();
+        insertFrontTest();
+        insertBackTest();
+        removeFirstTest();
+        removeLastTest();
+        reverseEmptyTest();
+        reverseNonEmptyTest();
+        inPlaceMapTest();
+        inPlaceMapEmptyTest();
+        mapTest();
+        mapEmptyTest();
+        getSpanTest();
+        getSpanMutTest();
+        
+        -- New regression tests for specific bug fixes
+        reverseEvenNumberTest();
+        reverseOddNumberTest();
+        insertCapacityResizeTest();
+        capacityGrowthTest();
+        edgeCaseInvariantsTest();
+        
+        return nil;
+    end;
+
+    function basicLifecycleTest(): Unit is
+        testHeading("Basic lifecycle: allocateEmpty and destroyEmpty");
+        let b: Buffer[Int32] := allocateEmpty();
+        destroyEmpty(b);
+        assertSuccess("Basic lifecycle done.");
+        return nil;
+    end;
+
+    function initializeTest(): Unit is
+        testHeading("initialize, length, nth, and destroyFree");
+        let b: Buffer[Int32] := initialize(3, 10);
+        assertLength(&b, 3);
+        assertTrue(nth(&b, 0) = 10, "[0] = 10");
+        assertTrue(nth(&b, 1) = 10, "[1] = 10");
+        assertTrue(nth(&b, 2) = 10, "[2] = 10");
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+    
+    function initializeEmptyTest(): Unit is
+        testHeading("initializeEmpty");
+        let b: Buffer[Int32] := initialize(0, 10);
+        assertLength(&b, 0);
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+    
+    function storeTest(): Unit is
+        testHeading("storeNth");
+        var b: Buffer[Int32] := initialize(1, 10);
+        assertLength(&b, 1);
+        assertTrue(nth(&b, 0) = 10, "[0] = 10");
+        storeNth(&!b, 0, 20);
+        assertTrue(nth(&b, 0) = 20, "[0] = 20");
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function swapNthTest(): Unit is
+        testHeading("swapNth");
+        var b: Buffer[Int32] := initialize(1, 10);
+        assertLength(&b, 1);
+        assertTrue(nth(&b, 0) = 10, "[0] = 10");
+        let old: Int32 := swapNth(&!b, 0, 20);
+        assertTrue(old = 10, "old = 10");
+        assertTrue(nth(&b, 0) = 20, "[0] = 20");
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function swapIndexTest(): Unit is
+        testHeading("swapIndex");
+        var b: Buffer[Int32] := initialize(2, 0);
+        assertLength(&b, 2);
+        storeNth(&!b, 0, 10);
+        storeNth(&!b, 1, 20);
+        assertTrue(nth(&b, 0) = 10, "[0] = 10");
+        assertTrue(nth(&b, 1) = 20, "[1] = 20");
+        swapIndex(&!b, 0, 1);
+        assertTrue(nth(&b, 0) = 20, "[0] = 20");
+        assertTrue(nth(&b, 1) = 10, "[1] = 10");
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function double(i: Int32): Int32 is
+        return 2 * i;
+    end;
+
+    function swapTransformTest(): Unit is
+        testHeading("swapTransform");
+        var b: Buffer[Int32] := initialize(1, 30);
+        assertLength(&b, 1);
+        swapTransform(&!b, 0, double);
+        assertTrue(nth(&b, 0) = 60, "[0] = 60");
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function fillTest(): Unit is
+        testHeading("initialize then fill");
+        var b: Buffer[Int32] := initialize(3, 10);
+        fill(&!b, 20);
+        assertLength(&b, 3);
+        assertTrue(nth(&b, 0) = 20, "[0] = 20");
+        assertTrue(nth(&b, 1) = 20, "[1] = 20");
+        assertTrue(nth(&b, 2) = 20, "[2] = 20");
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function insertFrontTest(): Unit is
+        testHeading("insertFront");
+        var b: Buffer[Int32] := allocateEmpty();
+        -- []
+        assertLength(&b, 0);
+        -- [3]
+        insertFront(&!b, 3);
+        assertLength(&b, 1);
+        assertNth(&b, 0, 3);
+        -- [2, 3]
+        insertFront(&!b, 2);
+        assertLength(&b, 2);
+        assertNth(&b, 0, 2);
+        assertNth(&b, 1, 3);
+        -- [1,2,3]
+        insertFront(&!b, 1);
+        assertLength(&b, 3);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 3);
+        destroyFree(b);
+        return nil;
+    end;
+
+    function insertBackTest(): Unit is
+        testHeading("insertBack");
+        var b: Buffer[Int32] := allocateEmpty();
+        -- []
+        assertLength(&b, 0);
+        -- [1]
+        insertBack(&!b, 1);
+        assertLength(&b, 1);
+        assertNth(&b, 0, 1);
+        -- [1, 2]
+        insertBack(&!b, 2);
+        assertLength(&b, 2);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        -- [1,2,3]
+        insertBack(&!b, 3);
+        assertLength(&b, 3);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 3);
+        destroyFree(b);
+        return nil;
+    end;
+
+    function removeFirstTest(): Unit is
+        testHeading("removeFirst");
+        var b: Buffer[Int32] := allocateEmpty();
+        -- []
+        assertLength(&b, 0);
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        -- [1,2,3]
+        assertLength(&b, 3);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 3);
+        -- [2,3]
+        removeFirst(&!b);
+        assertLength(&b, 2);
+        assertNth(&b, 0, 2);
+        assertNth(&b, 1, 3);
+        -- [3]
+        removeFirst(&!b);
+        assertLength(&b, 1);
+        assertNth(&b, 0, 3);
+        -- []
+        removeFirst(&!b);
+        assertLength(&b, 0);
+        destroyEmpty(b);
+        return nil;
+    end;
+
+    function removeLastTest(): Unit is
+        testHeading("removeLast");
+        var b: Buffer[Int32] := allocateEmpty();
+        -- []
+        assertLength(&b, 0);
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        -- [1,2,3]
+        assertLength(&b, 3);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 3);
+        -- [1,2]
+        removeLast(&!b);
+        assertLength(&b, 2);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        -- [1]
+        removeLast(&!b);
+        assertLength(&b, 1);
+        assertNth(&b, 0, 1);
+        -- []
+        removeLast(&!b);
+        assertLength(&b, 0);
+        destroyEmpty(b);
+        return nil;
+    end;
+
+    function reverseEmptyTest(): Unit is
+        testHeading("reverse (empty)");
+        -- Test empty array
+        var b: Buffer[Int32] := allocateEmpty();
+        assertLength(&b, 0);
+        reverse(&!b);
+        assertLength(&b, 0);
+        destroyFree(b);
+        return nil;
+    end;
+
+    function reverseNonEmptyTest(): Unit is
+        testHeading("reverse (non-empty)");
+        -- Test non-empty array
+        var b: Buffer[Int32] := allocateEmpty();
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        -- [1,2,3]
+        assertLength(&b, 3);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 3);
+        reverse(&!b);
+        -- [3,2,1]
+        assertLength(&b, 3);
+        assertNth(&b, 0, 3);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 1);
+        destroyFree(b);
+        return nil;
+    end;
+
+    function inPlaceMapTest(): Unit is
+        testHeading("inPlaceMap");
+        -- Create an array [1,2,3,4,5]
+        var b: Buffer[Int32] := allocateEmpty();
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        insertBack(&!b, 4);
+        insertBack(&!b, 5);
+        -- Double each element in place.
+        inPlaceMap(&!b, double);
+        -- Assert contents.
+        assertTrue(nth(&b, 0) = 2,  "[0] = 2");
+        assertTrue(nth(&b, 1) = 4,  "[1] = 4");
+        assertTrue(nth(&b, 2) = 6,  "[2] = 6");
+        assertTrue(nth(&b, 3) = 8,  "[3] = 8");
+        assertTrue(nth(&b, 4) = 10, "[4] = 10");
+        -- End.
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function inPlaceMapEmptyTest(): Unit is
+        testHeading("inPlaceMapEmpty");
+
+        var b: Buffer[Int32] := allocateEmpty();
+        inPlaceMap(&!b, double);
+        assertLength(&b, 0);
+ 
+        destroyFree(b);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+    
+    union CardinalDirection: Free is
+        case North;
+        case South;
+        case East;
+        case West;
+    end;
+
+    function directionToChar(dir: CardinalDirection): Nat8 is
+        case dir of
+            when North do
+                return 'N';
+            when South do
+                return 'S';
+            when East do
+                return 'E';
+            when West do
+                return 'W';
+        end case;
+    end;
+
+    function mapTest(): Unit is
+        testHeading("map");
+        -- Create an array [North, South, East, West]
+        var b1: Buffer[CardinalDirection] := allocateEmpty();
+        insertBack(&!b1, North());
+        insertBack(&!b1, South());
+        insertBack(&!b1, East());
+        insertBack(&!b1, West());
+        -- Map each of the cardinal directions into a character.
+        let b2: Buffer[Nat8] := map(b1, directionToChar);
+        -- Assert the contents.
+        assertTrue(nth(&b2, 0) = 'N',  "[0] = N");
+        assertTrue(nth(&b2, 1) = 'S',  "[1] = S");
+        assertTrue(nth(&b2, 2) = 'E',  "[2] = E");
+        assertTrue(nth(&b2, 3) = 'W',  "[3] = W");
+        -- End.
+        destroyFree(b2);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function mapEmptyTest(): Unit is
+        testHeading("mapEmpty");
+
+        let b1: Buffer[CardinalDirection] := allocateEmpty();
+        let b2: Buffer[Nat8] := map(b1, directionToChar);
+        
+        assertLength(&b2, 0);
+        
+        destroyFree(b2);
+        assertSuccess("destroyFree complete");
+        return nil;
+    end;
+
+    function getSpanTest(): Unit is
+        testHeading("getSpan");
+
+        var b: Buffer[Int32] := allocateEmpty();
+        -- []
+        assertLength(&b, 0);
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        -- [1,2,3]
+        assertLength(&b, 3);
+
+        -- Get an immutable span.
+        borrow ref: &[Buffer[Int32], R] := &b do
+            let sp: Span[Int32, R] := getSpan(ref, 0, 2);
+            -- Assert the contents.
+            assertTrue(sp[0] = 1,  "sp[0] = 1");
+            assertTrue(sp[1] = 2,  "sp[1] = 2");
+            assertTrue(sp[2] = 3,  "sp[2] = 3");
+        end borrow;
+
+        -- Destroy.
+        destroyFree(b);
+
+        return nil;
+    end;
+
+    function getSpanMutTest(): Unit is
+        testHeading("getSpanMut");
+
+        var b: Buffer[Int32] := allocateEmpty();
+        -- []
+        assertLength(&b, 0);
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        -- [1,2,3]
+        assertLength(&b, 3);
+
+        -- Get a mutable span.
+        borrow ref: &![Buffer[Int32], R] := &!b do
+            var sp: Span![Int32, R] := getSpanMut(ref, 0, 2);
+            -- Write.
+            sp[0] := 10;
+            sp[1] := 20;
+            sp[2] := 30;
+        end borrow;
+
+        -- Assert contents.
+        assertTrue(nth(&b, 0) = 10,  "[0] = 10");
+        assertTrue(nth(&b, 1) = 20,  "[1] = 20");
+        assertTrue(nth(&b, 2) = 30,  "[2] = 30");
+
+        -- Destroy.
+        destroyFree(b);
+
+        return nil;
+    end;
+
+    ---
+    --- Regression Tests for Bug Fixes
+    ---
+
+    function reverseEvenNumberTest(): Unit is
+        testHeading("reverse even number of elements");
+        var b: Buffer[Int32] := allocateEmpty();
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        insertBack(&!b, 4);
+        -- [1,2,3,4]
+        assertLength(&b, 4);
+        assertNth(&b, 0, 1);
+        assertNth(&b, 1, 2);
+        assertNth(&b, 2, 3);
+        assertNth(&b, 3, 4);
+        reverse(&!b);
+        -- [4,3,2,1]
+        assertLength(&b, 4);
+        assertNth(&b, 0, 4);
+        assertNth(&b, 1, 3);
+        assertNth(&b, 2, 2);
+        assertNth(&b, 3, 1);
+        destroyFree(b);
+        return nil;
+    end;
+
+    function reverseOddNumberTest(): Unit is
+        testHeading("reverse odd number of elements");
+        var b: Buffer[Int32] := allocateEmpty();
+        insertBack(&!b, 1);
+        insertBack(&!b, 2);
+        insertBack(&!b, 3);
+        insertBack(&!b, 4);
+        insertBack(&!b, 5);
+        -- [1,2,3,4,5]
+        assertLength(&b, 5);
+        reverse(&!b);
+        -- [5,4,3,2,1]
+        assertLength(&b, 5);
+        assertNth(&b, 0, 5);
+        assertNth(&b, 1, 4);
+        assertNth(&b, 2, 3);  -- Middle element
+        assertNth(&b, 3, 2);
+        assertNth(&b, 4, 1);
+        destroyFree(b);
+        return nil;
+    end;
+
+    function insertCapacityResizeTest(): Unit is
+        testHeading("insert capacity resize");
+        var b: Buffer[Int32] := allocateEmpty();
+        
+        -- Fill to near capacity
+        for i from 0 to 14 do
+            insertBack(&!b, indexToInt32(i));
+        end for;
+        
+        assertLength(&b, 15);
+        
+        -- Trigger resize
+        insertBack(&!b, 15);
+        assertLength(&b, 16);
+        assertNth(&b, 15, 15);
+        
+        -- Trigger another resize
+        insertBack(&!b, 16);
+        assertLength(&b, 17);
+        assertNth(&b, 16, 16);
+        
+        destroyFree(b);
+        return nil;
+    end;
+
+    function capacityGrowthTest(): Unit is
+        testHeading("capacity growth calculation");
+        var b: Buffer[Int32] := allocateEmpty();
+        
+        -- Force multiple resizes
+        for i from 0 to 100 do
+            insertBack(&!b, indexToInt32(i));
+        end for;
+        
+        assertLength(&b, 101);
+        
+        -- Verify all elements preserved
+        for i from 0 to 100 do
+            assertTrue(nth(&b, i) = indexToInt32(i), "Element at index preserved after resizes");
+        end for;
+        
+        destroyFree(b);
+        return nil;
+    end;
+
+    function edgeCaseInvariantsTest(): Unit is
+        testHeading("edge case invariants");
+        
+        -- Empty buffer
+        let b1: Buffer[Int32] := allocateEmpty();
+        assertLength(&b1, 0);
+        destroyEmpty(b1);
+        
+        -- Single element buffer
+        var b2: Buffer[Int32] := initialize(1, 42);
+        assertLength(&b2, 1);
+        assertNth(&b2, 0, 42);
+        
+        insertBack(&!b2, 43);
+        assertLength(&b2, 2);
+        assertNth(&b2, 1, 43);
+        
+        destroyFree(b2);
+        
+        -- Minimum capacity boundary
+        var b3: Buffer[Int32] := allocateEmpty();
+        for i from 0 to 15 do
+            insertBack(&!b3, indexToInt32(i * 10));
+        end for;
+        
+        assertLength(&b3, 16);
+        
+        for i from 0 to 15 do
+            assertTrue(nth(&b3, i) = indexToInt32(i * 10), "Minimum capacity boundary test");
+        end for;
+        
+        destroyFree(b3);
+        
+        assertSuccess("Edge case invariants passed");
+        return nil;
+    end;
+
+    ---
+    --- Utilities
+    ---
+
+    generic [T: Type, R: Region]
+    function assertLength(ref: &[Buffer[T], R], len: Index): Unit is
+        assertTrue(length(ref) = len, "length");
+        return nil;
+    end;
+
+    generic [T: Free, R: Region]
+    function assertNth(ref: &[Buffer[T], R], pos: Index, value: T): Unit is
+        assertTrue(nth(ref, pos) = value, "nth");
+        return nil;
+    end;
+
+    -- Helper function to convert Index to Int32 for tests
+    function indexToInt32(idx: Index): Int32 is
+        case toInt32(idx) of
+            when Some(value: Int32) do
+                return value;
+            when None do
+                abort("Index value too large for Int32");
+        end case;
+    end;
+end module body.

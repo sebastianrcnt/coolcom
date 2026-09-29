@@ -1,0 +1,26 @@
+{
+  "module": "Test",
+  "kind": "Linearity Error",
+  "text": [
+    { "type": "code", "content": "Foo" },
+    { "type": "text", "content": " was declared to belong to the " },
+    { "type": "code", "content": "Free" },
+    { "type": "text", "content": " universe, but it " },
+    { "type": "text", "content": "has a type parameter" },
+    { "type": "text", "content": " that belongs to the " },
+    { "type": "code", "content": "Type" },
+    { "type": "text", "content": " universe." }
+  ],
+  "span": {
+    "filename": "test-programs/suites/003-record/003-free-record-linear-param/Test.aum",
+    "startp": { "line": 2, "column": 4 },
+    "end": { "line": 3, "column": 8 }
+  },
+  "context": [
+    [ 1, "module body Test is" ],
+    [ 2, "    record Foo[A: Type]: Free is" ],
+    [ 3, "    end;" ],
+    [ 4, "" ],
+    [ 5, "    function main(): ExitCode is" ]
+  ]
+}

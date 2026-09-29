@@ -1,0 +1,27 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    {
+      "type": "text",
+      "content": "Generic instances can only use each type parameter once in the argument."
+    }
+  ],
+  "span": {
+    "filename": "test-programs/suites/008-typeclasses/005-duplicate-tyvar/Test.aum",
+    "startp": { "line": 11, "column": 4 },
+    "end": { "line": 16, "column": 8 }
+  },
+  "context": [
+    [ 9, "    end;" ],
+    [ 10, "" ],
+    [ 11, "    generic [T: Free]" ],
+    [ 12, "    instance TC(Pair[T, T]) is" ],
+    [ 13, "        method Accept(x: Pair[T, T]): Unit is" ],
+    [ 14, "            return nil;" ],
+    [ 15, "        end;" ],
+    [ 16, "    end;" ],
+    [ 17, "" ],
+    [ 18, "    function main(): ExitCode is" ]
+  ]
+}

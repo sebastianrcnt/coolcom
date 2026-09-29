@@ -1,0 +1,17 @@
+module body Test is
+    record R : Linear is
+        x: Int32;
+    end;
+
+    function Consume(r: R): Unit is
+        let { x: Int32 } := r;
+        return nil;
+    end;
+
+    function main(): ExitCode is
+        let r: R := R(x => 32);
+        Consume(r);
+        Consume(r);
+        return ExitSuccess();
+    end;
+end module body.

@@ -1,0 +1,3 @@
+module Example.Haversine is
+    function main(): ExitCode;
+end module.

@@ -1,0 +1,16 @@
+import Test_TC (Acceptable);
+
+module body Test is
+    record Foo: Free is
+    end;
+
+    instance Acceptable(Foo) is
+        method Accept(value: Foo): Unit is
+            return nil;
+        end;
+    end;
+
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

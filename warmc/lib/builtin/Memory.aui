@@ -1,0 +1,75 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+module Austral.Memory is
+    type Address[T: Type]: Free;
+    type Pointer[T: Type]: Free;
+
+    generic [T: Type]
+    function nullPointer(): Address[T];
+
+    generic [T: Type]
+    function nullCheck(address: Address[T]): Option[Pointer[T]];
+
+    generic [T: Type]
+    function allocate(): Address[T];
+
+    generic [T: Type]
+    function allocateBuffer(count: Index): Address[T];
+
+    generic [T: Type]
+    function load(pointer: Pointer[T]): T;
+
+    generic [T: Type]
+    function store(pointer: Pointer[T], value: T): Unit;
+
+    generic [T: Type]
+    function deallocate(pointer: Pointer[T]): Unit;
+
+    generic [T: Type, R: Region]
+    function loadRead(ref: &[Pointer[T], R]): &[T, R];
+
+    generic [T: Type, R: Region]
+    function loadWrite(ref: &![Pointer[T], R]): &![T, R];
+
+    generic [T: Type]
+    function resizeArray(array: Pointer[T], size: Index): Address[T];
+
+    generic [T: Type, U: Type]
+    function memmove(source: Pointer[T], destination: Pointer[U], count: ByteSize): Unit;
+
+    generic [T: Type, U: Type]
+    function memcpy(source: Pointer[T], destination: Pointer[U], count: ByteSize): Unit;
+
+    generic [T: Type]
+    function positiveOffset(pointer: Pointer[T], offset: Index): Pointer[T];
+
+    generic [T: Type]
+    function negativeOffset(pointer: Pointer[T], offset: Index): Pointer[T];
+
+    function arraySizeInBytes(elem_size: ByteSize, count: Index): ByteSize;
+
+    generic [T: Type, R: Region]
+    function span(ref: &[Pointer[T], R], start: Index, final: Index): Span[T, R];
+
+    generic [T: Type, R: Region]
+    function spanWrite(ref: &![Pointer[T], R], start: Index, final: Index): Span![T, R];
+
+    generic [A: Type, B: Type]
+    function pointerCast(ptr: Pointer[A]): Pointer[B];
+
+    generic [T: Type, R: Region]
+    function refToPointer(ref: &[T, R]): Pointer[T];
+
+    generic [T: Type, R: Region]
+    function refMutToPointer(ref: &![T, R]): Pointer[T];
+
+    generic [T: Type, R: Region]
+    function spanToPointer(sp: Span[T, R]): Pointer[T];
+
+    generic [T: Type, R: Region]
+    function spanWriteToPointer(sp: Span![T, R]): Pointer[T];
+end module.

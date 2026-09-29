@@ -1,0 +1,57 @@
+pragma Unsafe_Module;
+
+module body Test is
+    pragma Foreign_Import(External_Name => "puts");
+    function Put_String(str: Span[Nat8, Static]): Int32 is
+    end;
+
+    typeclass PrintFree(T: Free) is
+        method PrintF(x: T): Unit;
+    end;
+
+    instance PrintFree(Nat8) is
+        method PrintF(x: Nat8): Unit is
+            Put_String("Nat8");
+            return nil;
+        end;
+    end;
+
+    instance PrintFree(Nat16) is
+        method PrintF(x: Nat16): Unit is
+            Put_String("Nat16");
+            return nil;
+        end;
+    end;
+
+    instance PrintFree(Float64) is
+        method PrintF(x: Float64): Unit is
+            Put_String("Float64");
+            return nil;
+        end;
+    end;
+
+    generic [U: Type, R: Region]
+    instance PrintFree(&[U, R]) is
+        method PrintF(x: &[U, R]): Unit is
+            Put_String("REF");
+            return nil;
+        end;
+    end;
+
+    record Foo: Linear is
+    end;
+
+    function main(): ExitCode is
+        let n8: Nat8 := 'a';
+        PrintF(n8);
+        PrintF('a' : Nat16);
+        PrintF(3.14);
+        let foo: Foo := Foo();
+        borrow fooref: &[Foo, rho] := &foo do
+            PrintF(fooref);
+        end borrow;
+        PrintF(&foo);
+        let {} := foo;
+        return ExitSuccess();
+    end;
+end module body.

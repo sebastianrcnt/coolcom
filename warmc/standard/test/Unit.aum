@@ -1,0 +1,54 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+module body Standard.Test.Unit is
+    function suiteHeading(heading: Span[Nat8, Static]): Unit is
+        print("Suite: ");
+        printLn(heading);
+        return nil;
+    end;
+
+    function testHeading(heading: Span[Nat8, Static]): Unit is
+        print("    Test: ");
+        printLn(heading);
+        return nil;
+    end;
+
+    function assertTrue(value: Bool, message: Span[Nat8, Static]): Unit is
+        print("        Assert: ");
+        print(message);
+        if value then
+            printLn(" ✓");
+        else
+            abort("Assertion failed (assertTrue).");
+        end if;
+        return nil;
+    end;
+
+    function assertFalse(value: Bool, message: Span[Nat8, Static]): Unit is
+        print("        Assert: ");
+        print(message);
+        if not value then
+            printLn(" ✓");
+        else
+            abort("Assertion failed (assertFalse).");
+        end if;
+        return nil;
+    end;
+
+    function assertSuccess(message: Span[Nat8, Static]): Unit is
+        print("        Assert: ");
+        print(message);
+        printLn(" ✓");
+        return nil;
+    end;
+
+    function assertFailure(message: Span[Nat8, Static]): Unit is
+        print("        Assert failure: ");
+        print(message);
+        abort("Assertion failed (assertFailure).");
+    end;
+end module body.

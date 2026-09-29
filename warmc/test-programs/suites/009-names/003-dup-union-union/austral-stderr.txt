@@ -1,0 +1,23 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    { "type": "text", "content": "A declaration with the name " },
+    { "type": "code", "content": "A" },
+    { "type": "text", "content": " already exists in the module " },
+    { "type": "code", "content": "Test" },
+    { "type": "text", "content": "." }
+  ],
+  "span": {
+    "filename": "test-programs/suites/009-names/003-dup-union-union/Test.aum",
+    "startp": { "line": 4, "column": 4 },
+    "end": { "line": 4, "column": 25 }
+  },
+  "context": [
+    [ 2, "    union A: Free is end;" ],
+    [ 3, "" ],
+    [ 4, "    union A: Free is end;" ],
+    [ 5, "" ],
+    [ 6, "    function main(): ExitCode is" ]
+  ]
+}

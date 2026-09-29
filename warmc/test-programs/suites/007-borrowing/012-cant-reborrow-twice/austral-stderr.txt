@@ -1,0 +1,25 @@
+{
+  "module": "Test",
+  "kind": "Linearity Error",
+  "text": [
+    { "type": "text", "content": "Cannot reborrow the variable " },
+    { "type": "code", "content": "fooref" },
+    { "type": "text", "content": " because it is already " },
+    { "type": "text", "content": "borrowed (read-write)" },
+    { "type": "text", "content": "." }
+  ],
+  "span": {
+    "filename": "test-programs/suites/007-borrowing/012-cant-reborrow-twice/Test.aum",
+    "startp": { "line": 12, "column": 8 },
+    "end": { "line": 14, "column": 19 }
+  },
+  "context": [
+    [ 10, "    function main(): ExitCode is" ],
+    [ 11, "        var foo: Foo := Foo();" ],
+    [ 12, "        borrow fooref: &![Foo, R] := &!foo do" ],
+    [ 13, "            bar(&~fooref, &~fooref);" ],
+    [ 14, "        end borrow;" ],
+    [ 15, "        let {} := foo;" ],
+    [ 16, "        return ExitSuccess();" ]
+  ]
+}

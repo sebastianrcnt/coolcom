@@ -1,0 +1,3 @@
+(executable
+ (name warmc)
+ (libraries austral_core))

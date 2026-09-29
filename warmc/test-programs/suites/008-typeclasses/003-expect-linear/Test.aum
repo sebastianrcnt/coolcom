@@ -1,0 +1,15 @@
+module body Test is
+    typeclass AcceptsLinear(T: Linear) is
+        method Accept(x: T): Unit;
+    end;
+
+    instance AcceptsLinear(Nat8) is
+        method Accept(x: Nat8): Unit is
+            return nil;
+        end;
+    end;
+
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

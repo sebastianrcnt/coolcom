@@ -1,0 +1,57 @@
+{
+  "name": "austral",
+  "displayName": "austral",
+  "description": "Austral language support for VS Code",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/austral/austral",
+    "directory": "editor/vscode-austral"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "austral",
+        "aliases": [
+          "Austral",
+          "austral"
+        ],
+        "extensions": [
+          ".aum",
+          ".aui"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "austral",
+        "scopeName": "source.austral",
+        "path": "./syntaxes/austral.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "austral",
+        "path": "./snippets/snippets.json"
+      }
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^20.2.5",
+    "@vscode/vsce": "^2.23.0",
+    "ts-node": "^10.9.1"
+  },
+  "scripts": {
+    "build": "vsce package",
+    "syntax": "ts-node src/generate-syntaxes.ts"
+  }
+}
