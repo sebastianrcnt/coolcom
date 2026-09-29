@@ -1,0 +1,81 @@
+// What the Aiwnios host (its C runtime) provides the TempleOS library, done
+// by the kernel: ticks, the command-line flag, sound (none yet), exit.
+
+Bool IsCmdLineMode()
+{//Plain text output: no DolDoc (PrintErr then says "ERROR: ").
+    return TRUE;
+}
+
+I64 __GetTicks()
+{//Milliseconds since boot.
+    return ArchCntVct * 1000 / ArchCntFrq;
+}
+
+I64 __GetTicksHP()
+{//Microseconds since boot.
+    return ArchCntVct / (ArchCntFrq / 1000000);
+}
+
+U0 SndFreq(I64 freq)
+{//No sound device yet.
+    no_warn freq;
+}
+
+U8 *throw_hook;  // U0 (*)(I64 ch): an uncaught throw on this task (the shell's prompt)
+
+U0 NativeExit(I64 status)
+{//An uncaught throw (NativeExcept.HC): the shell goes back to its prompt, other tasks end.
+    U0 (*hook)(I64 ch);
+    CTask *t = Fs;
+    Print("ERROR: uncaught exception '%c' in %s\n", t->except_ch, t->task_name);
+    no_warn status;
+    hook = throw_hook;
+    if (hook)
+        (*hook)(t->except_ch);  // returns only if the task is not the shell
+    if (t == Gs->seth_task) {
+        Print("System halted.\n");
+        while (TRUE) {}
+    }
+    Exit;
+}
+
+// ---- Library routines of subsystems the kernel doesn't have yet (DolDoc,
+// pop-up tasks, progress bars, compiler classes): harmless stand-ins. ----
+
+CDoc *DocPut(CTask *task = NULL)
+{//No DolDoc: output is plain text.
+    no_warn task;
+    return NULL;
+}
+
+U8 *DocSave(CDoc *doc, I64 *_size = NULL)
+{
+    no_warn doc;
+    if (_size)
+        *_size = 0;
+    return NULL;
+}
+
+I64 PopUp(U8 *buf, CTask *parent = NULL, CTask **_pu_task = NULL)
+{//No pop-up tasks: say so.
+    no_warn parent, _pu_task;
+    Print("(PopUp not available: %s)\n", buf);
+    return 0;
+}
+
+U0 ProgressBarsRegTf(U8 *path = NULL)
+{
+    no_warn path;
+}
+
+U0 ClassMemberLstDel(CHashClass *tmpc)
+{//Kernel hash tables hold no classes.
+    no_warn tmpc;
+}
+
+U0 SwapI64(I64 *a, I64 *b)
+{
+    I64 t = *a;
+    *a = *b;
+    *b = t;
+}

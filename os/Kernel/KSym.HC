@@ -1,6 +1,6 @@
 // Kernel symbols: the table tools/binlink.py puts in the Image (KSYM_TABLE,
 // every HolyC export and assembly symbol, sorted by address). The shell
-// registers them all (Shell.HC ShellSyms); FunSegFind turns a code address into
+// registers them all (Shell.HC ShellSyms); KSymFunSeg turns a code address into
 // function+offset, as TempleOS FunSeg does, for fault messages.
 
 #define KSYM_CODE 1
@@ -44,7 +44,7 @@ U8 *KSymFind(U8 *name)
 
 #define FUN_SEG_MAX 0x10000  // no function is longer; past it an address is nobody's
 
-U8 *FunSegFind(U8 *addr, I64 *_offset = NULL)
+U8 *KSymFunSeg(U8 *addr, I64 *_offset = NULL)
 {//Name of the kernel function holding addr (NULL if none); *_offset from its start.
     I64 lo = 0, hi = KSymCnt - 1, mid, best = -1;
     while (lo <= hi) {  // last symbol at or below addr
@@ -70,11 +70,17 @@ U8 *FunSegFind(U8 *addr, I64 *_offset = NULL)
     return KSymName(best);
 }
 
+U8 *fun_seg_hook;  // U8 *(*)(U8 *addr, I64 *_offset): functions compiled by the shell
+
 U8 *StrPrintFunSeg(U8 *buf, I64 addr, I64 field_len = 0, I64 flags = 0)
-{//"Name+0xOFF" for a kernel code address, else the address in hex.
+{//"Name+0xOFF" for a code address (kernel, or compiled in the shell), else hex.
     I64 off;
-    U8 *name = FunSegFind(addr, &off);
+    U8 *name = KSymFunSeg(addr, &off);
+    U8 *(*hook)(U8 *addr, I64 *_offset);
     no_warn field_len, flags;
+    hook = fun_seg_hook;
+    if (!name && hook)
+        name = (*hook)(addr, &off);
     if (name)
         StrPrint(buf, "%s+0x%X", name, off);
     else

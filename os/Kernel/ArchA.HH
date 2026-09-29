@@ -60,3 +60,9 @@ import U0 ArchLongJmp(I64 *ctx);
 import U8 *ArchCompilerBin(I64 *size);         // embedded coolc/seed/Compiler.BIN (Blob.S)
 import U8 *ArchShellPrelude();                 // embedded shell prelude text
 import U8 *ArchKSyms();                        // kernel symbol table (KSym.HC)
+import I64 AIWNIOS_SetJmp(I64 *ctx);           // = ArchSetJmp (try/catch)
+import U0 AIWNIOS_LongJmp(I64 *ctx);
+import F64 Sqrt(F64 d);
+import F64 Floor(F64 d);
+import F64 Ceil(F64 d);
+import F64 Round(F64 d);                       // to nearest, ties away from zero

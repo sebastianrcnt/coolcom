@@ -1,14 +1,37 @@
 // Kernel entry: everything AOT-compiled into the kernel image is included from here.
+// The TempleOS library (strings, printing, math, hashes, queues, dates) is
+// TempleOS's own code: the files the compiler shares (coolc/Runtime) and a few
+// more from Aiwnios (KDate.HC). COOLCOM_KERNEL leaves out, in those files, what
+// the kernel does its own way (Sleep, exceptions of the compiler process).
+#define COOLCOM_KERNEL 1
+#define TEXT_MODE      1
 #include "KernelA.HH"
 #include "ArchA.HH"
+#include "../../coolc/Runtime/KGlbls.HC"
 #include "Fdt.HC"
 #include "Uart.HC"
 #include "Console.HC"
 #include "Spin.HC"
-#include "StrPrint.HC"
-#include "StrA.HC"
-#include "KSym.HC"
+#include "KUtils.HC"
+#include "KPrint.HC"
 #include "Mem.HC"
+#include "../../coolc/Runtime/KMisc.HC"
+#include "../../coolc/Runtime/CQue.HC"
+#include "../../coolc/Runtime/KDataTypes.HC"
+#include "../../coolc/Runtime/StrA.HC"
+#include "../../coolc/Runtime/KHashA.HC"
+#include "../../coolc/Runtime/KMath.HC"
+#include "../../coolc/Runtime/KMathB.HC"
+#include "../../coolc/Runtime/StrPrint.HC"
+#include "../../coolc/Runtime/KHashB.HC"
+#include "../../coolc/Runtime/StrB.HC"
+#include "../../coolc/Runtime/KDefine.HC"
+#include "../../coolc/Runtime/StrScan.HC"
+#include "../../coolc/Runtime/QSort.HC"
+#include "../../coolc/Runtime/NativeExcept.HC"
+#include "KMathC.HC"
+#include "KDate.HC"
+#include "KSym.HC"
 #include "Font.HC"
 #include "Fb.HC"
 #include "KTest.HC"
@@ -17,9 +40,9 @@
 #include "Except.HC"
 #include "MultiCore.HC"
 #include "Sched.HC"
+#include "KHost.HC"
 #include "Input.HC"
 #include "Blk.HC"
-#include "DskA.HH"
 #include "DskStrA.HC"
 #include "DskCache.HC"
 #include "DskDrv.HC"
@@ -72,8 +95,10 @@ U0 KMain(U8 *image_end, U8 *dt)
         while (TRUE) {}
     FdtHeap(image_end, dt, &heap_start, &heap_end);
     MemInit(heap_start, heap_end);
+    KDateInit;
     FbInit;
     "coolcom kernel\n";
+    "%D %T\n", Now, Now;
     "heap: %p..%p (%d MB)\n", sys_heap.start, sys_heap.end, (sys_heap.end - sys_heap.start) >> 20;
     KTest;
     IntcInit;

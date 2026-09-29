@@ -3,8 +3,6 @@
 //
 // Changes from the original:
 // - no exceptions (the kernel has none yet): failures print and return;
-// - dates are raw FAT timestamps (DskA.HH CDate) and new entries get a fixed
-//   one, as there is no real-time clock;
 // - names compare case-insensitively, as FAT requires, and short names show
 //   the NT lower-case flags other systems set (mtools, Windows);
 // - FATNameTo keeps the 8.3 short name within 11 bytes, FAT32FilesDel passes
@@ -19,22 +17,31 @@ extern Bool Cd(U8 *dirname = NULL, Bool make_dirs = FALSE);
 extern U0 DirEntryDel(CDirEntry *tmpde);
 extern I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0);
 
-#define FAT_DFT_DATETIME 0x5C216000  // 2026-01-01 12:00:00
-
-CDate Now()
-{//No real-time clock yet.
-    return FAT_DFT_DATETIME;
-}
+// NTres bits (Windows NT): the short name's base or extension is lower case.
+#define FAT_NT_LOWER_BASE 0x08
+#define FAT_NT_LOWER_EXT  0x10
 
 U0 CDate2Dos(U16 *t, U16 *d, CDate cdt)
 {
-    *d = cdt >> 16 & 0xFFFF;
-    *t = cdt & 0xFFFF;
+    CDateStruct ds;
+    Date2Struct(&ds, cdt);
+    *d = ds.day_of_mon + (ds.mon + (ds.year - 1980) << 4) << 5;
+    *t = ds.sec >> 1 + (ds.min + ds.hour << 6) << 5;
 }
 
 CDate Dos2CDate(U16 t, U16 d)
 {
-    return d << 16 | t;
+    CDateStruct ds;
+    MemSet(&ds, 0, sizeof(CDateStruct));
+    ds.day_of_mon = d & 0x1F;
+    d = d >> 5;
+    ds.mon = d & 0xF;
+    ds.year = d >> 4 + 1980;
+    ds.sec = (t & 0x1F) * 2;
+    t = t >> 5;
+    ds.min = t & 0x3F;
+    ds.hour = t >> 6;
+    return Struct2Date(&ds);
 }
 
 Bool FAT32Init(CDrv *dv)

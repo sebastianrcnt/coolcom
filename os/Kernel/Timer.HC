@@ -6,7 +6,7 @@ I64 jiffies;
 
 U0 TimerFiq()
 {//Derive jiffies from the counter so late interrupts don't make time drift.
-    jiffies = (ArchCntVct - cnt_start) / cnts_per_jiffy;
+    cnts.jiffies = jiffies = (ArchCntVct - cnt_start) / cnts_per_jiffy;
     ArchCntvCvalSet(cnt_start + (jiffies + 1) * cnts_per_jiffy);
 }
 

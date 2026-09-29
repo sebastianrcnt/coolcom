@@ -27,6 +27,7 @@ CDrv *DskDrvAdd(I64 unit, I64 offset, I64 size, I64 prt_num)
     dv->size = size;
     dv->prt_num = prt_num;
     dv->dv_signature = DRV_SIGNATURE_VAL;
+    dv->fat32_local_time_offset = local_time_offset;  // FAT stores local time
     blkdev.let_to_drv[drv_let - 'A'] = dv;
     if (!FAT32Init(dv)) {
         blkdev.let_to_drv[drv_let - 'A'] = NULL;
