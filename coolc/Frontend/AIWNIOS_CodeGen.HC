@@ -1003,7 +1003,9 @@ re_number:;
                         if (I64SetHas(graph->connects[tmp], tmp2)) {
                             if (tmp != tmp2) {
                                 color = coloring->colors[tmp2];
-                                canidates[color] = FALSE;
+                                // Uncolored/spilled neighbors have no register to exclude.
+                                if (color != -1)
+                                    canidates[color] = FALSE;
                             }
                         }
                     }
