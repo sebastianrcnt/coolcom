@@ -12,7 +12,7 @@ _start:
   .word 0
   .quad 0                    // text_offset: loaded at the chosen image base
   .quad image_end - _start   // image_size includes BSS and boot stacks
-  .quad 8                    // 16K pages in the Image flags
+  .quad (2 << 1) | (1 << 3)  // flags: 16K pages (bits 1-2 = 2), any 2 MiB-aligned base (bit 3)
   .quad 0
   .quad 0
   .quad 0
