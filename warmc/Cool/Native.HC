@@ -1,6 +1,7 @@
 // Host services only; Warm.HC can also be included in the kernel shell.
 #define U8 U8i
 #define I64 I64i
+#define U64 U64i
 #define Bool I8i
 #define TRUE 1
 #define FALSE 0
@@ -17,6 +18,7 @@ import I64 NativeArgCount();
 import U8 *NativeArg(I64 index);
 import U0 NativeExit(I64 code);
 #include "Warm.HC"
+#include "../../build/warmcool/Builtins.HC"
 U0 WDiagnostic(CWUnit *u)
 {
     CWToken *t = u->error_token;
@@ -41,8 +43,8 @@ U0 WDump(CWNode *n, I64 indent)
 I64 WNativeMain()
 {
     CWUnit *u = WNew();
-    U8 *arg, *source;
-    I64 i, size, n, code = 0;
+    U8 *arg, *source, *part;
+    I64 i, j, start, size, n, code = 0;
     Bool dump = FALSE, parse = FALSE;
     CWNode *m;
     for (i = 1; i < NativeArgCount(); i++) {
@@ -52,14 +54,20 @@ I64 WNativeMain()
         else if (WEq(arg, "compile")) {}
         else if (WPrefix(arg, "--")) {}
         else {
-            source = FileRead(arg, &size);
-            if (!source) {WFail(u, NULL, "Command Line Arguments Error", "Cannot read input file"); break;}
-            n = StrLen(arg); WParse(u, arg, source, !(n >= 4 && WEq(arg + n - 4, ".aui"))); Free(source);
+            start = 0; n = StrLen(arg);
+            for (j = 0; j <= n; j++) if (arg[j] == ',' || !arg[j]) {
+                    part = WText(u, arg + start, j - start); start = j + 1;
+                    source = FileRead(part, &size);
+                    if (!source) {WFail(u, NULL, "Command Line Arguments Error", "Cannot read input file"); break;}
+                    size = StrLen(part); WParse(u, part, source, !(size >= 4 && WEq(part + size - 4, ".aui"))); Free(source);
+                    if (u->error_kind) break;
+                }
             if (u->error_kind) break;
         }
     }
     if (!u->modules && !u->error_kind) WFail(u, NULL, "Command Line Arguments Error", "No input files");
     if (!u->error_kind && dump) for (m = u->modules; m; m = m->next) WDump(m, 0);
+    if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u);}
     if (!u->error_kind && !parse && !dump) WFail(u, u->modules->token, "Unsupported Feature", "Semantic compilation is not implemented yet");
     if (u->error_kind) {WDiagnostic(u); code = 1;}
     WDestroy(u); return code;

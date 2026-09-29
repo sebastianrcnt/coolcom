@@ -36,3 +36,9 @@ and successful silent programs, and exits nonzero on any failure. Runtime
 results are compared to OCaml's C backend and the recorded fixture; expected
 errors require agreement between the recorded kind, OCaml, and Cool. Crashes,
 missing output, timeout, and unsupported features are failures.
+
+Second checkpoint: module/declaration indexing, interface/body pairs, public
+imports and aliases, implicit Pervasive scope, lexical bindings, nominal type
+identity, substitutions and integer range helpers. The first name-resolution
+comparison reached **9/296** (all nine expected-error cases; no runtime passes).
+Type/linearity/code generation are not claimed by that count.

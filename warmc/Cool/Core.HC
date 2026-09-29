@@ -6,7 +6,7 @@ class CWNode {
     CWNode *next, *first, *last;
     CWToken *token, *finish;
     U8 *tag, *name, *role;
-    CWNode *resolved, *ty;
+    CWNode *resolved, *ty, *owner, *scope, *pair;
     I64 flags;
 };
 class CWUnit {

@@ -1,3 +1,5 @@
 #include "Core.HC"
 #include "Lexer.HC"
 #include "Parser.HC"
+#include "Resolve.HC"
+#include "Types.HC"
