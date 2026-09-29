@@ -2,6 +2,8 @@ extern U0 ConsPutCp(I64 cp);
 // Task-bound ANSI terminals. Shells run cooperatively on core 0; inherited
 // terminal references and cell/input locks also support worker tasks on other cores.
 // Screen cells are independent of the physical framebuffer and UART.
+// A cell color is an Ansi.HC color: 0..15 the ANSI colors, 16..255 the xterm palette,
+// ANSI_RGB_FLAG | 0xRRGGBB a 24-bit color.
 class CVtCell
 {
     I64 cp, fg, bg, width;
@@ -9,8 +11,10 @@ class CVtCell
 class CVTerm
 {
     I64 cols, rows, cx, cy, fg, bg, bold;
-    I64 esc, csi_n, csi_val[8], csi_private, u8_left, u8_cp;
+    I64 esc, csi_n, csi_val[16], csi_private, u8_left, u8_cp;
     I64 saved_cx, saved_cy, saved_fg, saved_bg, saved_bold, alternate;
+    I64 sv_cx, sv_cy, sv_fg, sv_bg, sv_bold; // ESC 7 / CSI s
+    Bool sv_reverse;
     Bool reverse, saved_reverse;
     CVtCell *cells, *saved;
     I64 keys[256], head, tail;
@@ -116,7 +120,27 @@ U0 VtCsi(CVTerm *v, U8 c)
                 else if (n >= 40 && n <= 47) v->bg = (n - 40);
                 else if (n >= 90 && n <= 97) v->fg = (n - 90 + 8);
                 else if (n >= 100 && n <= 107) v->bg = (n - 100 + 8);
+                else if (n == 38 || n == 48) {
+                    // 38;5;N (palette) or 38;2;R;G;B (24-bit); 48 is the background.
+                    if (i + 2 <= v->csi_n && v->csi_val[i + 1] == 5) {
+                        x = v->csi_val[i + 2] & 255;
+                        i += 2;
+                    } else if (i + 4 <= v->csi_n && v->csi_val[i + 1] == 2) {
+                        x = ANSI_RGB_FLAG | ((v->csi_val[i + 2] & 255) << 16) | ((v->csi_val[i + 3] & 255) << 8) | (v->csi_val[i + 4] & 255);
+                        i += 4;
+                    } else break;
+                    if (n == 38) v->fg = x;
+                    else v->bg = x;
+                }
             }
+            break;
+        case 's':
+            v->sv_cx = v->cx; v->sv_cy = v->cy; v->sv_fg = v->fg; v->sv_bg = v->bg;
+            v->sv_bold = v->bold; v->sv_reverse = v->reverse;
+            break;
+        case 'u':
+            v->cx = v->sv_cx; v->cy = v->sv_cy; v->fg = v->sv_fg; v->bg = v->sv_bg;
+            v->bold = v->sv_bold; v->reverse = v->sv_reverse;
             break;
         case 'H': case 'f':
             v->cy = VtParam(v, 0, 1) - 1;
@@ -161,14 +185,18 @@ U0 VtPut(CVTerm *v, U8 c)
         if (c == '[') {
             v->esc = 2;
             v->csi_n = v->csi_private = 0;
-            MemSet(v->csi_val, 0, 64);
+            MemSet(v->csi_val, 0, 16 * sizeof(I64));
+        } else if (c == '7') {
+            v->csi_n = v->csi_private = 0; VtCsi(v, 's');
+        } else if (c == '8') {
+            v->csi_n = v->csi_private = 0; VtCsi(v, 'u');
         }
         return;
     }
     if (v->esc == 2) {
         if (c == '?' && !v->csi_n && !v->csi_val[0]) v->csi_private = TRUE;
         else if (c >= '0' && c <= '9') v->csi_val[v->csi_n] = v->csi_val[v->csi_n] * 10 + c - '0';
-        else if (c == ';' && v->csi_n < 7) v->csi_n++;
+        else if (c == ';' && v->csi_n < 15) v->csi_n++;
         else {v->esc = 0; VtCsi(v, c);}
         return;
     }
@@ -285,7 +313,8 @@ I64 VtKeyPop()
 // its parent terminal too. SGR is reset at every row boundary.
 U0 VtDraw(CVTerm *v, I64 left, I64 top)
 {
-    I64 x, y, fg = -1, bg = -1, f, b;
+    I64 x, y, fg = -1, bg = -1;
+    U8 sgr[96];
     CVtCell *p;
     CVTerm snapshot;
     I64 daif = SpinLockIrq(&v->lock);
@@ -304,9 +333,8 @@ U0 VtDraw(CVTerm *v, I64 left, I64 top)
             if (p->width) {
                 if (p->fg != fg || p->bg != bg) {
                     fg = p->fg; bg = p->bg;
-                    f = 30 + fg; if (fg >= 8) f = 90 + fg - 8;
-                    b = 40 + bg; if (bg >= 8) b = 100 + bg - 8;
-                    Print("\x1b[%d;%dm", f, b);
+                    AnsiSetS(sgr, fg, bg);
+                    ConsPutS(sgr);
                 }
                 ConsPutCp(p->cp);
             }
@@ -345,4 +373,21 @@ U0 VtStop(CVTerm *v)
         }
         SpinUnlockIrq(&c->lock, daif);
     }
+}
+
+Bool AnsiTermSize(I64 *rows, I64 *cols)
+{//The size of the current task's terminal. FALSE (and 24x80) if it has none, e.g. UART only.
+    if (VtCurrent) {
+        *rows = VtCurrent->rows;
+        *cols = VtCurrent->cols;
+        return TRUE;
+    }
+    if (fb.base) {
+        *rows = fb.rows;
+        *cols = fb.cols;
+        return TRUE;
+    }
+    *rows = 24;
+    *cols = 80;
+    return FALSE;
 }

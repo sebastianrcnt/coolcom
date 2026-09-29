@@ -542,11 +542,8 @@ Bool VimNormal(I64 c)
 
 I64 VimPageRows()
 {//Text rows on screen: all rows minus the status line.
-    I64 rows = 24;
-    if (VtCurrent)
-        rows = VtCurrent->rows;
-    else if (fb.base)
-        rows = fb.rows;
+    I64 rows, cols;
+    AnsiTermSize(&rows, &cols);
     return rows - 1;
 }
 
@@ -660,18 +657,6 @@ done:
     return quit;
 }
 
-U0 VimPutNum(I64 n)
-{
-    U8 b[32];
-    StrPrint(b, "%d", n);
-    ConsPutS(b);
-}
-
-U0 VimCsi(I64 row, I64 col)
-{
-    ConsPutS("\x1b["); VimPutNum(row); ConsPut(';'); VimPutNum(col); ConsPut('H');
-}
-
 // Render only printable text: a file cannot inject terminal control sequences.
 U0 VimText(U8 *s, I64 limit)
 {
@@ -698,23 +683,22 @@ I64 VimTokenColor(I64 p)
     p = a;
     while (p < vim_len && VimClass(p) == 1) p = VimStep(p);
     n = p - a;
-    if (n > 76) return 37;
+    if (n > 76) return ANSI_WHITE;
     word[0] = '|';
     MemCpy(word + 1, vim_buf + a, n);
     word[n + 1] = '|'; word[n + 2] = 0;
-    if (StrMatch(word, "|if|else|for|while|do|switch|case|break|return|goto|class|union|extern|import|public|sizeof|try|catch|throw|")) return 35;
-    if (StrMatch(word, "|U0|U8|U16|U32|U64|I8|I16|I32|I64|F64|Bool|TRUE|FALSE|NULL|")) return 36;
-    if (vim_buf[a] >= '0' && vim_buf[a] <= '9') return 33;
-    return 37;
+    if (StrMatch(word, "|if|else|for|while|do|switch|case|break|return|goto|class|union|extern|import|public|sizeof|try|catch|throw|")) return ANSI_MAGENTA;
+    if (StrMatch(word, "|U0|U8|U16|U32|U64|I8|I16|I32|I64|F64|Bool|TRUE|FALSE|NULL|")) return ANSI_CYAN;
+    if (vim_buf[a] >= '0' && vim_buf[a] <= '9') return ANSI_YELLOW;
+    return ANSI_WHITE;
 }
 
 U0 VimDraw()
 {
-    I64 rows = 24, cols = 80, p, q, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
-    I64 color, quote, comment, cp, i, token_end = 0, token_color = 37;
+    I64 rows, cols, p, q, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
+    I64 color, quote, comment, cp, i, token_end = 0, token_color = ANSI_WHITE;
     U8 number[32], status[512];
-    if (VtCurrent) {rows = VtCurrent->rows; cols = VtCurrent->cols;}
-    else if (fb.base) {rows = fb.rows; cols = fb.cols;}
+    AnsiTermSize(&rows, &cols);
     if (rows < 3 || cols < 12) return;
     if (vim_mode >= 3) VimRange(&a, &b);
     if (vim_top > VimLine(vim_pos)) vim_top = VimLine(vim_pos);
@@ -738,23 +722,23 @@ U0 VimDraw()
         else if (vim_buf[i] == '/' && vim_buf[i + 1] == '/') comment = 1;
     }
     for (y = 1; y < rows; y++) {
-        VimCsi(y, 1); ConsPutS("\x1b[0m\x1b[K");
-        if (p > VimLastLine()) {ConsPutS("\x1b[90m~");}
+        AnsiCursor(y, 1); AnsiReset; AnsiClearEol;
+        if (p > VimLastLine()) {AnsiFg(ANSI_GRAY); ConsPut('~');}
         else {
             if (VimLine(vim_pos) == p) row = y;
             StrPrint(number, "%5d ", line++);
-            ConsPutS("\x1b[90m"); ConsPutS(number);
+            AnsiFg(ANSI_GRAY); ConsPutS(number);
             q = VimEnd(p); x = 0; quote = 0;
             while (p < q) {
                 k = VimStep(p) - p; w = VimWidth(p, x);
                 cp = Utf8Cp(vim_buf + p, k);
-                color = 37;
+                color = ANSI_WHITE;
                 if (!comment && !quote && cp == '/' && p + 1 < q) {
                     if (vim_buf[p + 1] == '/') comment = 1;
                     if (vim_buf[p + 1] == '*') comment = 2;
                 }
-                if (comment) color = 90;
-                else if (quote || cp == '"' || cp == 39) color = 32;
+                if (comment) color = ANSI_GRAY;
+                else if (quote || cp == '"' || cp == 39) color = ANSI_GREEN;
                 else if (VimClass(p) == 1) {
                     if (p >= token_end) {
                         token_color = VimTokenColor(p); token_end = p;
@@ -762,11 +746,10 @@ U0 VimDraw()
                     }
                     color = token_color;
                 }
-                else if (cp == '#') color = 35;
+                else if (cp == '#') color = ANSI_MAGENTA;
                 if (x >= vim_left && x + w <= vim_left + cols - 7) {
-                    ConsPutS("\x1b[0;"); VimPutNum(color);
-                    if (p >= a && p < b) ConsPutS(";44");
-                    ConsPut('m');
+                    if (p >= a && p < b) AnsiSet(color, ANSI_BLUE);
+                    else AnsiSet(color);
                     if (cp == '\t') {for (i = 0; i < w; i++) ConsPut(' ');}
                     else if (cp < 32 || cp == 127) ConsPut('?');
                     else {for (i = 0; i < k; i++) ConsPut(vim_buf[p + i]);}
@@ -782,10 +765,10 @@ U0 VimDraw()
             p = q + 1;
         }
     }
-    VimCsi(rows, 1); ConsPutS("\x1b[0;30;47m\x1b[K");
+    AnsiCursor(rows, 1); AnsiSet(ANSI_BLACK, ANSI_WHITE); AnsiClearEol;
     if (vim_mode == 2) {
         ConsPut(vim_prompt); VimText(vim_cmd, cols - 2);
-        VimCsi(rows, 2 + LineWidth(vim_cmd, 0, vim_cmd_n));
+        AnsiCursor(rows, 2 + LineWidth(vim_cmd, 0, vim_cmd_n));
     } else {
         if (vim_mode == 1) StrCpy(status, "INSERT");
         else if (vim_mode == 3) StrCpy(status, "VISUAL");
@@ -795,16 +778,16 @@ U0 VimDraw()
         if (vim_dirty) StrCat(status, " [+]");
         StrCat(status, "  "); StrCat(status, vim_msg);
         VimText(status, cols - 1);
-        VimCsi(row, 7 + col - vim_left);
+        AnsiCursor(row, 7 + col - vim_left);
     }
-    ConsPutS("\x1b[0m");
+    AnsiReset;
 }
 
 U0 VimClose()
 {
     if (!vim_active) return;
     vim_active = FALSE;
-    ConsPutS("\x1b[0m\x1b[?25h\x1b[?1049l");
+    AnsiReset; AnsiCursorShow; AnsiAltScreen(FALSE);
     Free(vim_buf); Free(vim_saved); Free(vim_yank); Free(vim_hist);
     vim_buf = vim_saved = vim_yank = vim_hist = NULL;
     shell_stmt_cleanup = NULL;
@@ -822,7 +805,7 @@ Bool VimOpen(U8 *name)
     vim_record = vim_kn = vim_dn = vim_replay = vim_yank_len = 0;
     vim_search[0] = 0; vim_search_dir = 1; vim_goal = -1; vim_msg = "";
     if (!VimLoad(name)) {Print("Vim: %s\n", vim_msg); VimClose(); return FALSE;}
-    ConsPutS("\x1b[?1049h\x1b[?25h");
+    AnsiAltScreen(TRUE); AnsiCursorShow;
     return TRUE;
 }
 

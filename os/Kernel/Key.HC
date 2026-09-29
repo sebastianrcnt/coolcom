@@ -322,8 +322,8 @@ U0 HistAdd(U8 *line)
 }
 
 // The line is UTF-8 in b[0..n); pos is a byte offset on a character boundary.
-// The screen is kept in step with ConsPut(8) (backspace) and reprinting
-// characters, which both the UART terminal and the framebuffer understand.
+// The screen is kept in step with Ansi.HC's cursor-left and erase-to-end-of-line and
+// with reprinting characters, which the UART terminal and the framebuffer understand.
 I64 LineWidth(U8 *b, I64 from, I64 to)
 {//Terminal columns of b[from..to).
     I64 w = 0, k;
@@ -364,14 +364,7 @@ U0 LineOut(U8 *b, I64 from, I64 to)
 
 U0 LineBack(I64 cols)
 {
-    while (cols-- > 0)
-        ConsPut(8);
-}
-
-U0 LineBlank(I64 cols)
-{
-    while (cols-- > 0)
-        ConsPut(' ');
+    AnsiLeft(cols);
 }
 
 U0 LineSet(U8 *b, I64 size, I64 *_n, I64 *_pos, U8 *s)
@@ -380,8 +373,7 @@ U0 LineSet(U8 *b, I64 size, I64 *_n, I64 *_pos, U8 *s)
     LineOut(b, *_pos, *_n);
     w = LineWidth(b, 0, *_n);
     LineBack(w);
-    LineBlank(w);
-    LineBack(w);
+    AnsiClearEol;
     *_n = StrLen(s);
     if (*_n > size - 1)
         *_n = size - 1;
@@ -416,8 +408,8 @@ U0 LineDelete(U8 *b, I64 *_n, I64 *_pos, I64 from, I64 to)
     if (from < *_pos)  // backspace: the cursor moves back over it first
         LineBack(w);
     LineOut(b, from, n);
-    LineBlank(w);
-    LineBack(LineWidth(b, from, n) + w);
+    AnsiClearEol;
+    LineBack(LineWidth(b, from, n));
     *_n = n;
     *_pos = from;
 }
