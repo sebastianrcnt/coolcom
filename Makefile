@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel seed
+.PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -23,6 +23,12 @@ seed: build/coolc
 	cp build/seed2.BIN coolc/seed/Compiler.BIN
 	@echo "seed updated (commit coolc/seed/Compiler.BIN)"
 
+# Regenerate the console font blob from GNU Unifont's .hex source (downloaded
+# into the gitignored vendor/unifont). The generated os/Kernel/Unifont.BIN is
+# committed, so a normal build needs neither the download nor Python here.
+font:
+	python3 tools/mkfont.py "$$(tools/vendor-unifont.sh | tail -1)" os/Kernel/Unifont.BIN
+
 # B is the build directory, IMAGE_BASE the link address (module = +2 MiB). Only
 # `make reloc-check` changes them, to build a second Image at another base.
 B ?= build
@@ -39,12 +45,14 @@ build/hcfmt.BIN: coolc/Fmt/Native.HC coolc/Fmt/HCFmt.HC coolc/seed/Compiler.BIN 
 
 # -q keeps relocations in the ELF for tools/reloc-check.py.
 LD := aarch64-elf-ld --no-warn-rwx-segments -q -T os/Kernel/Kernel.ld --defsym IMAGE_BASE=$(IMAGE_BASE) --defsym MODULE_BASE=$(MODULE_BASE)
-ASM_OBJS := $(B)/Boot.o $(B)/Arch.o $(B)/Blob.o
+ASM_OBJS := $(B)/Boot.o $(B)/Arch.o $(B)/Blob.o $(B)/FontData.o
 
 $(B)/%.o: os/Kernel/%.S os/Kernel/Asm.h | $(B)
 	aarch64-elf-gcc -c $< -o $@
 # Blob.S embeds the compiler seed and the shell prelude (.incbin).
 $(B)/Blob.o: coolc/seed/Compiler.BIN build/ShellPrelude.HH
+# FontData.S embeds the console font (os/Kernel/Unifont.BIN, made by `make font`).
+$(B)/FontData.o: os/Kernel/Unifont.BIN
 build/ShellPrelude.HH: $(KSRC) tools/mkprelude.py | build
 	python3 tools/mkprelude.py os/Kernel/Kernel.HC > $@
 

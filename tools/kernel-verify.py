@@ -3,6 +3,7 @@
 
   kernel-verify.py prepare DIR   write DIR/disk.img, DIR/fat.img and DIR/input.txt for coolvm
   kernel-verify.py verify DIR    check DIR/screen.png (640x480), DIR/disk.img and DIR/fat.img afterwards
+  kernel-verify.py verify-shell DIR   check DIR/shell.png from a boot fed DIR/shell.in on the UART
 
 Disk: 128 sectors, sector s byte j = (s*31 + j*7) & 255. The kernel overwrites
 sectors 9 and 10 with byte j (0..1023) = (j*3 + 17) & 255.
@@ -14,8 +15,11 @@ Input: mouse +5,-3, wheel +2, left button down, then the keys
 h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
 SHELL lines (the shell's output is checked by kernel-test.sh). A BREAK entry is
 "delay MS" then Ctrl+Alt+C, typed once the shell is running the line before it.
-Screen: rows 0..3 of 8x8 TempleOS-font text (white on black), color bars at
-y=80, a gray ramp at y=128.
+Shell UART: a plain shell boot is fed a Korean line (UTF-8, with a Hangul typed and deleted
+by DEL): the screenshot must show it echoed and then printed, as Unifont wide glyphs.
+Screen: rows 0..4 of Unifont text (8x16 cells, wide glyphs two cells, white on
+black; row 4 has Hangul and CJK), color bars at y=112, a gray ramp at y=160.
+The glyphs come from os/Kernel/Unifont.BIN (layout in tools/mkfont.py).
 """
 import pathlib
 import re
@@ -77,6 +81,8 @@ for first, lo, up in ((2, "1234567890-=", "!@#$%^&*()_+"), (16, "qwertyuiop[]", 
         KEYS[b] = (first + i, True)
 LSHIFT, ENTER = 42, 28
 LCTRL, LALT, KEY_C = 29, 56, 46
+SHELL_KO_IN = ('Print("한글 테스트 마\x7f\\n");\r').encode()  # the Hangul 마 is deleted again
+SCREEN_KO = "한글 테스트 漢字 Ünï"  # printed by DevTestScreen
 
 
 def keys_of(code):
@@ -153,13 +159,35 @@ def prepare(d):
         else:
             text += typed(line)
     (d / "input.txt").write_text(text)
+    (d / "shell.in").write_bytes(SHELL_KO_IN)
 
 
 def load_font():
-    text = (ROOT / "boot/uefi-probe/font8x8.h").read_text()
-    vals = [int(v, 16) for v in re.findall(r"0x([0-9A-Fa-f]{16})ULL", text)]
-    assert len(vals) == 256
-    return vals
+    """{code point: (cells, 16 rows as ints, MSB = leftmost pixel)} from os/Kernel/Unifont.BIN."""
+    blob = (ROOT / "os/Kernel/Unifont.BIN").read_bytes()
+    (nruns,) = struct.unpack_from("<I", blob)
+    font = {}
+    for i in range(nruns):
+        first, count, off = struct.unpack_from("<III", blob, 4 + 12 * i)
+        cells, count = count >> 24, count & 0xFFFFFF
+        for k in range(count):
+            g = blob[off + k * 16 * cells:off + (k + 1) * 16 * cells]
+            font[first + k] = (cells, [int.from_bytes(g[r * cells:(r + 1) * cells], "big") for r in range(16)])
+    return font
+
+
+def draw_text(font, text, cols):
+    """Rows of pixel bits (True = foreground) for one text line, padded with blanks to cols cells."""
+    rows = [[] for _ in range(16)]
+    n = 0
+    for ch in text:
+        cells, g = font[ord(ch)]
+        for r in range(16):
+            rows[r] += [bool(g[r] >> (8 * cells - 1 - x) & 1) for x in range(8 * cells)]
+        n += cells
+    for r in range(16):
+        rows[r] += [False] * (8 * (cols - n))
+    return rows
 
 
 def read_png(path):
@@ -206,37 +234,50 @@ def read_png(path):
     return width, height, rows
 
 
-def verify(d):
-    width, height, rows = read_png(d / "screen.png")
+def screen_of(d, name):
+    width, height, rows = read_png(d / name)
     assert (width, height) == (W, H), f"screenshot is {width}x{height}"
-    font = load_font()
 
     def px(x, y):
         return tuple(rows[y][3 * x:3 * x + 3])
+
+    return px
+
+
+def text_row_matches(px, font, r, text):
+    """Is text row r (16 pixels tall) exactly the Unifont rendering of text, blank after it?"""
+    return all(px(x, r * 16 + y) == ((255, 255, 255) if on else (0, 0, 0))
+               for y, bits in enumerate(draw_text(font, text, W // 8)) for x, on in enumerate(bits))
+
+
+def verify_shell(d):
+    px, font = screen_of(d, "shell.png"), load_font()
+    echo, out = '> Print("한글 테스트 \\n");', "한글 테스트"
+    hits = [r for r in range(H // 16 - 1)
+            if text_row_matches(px, font, r, echo) and text_row_matches(px, font, r + 1, out)]
+    assert len(hits) == 1, f"the typed Korean line and its output are not on the shell screen (matches: {hits})"
+    print("kernel-verify: Korean line typed at the shell shows Hangul in the screenshot")
+
+
+def verify(d):
+    px, font = screen_of(d, "screen.png"), load_font()
 
     lines = [
         "COOLCOM FB TEST",
         "input: hiA",
         f"mouse: x={W // 2 + 5} y={H // 2 - 3} b=1",
         "0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz",
+        SCREEN_KO,
     ]
     for r, text in enumerate(lines):
-        text = text.ljust(W // 8)
-        for col, ch in enumerate(text):
-            glyph = font[ord(ch)]
-            for y in range(8):
-                bits = (glyph >> (8 * y)) & 255
-                for x in range(8):
-                    want = (255, 255, 255) if (bits >> x) & 1 else (0, 0, 0)
-                    got = px(col * 8 + x, r * 8 + y)
-                    assert got == want, f"text row {r} {text.strip()!r}: pixel ({col * 8 + x},{r * 8 + y}) is {got}, want {want}"
+        assert text_row_matches(px, font, r, text), f"text row {r} {text!r} is not on the screen"
     for x0, color in ((16, (255, 0, 0)), (64, (0, 255, 0)), (112, (0, 0, 255))):
-        for y in (80, 95, 111):
+        for y in (112, 127, 143):
             for x in (x0, x0 + 31):
                 assert px(x, y) == color, f"bar at ({x},{y}) is {px(x, y)}, want {color}"
-        assert px(x0 + 32, 95) == (0, 0, 0) and px(x0, 112) == (0, 0, 0)
+        assert px(x0 + 32, 127) == (0, 0, 0) and px(x0, 144) == (0, 0, 0)
     for i in range(256):
-        for y in (128, 143):
+        for y in (160, 175):
             assert px(16 + i, y) == (i, i, i), f"ramp at {16 + i},{y}"
 
     disk = (d / "disk.img").read_bytes()
@@ -249,7 +290,7 @@ def verify(d):
     print("kernel-verify: screen text/pixels, disk contents and FAT32 files OK")
 
 
-if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] in ("prepare", "verify"):
-    {"prepare": prepare, "verify": verify}[sys.argv[1]](pathlib.Path(sys.argv[2]))
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] in ("prepare", "verify", "verify-shell"):
+    {"prepare": prepare, "verify": verify, "verify-shell": verify_shell}[sys.argv[1]](pathlib.Path(sys.argv[2]))
 else:
     sys.exit(__doc__)
