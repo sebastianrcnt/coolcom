@@ -1,0 +1,216 @@
+// Network shell tools: Dns, Ping, HttpGet (HttpFetch) and NetRep. Every kernel
+// function is in the shell prelude (tools/mkprelude.py), so these are shell
+// commands as they are: Ping("example.com"); HttpGet("http://example.com/");
+
+U8 *DnsErrStr(I64 err)
+{
+    if (err == DNS_ERR_NXDOMAIN) return "no such name";
+    if (err == DNS_ERR_TIMEOUT) return "timeout";
+    return "lookup failed";
+}
+
+I64 Dns(U8 *name)
+{//Print the IPv4 addresses of name; returns the first one or 0.
+    I64 ips[DNS_MAX_ADDRS], n, i;
+    U8 buf[16];
+    n = DnsQuery(name, ips);
+    if (n < 1) {
+        Print("%s: %s\n", name, DnsErrStr(n));
+        return 0;
+    }
+    for (i = 0; i < n; i++)
+        Print("%s has address %s\n", name, NetIpStr(buf, ips[i]));
+    return ips[0];
+}
+
+// ---- Ping ----------------------------------------------------------------
+
+I64 Ping(U8 *host, I64 cnt = 4, I64 size = 56)
+{//Send cnt ICMP echo requests, a second apart; returns the replies received.
+    I64 ip, seq, got = 0, start, deadline, daif;
+    U8 buf[16];
+    if (!DnsResolve(host, &ip)) {
+        Print("ping: cannot resolve %s\n", host);
+        return 0;
+    }
+    daif = NetLock;
+    net_ping_id = (net_ping_id + 1 + (NetRand & 0xFF)) & 0xFFFF;
+    net_ping_got_seq = -1;
+    NetUnlock(daif);
+    Print("PING %s (%s): %d data bytes\n", host, NetIpStr(buf, ip), size);
+    for (seq = 1; seq <= cnt; seq++) {
+        start = jiffies;
+        daif = NetLock;
+        IcmpEcho(ip, net_ping_id, seq, size);
+        NetUnlock(daif);
+        deadline = start + 1000;
+        while (net_ping_got_seq != seq && jiffies < deadline)
+            NetWait;
+        if (net_ping_got_seq == seq) {
+            got++;
+            Print("%d bytes from %s: icmp_seq=%d ttl=%d time=%d ms\n", net_ping_got_len,
+                    buf, seq, net_ping_got_ttl, net_ping_got_jiffy - start);
+        } else
+            Print("Request timeout for icmp_seq %d\n", seq);
+        if (seq < cnt)
+            while (jiffies < start + 1000)
+                NetWait;
+    }
+    Print("%d packets transmitted, %d received\n", cnt, got);
+    return got;
+}
+
+// ---- HTTP ----------------------------------------------------------------
+
+U8 *HttpFetch(U8 *url, I64 *_len = NULL, I64 *_status = NULL, I64 timeout_ms = 15000)
+{//GET a plain http:// URL (HTTP/1.0): the whole response, NUL-terminated (Free it), or NULL.
+    U8 host[256], *path, *p, *req, *res, buf[4096];
+    I64 port = 80, ip, n, len = 0, cap = 16384, i, deadline;
+    CTcb *t;
+    if (_len) *_len = 0;
+    if (_status) *_status = 0;
+    if (!StrNCmp(url, "http://", 7))
+        url += 7;
+    else if (StrFind("://", url)) {
+        Print("HttpGet: only http:// URLs\n");
+        return NULL;
+    }
+    i = 0;
+    while (url[i] && url[i] != '/' && url[i] != ':' && i < 255) {
+        host[i] = url[i];
+        i++;
+    }
+    host[i] = 0;
+    p = url + i;
+    if (*p == ':') {
+        port = Str2I64(p + 1, 10, &p);
+        if (port < 1 || port > 65535) {
+            Print("HttpGet: bad port\n");
+            return NULL;
+        }
+    }
+    path = p;
+    if (!*path)
+        path = "/";
+    if (!*host) {
+        Print("HttpGet: no host\n");
+        return NULL;
+    }
+    if (!DnsResolve(host, &ip)) {
+        Print("HttpGet: cannot resolve %s\n", host);
+        return NULL;
+    }
+    if (!(t = TcpConnect(ip, port))) {
+        Print("HttpGet: cannot connect to %s:%d\n", host, port);
+        return NULL;
+    }
+    req = MStrPrint("GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: coolcom\r\nConnection: close\r\n\r\n", path, host);
+    n = TcpSend(t, req, StrLen(req));
+    Free(req);
+    res = MAlloc(cap + 1);
+    deadline = jiffies + timeout_ms;
+    while (n > 0) {
+        n = TcpRecv(t, buf, 4096, MaxI64(deadline - jiffies, 0));
+        if (n <= 0)
+            break;
+        if (len + n > cap) {
+            p = MAlloc(2 * cap + n + 1);
+            MemCpy(p, res, len);
+            Free(res);
+            res = p;
+            cap = 2 * cap + n;
+        }
+        MemCpy(res + len, buf, n);
+        len += n;
+    }
+    TcpClose(t);
+    res[len] = 0;
+    if (!len) {
+        Print("HttpGet: no response (%d)\n", n);
+        Free(res);
+        return NULL;
+    }
+    if (_len) *_len = len;
+    if (_status && len > 12 && !StrNCmp(res, "HTTP/", 5) && (p = StrFind(" ", res)))
+        *_status = Str2I64(p + 1);
+    return res;
+}
+
+I64 HttpGet(U8 *url, Bool headers = FALSE)
+{//Fetch url and print the page (status line and body; all headers if headers). Body length or -1.
+    I64 len, status, blen;
+    U8 *res = HttpFetch(url, &len, &status), *body, *eol;
+    if (!res)
+        return -1;
+    body = StrFind("\r\n\r\n", res);
+    if (body)
+        body += 4;
+    else
+        body = res + len;
+    if (headers) {
+        PutS(res);
+        Free(res);
+        return len - (body - res);
+    }
+    eol = StrFind("\r\n", res);
+    if (eol && eol < body) {
+        *eol = 0;
+        Print("%s\n", res);
+    }
+    blen = len - (body - res);
+    PutS(body);
+    if (blen && body[blen - 1] != '\n')
+        PutS("\n");
+    Free(res);
+    return blen;
+}
+
+U0 NetRep()
+{//Print addresses, counters, the ARP cache and sockets.
+    U8 a[16], b[16], c[16], d[16], *out, *o;
+    I64 i, daif, lines = 0;
+    CTcb *t;
+    CUdpSock *s;
+    if (!net_nic) {
+        Print("net: no network device\n");
+        return;
+    }
+    Print("link   virtio-net %02X:%02X:%02X:%02X:%02X:%02X\n", net_mac[0], net_mac[1], net_mac[2],
+            net_mac[3], net_mac[4], net_mac[5]);
+    if (net_ip)
+        Print("inet   %s netmask %s gateway %s dns %s lease %d s\n", NetIpStr(a, net_ip),
+                NetIpStr(b, net_mask), NetIpStr(c, net_gw), NetIpStr(d, net_dns), net_lease);
+    else
+        Print("inet   (no address yet)\n");
+    Print("rx     %d frames %d bytes; tx %d frames %d bytes, %d dropped\n", net_stats.rx_frames,
+            net_stats.rx_bytes, net_stats.tx_frames, net_stats.tx_bytes, net_stats.tx_drop);
+    Print("proto  arp %d ip %d (dropped %d, bad checksum %d) icmp %d udp %d (dropped %d) loopback %d\n",
+            net_stats.arp_rx, net_stats.ip_rx, net_stats.ip_drop, net_stats.csum_bad, net_stats.icmp_rx,
+            net_stats.udp_rx, net_stats.udp_drop, net_stats.loop_pkts);
+    Print("tcp    %d segments in, %d out, %d retransmission timeouts, %d resets\n", net_stats.tcp_rx,
+            net_stats.tcp_tx, net_stats.tcp_retx, net_stats.tcp_rst);
+    // The tables change under the lock; format them there and print afterwards.
+    out = MAlloc(64 * 128);
+    o = out;
+    *o = 0;
+    daif = NetLock;
+    for (i = 0; i < NET_ARPS; i++)
+        if (net_arp[i].ip && lines++ < 64) {
+            StrPrint(o, "arp    %s at %02X:%02X:%02X:%02X:%02X:%02X\n", NetIpStr(a, net_arp[i].ip),
+                     net_arp[i].mac[0], net_arp[i].mac[1], net_arp[i].mac[2], net_arp[i].mac[3],
+                     net_arp[i].mac[4], net_arp[i].mac[5]);
+            o += StrLen(o);
+        }
+    for (t = tcp_list; t && lines++ < 64; t = t->next) {
+        StrPrint(o, "tcp    %s:%d %s:%d %s send %d recv %d\n", NetIpStr(a, t->lip), t->lport,
+                 NetIpStr(b, t->rip), t->rport, TcpStateName(t->state), t->slen, t->rlen);
+        o += StrLen(o);
+    }
+    for (s = net_udp; s && lines++ < 64; s = s->next) {
+        StrPrint(o, "udp    port %d, %d queued\n", s->port, s->cnt);
+        o += StrLen(o);
+    }
+    NetUnlock(daif);
+    PutS(out);
+    Free(out);
+}

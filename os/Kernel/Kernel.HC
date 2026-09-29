@@ -64,6 +64,7 @@
 #include "Net.HC"
 #include "NetTcp.HC"
 #include "NetApp.HC"
+#include "NetTools.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"
 #include "ShellCmp.HC"

@@ -6,8 +6,8 @@
 
 U0 DevTestNet()
 {
-    I64 i, n, got, ip, src, sport, f0 = kt_fails;
-    U8 *a, *b, buf[16];
+    I64 i, n, got, ip, src, sport, status, len, f0 = kt_fails;
+    U8 *a, *b, buf[16], *res;
     CTcb *l, *c, *s;
     CUdpSock *u1, *u2;
     if (!net_nic) {
@@ -21,14 +21,7 @@ U0 DevTestNet()
         KTFail("net: DHCP");
         return;
     }
-    net_ping_id = 0x1234;
-    i = jiffies;
-    n = NetLock;
-    IcmpEcho(net_gw, 0x1234, 7);
-    NetUnlock(n);
-    while (net_ping_got_seq != 7 && jiffies < i + 1000)
-        NetWait;
-    if (net_ping_got_seq != 7)
+    if (Ping("10.0.2.2", 1) != 1)
         KTFail("net: ping gateway");
     // UDP over loopback.
     u1 = UdpOpen(5555);
@@ -90,15 +83,16 @@ U0 DevTestNet()
         Print("net: DNS failed, host offline? external tests skipped\n");
     } else {
         Print("net: example.com is %s\n", NetIpStr(buf, ip));
-        c = TcpConnect(ip, 80);
-        if (!c || TcpSend(c, "HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n", 38) != 38 ||
-                TcpRecv(c, buf, 12, 10000) < 12 || StrNCmp(buf, "HTTP/1.1 200", 12))
+        res = HttpFetch("http://example.com/", &len, &status);
+        if (!res || status != 200 || !StrFind("Example Domain", res))
             KTFail("net: http://example.com");
         else
-            Print("net: HTTP 200 from example.com\n");
-        if (c)
-            TcpClose(c);
+            Print("net: HTTP %d, %d bytes from example.com\n", status, len);
+        Free(res);
+        if (HttpGet("http://example.com/") <= 0)
+            KTFail("net: HttpGet");
     }
+    NetRep;
     if (kt_fails == f0)
         Print("  net: PASS\n");
 }

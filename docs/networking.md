@@ -30,6 +30,7 @@ lwIP was the other option: `tools/c2hc` could transpile it. It was not used beca
 | `os/Kernel/Net.HC` | Ethernet, ARP (16-entry cache, packets wait for the reply), IPv4, ICMP echo, UDP sockets, the loopback queue, `NetPoll`/`NetWait` |
 | `os/Kernel/NetTcp.HC` | TCP and the TCP socket calls |
 | `os/Kernel/NetApp.HC` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
+| `os/Kernel/NetTools.HC` | Shell tools: `Dns`, `Ping`, `HttpGet`/`HttpFetch`, `NetRep` |
 | `os/Kernel/NetTest.HC` | `DevTestNet`, run by `DevTest` when there is a NIC |
 
 `KMain` calls `NetInit` after the secondary cores start. `NetInit` probes the FDT's `virtio,mmio`
@@ -104,6 +105,25 @@ Names and addresses (`NetApp.HC`, `Net.HC`): `DnsQuery(name, ips, max)` returns 
 `NetIpStr` convert addresses, and `Dhcp` configures the interface again. The DNS cache keeps 16
 names for their TTL.
 
+## Shell tools
+
+Every kernel function is in the shell prelude, so these are commands as they are:
+
+```
+> Dns("example.com");                 // prints every A record, returns the first address
+example.com has address 104.20.23.154
+> Ping("example.com", 2);             // cnt = 4, size = 56 by default; returns replies received
+64 bytes from 104.20.23.154: icmp_seq=1 ttl=64 time=33 ms
+> HttpGet("http://example.com/");     // prints the status line and the body; TRUE as 2nd arg: all headers
+> NetRep;                             // MAC, address, netmask, gateway, DNS, lease, counters, ARP cache, sockets
+```
+
+`HttpGet` speaks plain HTTP/1.0 (`Connection: close`, so no chunked bodies) to `http://host[:port]/path`;
+`HttpFetch(url, &len, &status)` returns the whole response instead of printing it. There is no TLS, so
+`https://` URLs are refused. Under coolvm, ICMP echo to hosts other than the gateway goes out through
+the host's unprivileged ICMP socket, so `Ping` works for outside addresses too (the TTL shown is the
+NAT's).
+
 ## Tests
 
 `tools/kernel-test.sh` boots the kernel test with `--net`, and `DevTestNet` then checks the
@@ -114,9 +134,14 @@ following:
 - UDP works over loopback.
 - TCP over loopback: listen and accept, 50,000 bytes each way (more than the receive window), an
   orderly close with end of stream on both sides, and connection refused on a closed port.
-- DNS resolves `example.com`, and a TCP connection to port 80 gets `HTTP/1.1 200` back through the
-  NAT.
+- DNS resolves `example.com`. `HttpFetch` of `http://example.com/` must return status 200 and
+  `Example Domain`, and `HttpGet` prints the page. `NetRep` output goes into the log.
 
 If the DNS lookup fails, the host is taken to be offline and the external part is skipped with
 `net: DNS failed, host offline? external tests skipped`. `COOLVM_NET_OFFLINE=1` simulates that.
-The script requires `net: loopback ok` and `  net: PASS`.
+The script requires `net: loopback ok` and `  net: PASS`. It then boots a plain shell with a NIC and
+types `NetRep;`, `Ping("10.0.2.2", 1);` and, when online, `Dns("example.com");` and
+`HttpGet("http://example.com/");`, and checks what they print.
+
+The stack was also checked by hand with a 1 MiB download (`HttpFetch` of a speed-test file). It arrived
+byte-exact over about 730 segments, with no retransmissions.
