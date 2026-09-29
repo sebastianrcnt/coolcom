@@ -299,6 +299,15 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
                 vm_stop((int)(v >> 16) & 0xff, "finisher: exit");
             else
                 ok = false;
+        } else if (wr && *offp >= FINISHER_BOOT_ADDR && *offp < FINISHER_BOOT_SIZE + 8 &&
+                   (size == 4 || (size == 8 && !(*offp & 7)))) {
+            uint64_t *r = *offp < FINISHER_BOOT_SIZE ? &g.boot_addr : &g.boot_size;
+            if (size == 8)
+                *r = *val;
+            else if (*offp & 4)
+                *r = (*r & 0xffffffffULL) | (uint64_t)(uint32_t)*val << 32;
+            else
+                *r = (*r & ~0xffffffffULL) | (uint32_t)*val;
         } else if (wr || *offp != 0) {
             ok = false;
         } else {

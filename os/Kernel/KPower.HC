@@ -1,7 +1,7 @@
 // Shutdown and Reboot. Disk writes go straight through the block cache
 // (DskCache.HC), so flushing means asking each block device to make them
 // durable (BlkFlush). Power control is coolvm's finisher (Fdt.HC): 0x5555
-// powers off, 0x7777 resets (coolvm starts again).
+// powers off, 0x7777 resets (coolvm starts again, with Reboot(image) that Image).
 // TODO real M1: power off and reset go through the SMC (m1n1 does it with the
 // "reboot"/"shutdown" SMC keys); until then these only flush and halt there.
 
@@ -34,7 +34,34 @@ U0 Shutdown()
     PowerHalt(FINISHER_POWER_OFF, "Power off.");
 }
 
-U0 Reboot()
-{//Flush the disks and restart.
+#define FINISHER_BOOT_ADDR 0x8
+#define FINISHER_BOOT_SIZE 0x10
+
+U0 Reboot(U8 *image = NULL)
+{//Flush the disks and restart. With image, a kernel Image file (MakeKernel
+    //writes C:/Kernel.Image), coolvm boots that instead: it is read into RAM
+    //and its address and size go to the finisher (VM-only, docs/kernel-rebuild.md).
+    U8 *buf;
+    I64 size;
+    if (image) {
+        if (!fdt_finisher) {
+            PrintErr("Reboot: booting a file needs coolvm's finisher\n");
+            return;
+        }
+        if (!(buf = FileRead(image, &size))) {
+            PrintErr("Reboot: cannot read %s\n", image);
+            return;
+        }
+        if (size < 64 || *(buf + 0x38)(U32 *) != 0x644D5241) {  // "ARM\x64"
+            PrintErr("Reboot: %s is not an arm64 Image\n", image);
+            Free(buf);
+            return;
+        }
+        "Booting %s (%d bytes).\n", image, size;
+        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_ADDR, buf(I64) & 0xFFFFFFFF);  // RAM is identity mapped
+        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_ADDR + 4, buf(I64) >> 32);
+        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_SIZE, size & 0xFFFFFFFF);
+        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_SIZE + 4, size >> 32);
+    }
     PowerHalt(FINISHER_RESET, "Rebooting.");
 }

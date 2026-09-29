@@ -50,7 +50,8 @@ static void usage(void)
             "  --net           attach a virtio-net NIC behind a user-mode NAT (guest 10.0.2.15, gateway 10.0.2.2)\n"
             "The optional kernel.dtb replaces the generated device tree verbatim (no fix-ups are applied).\n"
             "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n"
-            "A guest reset (finisher 0x7777) starts coolvm again with the same options, without --input-script.\n",
+            "A guest reset (finisher 0x7777) starts coolvm again with the same options, without --input-script;\n"
+            "a guest that named an Image in its RAM first (Reboot(\"C:/Kernel.Image\")) boots that instead.\n",
             MAX_CPUS, (unsigned long long)DRAM_BASE);
 }
 
@@ -126,6 +127,7 @@ int main(int argc, char **argv)
     int ndisks = 0;
     g.fb_width = 1024; g.fb_height = 768;
     bool verbose = false;
+    bool temp_kernel = false;
 
     static const struct option opts[] = {
         {"cpus", required_argument, 0, 'c'},   {"mem", required_argument, 0, 'm'},
@@ -138,6 +140,7 @@ int main(int argc, char **argv)
         {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
         {"net", no_argument, 0, 'N'},
+        {"temp-kernel", no_argument, 0, 'K'}, /* internal: the kernel file is ours to delete */
         {0, 0, 0, 0}};
     int o;
     while ((o = getopt_long(argc, argv, "h", opts, NULL)) != -1) {
@@ -155,6 +158,7 @@ int main(int argc, char **argv)
         case 'v': verbose = true; break;
         case 'H': g.headless = true; break;
         case 'N': g.net = true; break;
+        case 'K': temp_kernel = true; break;
         case 'S': g.screenshot = optarg; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
@@ -171,6 +175,7 @@ int main(int argc, char **argv)
         return 2;
     }
     const char *kernel_path = argv[optind];
+    int kernel_arg = optind;
     const char *dtb_path = argc - optind > 1 ? argv[optind + 1] : NULL;
     cpu_set_verbose(verbose);
 
@@ -386,8 +391,30 @@ int main(int argc, char **argv)
     fflush(stdout);
     if (atomic_load(&g.reset)) {
         /* Reboot: run again from scratch, without the scripted input (already typed). */
-        char **nargv = calloc(argc + 1, sizeof(char *));
+        char **nargv = calloc(argc + 2, sizeof(char *));
+        const char *next_kernel = kernel_path;
+        static char boot_path[1024];
         int n = 0;
+        if (g.boot_size) {
+            /* The guest named an Image in its RAM: save it and boot it (docs/kernel-rebuild.md). */
+            uint64_t a = g.boot_addr, sz = g.boot_size;
+            if (a < DRAM_BASE || sz < 64 || sz > g.ram_size || a - DRAM_BASE > g.ram_size - sz) {
+                LOGE("finisher: boot image 0x%llx+0x%llx is not in RAM\n", (unsigned long long)a,
+                     (unsigned long long)sz);
+                return 1;
+            }
+            const char *tmp = getenv("TMPDIR");
+            snprintf(boot_path, sizeof(boot_path), "%s/coolvm-boot-XXXXXX", tmp && *tmp ? tmp : "/tmp");
+            int fd = mkstemp(boot_path);
+            if (fd < 0 || write(fd, g.ram + (a - DRAM_BASE), sz) != (ssize_t)sz || close(fd)) {
+                perror("coolvm: boot image");
+                return 1;
+            }
+            if (temp_kernel)
+                unlink(kernel_path);
+            next_kernel = boot_path;
+            fprintf(stderr, "coolvm: guest reset, booting the %llu-byte Image it passed\n", (unsigned long long)sz);
+        }
         for (int i = 0; i < argc; i++) {
             if (!strcmp(argv[i], "--input-script") && i + 1 < argc) {
                 i++;
@@ -395,12 +422,16 @@ int main(int argc, char **argv)
             }
             if (!strncmp(argv[i], "--input-script=", 15))
                 continue;
-            nargv[n++] = argv[i];
+            if (i == kernel_arg && g.boot_size && !temp_kernel)
+                nargv[n++] = "--temp-kernel";
+            nargv[n++] = i == kernel_arg ? (char *)next_kernel : argv[i];
         }
         fprintf(stderr, "coolvm: guest reset, starting again\n");
         execv(argv[0], nargv);
         perror("coolvm: execv");
         return 1;
     }
+    if (temp_kernel)
+        unlink(kernel_path);
     return atomic_load(&g.exit_code);
 }

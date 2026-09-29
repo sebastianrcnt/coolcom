@@ -164,7 +164,8 @@ syntax-test: build/kernel.Image coolvm
 selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH
 	tools/selfhost-test.sh $<
 
-# The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image.
+# The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image,
+# and a kernel it changed and rebuilt must boot to a shell prompt through Reboot (about 6 s).
 kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm
 	tools/kernel-rebuild-test.sh $<
 
@@ -180,7 +181,7 @@ ime-test: build/kernel.Image coolvm
 top-test: build/kernel.Image coolvm
 	python3 tools/top-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

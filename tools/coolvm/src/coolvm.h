@@ -42,10 +42,16 @@
 /* VM-only "test finisher" (SiFive-test style): a write of 0x5555 powers the VM off (exit 0),
  * (code << 16) | 0x3333 exits with `code`, 0x7777 resets: coolvm starts again (re-executes
  * itself with the same arguments minus --input-script; disks keep what was written).
+ * Boot another kernel (VM-only, docs/kernel-rebuild.md): write the guest-physical address of an
+ * arm64 Image in RAM to FINISHER_BOOT_ADDR and its size to FINISHER_BOOT_SIZE (32-bit halves,
+ * low word first, or one 64-bit store), then 0x7777: coolvm saves those bytes to a temporary
+ * file and starts again with it as the kernel (later plain resets boot it again).
  * Advertised in the device tree as /soc/finisher@1ff000000; NOT present on real hardware.
  * Unlike the PSCI-style HVC it also works for guests running at EL2. */
 #define FINISHER_BASE 0x1ff000000ULL
 #define FINISHER_SIZE 0x1000ULL
+#define FINISHER_BOOT_ADDR 0x8
+#define FINISHER_BOOT_SIZE 0x10
 
 /* VM-only devices, deliberately outside the t8103 SoC MMIO window. */
 #define INPUT_BASE 0x1ff001000ULL
@@ -119,6 +125,7 @@ struct vm {
     _Atomic bool stop;
     _Atomic int exit_code;
     _Atomic bool reset;  /* finisher 0x7777: boot again once stopped (main.c) */
+    uint64_t boot_addr, boot_size; /* finisher: the Image to boot at the reset, if boot_size */
     bool trace_mmio;
     bool lenient; /* unknown MMIO reads-as-zero / writes ignored instead of fatal */
     bool strict;  /* unknown sysregs are fatal instead of injecting UNDEF */
