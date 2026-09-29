@@ -10,6 +10,17 @@ FLAG=-o
 [ "${2:-}" = "-n" ] && FLAG=-n
 cd "$ROOT"
 mmd -i "$IMG" ::Kernel ::Kernel/Runtime 2>/dev/null || true
-mcopy $FLAG -i "$IMG" os/Disk/*.HC ::
-mcopy $FLAG -i "$IMG" os/Kernel/*.HC os/Kernel/*.HH os/Kernel/*.S os/Kernel/*.h coolc/Fmt/HCTok.HC ::Kernel/
-mcopy $FLAG -i "$IMG" coolc/Runtime/*.HC ::Kernel/Runtime/
+# put SRC... DIR: copy each file into ::DIR; with -n, leave existing files alone.
+# (mcopy -n / -D s exit non-zero when they skip a file, so check first.)
+put() {
+    dir=$1; shift
+    for f in "$@"; do
+        if [ "$FLAG" = -n ] && mdir -i "$IMG" "::$dir$(basename "$f")" >/dev/null 2>&1; then
+            continue
+        fi
+        mcopy -o -i "$IMG" "$f" "::$dir"
+    done
+}
+put "" os/Disk/*.HC
+put Kernel/ os/Kernel/*.HC os/Kernel/*.HH os/Kernel/*.S os/Kernel/*.h coolc/Fmt/HCTok.HC
+put Kernel/Runtime/ coolc/Runtime/*.HC
