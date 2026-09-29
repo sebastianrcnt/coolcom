@@ -15,13 +15,29 @@ $(AIWBIN):
 build/Kernel.BIN: $(KSRC) $(AIWBIN) | build
 	tools/aiwcc.sh os/Kernel Kernel.HC $@
 
-build/kernel.raw build/syms.ld: build/Kernel.BIN tools/binlink.py
-	python3 tools/binlink.py $< build/kernel.raw build/syms.ld
+LD := aarch64-elf-ld --no-warn-rwx-segments -T os/Kernel/Kernel.ld
+ASM_OBJS := build/Boot.o build/Arch.o
 
-build/cool.elf: build/kernel.raw os/Kernel/Boot.S os/Kernel/Kernel.ld tools/Kernel.S
-	aarch64-elf-gcc -c os/Kernel/Boot.S -o build/Boot.o
+build/%.o: os/Kernel/%.S | build
+	aarch64-elf-gcc -c $< -o $@
+
+# Pass 1: link the assembly alone (HolyC symbols unresolved) to learn where its
+# routines land; the addresses don't depend on the HolyC module.
+build/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
+	mkdir -p build/pre
+	echo 'KBSS_END = 0x40100000;' > build/pre/syms.ld
+	$(LD) --unresolved-symbols=ignore-all build/pre/syms.ld $(ASM_OBJS) -o build/pre/arch.elf
+	aarch64-elf-nm build/pre/arch.elf | grep ' [Tt] ' > $@
+
+build/kernel.raw build/syms.ld: build/Kernel.BIN build/arch.syms tools/binlink.py
+	python3 tools/binlink.py $< build/kernel.raw build/syms.ld build/arch.syms
+
+# Pass 2: the real link; check the assembly didn't move.
+build/cool.elf: build/kernel.raw build/syms.ld $(ASM_OBJS) tools/Kernel.S
 	aarch64-elf-as tools/Kernel.S -o build/Kernel.o
-	aarch64-elf-ld --no-warn-rwx-segments -T os/Kernel/Kernel.ld build/Boot.o build/Kernel.o -o $@
+	$(LD) build/syms.ld $(ASM_OBJS) build/Kernel.o -o $@
+	aarch64-elf-nm build/cool.elf | grep -F -f build/arch.syms | cmp -s - build/arch.syms \
+	  || { echo "assembly symbols moved between link passes"; rm -f $@; exit 1; }
 
 run: build/cool.elf
 	$(QEMU) -kernel $<

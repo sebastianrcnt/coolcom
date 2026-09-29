@@ -1,10 +1,9 @@
 // Boot stub: bring the CPU to a sane EL1 state, then jump into HolyC KMain.
 //  - drop from EL2 to EL1 if needed
 //  - enable FP/SIMD (HolyC F64 code uses it)
-//  - install exception vectors that dump ESR/ELR/FAR over the UART
+//  - install the exception vectors (Arch.S)
 //  - identity-map RAM + devices and turn on the MMU and caches
 
-#define UART_BASE 0x09000000
 #define RAM_END   0x80000000 // QEMU virt, 1GB at 0x40000000
 
 // MAIR attribute indices
@@ -52,7 +51,7 @@ _start:
   msr cpacr_el1, x0
   isb
 
-  adr x0, vectors
+  ldr x0, =vectors
   msr vbar_el1, x0
   isb
 
@@ -123,86 +122,6 @@ mmu_on:
   msr sctlr_el1, x1
   isb
   ret
-
-// Exception vectors: every entry is fatal for now, report and hang.
-.macro VEC n
-  .balign 0x80
-  mov x19, #\n
-  b except_fatal
-.endm
-
-.balign 0x800
-vectors:
-  VEC 0  // current EL, SP0: sync
-  VEC 1  //   irq
-  VEC 2  //   fiq
-  VEC 3  //   serror
-  VEC 4  // current EL, SPx: sync
-  VEC 5  //   irq
-  VEC 6  //   fiq
-  VEC 7  //   serror
-  VEC 8  // lower EL, AArch64
-  VEC 9
-  VEC 10
-  VEC 11
-  VEC 12 // lower EL, AArch32
-  VEC 13
-  VEC 14
-  VEC 15
-
-except_fatal:
-  adr x0, str_exc
-  bl uart_puts
-  mov x0, x19
-  bl uart_hex
-  adr x0, str_esr
-  bl uart_puts
-  mrs x0, esr_el1
-  bl uart_hex
-  adr x0, str_elr
-  bl uart_puts
-  mrs x0, elr_el1
-  bl uart_hex
-  adr x0, str_far
-  bl uart_puts
-  mrs x0, far_el1
-  bl uart_hex
-  adr x0, str_nl
-  bl uart_puts
-  b park
-
-// uart_puts(x0 = NUL-terminated string). Clobbers x0-x2.
-uart_puts:
-  ldr x1, =UART_BASE
-1:
-  ldrb w2, [x0], #1
-  cbz w2, 2f
-  strb w2, [x1]
-  b 1b
-2:
-  ret
-
-// uart_hex(x0): print as 16 hex digits. Clobbers x0-x4.
-uart_hex:
-  ldr x1, =UART_BASE
-  mov x3, #60
-1:
-  lsr x2, x0, x3
-  and x2, x2, #0xf
-  cmp x2, #10
-  add x4, x2, #'0'
-  add x2, x2, #('A' - 10)
-  csel x2, x4, x2, lo
-  strb w2, [x1]
-  subs x3, x3, #4
-  b.ge 1b
-  ret
-
-str_exc: .asciz "\n*** EXCEPTION vec="
-str_esr: .asciz " ESR="
-str_elr: .asciz " ELR="
-str_far: .asciz " FAR="
-str_nl:  .asciz "\n"
 
 .section .bss
 .balign 4096

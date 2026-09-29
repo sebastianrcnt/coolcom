@@ -1,7 +1,11 @@
 // Kernel entry: everything AOT-compiled into the kernel image is included from here.
 #include "KernelA.HH"
+#include "ArchA.HH"
 #include "Uart.HC"
 #include "StrPrint.HC"
+#include "Gic.HC"
+#include "Except.HC"
+#include "Timer.HC"
 
 U8 *mem_heap_start,*mem_heap_end;
 
@@ -26,5 +30,15 @@ U0 KMain(U8 *heap_start,U8 *heap_end)
   StrPrint(sb, "%s-%d", "buf", 99);
   "sp: %s\n", sb;
   "heap: %p..%p (%d MB)\n", mem_heap_start, mem_heap_end, (mem_heap_end-mem_heap_start)>>20;
-  while (TRUE) {}
+  GicInit;
+  TimerInit;
+  ArchIrqOn;
+  "timer: %d Hz counter, %d Hz tick\n",cnt_freq,JIFFY_FREQ;
+  I64 i,c0=ArchCntVct;
+  for (i=1;i<=3;i++) {
+    Sleep(1000);
+    "tick %d: jiffies=%d counter says %d ms\n",i,jiffies,(ArchCntVct-c0)*1000/cnt_freq;
+  }
+  while (TRUE)
+    ArchWfi;
 }

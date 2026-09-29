@@ -6,7 +6,9 @@ import struct, sys
 #   code | main table (U64 addrs of top-level code, 0-terminated) | initialized globals
 # followed by the zero-filled globals, which are not stored in the image:
 #   KBSS_START .. KBSS_END, cleared by Boot.S.
-# Usage: binlink.py <in.BIN> <out.raw> <out syms.ld>
+# Usage: binlink.py <in.BIN> <out.raw> <out syms.ld> [arch.syms]
+# arch.syms (`nm` output of the linked assembly) resolves HolyC `import`s of
+# assembly routines; every HolyC export is written to syms.ld as HC_<name>.
 ORG = 0x40100000  # must match os/Kernel/Kernel.ld
 
 IET_REL_I8, IET_IMM_U8, IET_REL_I16, IET_IMM_U16 = 4, 5, 6, 7
@@ -94,6 +96,14 @@ for name, init, refs in zeroed:
     kbss += len(init)
 kbss_end = align(kbss)
 
+arch_names = set()
+if len(sys.argv) > 4:
+    for line in open(sys.argv[4]):
+        f = line.split()
+        if len(f) == 3 and f[1] in 'TtDdBb' and f[2] not in syms:
+            syms[f[2]] = (int(f[0], 16), True)
+            arch_names.add(f[2])
+
 def addr(name, ctx):
     if name not in syms:
         die(f'unresolved import "{name}" (needed by {ctx}); the kernel must define it')
@@ -116,6 +126,8 @@ if 'KMain' not in syms:
 
 open(sys.argv[2], 'wb').write(image)
 open(sys.argv[3], 'w').write(
+    ''.join(f'HC_{k} = {addr(k, "export"):#x};\n' for k in sorted(syms)
+            if k.isidentifier() and k not in arch_names) +
     f'KMAIN = {addr("KMain", "boot"):#x};\n'
     f'MAIN_TABLE = {main_table:#x};\n'
     f'KBSS_START = {kbss_start:#x};\n'

@@ -1,5 +1,5 @@
 ENTRY(_start)
-INCLUDE build/syms.ld
+/* Symbols from binlink.py (build/syms.ld) are passed on the ld command line. */
 SECTIONS {
   . = 0x40080000;
   .text : { *(.text.boot) *(.text*) *(.rodata*) *(.data*) }
