@@ -1319,11 +1319,11 @@ ARM_addShiftRegXshift:
     case BIC_COMMA:
       next = ICArgN(rpn, 1);
       next2 = ICArgN(rpn, 0);
-      MemCpy(&orig_dst, &next->res, sizeof(CBICArg));
-      code_off = __OptPassFinal(cctrl, next2, bin, code_off);
+      // FIX(2): Argument 1 is discarded by PushTmpDepthFirst; argument 0 is the value.
+      // Evaluate the left side first, then move the right side into the result.
       code_off = __OptPassFinal(cctrl, next, bin, code_off);
-      // TODO WHICH ONE
-      code_off = ICMov(cctrl, &rpn->res, &next->res, bin, code_off);
+      code_off = __OptPassFinal(cctrl, next2, bin, code_off);
+      code_off = ICMov(cctrl, &rpn->res, &next2->res, bin, code_off);
       break;
     case BIC_EQ:
       next = ICArgN(rpn, 1);
@@ -2335,8 +2335,6 @@ signed_cmp:
       }
       break;
     case BIC_BNOT:
-      if (rpn->raw_type == BRT_F64)
-        abort(); // TODO
       //MACRO BACKEND_UNOP(ARM_mvnRegX, ARM_mvnRegX)
       next = rpn->base.next;
       code_off = __OptPassFinal(cctrl, next, bin, code_off);
@@ -2345,7 +2343,10 @@ signed_cmp:
       } else into_reg = 0;
       code_off = PutICArgIntoReg(cctrl, &next->res, rpn->raw_type, 0, bin, code_off);
       if (rpn->raw_type == BRT_F64) {
-        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mvnRegX(MFR(cctrl, into_reg), next->res.reg));
+        // FIX(3): Complement the F64 bit pattern through an integer register.
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovI64F64(MIR(cctrl, 0), next->res.reg));
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mvnRegX(MIR(cctrl, 0), 0));
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, into_reg), 0));
       } else  code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mvnRegX(MIR(cctrl, into_reg), next->res.reg));
       if (rpn->res.mode != MD_REG) {
         tmp.raw_type = rpn->raw_type;
@@ -2920,14 +2921,20 @@ signed_cmp:
                                   bin, code_off);
       break;
     case BIC_LSH_EQ:
-      if (rpn->raw_type == BRT_F64)
-        abort();
+      // FIX(4): F64 shift assignment uses the bit pattern and an integer count.
+      if (rpn->raw_type == BRT_F64) {
+        code_off = BF64BitAssign(cctrl, rpn, &ARM_lslvRegX, TRUE, bin, code_off);
+        break;
+      }
       code_off = __SexyAssignOp(cctrl, rpn, &ARM_lslvRegX, &ARM_lslImmX,
                                 &ARM_lslvRegX, bin, code_off);
       break;
     case BIC_RSH_EQ:
-      if (rpn->raw_type == BRT_F64)
-        abort();
+      // FIX(4): Shift F64 bits right logically.
+      if (rpn->raw_type == BRT_F64) {
+        code_off = BF64BitAssign(cctrl, rpn, &ARM_lsrvRegX, TRUE, bin, code_off);
+        break;
+      }
       switch (rpn->raw_type) {
         case BRT_U8i:
         case BRT_U16i:
@@ -2942,20 +2949,29 @@ signed_cmp:
       }
       break;
     case BIC_AND_EQ:
-      if (rpn->raw_type == BRT_F64)
-        abort(); // TODO
+      // FIX(4): Apply AND to F64 bit patterns.
+      if (rpn->raw_type == BRT_F64) {
+        code_off = BF64BitAssign(cctrl, rpn, &ARM_andRegX, FALSE, bin, code_off);
+        break;
+      }
       code_off = __SexyAssignOp(cctrl, rpn, &ARM_andRegX, &ARM_andImmX,
                                 &ARM_andRegX, bin, code_off);
       break;
     case BIC_OR_EQ:
-      if (rpn->raw_type == BRT_F64)
-        abort(); // TODO
+      // FIX(4): Apply OR to F64 bit patterns.
+      if (rpn->raw_type == BRT_F64) {
+        code_off = BF64BitAssign(cctrl, rpn, &ARM_orrRegX, FALSE, bin, code_off);
+        break;
+      }
       code_off = __SexyAssignOp(cctrl, rpn, &ARM_orrRegX, &ARM_orrImmX,
                                 &ARM_orrRegX, bin, code_off);
       break;
     case BIC_XOR_EQ:
-      if (rpn->raw_type == BRT_F64)
-        abort(); // TODO
+      // FIX(4): Apply XOR to F64 bit patterns.
+      if (rpn->raw_type == BRT_F64) {
+        code_off = BF64BitAssign(cctrl, rpn, &ARM_eorRegX, FALSE, bin, code_off);
+        break;
+      }
       code_off = __SexyAssignOp(cctrl, rpn, &ARM_eorRegX, &ARM_eorImmX,
                                 &ARM_eorRegX, bin, code_off);
       break;

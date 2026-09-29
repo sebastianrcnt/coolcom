@@ -459,6 +459,31 @@ I64 __ICMoveI64(CBCmpCtrl *cctrl, I64 dst_reg, U64 imm,
   return code_off;
 }
 
+// FIX(1): A negative displacement can exceed the encoder's immediate range.
+// Split the adjustment into encodable parts without clobbering a store source.
+I64 BAdjustNegOffset(CBCmpCtrl *cctrl, I64 base, I64 amount, Bool subtract,
+                     U8 *bin, I64 code_off) {
+  I64 part, sh;
+  while (amount) {
+    if (amount >= 4096) {
+      part = amount >> 12;
+      if (part > 2047)
+        part = 2047;
+      sh = 1;
+      amount -= part << 12;
+    } else {
+      part = amount;
+      if (part > 2047)
+        part = 2047;
+      sh = 0;
+      amount -= part;
+    }
+    code_off = AIWNIOS_ADD_CODE(bin, code_off,
+                                BAddSubImmX(subtract, 0, MIR(cctrl, base), base, part, sh));
+  }
+  return code_off;
+}
+
 I64 __ICMoveF64(CBCmpCtrl *cctrl, I64 dst_reg, F64 imm, U8 *bin,
                 I64 code_off) {
   //(For now),I ain't messing around with binary literals in ARM
@@ -1121,8 +1146,8 @@ store_r2:
       if (indir_off < 0) {
         indir_off2 = indir_off;
         indir_off = 0;
-        code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                    ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+        // FIX(1): Handle negative offsets beyond the immediate range.
+        code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, TRUE, bin, code_off);
       }
       switch (dst->raw_type) {
         case BRT_U0:
@@ -1229,8 +1254,8 @@ store_r2:
           abort();
       }
       if (indir_off2 < 0) {
-        code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                    ARM_addImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+        // FIX(1): Restore a base adjusted by a large negative offset.
+        code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, FALSE, bin, code_off);
       } else if (indir_off2 > 0) {
         code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, indir_off2));
       }
@@ -1371,8 +1396,8 @@ load_r2:
         if (indir_off < 0) {
           indir_off2 = indir_off;
           indir_off = 0;
-          code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                      ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+          // FIX(1): Handle negative offsets beyond the immediate range.
+          code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, TRUE, bin, code_off);
         }
         switch (src->raw_type) {
           case BRT_U0:
@@ -1508,8 +1533,8 @@ load_r2:
             abort();
         }
         if (indir_off2 < 0) {
-          code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                      ARM_addImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+          // FIX(1): Restore a base adjusted by a large negative offset.
+          code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, FALSE, bin, code_off);
         } else if (indir_off2 > 0) {
           code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                       ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, indir_off2));
@@ -2135,6 +2160,45 @@ I64 FBitOp(CBCmpCtrl *cctrl, CBICArg *res, CBICArg *next, CBICArg *next2,
       code_off = ICMov(cctrl, res, &tmp, bin, code_off);
     }
   }
+  return code_off;
+}
+// FIX(4): Apply bitwise compound operators to the bits of an F64 lvalue.
+I64 BF64BitAssign(CBCmpCtrl *cctrl, CBRPN *rpn,
+                  I32 (*bit_op)(I64, I64, I64), Bool shift,
+                  U8 *bin, I64 code_off) {
+  CBRPN *dst = ICArgN(rpn, 1), *rhs = ICArgN(rpn, 0);
+  CBICArg derefed, lhs, result, orig;
+  I64 pop = 0, pop2 = 0;
+  MemSet(&derefed, 0, sizeof(CBICArg));
+  MemSet(&lhs, 0, sizeof(CBICArg));
+  MemSet(&result, 0, sizeof(CBICArg));
+  MemSet(&orig, 0, sizeof(CBICArg));
+  code_off = __OptPassFinal(cctrl, rhs, bin, code_off);
+  if (dst->type == BIC_TYPECAST) {
+    code_off = TYPECAST_ASSIGN_BEGIN(cctrl, &dst, rhs, &orig, &pop, &pop2, bin, code_off);
+    MemCpy(&derefed, &dst->res, sizeof(CBICArg));
+  } else {
+    code_off = DerefToICArg(cctrl, &derefed, dst, 2, bin, code_off);
+  }
+  MemCpy(&lhs, &derefed, sizeof(CBICArg));
+  code_off = PutICArgIntoReg(cctrl, &lhs, BRT_F64, 2, bin, code_off);
+  result.mode = MD_REG;
+  result.reg = 4;
+  result.raw_type = BRT_F64;
+  if (shift) {
+    code_off = FBitOp(cctrl, &result, &lhs, &rhs->res, bit_op, TRUE, bin, code_off);
+  } else {
+    // FIX(4): Move both floating registers to integer registers before the bit op.
+    code_off = PutICArgIntoReg(cctrl, &rhs->res, BRT_F64, 1, bin, code_off);
+    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovI64F64(MIR(cctrl, 2), lhs.reg));
+    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovI64F64(MIR(cctrl, 1), rhs->res.reg));
+    code_off = AIWNIOS_ADD_CODE(bin, code_off, bit_op(MIR(cctrl, 2), 2, 1));
+    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, result.reg), 2));
+  }
+  code_off = ICMov(cctrl, &derefed, &result, bin, code_off);
+  code_off = ICMov(cctrl, &rpn->res, &result, bin, code_off);
+  if (pop2)
+    code_off = TYPECAST_ASSIGN_END(cctrl, pop, &orig, bin, code_off);
   return code_off;
 }
 I64 __SexyAssignOp(CBCmpCtrl *cctrl, CBRPN *rpn,

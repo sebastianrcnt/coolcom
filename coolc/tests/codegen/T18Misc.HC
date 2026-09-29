@@ -36,7 +36,7 @@ F64 A17(F64 a, F64 b) {F64 t = a; a = b; b = t; return a - b;}
 I64 A18(I64 a, I64 b, I64 c, I64 d) {return (a = b) + (c = d) + (a = c);}
 I64 A19(I64 a) {return a = a + 1;}
 I64 A20() {return g = h = gb = 7;}
-U0 A21(I64 a) {g = a, h = a;}
+U0 A21(I64 a) {g = a; h = a;}  // no comma operator: the port fixes its order (behavior/B02Comma), so it no longer matches C
 I64 A22(I64 *p) {*p = *p + 1; *p = *p * 2; *p = *p - 3; *p = *p / 2; *p = *p % 5; return *p;}
 I64 A23(I64 *p) {*p += *p; *p *= *p; *p -= *p; return *p;}
 I64 A24(I64 a) {a += a; a *= a; a -= a + 1; return a;}
