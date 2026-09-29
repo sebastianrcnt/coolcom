@@ -21,6 +21,15 @@ import I64 ArchAdd(I64 *p,I64 v);           // atomic add, returns new
 import U0 ArchStoreRel(I64 *p,I64 v);       // store-release + sev
 import I64 ArchPsciCpuOn(I64 mpidr,U8 *entry,I64 ctx);
 import U8 *ArchApEntry();
+import U0 ArchCtxSwitch(U8 **save_sp,U8 *new_sp);
+import U8 *ArchTaskStartAddr();
+
+// Initial stack frame of a new task, popped by ArchCtxSwitch (CTX_SIZE in Arch.S).
+class CCtxFrame
+{
+  I64 x19,x20,x21_28[8],x29,x30;
+  F64 d8_15[8];
+};
 
 // Saved by the exception entry in Arch.S; layout must match FR_* there.
 class CExceptFrame

@@ -243,3 +243,53 @@ ArchPsciCpuOn:
 ArchApEntry:
   ldr x0, =ap_start
   ret
+
+// Task switching. A switched-out task's stack holds its callee-saved
+// registers (AAPCS64: x19-x30, d8-d15); everything else was already saved
+// by the compiler around the Yield call.
+#define CTX_SIZE (20 * 8)
+
+// ArchCtxSwitch(U8 **save_sp, U8 *new_sp)
+.global ArchCtxSwitch
+ArchCtxSwitch:
+  sub sp, sp, #CTX_SIZE
+  stp x19, x20, [sp, #0]
+  stp x21, x22, [sp, #16]
+  stp x23, x24, [sp, #32]
+  stp x25, x26, [sp, #48]
+  stp x27, x28, [sp, #64]
+  stp x29, x30, [sp, #80]
+  stp d8, d9, [sp, #96]
+  stp d10, d11, [sp, #112]
+  stp d12, d13, [sp, #128]
+  stp d14, d15, [sp, #144]
+  mov x2, sp
+  str x2, [x0]
+  mov sp, x1
+  ldp x19, x20, [sp, #0]
+  ldp x21, x22, [sp, #16]
+  ldp x23, x24, [sp, #32]
+  ldp x25, x26, [sp, #48]
+  ldp x27, x28, [sp, #64]
+  ldp x29, x30, [sp, #80]
+  ldp d8, d9, [sp, #96]
+  ldp d10, d11, [sp, #112]
+  ldp d12, d13, [sp, #128]
+  ldp d14, d15, [sp, #144]
+  add sp, sp, #CTX_SIZE
+  ret
+
+// First "return" of a new task: its initial frame has x30 = here,
+// x19 = the task function, x20 = its argument.
+task_start:
+  mov x0, x20
+  blr x19
+  ldr x1, =HC_Exit
+  blr x1
+  b .
+
+// ArchTaskStartAddr(): the address new task frames return to.
+.global ArchTaskStartAddr
+ArchTaskStartAddr:
+  ldr x0, =task_start
+  ret

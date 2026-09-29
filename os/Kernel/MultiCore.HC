@@ -3,11 +3,20 @@
 #define AP_STACK_SIZE (64*1024)
 #define PSCI_INVALID_PARAMS (-2)
 
+extern class CTask;
+
+// HolyC classes are packed (no padding): atomics need 8-byte alignment, so keep
+// the size a multiple of 8 for arrays of CCPU and I64s ahead of smaller members.
 class CCPU
 {
   I64 num;
-  Bool online;
   U8 *stack;
+  I64 lock;           // guards this core's task ring
+  CTask *seth_task,   // the core's first task, never exits
+	*cur_task,
+	*dying;       // exited task waiting to be freed
+  Bool online;
+  U8 pad[7];
 };
 
 CCPU cpu_structs[CORES_MAX];
@@ -24,16 +33,6 @@ U0 CoreInit(I64 num)
   c->num=num;
   ArchTpidrSet(c);
   GicCpuInit;
-}
-
-U0 KMainAP(I64 num)
-{//Secondary cores start here (from Boot.S).
-  CoreInit(num);
-  "Core %d online\n",num;
-  cpu_structs[num].online=TRUE;
-  ArchAdd(&mp_cnt,1);
-  while (TRUE)
-    ArchWfi;
 }
 
 U0 MPStart(I64 cnt)
