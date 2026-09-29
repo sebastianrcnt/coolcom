@@ -73,6 +73,7 @@
 #include "KLink.HC"
 #include "MakeKernel.HC"
 #include "../../coolc/Fmt/HCTok.HC"
+#include "Shell.HC"
 #include "Syntax.HC"
 #include "UAsmARM64.HC"
 #include "KDbg.HC"

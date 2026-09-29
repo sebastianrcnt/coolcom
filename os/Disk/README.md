@@ -16,4 +16,6 @@
 | `Text.HC` | helpers the tools share. |
 | `Init.HC` | includes the above; defines `Cls`. |
 
+At the prompt a line such as `vim a.HC`, `find foo *.HC`, `less C:/Vim.HC`, `man StrLen`, `top` runs the tool (the shell turns command lines into calls; Tab completes function and file names).
+
 The VM framebuffer and the UART terminal receive the same ANSI output, so the programs work on either; the terminal should be 80x24 or larger. `make vim-test`, `tmux-test`, `syntax-test` and `text-test` boot the VM and drive them with input scripts.
