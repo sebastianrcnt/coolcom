@@ -839,7 +839,9 @@ U0 PrsPutStr(CCmpCtrl *cc)
     Bool is_print, is_putchars, needs_var = FALSE;
     CHashFun *tmpf;
     CCodeMisc *cm;
-    I64 st_len;
+    I64 st_len, fmt_kind = FMT_NONE, nvk = 0;
+    U8 fmt_vk[FMT_ARGS_MAX], *fmt_str = NULL;
+    CRPN *rpn;
 
     if (cc->token == TK_CHAR_CONST) {
         if (!(tmpf = HashFind("PutChars", cc->htc.hash_table_lst, HTT_FUN)))
@@ -871,6 +873,8 @@ U0 PrsPutStr(CCmpCtrl *cc)
             cm->str = LexExtStr(cc, &st_len);
             cm->st_len = st_len;
             RPNAddNew(cc, IC_STR_CONST, cm, cmp.internal_types[RT_PTR], FALSE);
+            fmt_kind = FMT_STR;
+            fmt_str = cm->str;
         } else {
             if (!PrsExpression(cc,, PEF_NO_COMMA))
                 LexExcept(cc, "Expected an expression at ");
@@ -883,9 +887,15 @@ U0 PrsPutStr(CCmpCtrl *cc)
             argc_cnt++;
             if (!PrsExpression(cc,, PEF_NO_COMMA))
                 LexExcept(cc, "Expected an expression at ");
+            rpn = cc->coc.coc_head.next;
+            if (nvk < FMT_ARGS_MAX)
+                fmt_vk[nvk] = rpn->ic_class && rpn->ic_class->raw_type == RT_F64 && !rpn->ic_class->ptr_stars_cnt;
+            nvk++;
         }
         if (cc->token != ';')
             LexExcept(cc, "Expected an ';' at ");
+        if (fmt_kind)
+            PrsFmtCheck(cc, "Print", fmt_kind, fmt_str, fmt_vk, nvk);
         //Fill in argc RPN
         argc->ic_data = argc_cnt - 1; //-1 ignores fmt string
         argc = RPNAddNew(cc, IC_VARGS, argc_cnt - 1,, FALSE); //-1 ignores fmt string

@@ -8,7 +8,8 @@ Disk: 128 sectors, sector s byte j = (s*31 + j*7) & 255. The kernel overwrites
 sectors 9 and 10 with byte j (0..1023) = (j*3 + 17) & 255.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
 h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
-SHELL lines (the shell's output is checked by kernel-test.sh).
+SHELL lines (the shell's output is checked by kernel-test.sh). A BREAK entry is
+"delay MS" then Ctrl+Alt+C, typed once the shell is running the line before it.
 Screen: rows 0..3 of 8x8 TempleOS-font text (white on black), color bars at
 y=80, a gray ramp at y=128.
 """
@@ -46,8 +47,20 @@ INPUT = """# mouse
 1 28 0
 """
 
-# Typed into the kernel's shell after the "hiA" line; it must print 49.
-SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));']
+# Typed into the kernel's shell after the "hiA" line: it must print 49, then two
+# statements that never finish are broken out of with Ctrl+Alt+C (a busy loop
+# is interrupted in place; Sleep has the shell switched out), then it prints 51.
+# Line editing: a line typed as ...7);, Left twice, Backspace, "42" must print 42
+# (edits at the cursor), then Up twice and ENTER recalls the 51 line and prints 51 again.
+BREAK = ("delay", 2000)
+BREAK2 = ("delay", 500)
+ENTER = 28
+KEY_BACKSPACE, KEY_UP, KEY_LEFT = 14, 103, 105
+SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
+         'while (TRUE) {}', BREAK, 'Sleep(60000);', BREAK2, r'Print("%d\n", 51);',
+         ("text", r'Print("%d\n", 7);'), ("key", KEY_LEFT), ("key", KEY_LEFT), ("key", KEY_BACKSPACE),
+         ("text", "42"), ("key", ENTER),
+         ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER)]
 
 # US layout, Linux key codes, as in os/Kernel/Input.HC: char -> (code, shifted).
 KEYS = {" ": (57, False), "`": (41, False), "~": (41, True), "\\": (43, False), "|": (43, True)}
@@ -57,16 +70,22 @@ for first, lo, up in ((2, "1234567890-=", "!@#$%^&*()_+"), (16, "qwertyuiop[]", 
         KEYS[a] = (first + i, False)
         KEYS[b] = (first + i, True)
 LSHIFT, ENTER = 42, 28
+LCTRL, LALT, KEY_C = 29, 56, 46
 
 
-def typed(line):
+def keys_of(code):
+    return f"1 {code} 1\n1 {code} 0\n"
+
+
+def typed(line, enter=True):
     """Input records that type line, then ENTER."""
     out = []
     for ch in line:
         code, shift = KEYS[ch]
         keys = [LSHIFT, code] if shift else [code]
         out += [f"1 {k} 1" for k in keys] + [f"1 {k} 0" for k in reversed(keys)]
-    out += [f"1 {ENTER} 1", f"1 {ENTER} 0"]
+    if enter:
+        out += [f"1 {ENTER} 1", f"1 {ENTER} 0"]
     return "".join(r + "\n" for r in out)
 
 
@@ -76,7 +95,19 @@ def sector(s):
 
 def prepare(d):
     (d / "disk.img").write_bytes(b"".join(sector(s) for s in range(SECTORS)))
-    (d / "input.txt").write_text(INPUT + "".join(typed(line) for line in SHELL))
+    text = INPUT
+    for line in SHELL:
+        if isinstance(line, tuple) and line[0] == "text":
+            text += typed(line[1], enter=False)
+        elif isinstance(line, tuple) and line[0] == "key":
+            text += keys_of(line[1])
+        elif isinstance(line, tuple):  # Ctrl+Alt+C after a delay
+            text += f"delay {line[1]}\n"
+            keys = [LCTRL, LALT, KEY_C]
+            text += "".join(f"1 {k} 1\n" for k in keys) + "".join(f"1 {k} 0\n" for k in reversed(keys))
+        else:
+            text += typed(line)
+    (d / "input.txt").write_text(text)
 
 
 def load_font():
