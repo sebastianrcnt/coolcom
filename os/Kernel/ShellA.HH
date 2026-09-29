@@ -5,6 +5,7 @@
 // Keep the prototypes identical to the kernel's definitions.
 extern U0 Print(U8 *fmt, ...);
 extern U8 *StrPrint(U8 *dst, U8 *fmt, ...);
+extern U8 *MStrPrint(U8 *fmt, ...);
 extern U0 PutChars(U64 ch);
 extern U8 *MAlloc(I64 size);
 extern U8 *CAlloc(I64 size);

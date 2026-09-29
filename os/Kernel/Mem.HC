@@ -373,4 +373,16 @@ U8 *StrNew(U8 *s)
     return p;
 }
 
+U8 *MStrPrint(U8 *fmt, ...)
+{//Format into a new heap string (free it with Free).
+    U8 *d = NULL, *res;  // first pass: count
+    KFmt(&d, fmt, argc, argv);
+    res = MAlloc(d(I64) + 1);
+    if (res) {
+        d = res;
+        KFmt(&d, fmt, argc, argv);
+    }
+    return res;
+}
+
 U0 HeapStats() {HeapStatsCtrl(&sys_heap);}

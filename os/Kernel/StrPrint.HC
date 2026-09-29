@@ -3,10 +3,16 @@
 // Format-flag semantics follow Aiwnios/TempleOS StrPrint.HC (BSD-3).
 
 // Emit one char: into *dst (then advance) or, if dst is NULL, to the UART.
+// If *dst is a low address (below 4 GiB, where there is no memory) nothing is
+// written but *dst still advances: starting from NULL that counts the length
+// (MStrPrint).
+Bool SPCounting(U8 *p) {return p(I64) < 0x100000000;}
+
 U0 SPutCh(U8 **dst, U8 c)
 {
     if (dst) {
-        **dst = c;
+        if (!SPCounting(*dst))
+            **dst = c;
         *dst += 1;
     } else
         ConsPut(c);
@@ -115,7 +121,7 @@ U0 KFmt(U8 **dst, U8 *fmt, I64 argc, I64 *argv)
         radix = 10;
         switch (ch) {
             case 0:
-                if (dst)
+                if (dst && !SPCounting(*dst))
                     **dst = 0;
                 return;
             case '%':
@@ -219,7 +225,7 @@ num:
         }
 next:
     }
-    if (dst)
+    if (dst && !SPCounting(*dst))
         **dst = 0;
 }
 

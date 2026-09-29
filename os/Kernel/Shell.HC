@@ -358,6 +358,7 @@ U0 ShellSyms()
 {//Every prototype in ShellA.HH needs its symbol here.
     ShellSym("Print", &Print);
     ShellSym("StrPrint", &StrPrint);
+    ShellSym("MStrPrint", &MStrPrint);
     ShellSym("PutChars", &PutChars);
     ShellSym("MAlloc", &MAlloc);
     ShellSym("CAlloc", &CAlloc);
