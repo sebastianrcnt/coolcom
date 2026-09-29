@@ -7,6 +7,12 @@ QEMU    := qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 1G -smp 2 -nogra
 .PHONY: all run debug aiwnios clean fmt fmt-check hooks
 all: build/cool.elf
 
+# Native macOS BIN loader. The compiler image is bootstrapped separately.
+.PHONY: native-host
+native-host: build/coolc
+build/coolc: coolc/Host/native.c | build
+	clang -std=c11 -Wall -Wextra -Werror -O2 $< -o $@
+
 aiwnios: $(AIWBIN)
 $(AIWBIN):
 	cmake -S $(AIWNIOS) -B $(AIWNIOS)/build -G Ninja -DCMAKE_BUILD_TYPE=Release
