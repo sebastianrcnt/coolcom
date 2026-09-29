@@ -241,6 +241,7 @@ U0 RtExit(I64 status)
 I64 shell_fault_ctx[32];  // ArchSetJmp context around each typed statement
 I64 shell_line_ctx[32];   // ... and around each whole line (compiling included)
 Bool shell_in_stmt;
+U8 *shell_stmt_cleanup;  // optional UI cleanup after normal return, fault, or break
 CTask *shell_task;
 
 U0 ShellTrap()
@@ -333,6 +334,7 @@ I64 ShellExeCmdLine(U8 *cc)
     U8 *code, **h = cc + CC_HTC_TABLES;
     U8 *(*stmt2bin)(U8 *cc, I64 *type, I64 cmp_flags);
     I64 (*fp)();
+    U0 (*cleanup)();
     if (!shell_hash) {  // CmpCtrlNew points every htc table at Fs->hash_table
         if (!h[0] || h[0] != h[1] || h[1] != h[2] || h[2] != h[3]) {
             Print("shell: unexpected CCmpCtrl layout\n");
@@ -351,6 +353,9 @@ I64 ShellExeCmdLine(U8 *cc)
                 res = (*fp)();
             }
             shell_in_stmt = FALSE;
+            cleanup = shell_stmt_cleanup;
+            shell_stmt_cleanup = NULL;
+            if (cleanup) (*cleanup)();
             // The statement's code is not freed: a global may still point
             // at a string constant stored in it.
         }
