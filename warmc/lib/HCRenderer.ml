@@ -79,7 +79,6 @@ let render units entry =
     "au_make_span", CNamedType "au_span_t"; "au_make_span_from_string", CNamedType "au_span_t";
     "au_get_argc", CNamedType "size_t"; "au_get_nth_arg", CNamedType "au_span_t";
     "au_abort", bool_ty; "au_array_index", ptr_ty; "au_calloc", ptr_ty;
-    "putchar", CNamedType "au_int32_t"; "puts", CNamedType "au_int32_t";
     "au_realloc", ptr_ty; "au_memcpy", ptr_ty; "au_memmove", ptr_ty; "au_free", bool_ty] in
   let fnname n = if Hashtbl.mem foreign n || List.mem_assoc n runtime then n else ident n in
   let used = Hashtbl.create 128 and used_types = Hashtbl.create 64 in
@@ -289,7 +288,10 @@ let render units entry =
         emit (typ t ^ " " ^ v ^ ";"); Option.iter (assign t v) value
     | CAssign (a,b) -> let a' = expr a in let b' = expr b in assign (typeof a) a' b'
     | CDiscarding e -> let _ = expr e in ()
-    | CReturn e -> let v = expr e in
+    | CReturn e ->
+        if aggregate rt && not (aggregate (typeof e)) then
+          unsupported "foreign span results require an explicit pointer and length adapter";
+        let v = expr e in
         if aggregate rt then (assign rt "*wh_result" v; emit "return;") else emit ("return " ^ v ^ ";")
     | CBlock ss -> List.iter (stmt rt) ss
     | CExplicitBlock ss -> let old = !vars in List.iter (stmt rt) ss; vars := old

@@ -26,8 +26,21 @@ let foreign_test _ =
   assert_bool "foreign symbol kept verbatim" (contains source " = KernelProbe(");
   assert_bool "foreign symbol must not be mangled" (not (contains source "wh_KernelProbe"))
 
+let rejects_foreign_span_result _ =
+  let span = CNamedType "au_span_t" in
+  let pointer = CPointer (CNamedType "au_nat8_t") in
+  let unit = CUnit ("Test", [CFunctionDefinition
+    (Desc "span return", "test", [], span, CBlock [
+      CLocalFunctionDeclaration ("GetBytes", [], pointer, LinkageExternal);
+      CReturn (CFuncall ("GetBytes", []))])]) in
+  try
+    ignore (HCRenderer.render [unit] None);
+    assert_failure "pointer return cannot manufacture a span length"
+  with Error.Austral_error _ -> ()
+
 let suite = "HolyC embed boundary" >::: [
   "general foreign call" >:: foreign_test;
+  "reject foreign span result" >:: rejects_foreign_span_result;
   "reject mixed operators in printf" >:: (fun _ ->
     rejects (CEmbed (CNamedType "au_unit_t", "au_printf(\"%i\", $1 + $2)",
                     [CInt "1"; CInt "2"])));
