@@ -186,7 +186,9 @@ The HolyC boundary is `standard/src/Kernel/Adapter.HC`.
   Read `bufferError`, borrow it for byte access, and consume it exactly once
   with `close`. `allocate` returns the same owned resource. Neither raw
   pointers nor escaping borrowed spans are exposed. Copies and indexes check
-  buffer bounds. Allocation and write sizes are capped at 256 MiB.
+  buffer bounds. Allocation and write sizes are capped at 256 MiB. Rectangle
+  coordinates are limited to signed 16-bit and sizes to 0..32767 before
+  calling the framebuffer clipping code.
 * Error values are `-1` (caught HolyC throw), `-2` (invalid input/bounds),
   `-3` (missing file/allocation or write failure), with zero for successful
   commands. Query functions return their documented nonnegative value or a

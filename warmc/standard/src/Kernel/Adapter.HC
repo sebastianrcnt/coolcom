@@ -97,6 +97,7 @@ I64 WksetColor(I64 fg, I64 bg) {
 }
 
 I64 WkfillRect(I64 x, I64 y, I64 w, I64 h, I64 color) {
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || w < 0 || w > 32767 || h < 0 || h > 32767) return -2;
     I64 result = -1;
     try {FbFillRect(x, y, w, h, color); result = 0;} catch {Fs->catch_except = TRUE;}
     return result;
@@ -182,43 +183,43 @@ I64 WkunixToDate(I64 stamp) {
 
 I64 Wkwrite(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {PutS(s); result = 0;}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {PutS(s); result = 0;} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 
 I64 Wkdir(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {result = Dir(s);}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {result = Dir(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 
 I64 Wkmkdir(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {result = DirMk(s);}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {result = DirMk(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 
 I64 Wkcd(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {result = Cd(s);}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {result = Cd(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 
 I64 Wkexists(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {result = FileFind(s);}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {result = FileFind(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 
 I64 Wkdelete(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {result = Del(s);}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {result = Del(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 
 I64 WkvalidName(U8 *text, U64 size) {
     U8 *s = NULL; I64 result = -1;
-    try {s = WkString(text, size); if (s) {result = FileNameChk(s);}} catch {Fs->catch_except = TRUE;}
+    try {s = WkString(text, size); if (s) {result = FileNameChk(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
     Free(s); return result;
 }
 

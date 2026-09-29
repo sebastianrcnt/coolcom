@@ -1,0 +1,16 @@
+import Warm.Kernel (
+    Terminal, acquireTerminal, releaseTerminal, write, fillRect, clear
+);
+module body Screen is
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var term: Terminal := acquireTerminal(&!root);
+        clear(&!term);
+        write(&!term, "Warm screen output\n");
+        fillRect(&!term, 10, 400, 40, 20, 65280);
+        releaseTerminal(term);
+        surrenderRoot(root);
+        printLn("WARM SCREEN PASS");
+        return ExitSuccess();
+    end;
+end module body.

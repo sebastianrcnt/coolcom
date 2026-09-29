@@ -1,0 +1,24 @@
+import Warm.Kernel (
+    Filesystem, Buffer, acquireFilesystem, releaseFilesystem,
+    writeFile, readFile, bufferError, bufferSize, readByte, close
+);
+module body Files is
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var fs: Filesystem := acquireFilesystem(&!root);
+        let status: Int64 := writeFile(&!fs, "C:/Warm.txt", "Warm FAT32\n");
+        var buffer: Buffer := readFile(&!fs, "C:/Warm.txt");
+        let err: Int64 := bufferError(&!buffer);
+        let size: Int64 := bufferSize(&!buffer);
+        let byte: Int64 := readByte(&!buffer, 0);
+        close(buffer);
+        releaseFilesystem(fs);
+        surrenderRoot(root);
+        if ((status = 0) and (err = 0)) and ((size = 11) and (byte = 87)) then
+            printLn("WARM FILE PASS");
+            return ExitSuccess();
+        else
+            return ExitFailure();
+        end if;
+    end;
+end module body.

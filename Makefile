@@ -119,7 +119,7 @@ vim-test: build/kernel.Image coolvm
 key-test: build/kernel.Image coolvm
 	python3 tools/key-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test
+test: build/kernel.Image reloc-check coolvm vim-test key-test warm-kernel-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 
@@ -160,3 +160,9 @@ c2hc-test: build/coolc
 
 stbtt-test: build/coolc build/hcfmt.BIN
 	python3 tools/c2hc/stbtt_test.py
+
+.PHONY: warm-kernel-test
+warm-kernel-test: build/kernel.Image coolvm
+	mkdir -p build/tmp
+	TMPDIR="$(CURDIR)/build/tmp" ./warmc/build.sh
+	python3 tools/warm-kernel-test.py

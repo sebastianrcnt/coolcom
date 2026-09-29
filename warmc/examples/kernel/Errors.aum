@@ -1,0 +1,36 @@
+import Warm.Kernel (
+    Filesystem, Buffer, acquireFilesystem, releaseFilesystem,
+    writeFile, readFile, bufferError, bufferSize, readByte, storeByte, close,
+    allocate, copyBytes, stringLength, stringCompare
+);
+module body Errors is
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var fs: Filesystem := acquireFilesystem(&!root);
+        -- The test harness replaces FileWrite with a throwing HolyC function.
+        let thrown: Int64 := writeFile(&!fs, "C:/Throw.txt", "test");
+        var missing: Buffer := readFile(&!fs, "C:/Absent.txt");
+        let absent: Int64 := bufferError(&!missing);
+        close(missing);
+        var data: Buffer := allocate(3);
+        let copied: Int64 := copyBytes(&!data, "abc");
+        let byte: Int64 := readByte(&!data, 2);
+        let bounds: Int64 := storeByte(&!data, 3, 42);
+        let overflow: Int64 := copyBytes(&!data, "abcd");
+        close(data);
+        var invalid: Buffer := allocate(-1);
+        let invalidSize: Int64 := bufferError(&!invalid);
+        close(invalid);
+        releaseFilesystem(fs);
+        surrenderRoot(root);
+        let strings: Bool := (stringLength("abc") = 3) and (stringCompare("abc", "abc") = 1);
+        let files: Bool := (thrown = -1) and (absent = -3);
+        let memory: Bool := ((copied = 0) and (byte = 99)) and ((bounds = -2) and (overflow = -2));
+        if (strings and files) and (memory and (invalidSize = -2)) then
+            printLn("WARM ERRORS PASS");
+            return ExitSuccess();
+        else
+            return ExitFailure();
+        end if;
+    end;
+end module body.
