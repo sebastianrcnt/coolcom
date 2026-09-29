@@ -27,6 +27,14 @@ U8 *except_hook;  // I64 (*)(I64 vec, CExceptFrame *f): TRUE if it recovered (th
 I64 break_req;    // set by the input IRQ handler on Ctrl+Alt+C
 U8 *break_hook;   // U0 (*)(CExceptFrame *f): called with the interrupted frame after such an IRQ (the shell)
 
+extern Bool TaskStackFault(CTask *t, CExceptFrame *f);
+
+U0 StackOverflowExit()
+{
+    Exit;
+    while (TRUE) {}
+}
+
 U0 KExcept(I64 vec, CExceptFrame *f)
 {
     I64 (*hook)(I64 vec, CExceptFrame *f);
@@ -49,6 +57,14 @@ U0 KExcept(I64 vec, CExceptFrame *f)
     hook = except_hook;
     if (hook && (*hook)(vec, f))
         return;
+    if (vec == EXC_CUR_SPX_SYNC && TaskStackFault(Fs, f)) {
+        RawPrint("ERROR: stack overflow, task %s\n", Fs->task_name);
+        if (Fs->stack_alloc) {
+            f->sp = Fs->stack_end;
+            f->elr = &StackOverflowExit;
+            return;
+        }
+    }
     ExceptDump(vec, f);
     "System halted.\n";
     while (TRUE) {}
