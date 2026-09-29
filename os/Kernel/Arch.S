@@ -154,12 +154,25 @@ GETTER ArchDaif,      daif
 
 .global ArchIrqOn
 ArchIrqOn:
-  msr daifclr, #2
+  msr daifclr, #3
   ret
 
 .global ArchIrqOff
 ArchIrqOff:
+  msr daifset, #3
+  ret
+
+.global ArchIntRestore
+ArchIntRestore:
+  msr daifclr, #3
+  tst x0, #0x80
+  b.eq 1f
   msr daifset, #2
+1:
+  tst x0, #0x40
+  b.eq 2f
+  msr daifset, #1
+2:
   ret
 
 .global ArchWfi
@@ -184,7 +197,9 @@ SETTER ArchTpidrSet, tpidr_el1
 .global ArchCpuNum
 ArchCpuNum:
   mrs x0, mpidr_el1
-  and x0, x0, #0xff
+  and x1, x0, #0xff
+  ubfx x0, x0, #16, #8
+  add x0, x1, x0, lsl #2
   ret
 
 // ArchXchg(I64 *p, I64 v): atomically store v, return the old value.
@@ -228,17 +243,40 @@ ArchStoreRel:
   sev
   ret
 
-// ArchPsciCpuOn(I64 mpidr, U8 *entry, I64 ctx): PSCI CPU_ON through HVC (QEMU virt).
-.global ArchPsciCpuOn
-ArchPsciCpuOn:
-  mov x3, x2
-  mov x2, x1
-  mov x1, x0
-  ldr x0, =0xc4000003
-  hvc #0
+// Single-register MMIO operations required by Hypervisor.framework exits.
+.global ArchMmioRead32
+ArchMmioRead32:
+  ldr w0, [x0]
   ret
-
-// ArchApEntry(): address for ArchPsciCpuOn to start secondary cores at.
+.global ArchMmioWrite32
+ArchMmioWrite32:
+  str w1, [x0]
+  ret
+.global ArchSpinRelease
+ArchSpinRelease:
+  str x1, [x0]
+  dc civac, x0
+  dsb sy
+  sev
+  ret
+GETTER ArchCntvCtl, cntv_ctl_el0
+GETTER ArchIpiStatus, S3_5_C15_C1_1
+.global ArchFiqSourcesInit
+ArchFiqSourcesInit:
+  msr cntv_ctl_el0, xzr
+  msr S3_1_C15_C0_0, xzr // PMCR0: PMU FIQ mode off
+  msr S3_7_C15_C0_4, xzr // UPMCR0: uncore PMU FIQ mode off
+  mov x0, #1
+  msr S3_5_C15_C1_1, x0 // stale fast IPI
+  isb
+  ret
+SETTER ArchIpiAck, S3_5_C15_C1_1
+.global ArchIpiSend
+ArchIpiSend:
+  msr S3_5_C15_C0_1, x0
+  isb
+  ret
+// ArchApEntry(): address for ArchSpinRelease to start secondary cores at.
 .global ArchApEntry
 ArchApEntry:
   ldr x0, =ap_start

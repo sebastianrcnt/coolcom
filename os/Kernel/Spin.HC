@@ -23,6 +23,5 @@ I64 SpinLockIrq(I64 *l)
 U0 SpinUnlockIrq(I64 *l, I64 daif)
 {
     SpinUnlock(l);
-    if (!(daif & 0x80))  // DAIF.I was clear before
-        ArchIrqOn;
+    ArchIntRestore(daif);
 }

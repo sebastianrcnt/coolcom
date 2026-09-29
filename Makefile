@@ -1,11 +1,11 @@
-AIWNIOS ?= coolc/third_party/aiwnios
+AIWNIOS ?= $(if $(wildcard coolc/third_party/aiwnios/CMakeLists.txt),coolc/third_party/aiwnios,$(shell git worktree list --porcelain | sed -n '1s/^worktree //p')/coolc/third_party/aiwnios)
 export AIWNIOS_DIR := $(abspath $(AIWNIOS))
 AIWBIN  := $(AIWNIOS)/aiwnios.app/Contents/MacOS/aiwnios
+export AIWNIOS_BIN ?= $(abspath $(AIWBIN))
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
-QEMU    := qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 1G -smp 2 -nographic
 
-.PHONY: all run debug aiwnios clean fmt fmt-check hooks
-all: build/cool.elf
+.PHONY: all run test aiwnios clean fmt fmt-check hooks
+all: build/kernel.Image
 
 aiwnios: $(AIWBIN)
 $(AIWBIN):
@@ -25,7 +25,7 @@ build/%.o: os/Kernel/%.S | build
 # routines land; the addresses don't depend on the HolyC module.
 build/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
 	mkdir -p build/pre
-	echo 'KBSS_END = 0x40100000;' > build/pre/syms.ld
+	echo 'KBSS_END = 0x800400000;' > build/pre/syms.ld
 	$(LD) --unresolved-symbols=ignore-all build/pre/syms.ld $(ASM_OBJS) -o build/pre/arch.elf
 	aarch64-elf-nm build/pre/arch.elf | grep ' [Tt] ' > $@
 
@@ -39,11 +39,14 @@ build/cool.elf: build/kernel.raw build/syms.ld $(ASM_OBJS) tools/Kernel.S
 	aarch64-elf-nm build/cool.elf | grep -F -f build/arch.syms | cmp -s - build/arch.syms \
 	  || { echo "assembly symbols moved between link passes"; rm -f $@; exit 1; }
 
-run: build/cool.elf
-	$(QEMU) -kernel $<
+build/kernel.Image: build/cool.elf
+	aarch64-elf-objcopy -O binary $< $@
 
-debug: build/cool.elf
-	$(QEMU) -kernel $< -s -S
+run: build/kernel.Image coolvm
+	gtimeout 60 build/coolvm --cpus 2 --mem 1024 --timeout 55 $<
+
+test: build/kernel.Image coolvm
+	tools/kernel-test.sh $<
 
 build:
 	mkdir -p build
