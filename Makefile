@@ -80,8 +80,14 @@ reloc-check: build/kernel.Image
 	python3 tools/reloc-check.py --elf build/alt/cool.elf
 	python3 tools/reloc-check.py --compare build/cool.elf build/kernel.Image build/alt/cool.elf build/alt/kernel.Image
 
-run: build/kernel.Image coolvm
-	build/coolvm --cpus 2 --mem 1024 $<
+# build/disk.img is the persistent C: drive for make run (FAT32; mount it on
+# the Mac with `hdiutil attach build/disk.img` while the VM is not running).
+build/disk.img: | build
+	mkfile -n 64m $@
+	mformat -i $@ -F -v COOLDISK ::
+
+run: build/kernel.Image coolvm build/disk.img
+	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
 
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
 test: build/kernel.Image reloc-check coolvm
