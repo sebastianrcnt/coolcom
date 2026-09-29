@@ -45,6 +45,11 @@ wrap-around or truncation (instruction encodings!), make it explicit with a
 mask or by assigning to a `U32`/`I32` variable.
 
 **HolyC differences you must handle:**
+- **Operator precedence differs from C.** Highest first: unary; `` ` `` (power)
+  and `<< >>`; `* / %`; `&`; `^`; `|`; `+ -`; `< > <= >=`; `== !=`; `&&`;
+  `^^`; `||`; assignment. So `a | b + c` is `(a|b)+c` and `a + b << 2` is
+  `a+(b<<2)`. Parenthesize every expression that mixes operator classes so it
+  groups exactly as in C.
 - `#define` has no parameters. Turn function-like macros into functions
   (or expand them inline if they are tiny and used a few times).
 - No `continue`: use `goto` to a label at the end of the loop body.
