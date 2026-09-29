@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: all run test vim-test disk-install reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -97,11 +97,17 @@ build/disk.img: | build
 	mkfile -n 64m $@
 	mformat -i $@ -F -v COOLDISK ::
 
-run: build/kernel.Image coolvm build/disk.img
+disk-install: build/disk.img
+	mcopy -o -i build/disk.img os/Disk/Init.HC os/Disk/Vim.HC os/Disk/Tmux.HC ::
+
+run: build/kernel.Image coolvm disk-install
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
 
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
-test: build/kernel.Image reloc-check coolvm
+vim-test: build/kernel.Image coolvm
+	python3 tools/vim-test.py $<
+
+test: build/kernel.Image reloc-check coolvm vim-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

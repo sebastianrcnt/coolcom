@@ -487,6 +487,11 @@ U0 ShellTask(U8 *data)
         return;
     }
     Print("Cool shell: %d KB compiler loaded\n", shell_cmp->file_size >> 10);
+    if (DrvCur && FileFind("C:/Init.HC")) {
+        Print("Running C:/Init.HC\n");
+        if (!ArchSetJmp(shell_line_ctx))
+            ShellExe("#include \"C:/Init.HC\"");
+    }
     while (n) {
         Print("> ");
         GetLine(shell_line, SHELL_LINE_LEN);
