@@ -169,9 +169,10 @@ static void inject_undef(cpu_t *c, uint64_t pc)
  *   - on every exit and every ~250us tick from the poker thread while the host
  *     mask is set (vtimer_sync), re-read CNTV_CTL: once the condition
  *     (ENABLE && ISTATUS && !IMASK) is gone, clear the host mask so the next
- *     expiry exits again.
- * Deviation: a handler that never quiesces the timer is not re-interrupted
- * (edge-like), and re-arm latency is up to ~250us.
+ *     expiry exits again. Also recognize a changed CVAL: the newly programmed
+ *     deadline may already be expired if the host missed the deasserted interval.
+ * Deviation: an unchanged, expired deadline is not re-interrupted after FIQ
+ * entry (edge-like). Polling normally adds ~250us of re-arm latency.
  */
 static void vtimer_sync(cpu_t *c)
 {
@@ -180,7 +181,11 @@ static void vtimer_sync(cpu_t *c)
     uint64_t ctl = 0;
     hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_CNTV_CTL_EL0, &ctl);
     bool firing = (ctl & 7) == 5; /* ENABLE=1, IMASK=0, ISTATUS=1 */
-    if (!firing) {
+    uint64_t cval = c->vt_fired_cval;
+    if (c->vt_await_clear)
+        hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_CNTV_CVAL_EL0, &cval);
+    bool rearmed = c->vt_await_clear && cval != c->vt_fired_cval;
+    if (!firing || rearmed) {
         hv_vcpu_set_vtimer_mask(c->vcpu, false);
         atomic_store(&c->vt_host_masked, false);
         c->timer_fiq = false;
@@ -592,6 +597,7 @@ static void run_loop(cpu_t *c)
             break;
         case HV_EXIT_REASON_VTIMER_ACTIVATED:
             /* framework has set the vtimer mask; see the protocol comment above */
+            hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_CNTV_CVAL_EL0, &c->vt_fired_cval);
             atomic_store(&c->vt_host_masked, true);
             poker_wake();
             c->timer_fiq = true;

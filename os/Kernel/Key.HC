@@ -200,6 +200,7 @@ U0 KeyUartPoll()
 // ---- reading keys ----
 I64 KeyPending()
 {//Events waiting to be read.
+    if (VtCurrent && !VtCurrent->direct) return (VtCurrent->tail + 256 - VtCurrent->head) % 256;
     KeyUartPoll;
     return (key_tail + KEY_BUF - key_head) % KEY_BUF;
 }
@@ -207,6 +208,7 @@ I64 KeyPending()
 I64 KeyPop()
 {//The oldest event, or 0 if none.
     I64 ev = 0, daif;
+    if (VtCurrent && !VtCurrent->direct) return VtKeyPop;
     KeyUartPoll;
     daif = SpinLockIrq(&key_lock);
     if (key_head != key_tail) {
@@ -292,23 +294,31 @@ I64 GetChar(I64 *_ev = NULL, Bool echo = TRUE)
 // ---- GetLine: a line editor with history ----
 #define HIST_N   32
 #define HIST_LEN 512
-U8 kbd_hist[HIST_N * HIST_LEN];
-U8 hist_edit[HIST_LEN];  // the line being typed while a history entry is shown
-I64 hist_n, hist_head;   // entries kept; next slot to write
+class CKeyHistory
+{
+    U8 lines[HIST_N * HIST_LEN], edit[HIST_LEN];
+    I64 n, head;
+};
+CKeyHistory *KeyHistory()
+{
+    if (!Fs->key_history)
+        Fs->key_history = CAlloc(sizeof(CKeyHistory));
+    return Fs->key_history;
+}
 
 U8 *HistGet(I64 back)
 {//The back-th newest entry (1 = newest).
-    return kbd_hist + ((hist_head - back + 2 * HIST_N) % HIST_N) * HIST_LEN;
+    return KeyHistory->lines + ((KeyHistory->head - back + 2 * HIST_N) % HIST_N) * HIST_LEN;
 }
 
 U0 HistAdd(U8 *line)
 {
-    if (!*line || (hist_n && !StrCmp(HistGet(1), line)))
+    if (!*line || (KeyHistory->n && !StrCmp(HistGet(1), line)))
         return;
-    StrCpy(kbd_hist + hist_head * HIST_LEN, line);
-    hist_head = (hist_head + 1) % HIST_N;
-    if (hist_n < HIST_N)
-        hist_n++;
+    StrCpy(KeyHistory->lines + KeyHistory->head * HIST_LEN, line);
+    KeyHistory->head = (KeyHistory->head + 1) % HIST_N;
+    if (KeyHistory->n < HIST_N)
+        KeyHistory->n++;
 }
 
 // The line is UTF-8 in b[0..n); pos is a byte offset on a character boundary.
@@ -450,9 +460,9 @@ U8 *GetLine(U8 *buf, I64 size)
             if (pos > 0)
                 LineDelete(buf, &n, &pos, LinePrev(buf, pos), pos);
         } else if (c == KEY_UP) {
-            if (hi < hist_n) {
+            if (hi < KeyHistory->n) {
                 if (!hi)
-                    StrCpy(hist_edit, buf);
+                    StrCpy(KeyHistory->edit, buf);
                 hi++;
                 LineSet(buf, size, &n, &pos, HistGet(hi));
             }
@@ -462,7 +472,7 @@ U8 *GetLine(U8 *buf, I64 size)
                 if (hi)
                     LineSet(buf, size, &n, &pos, HistGet(hi));
                 else
-                    LineSet(buf, size, &n, &pos, hist_edit);
+                    LineSet(buf, size, &n, &pos, KeyHistory->edit);
             }
         } else if (c >= 32 && c < KEY_SPECIAL && !(ev & (KF_CTRL | KF_ALT)))
             LineInsert(buf, size, &n, &pos, ubuf, Utf8Enc(ubuf, c));

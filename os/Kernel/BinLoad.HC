@@ -46,7 +46,7 @@ class CBinMod
     I64 nhost;
 };
 
-CBinMod *bin_trap_mod;  // the module whose trap stubs report import names
+CBinMod *BinTrapMod() {return Fs->bin_module;}
 
 U8 *BinAlloc(I64 size)
 {//Zeroed heap memory for module code and data. The block start is kept
@@ -113,7 +113,7 @@ U0 (*bin_trap_hook)();  // the shell: return to its prompt instead of halting
 
 U0 BinTrap(I64 id)
 {//Reached through an import stub: nothing defines the import.
-    Print("ERROR: unresolved import %s was called\n", bin_trap_mod->imps[id].name);
+    Print("ERROR: unresolved import %s was called\n", BinTrapMod->imps[id].name);
     if (bin_trap_hook)
         (*bin_trap_hook)();  // doesn't return on the shell task
     Print("bin: task halted\n");
@@ -292,7 +292,7 @@ CBinMod *BinLoad(U8 *bin, I64 size, CBinSym *host, I64 nhost)
     m->code_size = patch - 32;
     m->host = host;
     m->nhost = nhost;
-    bin_trap_mod = m;
+    Fs->bin_module = m;
     if (!BinParse(m, patch) || !BinResolve(m))
         return NULL;
     ArchICacheSync(m->code, m->code_size);

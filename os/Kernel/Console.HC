@@ -1,9 +1,10 @@
 // Console outputs. Print(), PutChars() and the input echo send every character
-// to each registered output (UART first, then the framebuffer console), so a
-// new output only needs ConsAdd(&MyPut).
+// to the current task terminal when bound; otherwise to registered outputs
+// (UART first, then framebuffer). A direct terminal records and forwards bytes.
 #define CONS_OUTS 4
 U8 *cons_out[CONS_OUTS];
 I64 cons_nout;
+U8 *cons_route; // optional task terminal sink (TRUE consumes the byte)
 
 U0 ConsAdd(U0 (*put)(U8 c))
 {
@@ -14,7 +15,10 @@ U0 ConsAdd(U0 (*put)(U8 c))
 U0 ConsPut(U8 c)
 {
     I64 i;
+    Bool (*route)(U8 c);
     U0 (*fp)(U8 c);
+    route = cons_route;
+    if (route && (*route)(c)) return;
     for (i = 0; i < cons_nout; i++) {
         fp = cons_out[i];
         (*fp)(c);

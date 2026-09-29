@@ -200,7 +200,7 @@ def main():
     def copy(path, name):
         run(['mcopy', '-o', '-i', str(disk), str(path), '::' + name])
 
-    for name in ('Init.HC', 'Vim.HC', 'Tmux.HC'):
+    for name in ('Init.HC', 'Vim.HC', 'Tmux.HC', 'Nyan.HC'):
         copy(pathlib.Path('os/Disk') / name, name)
     other = d / 'Other.txt'
     other.write_text('other\n')

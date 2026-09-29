@@ -543,7 +543,9 @@ Bool VimNormal(I64 c)
 I64 VimPageRows()
 {//Text rows on screen: all rows minus the status line.
     I64 rows = 24;
-    if (fb.base)
+    if (VtCurrent)
+        rows = VtCurrent->rows;
+    else if (fb.base)
         rows = fb.rows;
     return rows - 1;
 }
@@ -711,7 +713,8 @@ U0 VimDraw()
     I64 rows = 24, cols = 80, p, q, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
     I64 color, quote, comment, cp, i, token_end = 0, token_color = 37;
     U8 number[32], status[512];
-    if (fb.base) {rows = fb.rows; cols = fb.cols;}
+    if (VtCurrent) {rows = VtCurrent->rows; cols = VtCurrent->cols;}
+    else if (fb.base) {rows = fb.rows; cols = fb.cols;}
     if (rows < 3 || cols < 12) return;
     if (vim_mode >= 3) VimRange(&a, &b);
     if (vim_top > VimLine(vim_pos)) vim_top = VimLine(vim_pos);
