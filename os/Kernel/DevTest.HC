@@ -315,6 +315,8 @@ U0 DevTest()
         DevTestFs;
         DevTestTerm;
         DevTestShell;
+        if (net_nic)
+            DevTestNet;  // before the screen test: it prints
         DevTestScreen;
     }
 }

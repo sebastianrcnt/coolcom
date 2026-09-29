@@ -2,7 +2,9 @@
 # Boot the kernel Image headless in coolvm with a disk, scripted input and a
 # framebuffer, expect KERNEL TEST PASS and the line 49 printed by the shell
 # (the input script types lines into it, incl. two Ctrl+Alt+C breaks), then check the screenshot and
-# the disk files on the host (tools/kernel-verify.py; needs mtools). Then boot the Image again as
+# the disk files on the host (tools/kernel-verify.py; needs mtools). This boot has a NIC (--net): the
+# kernel gets an address by DHCP from coolvm's NAT, tests TCP/UDP over loopback and fetches
+# http://example.com (that part is skipped if the host is offline). Then boot the Image again as
 # a plain shell with a Korean line typed on the UART (stdin) and check the screenshot for Hangul.
 # Extra arguments go to coolvm.
 # Usage: kernel-test.sh kernel.Image [coolvm options]
@@ -14,17 +16,18 @@ trap 'rm -rf "$dir"' EXIT
 python3 tools/kernel-verify.py prepare "$dir"
 log=$dir/log
 if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --width 640 --height 480 \
-    --bootargs 'coolcom.test=1' --input-script "$dir/input.txt" --disk "$dir/disk.img" --disk "$dir/fat.img" --disk "$dir/format.img" \
+    --bootargs 'coolcom.test=1' --input-script "$dir/input.txt" --disk "$dir/disk.img" --disk "$dir/fat.img" --disk "$dir/format.img" --net \
     --screenshot "$dir/screen.png" "$@" "$image" >"$log" 2>&1 \
     && grep -q 'SELFTEST PASS' "$log" && grep -q '2 cores online' "$log" \
     && [ "$(grep -c 'heap overflow block=' "$log")" = 5 ] \
     && [ "$(grep -c 'ERROR: stack overflow, task Shell' "$log")" = 2 ] \
     && grep -q 'ERROR: kernel text write' "$log" \
     && tr -d '\r' <"$log" | grep -qx 'MEMSAFE RECOVERED 81' \
-    && grep -q 'KERNEL TEST PASS' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
+    && grep -q 'KERNEL TEST PASS' "$log" && grep -q '  net: PASS' "$log" && grep -q 'net: loopback ok' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
     && [ "$(tr -d '\r' <"$log" | grep -cx 'Break')" = 2 ] \
     && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx '63' && tr -d '\r' <"$log" | grep -qx 'A92' && python3 tools/kernel-verify.py verify "$dir"; then
     tail -n 12 "$log"
+    grep -E '^net: (address|HTTP|DNS failed)' "$log" | tr -d '\r'
     # Compile the real startup files under the heap canaries as a regression
     # for GraphColor indexing its candidate array with an uncolored (-1) neighbor.
     mcopy -o -i "$dir/fat.img" os/Disk/*.HC ::

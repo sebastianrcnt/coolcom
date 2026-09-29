@@ -60,6 +60,10 @@
 #include "DskMount.HC"
 #include "DskTools.HC"
 #include "KPower.HC"
+#include "NetDrv.HC"
+#include "Net.HC"
+#include "NetTcp.HC"
+#include "NetApp.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"
 #include "ShellCmp.HC"
@@ -68,6 +72,7 @@
 #include "UAsmARM64.HC"
 #include "KDbg.HC"
 #include "TermTest.HC"
+#include "NetTest.HC"
 #include "DevTest.HC"
 
 U0 KMainAP(I64 num)
@@ -123,6 +128,8 @@ U0 KMain(U8 *image_end, U8 *dt)
     "timer: %d Hz counter, %d Hz tick\n", cnt_freq, JIFFY_FREQ;
     MPStart(CORES_MAX);
     "%d cores online\n", mp_cnt;
+    if (NetInit)
+        "network: virtio-net %02X:%02X:%02X:%02X:%02X:%02X\n", net_mac[0], net_mac[1], net_mac[2], net_mac[3], net_mac[4], net_mac[5];
     I64 i;
     for (i = 1; i <= 4; i++)
         Spawn(&DemoTask, i);
