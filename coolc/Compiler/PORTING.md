@@ -56,6 +56,13 @@ mask or by assigning to a `U32`/`I32` variable.
 - No ternary `?:`: use `if`/`else` into a temporary.
 - No designated initializers or compound literals: assign fields one by one.
 - Classes are packed (no padding). Don't rely on `sizeof` equalling C's.
+- **Assigning a class by value copies only its first 8 bytes** (`a = b;`,
+  `*p = *q;`). Write struct copies as `MemCpy(&a, &b, sizeof(CBFoo))` and
+  `CBFoo x = {0};` as a declaration plus `MemSet`. `tools/porttest/classassign.py`
+  flags suspicious lines.
+- `reg` is a keyword; rename such identifiers. A prototype without `extern`
+  defines an empty function. Function addresses need `&`. Locals are
+  function-scoped.
 - Arrays of function pointers don't parse: store them as `U8 *` and copy
   into a local function-pointer variable to call.
 - No `static` locals: use a global named `<Function>_<var>`.
@@ -84,7 +91,7 @@ directory (not in the repo) put: `os/Kernel/KernelA.HH`, `BackendA.HH`, your
 file, a stub header of `extern` prototypes for everything your file calls
 that is defined elsewhere (other port files, `MAlloc`, `Print`, `MemCpy`,
 `QueIns`, ...; HolyC rejects calls to undeclared functions), and an entry
-file that includes them in that order. Then run
+file that `#define BACKEND_STANDALONE` and then includes them in that order. Then run
 `AIWNIOS_DIR=/Volumes/t5/coolcom/coolc/third_party/aiwnios tools/aiwcc.sh <dir> <entry.HC> <out.BIN>`
 from the repo. It must report `Errs:0`. Don't commit the stubs.
 

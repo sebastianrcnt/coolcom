@@ -1276,14 +1276,18 @@ extern CBHash *HashFind(U8 *str, CBHashTable *table, I64 type, I64 inst); //INTE
 extern U0 HashAdd(CBHash *h, CBHashTable *table);                     //INTEGRATION
 extern CBHeapCtrl *HeapCtrlInit(CBHeapCtrl *ct, CBTask *task, I64 is_code_heap); //INTEGRATION
 extern U0 HeapCtrlDel(CBHeapCtrl *ct);                                //INTEGRATION
+#ifdef BACKEND_STANDALONE // MSize: kernel provides it
 extern I64 MSize(U8 *ptr);
+#endif
 extern I64 SetWriteNP(I64 n);                                         //INTEGRATION: W^X toggle (Apple), identity elsewhere
 extern I64 DoNothing();                                               //INTEGRATION
+#ifdef BACKEND_STANDALONE // Que*: kernel provides them
 extern U0 QueIns(CBQue *a, CBQue *to);
 extern U0 QueRem(CBQue *a);
 extern U0 QueInit(CBQue *i);
 extern U0 QueDel(CBQue *f);
 extern I64 QueCnt(CBQue *head);
+#endif
 extern I64 FFI_CALL_TOS_2(U8 *fptr, I64 a, I64 b);                    //INTEGRATION
 extern U0 qsort(U8 *base, I64 cnt, I64 sz, U8 *cmp);                  //INTEGRATION: libc qsort (cmp takes two element pointers)
 extern F64 fmod(F64 a, F64 b);                                        //INTEGRATION: libc
@@ -1298,6 +1302,9 @@ extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl,I64 pop,CBICArg *_orig,
 	U8 *bin,I64 code_off);
 
 // ---- Kernel heap/string/print functions used by the port (INTEGRATION: provided by the CoolC kernel) ----
+// These are only declared for standalone syntax checks (#define BACKEND_STANDALONE): the backend is
+// included after the kernel/runtime that defines them, and an extern here would hide those definitions.
+#ifdef BACKEND_STANDALONE // kernel provides these
 extern U8 *MAlloc(I64 size);
 extern U8 *CAlloc(I64 size);
 extern U0 Free(U8 *ptr);
@@ -1307,6 +1314,7 @@ extern U8 *MemSet(U8 *dst, I64 val, I64 cnt);
 extern I64 StrLen(U8 *s);
 extern I64 StrCmp(U8 *a, U8 *b);
 extern U0 Print(U8 *fmt, ...);
+#endif
 
 // ---- Frontend diagnostics used by AssignRawTypeToNode (INTEGRATION: the HolyC frontend's error reporting) ----
 extern I64 ParseErr(CBCmpCtrl *ctrl, U8 *fmt, ...);
@@ -1316,4 +1324,6 @@ extern I64 ParseWarn(CBCmpCtrl *ctrl, U8 *fmt, ...);
 extern U0 abort();                              // print and halt (C abort())
 extern I64 BETWEEN(I64 a, I64 min, I64 max);    // C macro: a>=min && a<=max
 
+#ifdef BACKEND_STANDALONE
 extern U0 throw(I64 code); //INTEGRATION: kernel exception throw (keyword in full HolyC)
+#endif

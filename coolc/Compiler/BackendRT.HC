@@ -83,11 +83,25 @@ F64 BFMod(F64 a,F64 b)
   return a%b;
 }
 
+#ifdef BACKEND_STANDALONE
 extern F64 Pow(F64 base,F64 power);  //INTEGRATION: the kernel must provide Pow (libm pow-exact)
+#endif
 
 F64 BPow(F64 a,F64 b)
 {
   return Pow(a,b);
+}
+
+I64 ParseErr(CBCmpCtrl *ctrl,U8 *fmt,...)
+{//The C parser's error report; the frontend normally catches these first.
+  Print("backend: error: %s\n",fmt);
+  return 0;
+}
+
+I64 ParseWarn(CBCmpCtrl *ctrl,U8 *fmt,...)
+{
+  Print("backend: warning: %s\n",fmt);
+  return 0;
 }
 
 CBTask b_task;
