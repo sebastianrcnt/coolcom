@@ -152,12 +152,12 @@ U0 Uf(U8 *st)
     I64 i;
     if (start)
         end = KSymNext(start);
-    else if (shell_hash && (tmpf = HashFind(st, shell_hash, HTT_FUN)) && (start = tmpf->exe_addr)) {
+    else if (ShellCur && ShellCur->hash && (tmpf = HashFind(st, ShellCur->hash, HTT_FUN)) && (start = tmpf->exe_addr)) {
         if (dbg_info = tmpf->dbg_info)
             end = dbg_info->body[dbg_info->max_line + 1 - dbg_info->min_line];
         else {  // up to the next function compiled after it
             end = start + UF_MAX;
-            for (table = shell_hash; table; table = table->next)
+            for (table = ShellCur->hash; table; table = table->next)
                 for (i = 0; i <= table->mask; i++)
                     for (h = table->body[i]; h; h = h->next)
                         if (h->type & HTT_FUN && (other = h(CHashFun *)->exe_addr) > start && other < end)

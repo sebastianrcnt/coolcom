@@ -25,6 +25,7 @@ U0 ExceptDump(I64 vec, CExceptFrame *f)
 U8 *except_hook;  // I64 (*)(I64 vec, CExceptFrame *f): TRUE if it recovered (the shell)
 
 I64 break_req;    // set by the input IRQ handler on Ctrl+Alt+C
+U8 *shell_tick_hook; // optional scheduling point for interrupted JIT code
 U8 *break_hook;   // U0 (*)(CExceptFrame *f): called with the interrupted frame after such an IRQ (the shell)
 
 extern Bool TaskStackFault(CTask *t, CExceptFrame *f);
@@ -51,6 +52,8 @@ U0 KExcept(I64 vec, CExceptFrame *f)
     }
     if (vec == EXC_CUR_SPX_FIQ) {
         FiqDispatch;
+        brk = shell_tick_hook;
+        if (brk) (*brk)(f);
         return;
     }
     PrintBreakLock;

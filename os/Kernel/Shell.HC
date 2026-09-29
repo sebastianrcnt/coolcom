@@ -10,8 +10,8 @@
 // hash table, where the next line finds them. JIT code is written into heap
 // memory and made executable with ArchICacheSync.
 //
-// Compiler-built code reads its Fs through x28, which points at shell_tls;
-// only the shell task sets x28, so only the shell task may run the compiler.
+// Each shell sets x28 to its own TLS; ArchCtxSwitch saves/restores x28.
+// Definitions are private to a shell. Kernel exports are shared.
 
 #define SHELL_STACK    (2 * 1024 * 1024)
 #define SHELL_LINE_LEN 512
@@ -31,13 +31,20 @@
 #define HASH_EXPORT_VAL    72
 #define HTT_EXPORT_SYS_SYM 1
 
-I64 shell_tls[2];         // [0]: the compiler's current task (its Fs)
-CBinMod *shell_cmp;
-U8 *shell_hash;           // the compiler task's global hash table
-U8 *shell_lex_stmt2bin, *shell_exe_puts, *shell_hash_add;
-I64 shell_state;          // 0 not started, 1 running, 2 done, -1 failed
-I64 shell_check;          // self-test result, see DevTestShell
-U8 shell_line[SHELL_LINE_LEN];
+// Private module globals, definitions, TLS and exception contexts per shell.
+class CShell
+{
+    I64 tls[2];
+    CBinMod *cmp;
+    U8 *hash, *lex_stmt2bin, *exe_puts, *hash_add;
+    I64 fault_ctx[32], line_ctx[32], fault_daif, line_daif;
+    Bool in_stmt, line_active;
+    I64 next_slice;
+    U8 line[SHELL_LINE_LEN];
+};
+CShell *ShellCur() {return Fs->shell_ctx;}
+CTask *shell_foreground;
+I64 shell_state, shell_check; // boot self-test only
 
 // ---- Runtime services the compiler imports (see coolc/Host/native.c) ----
 
@@ -90,8 +97,8 @@ U8 *RtMAllocIdent(U8 *p)
     return q;
 }
 
-U8 *RtFs() {return shell_tls[0];}
-U0 RtSetFs(U8 *task) {shell_tls[0] = task;}
+U8 *RtFs() {return ShellCur->tls[0];}
+U0 RtSetFs(U8 *task) {ShellCur->tls[0] = task;}
 
 I64 RtBt(U8 *bits, I64 bit)
 {
@@ -231,48 +238,42 @@ I64 RtFileWrite(U8 *name, U8 *data, I64 size)
 U0 RtExit(I64 status)
 {
     Print("shell: compiler exited (%d); shell halted\n", status);
-    shell_state = -1;
+    if (!VtCurrent || VtCurrent->direct) shell_state = -1;
     while (TRUE) {
         Yield;
         ArchWfi;
     }
 }
 
-I64 shell_fault_ctx[32];  // ArchSetJmp context around each typed statement
-I64 shell_fault_daif, shell_line_daif;
-I64 shell_line_ctx[32];   // ... and around each whole line (compiling included)
-Bool shell_in_stmt, shell_line_active;
-CTask *shell_task;
-
 U0 ShellTrap()
 {//bin_trap_hook, throw_hook: an unresolved import was called, or a throw was not
     //caught, on the shell task: back to the prompt.
-    if (Fs != shell_task)
+    if (!ShellCur || !ShellCur->line_active)
         return;
-    if (shell_in_stmt) {
-        shell_in_stmt = FALSE;
-        ArchLongJmp(shell_fault_ctx);
+    if (ShellCur->in_stmt) {
+        ShellCur->in_stmt = FALSE;
+        ArchLongJmp(ShellCur->fault_ctx);
     }
-    ArchLongJmp(shell_line_ctx);
+    ArchLongJmp(ShellCur->line_ctx);
 }
 
 U0 ShellLineFaultResume()
 {
-    ArchLongJmp(shell_line_ctx);
+    ArchLongJmp(ShellCur->line_ctx);
 }
 
 U0 ShellFaultResume()
 {//Where a faulting statement "returns" to: back into ShellExeCmdLine.
-    ArchLongJmp(shell_fault_ctx);
+    ArchLongJmp(ShellCur->fault_ctx);
 }
 
 U0 ShellBreakNow()
 {//Ctrl+Alt+C stopped the statement: back to the prompt.
-    if (!shell_in_stmt)
+    if (!ShellCur || !ShellCur->in_stmt)
         return;  // the statement already ended
-    shell_in_stmt = FALSE;
+    ShellCur->in_stmt = FALSE;
     Print("\nBreak\n");
-    ArchLongJmp(shell_fault_ctx);
+    ArchLongJmp(ShellCur->fault_ctx);
 }
 
 U0 ShellBreak(CExceptFrame *f)
@@ -280,14 +281,17 @@ U0 ShellBreak(CExceptFrame *f)
     //shell's own statement, resume in ShellBreakNow instead. Otherwise the shell is switched
     //out inside the statement (Sleep, GetKey, or mid-Yield): flag it and wake it, and Yield
     //calls ShellBreakNow when the shell next runs.
-    U8 *stack = shell_task->stk;
-    if (!shell_in_stmt)
-        return;
-    if (Fs == shell_task && f->sp >= stack && f->sp <= shell_task->stack_end)
+    CTask *t = shell_foreground;
+    CShell *sh;
+    if (vt_focus) t = vt_focus->owner;
+    if (!TaskValidate(t)) return;
+    sh = t->shell_ctx;
+    if (!sh || !sh->in_stmt) return;
+    if (Fs == t && f->sp >= t->stk && f->sp <= t->stack_end)
         f->elr = &ShellBreakNow;
     else {
-        shell_task->wake_jiffy = 0;
-        LBts(&shell_task->task_flags, TASKf_PENDING_BREAK);
+        t->wake_jiffy = 0;
+        LBts(&t->task_flags, TASKf_PENDING_BREAK);
     }
 }
 
@@ -297,26 +301,26 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
 {//except_hook: a typed statement faulted; report it and go back to the prompt.
     I64 ec = f->esr >> 26 & 0x3F;
     U8 *what = "exception", where[80];
-    if (vec != EXC_CUR_SPX_SYNC || Fs != shell_task)
+    if (vec != EXC_CUR_SPX_SYNC || !ShellCur)
         return FALSE;
-    if (TaskStackFault(Fs, f) && (shell_in_stmt || shell_line_active)) {
+    if (TaskStackFault(Fs, f) && (ShellCur->in_stmt || ShellCur->line_active)) {
         RawPrint("\nERROR: stack overflow, task %s\n", Fs->task_name);
         // Return on the saved statement stack, never on the exhausted SP.
-        if (shell_in_stmt) {
-            f->spsr = (f->spsr & ~0x3C0) | shell_fault_daif;
-            f->sp = shell_fault_ctx[21];
+        if (ShellCur->in_stmt) {
+            f->spsr = (f->spsr & ~0x3C0) | ShellCur->fault_daif;
+            f->sp = ShellCur->fault_ctx[21];
             f->elr = &ShellFaultResume;
         } else {
-            f->spsr = (f->spsr & ~0x3C0) | shell_line_daif;
-            f->sp = shell_line_ctx[21];
+            f->spsr = (f->spsr & ~0x3C0) | ShellCur->line_daif;
+            f->sp = ShellCur->line_ctx[21];
             f->elr = &ShellLineFaultResume;
         }
-        shell_in_stmt = FALSE;
+        ShellCur->in_stmt = FALSE;
         return TRUE;
     }
-    if (!shell_in_stmt)
+    if (!ShellCur->in_stmt)
         return FALSE;
-    shell_in_stmt = FALSE;
+    ShellCur->in_stmt = FALSE;
     if (ec == 0x25 && (f->esr & 0x7F) == 0x4F)
         what = "kernel text write";
     else if (ec == 0x25)
@@ -328,7 +332,7 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
     else if (ec == 0)
         what = "invalid instruction";
     Print("\nERROR: %s at address %X (code at %s)\n", what, f->far, StrPrintFunSeg(where, f->elr));
-    Backtrace(f, shell_task);
+    Backtrace(f, Fs);
     f->elr = &ShellFaultResume;
     return TRUE;
 }
@@ -340,7 +344,9 @@ U8 *ShellFunSeg(U8 *addr, I64 *_offset)
     CHash *h;
     CHashFun *best = NULL;
     I64 i;
-    for (table = shell_hash; table; table = table->next)
+    if (!ShellCur)
+        return NULL;
+    for (table = ShellCur->hash; table; table = table->next)
         for (i = 0; i <= table->mask; i++)
             for (h = table->body[i]; h; h = h->next)
                 if (h->type & HTT_FUN && h(CHashFun *)->exe_addr <= addr &&
@@ -358,25 +364,25 @@ I64 ShellExeCmdLine(U8 *cc)
     U8 *code, **h = cc + CC_HTC_TABLES;
     U8 *(*stmt2bin)(U8 *cc, I64 *type, I64 cmp_flags);
     I64 (*fp)();
-    if (!shell_hash) {  // CmpCtrlNew points every htc table at Fs->hash_table
+    if (!ShellCur->hash) {  // CmpCtrlNew points every htc table at Fs->hash_table
         if (!h[0] || h[0] != h[1] || h[1] != h[2] || h[2] != h[3]) {
             Print("shell: unexpected CCmpCtrl layout\n");
             return 0;
         }
-        shell_hash = h[3];
+        ShellCur->hash = h[3];
     }
-    stmt2bin = shell_lex_stmt2bin;
+    stmt2bin = ShellCur->lex_stmt2bin;
     while (*tok && (*tok != '}' || !(*flags & CCF_EXE_BLK))) {
         code = (*stmt2bin)(cc, &type, CMPF_PRS_SEMICOLON);
         if (code && code != INVALID_PTR) {
             fp = code;
-            shell_fault_daif = ArchDaif & 0x3C0;
-            if (!ArchSetJmp(shell_fault_ctx)) {
-                LBtr(&shell_task->task_flags, TASKf_PENDING_BREAK);
-                shell_in_stmt = TRUE;
+            ShellCur->fault_daif = ArchDaif & 0x3C0;
+            if (!ArchSetJmp(ShellCur->fault_ctx)) {
+                LBtr(&Fs->task_flags, TASKf_PENDING_BREAK);
+                ShellCur->in_stmt = TRUE;
                 res = (*fp)();
             }
-            shell_in_stmt = FALSE;
+            ShellCur->in_stmt = FALSE;
             // The statement's code is not freed: a global may still point
             // at a string constant stored in it.
         }
@@ -410,7 +416,7 @@ U0 ShellRtInit()
     ShellRt("Bt", &RtBt);
     ShellRt("Bts", &RtBts);
     ShellRt("Btr", &RtBtr);
-    ShellRt("LBts", &RtBts);  // one compiler task: no locking needed
+    ShellRt("LBts", &RtBts);  // private compiler state
     ShellRt("LBtr", &RtBtr);
     ShellRt("Bsf", &RtBsf);
     ShellRt("Bsr", &RtBsr);
@@ -453,8 +459,8 @@ U0 ShellSym(U8 *name, U8 *addr)
     *str = StrNew(name);
     *type = HTT_EXPORT_SYS_SYM;
     *val = addr;
-    add = shell_hash_add;
-    (*add)(e, shell_hash);
+    add = ShellCur->hash_add;
+    (*add)(e, ShellCur->hash);
 }
 
 U0 ShellSyms()
@@ -467,8 +473,8 @@ U0 ShellSyms()
 I64 ShellExe(U8 *src)
 {//JIT-compile and run src; returns the value of its last statement.
     I64 (*exe)(U8 *buf, U8 *filename, I64 flags, U8 *htc);
-    ArchX28Set(shell_tls);
-    exe = shell_exe_puts;
+    ArchX28Set(ShellCur->tls);
+    exe = ShellCur->exe_puts;
     return (*exe)(src, NULL, 0, NULL);
 }
 
@@ -476,32 +482,54 @@ Bool ShellInit()
 {//Load the compiler, then compile the prelude. Runs on the shell task.
     I64 size;
     U8 *bin = ArchCompilerBin(&size);
-    ArchX28Set(shell_tls);
-    ShellRtInit;
-    shell_cmp = BinLoad(bin, size, shell_rt, shell_nrt);
-    if (!shell_cmp)
+    ArchX28Set(ShellCur->tls);
+    if (!shell_nrt) ShellRtInit;
+    ShellCur->cmp = BinLoad(bin, size, shell_rt, shell_nrt);
+    if (!ShellCur->cmp)
         return FALSE;
-    shell_lex_stmt2bin = BinSymFind(shell_cmp, "LexStmt2Bin");
-    shell_exe_puts = BinSymFind(shell_cmp, "ExePutS");
-    shell_hash_add = BinSymFind(shell_cmp, "HashAdd");
-    if (!shell_lex_stmt2bin || !shell_exe_puts || !shell_hash_add) {
+    ShellCur->lex_stmt2bin = BinSymFind(ShellCur->cmp, "LexStmt2Bin");
+    ShellCur->exe_puts = BinSymFind(ShellCur->cmp, "ExePutS");
+    ShellCur->hash_add = BinSymFind(ShellCur->cmp, "HashAdd");
+    if (!ShellCur->lex_stmt2bin || !ShellCur->exe_puts || !ShellCur->hash_add) {
         Print("shell: compiler exports missing\n");
         return FALSE;
     }
     ShellExe("");  // ExeCmdLine records the hash table
-    if (!shell_hash)
+    if (!ShellCur->hash)
         return FALSE;
     ShellSyms;
     ShellExe(ArchShellPrelude);
     return TRUE;
 }
 
+U0 ShellTick(CExceptFrame *f)
+{//Preempt only JIT statements, never kernel/driver critical sections or the
+    //compiler itself. The complete IRQ register frame stays on this task's
+    //stack across Yield. Other tasks must run with interrupts enabled.
+    CShell *sh = ShellCur;
+    if (!sh || !sh->in_stmt || jiffies < sh->next_slice) return;
+    if (f->elr < sys_heap.start || f->elr >= sys_heap.end) return;
+    sh->next_slice = jiffies + 10;
+    ArchIrqOn;
+    Yield;
+    ArchIrqOff;
+}
+
 U0 ShellTask(U8 *data)
 {//Read, compile and run lines: data of them, or forever if data < 0.
-    I64 n = data;
-    shell_state = 1;
-    shell_task = Fs;
+    I64 n = data, cols = 80, rows = 24;
+    Bool primary = !VtCurrent || VtCurrent->direct;
+    CVTerm *v;
+    if (!VtCurrent) {
+        if (fb.base) {cols = fb.cols; rows = fb.rows;}
+        v = VtNew(cols, rows); v->direct = TRUE;
+        VtBind(Fs, v); VtRelease(v);
+        v->owner = Fs;
+    }
+    if (primary) {shell_state = 1; shell_foreground = Fs;}
+    Fs->shell_ctx = CAlloc(sizeof(CShell));
     except_hook = &ShellFault;
+    shell_tick_hook = &ShellTick;
     break_hook = &ShellBreak;
     task_break_hook = &ShellBreakNow;
     bin_trap_hook = &ShellTrap;
@@ -509,32 +537,32 @@ U0 ShellTask(U8 *data)
     fun_seg_hook = &ShellFunSeg;
     if (!ShellInit) {
         Print("shell: compiler failed to load\n");
-        shell_state = -1;
+        if (primary) shell_state = -1;
         return;
     }
-    Print("Cool shell: %d KB compiler loaded\n", shell_cmp->file_size >> 10);
+    Print("Cool shell: %d KB compiler loaded\n", ShellCur->cmp->file_size >> 10);
     if (DrvCur && FileFind("C:/Init.HC")) {
         Print("Running C:/Init.HC\n");
-        shell_line_daif = ArchDaif & 0x3C0;
-        shell_line_active = TRUE;
-        if (!ArchSetJmp(shell_line_ctx))
+        ShellCur->line_daif = ArchDaif & 0x3C0;
+        ShellCur->line_active = TRUE;
+        if (!ArchSetJmp(ShellCur->line_ctx))
             ShellExe("#include \"C:/Init.HC\"");
     }
-    shell_line_active = FALSE;
+    ShellCur->line_active = FALSE;
     while (n) {
         Print("> ");
-        GetLine(shell_line, SHELL_LINE_LEN);
-        shell_line_daif = ArchDaif & 0x3C0;
-        shell_line_active = TRUE;
-        if (!ArchSetJmp(shell_line_ctx))
-            ShellExe(shell_line);
-        shell_line_active = FALSE;
+        GetLine(ShellCur->line, SHELL_LINE_LEN);
+        ShellCur->line_daif = ArchDaif & 0x3C0;
+        ShellCur->line_active = TRUE;
+        if (!ArchSetJmp(ShellCur->line_ctx))
+            ShellExe(ShellCur->line);
+        ShellCur->line_active = FALSE;
         if (n > 0)
             n--;
     }
-    if (fdt_test)  // DevTestShell: Sq must have survived from the first line
+    if (fdt_test && primary)  // DevTestShell: Sq must have survived from the first line
         shell_check = ShellExe("Sq(7);");
-    shell_state = 2;
+    if (primary) shell_state = 2;
 }
 
 CTask *ShellStart(I64 lines = -1)
