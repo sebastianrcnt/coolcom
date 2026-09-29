@@ -9,12 +9,12 @@
 set -eu
 image=$1
 shift
-dir=$(mktemp -d)
+dir=$(mktemp -d build/kernel-test.XXXXXX)
 trap 'rm -rf "$dir"' EXIT
 python3 tools/kernel-verify.py prepare "$dir"
 log=$dir/log
 if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --width 640 --height 480 \
-    --bootargs 'coolcom.test=1' --input-script "$dir/input.txt" --disk "$dir/disk.img" --disk "$dir/fat.img" \
+    --bootargs 'coolcom.test=1' --input-script "$dir/input.txt" --disk "$dir/disk.img" --disk "$dir/fat.img" --disk "$dir/format.img" \
     --screenshot "$dir/screen.png" "$@" "$image" >"$log" 2>&1 \
     && grep -q 'SELFTEST PASS' "$log" && grep -q '2 cores online' "$log" \
     && [ "$(grep -c 'heap overflow block=' "$log")" = 5 ] \

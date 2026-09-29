@@ -139,6 +139,8 @@ def prepare_fat(d):
         "-v", "COOLFAT", str(img))
     (d / "note.txt").write_bytes(HOST_NOTE)
     run("mcopy", "-i", str(img), str(d / "note.txt"), "::HostNote.txt")
+    for name in ("Host-long-name-" + "h" * (251-15) + ".txt", "호스트에서 만든 긴 한글 파일 이름입니다.txt"):
+        run("mcopy", "-i", str(img), str(d / "note.txt"), "::" + name)
     (d / "Test.HC").write_bytes(TEST_HC)
     run("mcopy", "-i", str(img), str(d / "Test.HC"), "::Test.HC")
 
@@ -147,17 +149,102 @@ def verify_fat(d):
     img = str(d / "fat.img")
     fsck = subprocess.run(["fsck_msdos", "-n", img], capture_output=True, text=True)
     assert fsck.returncode == 0 and "Fix?" not in fsck.stdout, "fsck_msdos:\n" + fsck.stdout + fsck.stderr
-    listing = run("mdir", "-i", img, "-/", "-b", "::", text=True).stdout.split()
+    listing = run("mdir", "-i", img, "-/", "-b", "::", text=True).stdout.splitlines()
     for name, want in (("HostNote.txt", HOST_NOTE), ("FromCoolcom.txt", fs_data(3000, 0)),
-                       ("Sub/Inner.TXT", fs_data(700, 5))):
+                       ("Sub/Inner.TXT", fs_data(700, 5)),
+                       ("k"*251+".txt", b"long"),
+                       ("한"*251+".txt", b"wide"),
+                       ("커널에서 만든 긴 한글 파일 이름입니다.txt", b"hangul"),
+                       ("같은 이름 접두사 첫번째.txt", b"one"),
+                       ("같은 이름 접두사 두번째.txt", b"two")):
+
         assert "::/" + name in listing, f"{name} not in the host's listing {listing}"
         got = run("mcopy", "-n", "-i", img, "::" + name, "-").stdout
         assert got == want, f"{name} on the FAT volume differs"
 
 
+    # mtools currently truncates supplementary-plane names on this host. Inspect
+    # their actual UTF-16 slots and read data using the unique short alias.
+    names = fat_directory_names(d / "fat.img")
+    alias = names["Unicode-😀-surrogate-pair.txt"]
+    assert run("mcopy", "-i", img, "::"+alias, "-").stdout == b"emoji"
+    formatted = str(d / "format.img")
+    check = run("fsck_msdos", "-n", formatted, text=True)
+    assert "Fix?" not in check.stdout, check.stdout
+    deep = "Moved/" + "깊은폴더/"*20 + "긴 파일 이름과 한글 내용을 가진 파일.txt"
+    assert run("mcopy", "-i", formatted, "::"+deep, "-").stdout == b"tree-data"
+    assert run("mcopy", "-i", formatted, "::Broken.txt", "-").stdout == b"broken"
+    fat_directory_names(d / "format.img")
+
+
+def fat_directory_names(path):
+    """Independent raw VFAT validation, including aliases and cross-cluster slots."""
+    import struct
+    image = path.read_bytes()
+    u16 = lambda at: struct.unpack_from("<H", image, at)[0]
+    u32 = lambda at: struct.unpack_from("<I", image, at)[0]
+    spc, reserved, fats = image[13], u16(14), image[16]
+    fat_size = u32(36)
+    fat = image[reserved*512:(reserved+fat_size)*512]
+    data = (reserved+fats*fat_size)*512
+    visited = set()
+    result = {}
+    def directory(first, prefix=""):
+        contents = b""
+        c = first
+        while 2 <= c < 0x0ffffff8:
+            assert c not in visited, "shared/cyclic directory"
+            visited.add(c)
+            contents += image[data+(c-2)*spc*512:data+(c-1)*spc*512]
+            c = struct.unpack_from("<I", fat, c*4)[0] & 0x0fffffff
+        aliases, slots = set(), []
+        for at in range(0, len(contents), 32):
+            e = contents[at:at+32]
+            if not e[0]:
+                assert not slots, "orphan LFN at end"
+                break
+            if e[0] == 0xe5:
+                assert not slots, "orphan LFN before deleted entry"
+                continue
+            if e[11] == 15:
+                slots.append(e)
+                continue
+            assert e[:11] not in aliases, "duplicate short alias"
+            aliases.add(e[:11])
+            short = e[:8].decode("ascii").rstrip()
+            ext = e[8:11].decode("ascii").rstrip()
+            if ext: short += "."+ext
+            name = short
+            if slots:
+                checksum = 0
+                for ch in e[:11]: checksum = (((checksum & 1) << 7)+(checksum >> 1)+ch) & 255
+                assert 1 <= len(slots) <= 20
+                for i, slot in enumerate(slots):
+                    assert slot[0] == (len(slots)-i | (0x40 if i == 0 else 0))
+                    assert slot[12] == 0 and slot[13] == checksum and slot[26:28] == b"\0\0"
+                wide = b"".join(t[1:11]+t[14:26]+t[28:32] for t in reversed(slots))
+                units = list(struct.unpack("<"+"H"*(len(wide)//2), wide))
+                if 0 in units:
+                    end = units.index(0)
+                    assert all(x == 0xffff for x in units[end+1:])
+                    units = units[:end]
+                assert len(units) <= 255
+                name = struct.pack("<"+"H"*len(units), *units).decode("utf-16-le")
+                slots = []
+            result[prefix+name] = prefix+short
+            if e[11] & 16 and name not in (".", ".."):
+                child = struct.unpack_from("<H",e,26)[0] | struct.unpack_from("<H",e,20)[0] << 16
+                directory(child,prefix+name+"/")
+    directory(u32(44))
+    return result
+
+
 def prepare(d):
     (d / "disk.img").write_bytes(b"".join(sector(s) for s in range(SECTORS)))
     prepare_fat(d)
+    with (d / "format.img").open("wb") as f:
+        f.truncate(64 * 1024 * 1024)
+    run("mformat", "-i", str(d / "format.img"), "-F", "::")
     text = INPUT
     for line in SHELL:
         if isinstance(line, tuple) and line[0] == "text":

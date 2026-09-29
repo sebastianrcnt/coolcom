@@ -58,6 +58,136 @@ U8 *DevTestFsData(I64 n, I64 seed)
     return s;
 }
 
+U0 DevTestFatNames()
+{
+    U8 name[766], *s;
+    I64 i, size;
+    StrCpy(name, "Host-long-name-");
+    for (i = StrLen(name); i < 251; i++) name[i] = 'h';
+    StrCpy(name + 251, ".txt");
+    s = FileRead(name, &size);
+    if (!s || size != 20 || StrCmp(s, "Hello from the host\n")) KTFail("fat: host 255-unit name");
+    Free(s);
+    s = FileRead("호스트에서 만든 긴 한글 파일 이름입니다.txt", &size);
+    if (!s || size != 20) KTFail("fat: host Hangul name");
+    Free(s);
+    for (i = 0; i < 251; i++) name[i] = 'k';
+    StrCpy(name + 251, ".txt");
+    if (FileWrite(name, "long", 4) == INVALID_CLUS) KTFail("fat: 255-unit write");
+    s = FileRead(name, &size);
+    if (!s || size != 4 || StrCmp(s, "long")) KTFail("fat: 255-unit read");
+    Free(s);
+    if (FileWrite("커널에서 만든 긴 한글 파일 이름입니다.txt", "hangul", 6) == INVALID_CLUS ||
+            FileWrite("같은 이름 접두사 첫번째.txt", "one", 3) == INVALID_CLUS ||
+            FileWrite("같은 이름 접두사 두번째.txt", "two", 3) == INVALID_CLUS ||
+            FileWrite("Unicode-😀-surrogate-pair.txt", "emoji", 5) == INVALID_CLUS)
+        KTFail("fat: unicode write");
+    for (i = 0; i < 251; i++) MemCpy(name + i * 3, "한", 3);
+    StrCpy(name + 753, ".txt");
+    if (FileWrite(name, "wide", 4) == INVALID_CLUS) KTFail("fat: 255-unit Hangul write");
+    s = FileRead(name, &size);
+    if (!s || size != 4 || StrCmp(s, "wide")) KTFail("fat: 255-unit Hangul read");
+    Free(s);
+    for (i = 1; i <= 15; i++) {
+        StrPrint(name, "Alias collision number %d.txt", i);
+        if (FileWrite(name, "alias", 5) == INVALID_CLUS) KTFail("fat: alias collision write");
+    }
+    if (!FileFind("ALIASC~1.TXT") || !FileFind("ALIASC~2.TXT") || !FileFind("ALIAS~15.TXT"))
+        KTFail("fat: unique short aliases");
+    // Exact multiples of 13 have no terminator in their last LFN slot.
+    for (i = 13; i <= 39; i += 13) {
+        MemSet(name, 'z', i); name[i] = 0;
+        if (FileWrite(name, "slots", 5) == INVALID_CLUS || Del(name) != 1 || FileFind(name))
+            KTFail("fat: LFN slot boundary delete");
+    }
+    for (i = 0; i < 256; i++) name[i] = 'x';
+    name[256] = 0;
+    if (FileNameChk(name) || FileWrite(name, "bad", 3) != INVALID_CLUS) KTFail("fat: reject 256 units");
+}
+
+U0 DevTestFatFull(CDrv *dv)
+{//Leave exactly one free cluster, request two, and require a complete rollback.
+    I64 i, limit = FAT32Limit(dv), sectors = (limit + 127) / 128, single = 0, saved_free = dv->fis->free_clus;
+    U32 *saved = MAlloc(sectors * 512), *full = MAlloc(sectors * 512);
+    DrvFATBlkClean(dv);
+    DrvBlkRead(dv, saved, dv->fat1, sectors); MemCpy(full, saved, sectors * 512);
+    for (i = 2; i < limit; i++)
+        if (!(full[i] & 0x0FFFFFFF)) {
+            if (!single) single = i;
+            else full[i] = 0x0FFFFFF7;
+        }
+    DrvBlkWrite(dv, full, dv->fat1, sectors); DrvBlkWrite(dv, full, dv->fat2, sectors);
+    DrvFATBlkAlloc(dv); dv->fis->free_clus = 1; dv->fis->most_recently_alloced = single - 1;
+    if (ClusAlloc(dv, 0, 2) != INVALID_CLUS || DiskInfo(Drv2Let(dv)) != dv->spc * 512)
+        KTFail("fat: full allocation rollback");
+    DrvBlkWrite(dv, saved, dv->fat1, sectors); DrvBlkWrite(dv, saved, dv->fat2, sectors);
+    DrvFATBlkAlloc(dv); dv->fis->free_clus = saved_free;
+    FAT32FreeCntAdd(dv, 0);
+    Free(saved); Free(full);
+}
+
+U0 DevTestFatTools()
+{
+    I64 i, free, c, first, count, size;
+    U8 path[4096], *s;
+    CDrv *dv;
+    CDirEntry de;
+    CFAT32DirEntry *dir;
+    U32 sector[128];
+    if (!FatFormat('D')) {KTFail("fat: format"); return;}
+    if (Fsck('D') || DiskInfo('D') <= 0) KTFail("fat: fresh format check");
+    StrCpy(path, "C:/Tree");
+    if (!DirMk(path)) KTFail("fat: tree root");
+    for (i = 0; i < 20; i++) {
+        StrCat(path, "/깊은폴더");
+        if (!DirMk(path)) KTFail("fat: deep mkdir");
+    }
+    StrCat(path, "/긴 파일 이름과 한글 내용을 가진 파일.txt");
+    if (FileWrite(path, "tree-data", 9) == INVALID_CLUS) KTFail("fat: deep file");
+    if (!Copy("Tree", "D:/Copied") || !Move("D:/Copied", "D:/Moved")) KTFail("fat: recursive copy/move");
+    if (Copy("Tree", "Tree/inside") || FileFind("Tree/inside")) KTFail("fat: descendant rejection");
+    if (Del("Tree") != 22 || FileFind("Tree")) KTFail("fat: recursive delete");
+    StrCpy(path, "D:/Moved");
+    for (i = 0; i < 20; i++) StrCat(path, "/깊은폴더");
+    StrCat(path, "/긴 파일 이름과 한글 내용을 가진 파일.txt");
+    s = FileRead(path, &size);
+    if (!s || size != 9 || StrCmp(s, "tree-data")) KTFail("fat: deep copy contents");
+    Free(s);
+    DirMk("C:/PartialSrc"); DirMk("D:/PartialDst"); DirMk("D:/PartialDst/blocked.txt");
+    FileWrite("C:/PartialSrc/good.txt", "good", 4); FileWrite("C:/PartialSrc/blocked.txt", "keep", 4);
+    if (Move("C:/PartialSrc/*", "D:/PartialDst") || !FileFind("D:/PartialDst/good.txt") ||
+            !FileFind("C:/PartialSrc/good.txt") || !FileFind("C:/PartialSrc/blocked.txt"))
+        KTFail("fat: partial move retains sources");
+    Del("C:/PartialSrc"); Del("D:/PartialDst");
+    // Inject a lost cluster, a cyclic file, a bad parent, a FAT mirror mismatch,
+    // and a stale free count on the disposable D: volume.
+    dv = Let2Drv('D');
+    free = DiskInfo('D');
+    c = ClusAlloc(dv, 0, 1);
+    if (c == INVALID_CLUS || Fsck('D') <= 0 || Fsck('D', TRUE) <= 0 || Fsck('D') || DiskInfo('D') != free)
+        KTFail("fat: lost cluster repair");
+    FileWrite("D:/Broken.txt", "broken", 6);
+    if (!FileFind("D:/Broken.txt", &de)) KTFail("fat: broken fixture");
+    Free(de.full_name);
+    DrvFATBlkSet(dv, de.clus);
+    dv->cur_fat_blk[de.clus & 127] = de.clus;
+    LBts(&dv->fat_blk_dirty, 0); DrvFATBlkClean(dv);
+    if (!FileFind("D:/Moved", &de)) KTFail("fat: directory fixture");
+    Free(de.full_name);
+    first = de.clus;
+    dir = FAT32DirLoad(dv, first, &count);
+    dir[1].clus_lo = first;
+    FAT32DirStore(dv, first, dir, count); Free(dir);
+    DrvBlkRead(dv, sector, dv->fat2, 1);
+    sector[100] ^= 1;
+    DrvBlkWrite(dv, sector, dv->fat2, 1);
+    dv->fis->free_clus = 0;
+    DrvBlkWrite(dv, dv->fis, dv->file_system_info_sect, 1);
+    if (Fsck('D') <= 0 || Fsck('D', TRUE) <= 0 || Fsck('D')) KTFail("fat: chain/directory/mirror repair");
+    DevTestFatFull(dv);
+    if (Fsck('D') || Fsck('C')) KTFail("fat: source consistency");
+}
+
 U0 DevTestFs()
 {//Disk 1 is a FAT32 image made on the host (newfs_msdos) holding HostNote.txt.
     //Read it, write FromCoolcom.txt (twice, so the first copy is freed) and
@@ -87,7 +217,7 @@ U0 DevTestFs()
         KTFail("fs: DirCur in Sub");
     Free(s);
     Cd("..");
-    if (Dir != 4)
+    if (Dir != 6)
         KTFail("fs: Dir count");
     s = FileRead("FromCoolcom.txt", &size);
     if (!s || size != 3000 || MemCmp(s, a, 3000))
@@ -100,6 +230,8 @@ U0 DevTestFs()
     if (!Copy("C:/Sub/Inner.TXT", "C:/Copy.TXT") || !Move("Copy.TXT", "Moved.TXT") || FileFind("Copy.TXT") ||
             Del("Moved.TXT") != 1 || FileFind("Moved.TXT") || !IsDir("Sub") || IsDir("HostNote.txt"))
         KTFail("fs: Copy/Move/Del/IsDir");
+    DevTestFatNames;
+    DevTestFatTools;
     s = FileRead("Missing.TXT");
     if (s)
         KTFail("fs: FileRead of a missing file");
