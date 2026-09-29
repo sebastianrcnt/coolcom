@@ -190,3 +190,10 @@ let entrypoint_code (env: env) (name: qident): string =
      empty_entrypoint_code entrypoint_id (get_exit_code_monomorph env)
   | RootCapEntrypoint ->
      entrypoint_code (get_root_capability_monomorph env) (get_exit_code_monomorph env) entrypoint_id
+
+let hc_entrypoint env name =
+  let id, kind = check_entrypoint_validity env name in
+  let root = match kind with
+    | EmptyEntrypoint -> None
+    | RootCapEntrypoint -> Some (gen_mono_id (get_root_capability_monomorph env)) in
+  (gen_decl_id id, gen_mono_id (get_exit_code_monomorph env), root)

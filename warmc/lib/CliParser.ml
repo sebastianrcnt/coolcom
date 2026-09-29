@@ -86,6 +86,7 @@ type mod_source =
 type target =
   | TypeCheck
   | Executable of { bin_path: string; entrypoint: entrypoint; }
+  | HCStandalone of { output_path: string; entrypoint: entrypoint option; }
   | CStandalone of { output_path: string; entrypoint: entrypoint option; }
 [@@deriving eq]
 
@@ -179,6 +180,12 @@ let parse_target_type (arglist: arglist): (arglist * target) =
       | "c" ->
          (* Build a standaloine C file. *)
          parse_c_target arglist
+      | "hc" ->
+         let args, target = parse_c_target arglist in
+         (match target with
+          | CStandalone {output_path; entrypoint} ->
+             (args, HCStandalone {output_path; entrypoint})
+          | _ -> assert false)
       | "tc" ->
          (* Typecheck. *)
          (arglist, TypeCheck)

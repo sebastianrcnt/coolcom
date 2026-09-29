@@ -104,7 +104,7 @@ and print_compile_usage _: unit =
   print_endline "";
   print_endline "Options:";
   print_endline "    --help          Print this text.";
-  print_endline "    --target-type   One of `bin`, `tc`, `c`. Default is `bin`.";
+  print_endline "    --target-type   One of `exe`, `tc`, `c`, `hc`. Default is `bin`.";
   print_endline "    --output        Path to the output file.";
   print_endline "    --entrypoint    The name of the entrypoint function, in the";
   print_endline "                    format `<module name>:<function name>`.";
@@ -169,6 +169,10 @@ and exec_target (mods: module_source list) (target: target): unit =
      ()
   | Executable { bin_path; entrypoint; } ->
      exec_compile_to_bin mods bin_path entrypoint
+  | HCStandalone { output_path; entrypoint } ->
+     let compiler = post_compile (compile_multiple empty_compiler mods) in
+     let entry = Option.map (fun (Entrypoint (mn, i)) -> (mn, i)) entrypoint in
+     write_string_to_file output_path (compiler_hc compiler entry)
   | CStandalone { output_path; entrypoint; } ->
      exec_compile_to_c mods output_path entrypoint
 
