@@ -169,11 +169,15 @@ class Translator:
                 name = self.name(v['name'])
                 if init['kind'] == 'InitListExpr':
                     elems = self.children(init)
+                    if not elems and init.get('array_filler'):
+                        elems = init['array_filler'][1:]
                     t = self.typ(v['type']['qualType'], v)
                     if not isinstance(t, tuple):
                         self.fail(v, 'record initializer')
                     for i, elem in enumerate(elems):
                         self.out(indent, f'{name}[{i}] = {self.expr(elem)};')
+                    for i in range(len(elems), t[1]):
+                        self.out(indent, f'{name}[{i}] = 0;')
                 else:
                     self.value(init, name, indent)
 
