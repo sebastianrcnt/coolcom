@@ -22,6 +22,26 @@ let render units entry =
     | CEnumDefinition (_, n, cases) -> List.iteri (fun i c -> Hashtbl.replace enums c i) cases;
         Hashtbl.replace enums n (-1)
     | _ -> ()) decls;
+  (* Foreign signatures live inside the generated wrapper, but must be known
+     before expression typing and reachability traversal. *)
+  let foreign = Hashtbl.create 32 in
+  let rec collect = function
+    | CLocalFunctionDeclaration (n, ps, rt, _) ->
+        (match Hashtbl.find_opt foreign n with
+         | Some signature when signature <> (ps, rt) ->
+             (* Parameter names do not affect the ABI. *)
+             let types ps = List.map (fun (CValueParam (_, t)) -> t) ps in
+             let old_ps, old_rt = signature in
+             if types old_ps <> types ps || old_rt <> rt then
+               unsupported ("conflicting foreign signatures: " ^ n)
+         | _ -> ());
+        Hashtbl.replace foreign n (ps, rt)
+    | CBlock ss | CExplicitBlock ss -> List.iter collect ss
+    | CIf (_, a, b) -> collect a; collect b
+    | CWhile (_, b) | CFor (_, _, b) -> collect b
+    | CSwitch (_, cs) -> List.iter (fun (CSwitchCase (_, b)) -> collect b) cs
+    | _ -> () in
+  List.iter (function CFunctionDefinition (_,_,_,_,b) -> collect b | _ -> ()) decls;
   let rec aggregate = function
     | CNamedType n -> Hashtbl.mem records n
     | CStructType _ | CUnionType _ -> true
@@ -30,6 +50,7 @@ let render units entry =
     | CPointer t -> typ t ^ " *"
     | CNamedType n -> (match n with
       | "au_unit_t" | "au_bool_t" | "au_region_t" | "au_nat8_t" | "uint8_t" -> "U8"
+      | "void" -> "U0"
       | "au_int8_t" -> "I8" | "au_nat16_t" -> "U16" | "au_int16_t" -> "I16"
       | "au_nat32_t" -> "U32" | "au_int32_t" -> "I32"
       | "au_nat64_t" | "au_index_t" | "size_t" -> "U64"
@@ -59,9 +80,8 @@ let render units entry =
     "au_make_span", CNamedType "au_span_t"; "au_make_span_from_string", CNamedType "au_span_t";
     "au_get_argc", CNamedType "size_t"; "au_get_nth_arg", CNamedType "au_span_t";
     "au_abort", bool_ty; "au_array_index", ptr_ty; "au_calloc", ptr_ty;
-    "putchar", CNamedType "au_int32_t"; "puts", CNamedType "au_int32_t";
     "au_realloc", ptr_ty; "au_memcpy", ptr_ty; "au_memmove", ptr_ty; "au_free", bool_ty] in
-  let fnname n = if n = "putchar" || n = "puts" then "au_" ^ n else if List.mem_assoc n runtime then n else ident n in
+  let fnname n = if Hashtbl.mem foreign n || List.mem_assoc n runtime then n else ident n in
   let used = Hashtbl.create 128 and used_types = Hashtbl.create 64 in
   let rec use_type = function
     | CNamedType n when Hashtbl.mem records n && not (Hashtbl.mem used_types n) ->
@@ -111,7 +131,8 @@ let render units entry =
     | CCast (_,t) | CEmbed (t,_,_) | CFptrCall (_,t,_,_) -> t
     | CFuncall (n,_) -> (match Hashtbl.find_opt funcs n with
         | Some (_,t,_) -> t | None -> (match List.assoc_opt n runtime with
-            | Some t -> t | None -> unsupported ("foreign call " ^ n)))
+            | Some t -> t | None -> (match Hashtbl.find_opt foreign n with
+              | Some (_, t) -> t | None -> unsupported ("foreign call " ^ n))))
     | CStructAccessor (e,n) -> field (typeof e) n
     | CPointerStructAccessor (e,n) -> (match typeof e with CPointer t -> field t n | _ -> assert false)
     | CAddressOf e -> CPointer (typeof e)
@@ -185,7 +206,10 @@ let render units entry =
   and call n t args =
     let args = List.map (fun e ->
       let v = expr e in if aggregate (typeof e) then "&" ^ par v else v) args in
-    if aggregate t then begin
+    if (t = CNamedType "au_unit_t" || t = CNamedType "void") && Hashtbl.mem foreign n then begin
+      (* HolyC U0 has no value. Warm Unit is represented by a dummy byte. *)
+      emit (n ^ "(" ^ join args ^ ");"); "0"
+    end else if aggregate t then begin
       let v = temp t in emit (n ^ "(" ^ join (("&" ^ v)::args) ^ ");"); v
     end else begin
       let v = temp t in emit (v ^ " = " ^ n ^ "(" ^ join args ^ ");"); v
@@ -268,7 +292,10 @@ let render units entry =
         emit (typ t ^ " " ^ v ^ ";"); Option.iter (assign t v) value
     | CAssign (a,b) -> let a' = expr a in let b' = expr b in assign (typeof a) a' b'
     | CDiscarding e -> let _ = expr e in ()
-    | CReturn e -> let v = expr e in
+    | CReturn e ->
+        if aggregate rt && not (aggregate (typeof e)) then
+          unsupported "foreign span results require an explicit pointer and length adapter";
+        let v = expr e in
         if aggregate rt then (assign rt "*wh_result" v; emit "return;") else emit ("return " ^ v ^ ";")
     | CBlock ss -> List.iter (stmt rt) ss
     | CExplicitBlock ss -> let old = !vars in List.iter (stmt rt) ss; vars := old
@@ -281,8 +308,9 @@ let render units entry =
     | CSwitch (e,ss) -> let v = expr e in emit ("switch (" ^ v ^ ") {");
         List.iter (fun (CSwitchCase (c,b)) -> emit ("case " ^ expr c ^ ":");
           let old = !vars in stmt rt b; vars := old; emit "break;") ss; emit "}"
-    | CLocalFunctionDeclaration (n,_,_,_) ->
-        if n <> "putchar" && n <> "puts" then unsupported ("foreign declaration " ^ n)
+    | CLocalFunctionDeclaration (_,ps,rt,_) ->
+        if aggregate rt || List.exists (fun (CValueParam (_,t)) -> aggregate t) ps then
+          unsupported "foreign aggregate ABI requires an explicit pointer adapter"
   in
   (* Anonymous C aggregates become named packed classes. Union payloads use a
      class containing an anonymous union, preserving overlapping storage. *)

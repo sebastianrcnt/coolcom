@@ -1,0 +1,7 @@
+import Warm.Kernel (Buffer, allocate);
+module body Leak is
+    function main(): ExitCode is
+        let buffer: Buffer := allocate(8);
+        return ExitSuccess();
+    end;
+end module body.

@@ -1,0 +1,300 @@
+// Warm kernel boundary. Include before generated Warm source.
+
+#define WARM_KERNEL 1
+
+class WkBuffer {U8 *data; I64 size; I64 error;};
+U8 *WkString(U8 *s, U64 n) {
+    U64 i;
+    if (n > 4096) return NULL;
+    for (i = 0; i < n; i++) if (!s[i]) return NULL;
+    U8 *p = MAlloc(n + 1);
+    if (!p) return NULL;
+    MemCpy(p, s, n); p[n] = 0;
+    return p;
+}
+WkBuffer *WkNew() {
+    WkBuffer *b = NULL;
+    try {b = CAlloc(sizeof(WkBuffer));} catch {Fs->catch_except = TRUE;}
+    return b;
+}
+
+I64 Wknow() {
+    I64 result = -1;
+    try {result = Now;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkunixNow() {
+    I64 result = -1;
+    try {result = UnixNow;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wkticks() {
+    I64 result = -1;
+    try {result = __GetTicks;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkticksHP() {
+    I64 result = -1;
+    try {result = __GetTicksHP;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkputByte(I64 value) {
+    I64 result = -1;
+    try {ConsPut(value); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkputCodepoint(I64 value) {
+    I64 result = -1;
+    try {ConsPutCp(value); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkgetKey() {
+    I64 result = -1;
+    try {result = GetKey(FALSE);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkkeyPending() {
+    I64 result = -1;
+    try {result = KeyPending;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkkeyPop() {
+    I64 result = -1;
+    try {result = KeyPop;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wkclear() {
+    I64 result = -1;
+    try {ConsClear; result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkcursorHide() {
+    I64 result = -1;
+    try {FbCursorHide; result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkcursorShow() {
+    I64 result = -1;
+    try {FbCursorShow; result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WksetColor(I64 fg, I64 bg) {
+    I64 result = -1;
+    try {FbSetColor(fg, bg); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkfillRect(I64 x, I64 y, I64 w, I64 h, I64 color) {
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || w < 0 || w > 32767 || h < 0 || h > 32767) return -2;
+    I64 result = -1;
+    try {FbFillRect(x, y, w, h, color); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wkscroll() {
+    I64 result = -1;
+    try {FbScroll; result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkscreenCodepoint(I64 value) {
+    I64 result = -1;
+    try {FbPutCp(value); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wkalternate(I64 on) {
+    I64 result = -1;
+    try {FbAlt(on); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkyieldTask() {
+    I64 result = -1;
+    try {Yield; result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wksleep(I64 ms) {
+    I64 result = -1;
+    try {Sleep(ms); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WksleepUntil(I64 tick) {
+    I64 result = -1;
+    try {SleepUntil(tick); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WktaskReport() {
+    I64 result = -1;
+    try {TaskRep; result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkisSilent() {
+    I64 result = -1;
+    try {result = IsSilent;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkkeyChar(I64 event) {
+    I64 result = -1;
+    try {result = KeyChar(event);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wkutf8Width(I64 cp) {
+    I64 result = -1;
+    try {result = Utf8Width(cp);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkansiColor(I64 n) {
+    I64 result = -1;
+    try {result = FbAnsiColor(n);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkdateToUnix(I64 date) {
+    I64 result = -1;
+    try {result = CDate2Unix(date);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 WkunixToDate(I64 stamp) {
+    I64 result = -1;
+    try {result = Unix2CDate(stamp);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+I64 Wkwrite(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {PutS(s); result = 0;} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 Wkdir(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {result = Dir(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 Wkmkdir(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {result = DirMk(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 Wkcd(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {result = Cd(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 Wkexists(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {result = FileFind(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 Wkdelete(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {result = Del(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 WkvalidName(U8 *text, U64 size) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(text, size); if (s) {result = FileNameChk(s);} else result = -2;} catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+WkBuffer *Wkallocate(I64 size) {
+    WkBuffer *b = WkNew();
+    if (!b) return NULL;
+    try {if (size < 0 || size > 0x10000000) b->error = -2;
+        else {b->data = CAlloc(size + 1); if (!b->data) b->error = -3; else b->size = size;}
+    } catch {Fs->catch_except = TRUE; b->error = -1;}
+    return b;
+}
+
+WkBuffer *WkreadFile(U8 *path, U64 size) {
+    WkBuffer *b = WkNew();
+    if (!b) return NULL; U8 *s = NULL;
+    try {s = WkString(path, size); if (!s) b->error = -2;
+        else {b->data = FileRead(s, &b->size); if (!b->data) b->error = -3;}
+    } catch {Fs->catch_except = TRUE; b->error = -1;}
+    Free(s); return b;
+}
+
+I64 WkwriteFile(U8 *path, U64 size, U8 *data, U64 count) {
+    U8 *s = NULL; I64 result = -1;
+    try {s = WkString(path, size); if (!s) result = -2;
+        else if (count > 0x10000000) result = -2;
+        else if (FileWrite(s, data, count)) result = 0; else result = -3;
+    } catch {Fs->catch_except = TRUE;}
+    Free(s); return result;
+}
+
+I64 WkbufferSize(WkBuffer *b) {if (!b) return -3; return b->size;}
+
+I64 WkbufferError(WkBuffer *b) {if (!b) return -3; return b->error;}
+
+I64 WkreadByte(WkBuffer *b, I64 index) {if (!b) return -3; if (b->error) return b->error; if (index < 0 || index >= b->size) return -2; return b->data[index];}
+
+I64 WkstoreByte(WkBuffer *b, I64 index, I64 value) {if (!b) return -3; if (b->error) return b->error; if (index < 0 || index >= b->size) return -2; b->data[index] = value; return 0;}
+
+I64 Wkfill(WkBuffer *b, I64 value) {if (!b) return -3; if (b->error) return b->error; MemSet(b->data, value, b->size); return 0;}
+
+I64 Wkclose(WkBuffer *b) {if (b) {Free(b->data); Free(b);} return 0;}
+
+I64 WkstringLength(U8 *text, U64 size)
+{
+    U8 *s = NULL;
+    I64 result = -1;
+    try {s = WkString(text, size); if (s) result = StrLen(s); else result = -2;}
+    catch {Fs->catch_except = TRUE;}
+    Free(s);
+    return result;
+}
+
+I64 WkstringCompare(U8 *left, U64 left_size, U8 *right, U64 right_size)
+{
+    U8 *a = NULL, *b = NULL;
+    I64 result = -2;
+    try {
+        a = WkString(left, left_size);
+        b = WkString(right, right_size);
+        if (a && b) {
+            result = StrCmp(a, b);
+            if (result < 0) result = 0;
+            else if (result == 0) result = 1;
+            else result = 2;
+        }
+    } catch {Fs->catch_except = TRUE; result = -1;}
+    Free(a); Free(b);
+    return result;
+}
+
+I64 WkcopyBytes(WkBuffer *b, U8 *data, U64 size)
+{
+    if (!b) return -3;
+    if (b->error) return b->error;
+    if (size > b->size) return -2;
+    MemCpy(b->data, data, size);
+    return 0;
+}

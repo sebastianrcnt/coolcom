@@ -1,0 +1,7 @@
+module body Test is
+    function main(): ExitCode is
+        let root: RootCapability := RootCapability();
+        surrenderRoot(root);
+        return ExitSuccess();
+    end;
+end module body.

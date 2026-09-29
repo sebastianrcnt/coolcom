@@ -1,0 +1,7 @@
+import Warm.Kernel (write);
+module body NoCapability is
+    function main(): ExitCode is
+        write(0, "forbidden");
+        return ExitSuccess();
+    end;
+end module body.

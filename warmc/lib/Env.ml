@@ -316,12 +316,14 @@ let get_union_cases (env: env) (id: decl_id): decl list =
   List.filter pred decls
 
 let get_callable (env: env) (importing_module_name: module_name) (name: sident): callable option =
-  let _ = importing_module_name in
   match get_decl_by_name env name with
   | Some decl ->
      (match decl with
-      | Record { id; typarams; universe; slots; _ } ->
-         Some (RecordConstructor (id, typarams, universe, slots))
+      | Record { id; mod_id; vis; typarams; universe; slots; _ } ->
+         if vis = TypeVisPublic || module_name_from_id env mod_id = importing_module_name then
+           Some (RecordConstructor (id, typarams, universe, slots))
+         else
+           None
       | UnionCase { name; union_id; slots; _ } ->
          let (typarams, universe) =
            (match get_decl_by_id env union_id with

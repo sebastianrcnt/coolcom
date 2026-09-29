@@ -1,0 +1,23 @@
+{
+  "module": "Test",
+  "kind": "Generic Error",
+  "text": [
+    { "type": "text", "content": "I can't find a " },
+    { "type": "text", "content": "callable" },
+    { "type": "text", "content": " named " },
+    { "type": "code", "content": "RootCapability" },
+    { "type": "text", "content": "." }
+  ],
+  "span": {
+    "filename": "test-programs/suites/019-capability/001-forge-root/Test.aum",
+    "startp": { "line": 3, "column": 8 },
+    "end": { "line": 3, "column": 53 }
+  },
+  "context": [
+    [ 1, "module body Test is" ],
+    [ 2, "    function main(): ExitCode is" ],
+    [ 3, "        let root: RootCapability := RootCapability();" ],
+    [ 4, "        surrenderRoot(root);" ],
+    [ 5, "        return ExitSuccess();" ]
+  ]
+}

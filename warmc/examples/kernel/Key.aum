@@ -1,0 +1,17 @@
+import Warm.Kernel (Terminal, acquireTerminal, releaseTerminal, getKey);
+module body Key is
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var term: Terminal := acquireTerminal(&!root);
+        printLn("WARM KEY READY");
+        let key: Int64 := getKey(&!term);
+        releaseTerminal(term);
+        surrenderRoot(root);
+        if key = 120 then
+            printLn("WARM KEY PASS");
+            return ExitSuccess();
+        else
+            return ExitFailure();
+        end if;
+    end;
+end module body.
