@@ -3,16 +3,22 @@
 #include "ArchA.HH"
 #include "Fdt.HC"
 #include "Uart.HC"
+#include "Console.HC"
 #include "Spin.HC"
 #include "StrPrint.HC"
 #include "StrA.HC"
 #include "Mem.HC"
+#include "Font8x8.HC"
+#include "Fb.HC"
 #include "KTest.HC"
 #include "Timer.HC"
 #include "Aic.HC"
 #include "Except.HC"
 #include "MultiCore.HC"
 #include "Sched.HC"
+#include "Input.HC"
+#include "Blk.HC"
+#include "DevTest.HC"
 
 U0 KMainAP(I64 num)
 {//Secondary cores start here (from Boot.S).
@@ -45,16 +51,20 @@ U0 DemoTask(U8 *data)
 U0 KMain(U8 *image_end, U8 *dt)
 {
     U8 *heap_start, *heap_end;
+    ConsAdd(&UartPut);
     if (!FdtInit(dt))
         while (TRUE) {}
     FdtHeap(image_end, dt, &heap_start, &heap_end);
     MemInit(heap_start, heap_end);
-    UartPutS("coolcom kernel\n");
+    FbInit;
+    "coolcom kernel\n";
     "heap: %p..%p (%d MB)\n", sys_heap.start, sys_heap.end, (sys_heap.end - sys_heap.start) >> 20;
     KTest;
     IntcInit;
     CoreInit(0);
     TaskInitCur;
+    InputInit;
+    "block devices: %d\n", BlkInit;
     TimerInit;
     ArchIrqOn;
     "timer: %d Hz counter, %d Hz tick\n", cnt_freq, JIFFY_FREQ;
@@ -70,6 +80,7 @@ U0 KMain(U8 *image_end, U8 *dt)
     "heap used: %d bytes\n", HeapUsedBytes(&sys_heap);
     if (fdt_test && fdt_vm && fdt_finisher) {
         I64 code = 0, ipi_start = ipi_count;
+        DevTest;
         if (kt_fails || mp_cnt < 2 || jiffies < 100 || demo_steps < 12)
             code = 1;
         IntcSendIpi(fdt_cpu[1].mpidr);

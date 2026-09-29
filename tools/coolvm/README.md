@@ -14,7 +14,7 @@ build/coolvm [--cpus N] [--mem MB] [--headless] [--disk image] [--timeout S] ker
 
 Options: `--cpus N` (1..8, default 2; order = 4 e-cores then 4 p-cores), `--mem MB` (default 256),
 `--timeout S` (exit status 124), `--trace-mmio` (log every emulated MMIO and IMP-DEF sysreg access),
-`--bootargs STR`, `--dump-dtb FILE` (inspect with `dtc -I dtb -O dts`), `--lenient` (unknown MMIO reads
+`--load-offset BYTES` (kernel load offset from the DRAM base, 2 MiB-aligned, >= 0x200000, default 0x200000; to test kernel self-relocation like m1n1 choosing another base), `--bootargs STR`, `--dump-dtb FILE` (inspect with `dtc -I dtb -O dts`), `--lenient` (unknown MMIO reads
 0 / writes ignored), `--strict` (unknown sysreg is fatal), `--verbose`, `--el2` (experimental, see below).
 Display/device options: `--headless` (no Cocoa window), `--width N` and `--height N` (default 1024×768),
 `--screenshot FILE` (PNG at exit), `--input-script FILE` (preload input records), `--disk FILE` (writable raw

@@ -1,3 +1,4 @@
+#include "Asm.h"
 // AArch64 glue that HolyC can't express: exception entry/exit and system
 // register access. HolyC calls the Arch* routines through `import`
 // declarations (see ArchA.HH); binlink.py resolves them from this object.
@@ -12,13 +13,17 @@
 #define FR_VEC    (35 * 8)
 #define FR_Q      (36 * 8) // q0..q31
 #define FR_SIZE   (FR_Q + 32 * 16)
+// The Aiwnios code generator saves callee-saved registers below sp (stp x19, x20, [sp, #-16], then
+// sub sp) and restores them the same way, so an interrupt between those two instructions would
+// overwrite them with the exception frame. Leave a red zone under the interrupted sp untouched.
+#define REDZONE   512
 
 .text
 
 // Every vector saves x0/x1, records its index and joins except_common.
 .macro VEC n
   .balign 0x80
-  sub sp, sp, #FR_SIZE
+  sub sp, sp, #(FR_SIZE + REDZONE)
   stp x0, x1, [sp, #FR_X]
   mov x0, #\n
   b except_common
@@ -87,7 +92,7 @@ except_common:
 
   // KExcept(vec, frame); it may edit the frame (e.g. ELR) before we return.
   mov x1, sp
-  ldr x2, =HC_KExcept
+  LA x2, HC_KExcept
   blr x2
 
   add x1, sp, #FR_Q
@@ -126,7 +131,7 @@ except_common:
   ldp x28, x29, [sp, #FR_X + 28 * 8]
   ldr x30, [sp, #FR_X + 30 * 8]
   ldp x0, x1, [sp, #FR_X]
-  add sp, sp, #FR_SIZE
+  add sp, sp, #(FR_SIZE + REDZONE)
   eret
 
 // System register accessors. Each is a plain AAPCS64 function.
@@ -279,7 +284,7 @@ ArchIpiSend:
 // ArchApEntry(): address for ArchSpinRelease to start secondary cores at.
 .global ArchApEntry
 ArchApEntry:
-  ldr x0, =ap_start
+  LA x0, ap_start
   ret
 
 // Task switching. A switched-out task's stack holds its callee-saved
@@ -322,12 +327,32 @@ ArchCtxSwitch:
 task_start:
   mov x0, x20
   blr x19
-  ldr x1, =HC_Exit
+  LA x1, HC_Exit
   blr x1
   b .
 
 // ArchTaskStartAddr(): the address new task frames return to.
 .global ArchTaskStartAddr
 ArchTaskStartAddr:
-  ldr x0, =task_start
+  LA x0, task_start
+  ret
+
+// Barriers and MMU maintenance for device drivers.
+.global ArchDsb
+ArchDsb:
+  dsb sy
+  ret
+
+.global ArchTlbFlush
+ArchTlbFlush:
+  dsb sy
+  tlbi vmalle1
+  dsb sy
+  isb
+  ret
+
+// ArchL2Table(): the boot level-2 translation table (Boot.S), 32 MiB entries.
+.global ArchL2Table
+ArchL2Table:
+  LA x0, l2_table
   ret

@@ -14,7 +14,7 @@ U0 IrqSet(I64 irq, U0 (*fp)(I64 irq))
     if (irq < 0 || irq >= AIC_IRQS_NUM)
         return;
     irq_handlers[irq] = fp;
-    ArchMmioWrite32(fdt_aic + 0x3000 + irq * 4, 0);
+    ArchMmioWrite32(fdt_aic + 0x3000 + irq * 4, 1);  // deliver to core 0
     ArchMmioWrite32(fdt_aic + 0x4180 + (irq / 32) * 4, 1 << (irq & 31));
 }
 

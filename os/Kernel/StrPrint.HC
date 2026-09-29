@@ -9,7 +9,7 @@ U0 SPutCh(U8 **dst, U8 c)
         **dst = c;
         *dst += 1;
     } else
-        UartPut(c);
+        ConsPut(c);
 }
 
 // Emit `n` copies of c.

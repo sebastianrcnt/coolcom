@@ -50,3 +50,6 @@ class CExceptFrame
 #define EXC_CUR_SPX_SYNC 4
 #define EXC_CUR_SPX_IRQ  5
 #define EXC_CUR_SPX_FIQ  6
+import U0 ArchDsb();
+import U0 ArchTlbFlush();
+import I64 *ArchL2Table();  // boot translation table: entry i maps the 32 MiB block at i << 25
