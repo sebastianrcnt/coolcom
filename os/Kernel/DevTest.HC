@@ -1,9 +1,9 @@
 // Device tests, run by KMain when booted with coolcom.test=1 under coolvm.
 // tools/kernel-test.sh supplies a 64 KiB disk (128 sectors, sector s byte j =
-// s*31 + j*7 mod 256), a scripted input queue (mouse +5,-3, wheel +2, left
-// button, then the keys h x BACKSPACE i SHIFT+a ENTER, then two shell lines)
-// and a 640x480 framebuffer, and afterwards checks the disk file, the
-// screenshot and that the shell printed 49.
+// s*31 + j*7 mod 256), a FAT32 disk, a scripted input queue (mouse +5,-3,
+// wheel +2, left button, then the keys h x BACKSPACE i SHIFT+a ENTER, then two
+// shell lines) and a 640x480 framebuffer, and afterwards checks the disk
+// files, the screenshot and that the shell printed 49.
 
 U8 dt_line[64];
 
@@ -44,6 +44,67 @@ blk_done:
     Free(b);
     if (kt_fails == f0)
         Print("  blk: PASS\n");
+}
+
+U8 *DevTestFsData(I64 n, I64 seed)
+{//Printable test file contents; tools/kernel-verify.py makes the same.
+    U8 *s = MAlloc(n);
+    I64 j;
+    for (j = 0; j < n; j++)
+        if (j % 64 == 63)
+            s[j] = '\n';
+        else
+            s[j] = 'A' + (j * 7 + seed) % 26;
+    return s;
+}
+
+U0 DevTestFs()
+{//Disk 1 is a FAT32 image made on the host (newfs_msdos) holding HostNote.txt.
+    //Read it, write FromCoolcom.txt (twice, so the first copy is freed) and
+    //Sub/Inner.TXT; the host checks them afterwards with mtools and fsck_msdos.
+    I64 size, f0 = kt_fails;
+    U8 *s, *a = DevTestFsData(3000, 0), *b = DevTestFsData(700, 5);
+    DrvRep;
+    if (sizeof(CFAT32Boot) != 512 || sizeof(CFAT32DirEntry) != 32 || sizeof(CFAT32DirEntryLong) != 32 ||
+            offset(CFAT32Boot.root_clus) != 44)
+        KTFail("fs: FAT structure layout");
+    if (!Cd("C:/")) {
+        KTFail("fs: no drive C:");
+        goto fs_done;
+    }
+    s = FileRead("hostnote.txt", &size);
+    if (!s || size != 20 || StrCmp(s, "Hello from the host\n"))
+        KTFail("fs: FileRead of the host's file");
+    Free(s);
+    FileWrite("FromCoolcom.txt", b, 100);
+    FileWrite("FromCoolcom.txt", a, 3000);
+    if (!DirMk("Sub") || !Cd("Sub"))
+        KTFail("fs: DirMk/Cd");
+    FileWrite("Inner.TXT", b, 700);
+    s = DirCur;
+    Print("cur dir: %s\n", s);
+    if (StrCmp(s, "C:/Sub"))
+        KTFail("fs: DirCur in Sub");
+    Free(s);
+    Cd("..");
+    if (Dir != 3)
+        KTFail("fs: Dir count");
+    s = FileRead("FromCoolcom.txt", &size);
+    if (!s || size != 3000 || MemCmp(s, a, 3000))
+        KTFail("fs: read back FromCoolcom.txt");
+    Free(s);
+    s = FileRead("C:/Sub/Inner.TXT", &size);
+    if (!s || size != 700 || MemCmp(s, b, 700))
+        KTFail("fs: read back Sub/Inner.TXT");
+    Free(s);
+    s = FileRead("Missing.TXT");
+    if (s)
+        KTFail("fs: FileRead of a missing file");
+fs_done:
+    Free(a);
+    Free(b);
+    if (kt_fails == f0)
+        Print("  fs: PASS\n");
 }
 
 U0 DevTestInput()
@@ -107,6 +168,7 @@ U0 DevTest()
     if (fb.base && fdt_input.base) {
         DevTestInput;
         DevTestBlk;
+        DevTestFs;
         DevTestShell;
         DevTestScreen;
     }

@@ -6,6 +6,8 @@
 #define TASKf_KILL      1
 #define TASKf_SUSPENDED 2
 
+extern class CDrv;
+
 class CTask
 {
     CTask *next, *last;  // this core's ring
@@ -13,6 +15,8 @@ class CTask
     U8 *stack;          // NULL for a core's first task (runs on the boot stack)
     I64 flags, wake_jiffy, cpu, num, switches;
     U8 task_name[TASK_NAME_LEN];
+    CDrv *cur_dv;  // current drive and directory (DskDirB.HC Cd)
+    U8 *cur_dir;
 };
 
 I64 task_num;
@@ -49,6 +53,7 @@ U0 TaskReap(CCPU *c)
     if (t) {
         c->dying = NULL;
         Free(t->stack);
+        Free(t->cur_dir);
         Free(t);
     }
 }
