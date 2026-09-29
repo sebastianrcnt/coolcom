@@ -9,7 +9,7 @@ import struct, sys
 # Usage: binlink.py <in.BIN> <out.raw> <out syms.ld> [arch.syms]
 # arch.syms (`nm` output of the linked assembly) resolves HolyC `import`s of
 # assembly routines; every HolyC export is written to syms.ld as HC_<name>.
-ORG = 0x40100000  # must match os/Kernel/Kernel.ld
+ORG = 0x800400000  # must match os/Kernel/Kernel.ld
 
 IET_REL_I8, IET_IMM_U8, IET_REL_I16, IET_IMM_U16 = 4, 5, 6, 7
 IET_REL_I32, IET_IMM_U32, IET_REL_I64, IET_IMM_I64 = 8, 9, 10, 11

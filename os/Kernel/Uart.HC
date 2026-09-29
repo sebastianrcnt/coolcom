@@ -1,9 +1,8 @@
-// PL011 UART on the QEMU virt machine.
-#define UART_BASE 0x09000000
-
+// Apple S5L UART, driven through simple 32-bit MMIO accessors.
 U0 UartPut(U8 c)
 {
-    *(UART_BASE)(U8 *) = c;
+    while (!(ArchMmioRead32(fdt_uart + 0x10) & 2)) {}
+    ArchMmioWrite32(fdt_uart + 0x20, c);
 }
 
 U0 UartPutS(U8 *s)
@@ -13,7 +12,7 @@ U0 UartPutS(U8 *s)
 }
 
 U0 PutChars(U64 ch)
-{//Print up to 8 chars packed into ch; target of the 'x'; statement.
+{
     while (ch) {
         UartPut(ch & 0xFF);
         ch >>= 8;

@@ -9,6 +9,7 @@ import I64 ArchMpidr();
 import I64 ArchDaif();
 import U0 ArchIrqOn();
 import U0 ArchIrqOff();
+import U0 ArchIntRestore(I64 daif);
 import U0 ArchWfi();
 import U0 ArchWfe();
 import U0 ArchSev();
@@ -19,7 +20,14 @@ import I64 ArchXchg(I64 *p, I64 v);          // atomic swap, returns old
 import I64 ArchCas(I64 *p, I64 old, I64 new); // compare-and-swap, returns seen
 import I64 ArchAdd(I64 *p, I64 v);           // atomic add, returns new
 import U0 ArchStoreRel(I64 *p, I64 v);       // store-release + sev
-import I64 ArchPsciCpuOn(I64 mpidr, U8 *entry, I64 ctx);
+import I64 ArchMmioRead32(I64 addr);
+import U0 ArchMmioWrite32(I64 addr, I64 val);
+import U0 ArchSpinRelease(I64 addr, I64 entry);
+import I64 ArchCntvCtl();
+import I64 ArchIpiStatus();
+import U0 ArchFiqSourcesInit();
+import U0 ArchIpiAck(I64 v);
+import U0 ArchIpiSend(I64 target);
 import U8 *ArchApEntry();
 import U0 ArchCtxSwitch(U8 **save_sp, U8 *new_sp);
 import U8 *ArchTaskStartAddr();
@@ -41,3 +49,4 @@ class CExceptFrame
 
 #define EXC_CUR_SPX_SYNC 4
 #define EXC_CUR_SPX_IRQ  5
+#define EXC_CUR_SPX_FIQ  6

@@ -28,6 +28,10 @@ U0 KExcept(I64 vec, CExceptFrame *f)
         IrqDispatch;
         return;
     }
+    if (vec == EXC_CUR_SPX_FIQ) {
+        FiqDispatch;
+        return;
+    }
     ExceptDump(vec, f);
     "System halted.\n";
     while (TRUE) {}
