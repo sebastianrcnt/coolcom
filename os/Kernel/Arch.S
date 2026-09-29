@@ -432,3 +432,29 @@ ArchLongJmp:
   mov sp, x1
   mov x0, #1
   ret
+
+// Names the TempleOS library calls (coolc/Runtime NativeExcept.HC: try/catch).
+.global AIWNIOS_SetJmp
+AIWNIOS_SetJmp:
+  b ArchSetJmp
+.global AIWNIOS_LongJmp
+AIWNIOS_LongJmp:
+  b ArchLongJmp
+
+// F64 functions that are one instruction (KMathC.HC has the rest).
+.global Sqrt
+Sqrt:
+  fsqrt d0, d0
+  ret
+.global Floor
+Floor:
+  frintm d0, d0
+  ret
+.global Ceil
+Ceil:
+  frintp d0, d0
+  ret
+.global Round
+Round:
+  frinta d0, d0
+  ret

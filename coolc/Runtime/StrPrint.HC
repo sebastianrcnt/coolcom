@@ -213,6 +213,32 @@ U8 *sys_pos_pows_lets = " KMGTPEZY",
 #define TMP_BUF_LEN	256
 #define SLOP		8
 
+// What each conversion of StrPrintJoin() takes. The compiler's check of
+// literal format strings (PrsFmtCheck, Frontend/AIWNIOS_PrsExp.HC) uses this
+// same table, so the two agree on what a conversion is.
+#define PRTF_ARG_BAD  (-1)  // not a conversion: StrPrintJoin prints it as written
+#define PRTF_ARG_NONE 0     // %%
+#define PRTF_ARG_I64  1     // an integer, pointer or string
+#define PRTF_ARG_F64  2
+#define PRTF_ARG_2I64 3     // two (%z, %Z: index and list)
+
+I64 PrtfArgKind(I64 ch)
+{
+    switch (ch) {
+        case 'F': case 'Q': case 'q': case 'D': case 'T': case 's': case 'S':
+        case 'c': case 'C': case 'p': case 'P': case 'd': case 'u': case 'x':
+        case 'X': case 'b': case 'B':
+            return PRTF_ARG_I64;
+        case 'z': case 'Z':
+            return PRTF_ARG_2I64;
+        case 'f': case 'e': case 'g': case 'n':
+            return PRTF_ARG_F64;
+        case '%':
+            return PRTF_ARG_NONE;
+    }
+    return PRTF_ARG_BAD;
+}
+
 U8 *StrPrintJoin(U8 *dst, U8 *fmt, I64 argc, I64 *argv)
 {/*$LK,"Print(\"\") Fmt Strings",A="FI:::/Doc/Print.DD"$
 In float formatting, do not exceed 18-digits
@@ -871,6 +897,12 @@ sp_out_eng: //Engineering notation
                 case '%':
                     SPutChar(_dst, '%', _buf);
                     break;
+                default:  // not a conversion (PrtfArgKind): shown as written
+                    SPutChar(_dst, '%', _buf);
+                    if (fmt[-1])
+                        SPutChar(_dst, fmt[-1], _buf);
+                    else
+                        fmt--;
             }
         } else {
             SPutChar(_dst, ch, _buf);

@@ -11,6 +11,7 @@ I64 fdt_nmem, fdt_nres, fdt_ncpu;
 I64 fdt_uart = 0x235200000, fdt_aic = 0x23B100000;
 I64 fdt_finisher, fdt_size;
 Bool fdt_vm, fdt_test;
+I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate.HC)
 
 // VM devices, found by compatible string under /soc and /chosen:
 //   simple-framebuffer, coolcom,coolvm-input, virtio,mmio (any number).
@@ -162,6 +163,10 @@ Bool FdtInit(U8 *dt)
             p = ((data + len + 3)(I64) & ~3)(U8 *);
             if (kind[depth] == 10 && FdtEqual(str + nameoff, "bootargs"))
                 fdt_test = FdtPrefix(data, "coolcom.test=1");
+            if (kind[depth] == 10 && FdtEqual(str + nameoff, "coolcom,unix-time") && len == 8)
+                fdt_unix_time = Fdt64(data);
+            if (kind[depth] == 10 && FdtEqual(str + nameoff, "coolcom,utc-offset") && len == 4)
+                fdt_utc_offset = Fdt32(data)(I32);
             if (depth == 0 && FdtEqual(str + nameoff, "compatible"))
                 fdt_vm = FdtPrefix(data, "coolcom,coolvm");
             if (FdtEqual(str + nameoff, "reg") && len >= 16) {

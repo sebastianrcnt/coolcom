@@ -244,7 +244,8 @@ Bool shell_in_stmt;
 CTask *shell_task;
 
 U0 ShellTrap()
-{//bin_trap_hook: an unresolved import was called on the shell task; back to the prompt.
+{//bin_trap_hook, throw_hook: an unresolved import was called, or a throw was not
+    //caught, on the shell task: back to the prompt.
     if (Fs != shell_task)
         return;
     if (shell_in_stmt) {
@@ -273,14 +274,14 @@ U0 ShellBreak(CExceptFrame *f)
     //shell's own statement, resume in ShellBreakNow instead. Otherwise the shell is switched
     //out inside the statement (Sleep, GetKey, or mid-Yield): flag it and wake it, and Yield
     //calls ShellBreakNow when the shell next runs.
-    U8 *stack = shell_task->stack;
+    U8 *stack = shell_task->stk;
     if (!shell_in_stmt)
         return;
     if (Fs == shell_task && f >= stack && f < stack + SHELL_STACK)
         f->elr = &ShellBreakNow;
     else {
         shell_task->wake_jiffy = 0;
-        shell_task->flags |= TASKf_BREAK;
+        LBts(&shell_task->task_flags, TASKf_PENDING_BREAK);
     }
 }
 
@@ -304,6 +305,25 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
     return TRUE;
 }
 
+U8 *ShellFunSeg(U8 *addr, I64 *_offset)
+{//fun_seg_hook: the function compiled in the shell holding addr (TempleOS
+    //FunSegFind over the hash table: the nearest function start below addr).
+    CHashTable *table;
+    CHash *h;
+    CHashFun *best = NULL;
+    I64 i;
+    for (table = shell_hash; table; table = table->next)
+        for (i = 0; i <= table->mask; i++)
+            for (h = table->body[i]; h; h = h->next)
+                if (h->type & HTT_FUN && h(CHashFun *)->exe_addr <= addr &&
+                        (!best || h(CHashFun *)->exe_addr > best->exe_addr))
+                    best = h;
+    if (!best || addr - best->exe_addr >= FUN_SEG_MAX)
+        return NULL;
+    *_offset = addr - best->exe_addr;
+    return best->str;
+}
+
 I64 ShellExeCmdLine(U8 *cc)
 {//Compile and run each statement of cc (TempleOS ExeCmdLine); returns the last value.
     I64 res = 0, type, *tok = cc + CC_TOKEN, *flags = cc + CC_FLAGS;
@@ -323,7 +343,7 @@ I64 ShellExeCmdLine(U8 *cc)
         if (code && code != INVALID_PTR) {
             fp = code;
             if (!ArchSetJmp(shell_fault_ctx)) {
-                shell_task->flags &= ~TASKf_BREAK;
+                LBtr(&shell_task->task_flags, TASKf_PENDING_BREAK);
                 shell_in_stmt = TRUE;
                 res = (*fp)();
             }
@@ -456,6 +476,8 @@ U0 ShellTask(U8 *data)
     break_hook = &ShellBreak;
     task_break_hook = &ShellBreakNow;
     bin_trap_hook = &ShellTrap;
+    throw_hook = &ShellTrap;  // an uncaught throw in a statement (NativeExcept.HC, KHost.HC)
+    fun_seg_hook = &ShellFunSeg;
     if (!ShellInit) {
         Print("shell: compiler failed to load\n");
         shell_state = -1;
@@ -477,5 +499,5 @@ U0 ShellTask(U8 *data)
 
 CTask *ShellStart(I64 lines = -1)
 {
-    return Spawn(&ShellTask, lines, "Shell", 0, SHELL_STACK);
+    return Spawn(&ShellTask, lines, "Shell", 0, NULL, SHELL_STACK);
 }

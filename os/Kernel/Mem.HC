@@ -163,7 +163,7 @@ CMemBlk *HeapChk(CHeapCtrl *hc, U8 *p, U8 *who)
     CMemBlk *b = p - HEAP_HDR;
     if (p(I64) & 15 || p < hc->start + HEAP_HDR || p >= hc->end ||
             !BlkMagicOk(b) || !BlkUsed(b)) {
-        Print("%s: bad pointer %p (invalid or double free)\n", who, p);
+        RawPrint("%s: bad pointer %p (invalid or double free)\n", who, p);  // (heap locked)
         heap_errs++;
         return NULL;
     }
@@ -333,16 +333,23 @@ U0 HeapStatsCtrl(CHeapCtrl *hc)
             hc->used >> 10, nu, (hc->total - hc->used) >> 10, nf, big >> 10, st);
 }
 
-// ---- TempleOS-style API on the system heap ----
+// ---- TempleOS API on the system heap. There is one heap: the task arguments
+// (whose heap TempleOS allocates from) are accepted and ignored. ----
 
 U0 MemInit(U8 *start, U8 *end) {HeapInit(&sys_heap, start, end);}
-U8 *MAlloc(I64 size) {return HeapAlloc(&sys_heap, size);}
 
-U8 *CAlloc(I64 size)
+U8 *MAlloc(I64 cnt, CTask *task = NULL)
 {
-    U8 *p = HeapAlloc(&sys_heap, size);
+    no_warn task;
+    return HeapAlloc(&sys_heap, cnt);
+}
+
+U8 *CAlloc(I64 cnt, CTask *task = NULL)
+{
+    U8 *p = HeapAlloc(&sys_heap, cnt);
+    no_warn task;
     if (p)
-        MemSet(p, 0, size);
+        MemSet(p, 0, cnt);
     return p;
 }
 
@@ -350,39 +357,36 @@ U0 Free(U8 *p) {HeapFree(&sys_heap, p);}
 U8 *ReAlloc(U8 *p, I64 size) {return HeapReAlloc(&sys_heap, p, size);}
 I64 MSize(U8 *p) {return HeapMSize(&sys_heap, p);}
 
-// Copy of a heap block (its whole usable size).
-U8 *MAllocIdent(U8 *src)
-{
-    I64 n = MSize(src);
+U8 *MAllocIdent(U8 *ptr, CTask *task = NULL)
+{//Copy of a heap block (its whole usable size).
+    I64 n = MSize(ptr);
     U8 *p;
-    if (!src || !n)
+    no_warn task;
+    if (!ptr || !n)
         return NULL;
     p = MAlloc(n);
     if (p)
-        MemCpy(p, src, n);
+        MemCpy(p, ptr, n);
     return p;
 }
 
-// Heap copy of a string.
-U8 *StrNew(U8 *s)
-{
-    I64 n = StrLen(s) + 1;
-    U8 *p = MAlloc(n);
+U8 *StrNew(U8 *str, CTask *task = NULL)
+{//Heap copy of a string.
+    I64 n;
+    U8 *p;
+    no_warn task;
+    if (!str)
+        str = "";
+    n = StrLen(str) + 1;
+    p = MAlloc(n);
     if (p)
-        MemCpy(p, s, n);
+        MemCpy(p, str, n);
     return p;
 }
 
-U8 *MStrPrint(U8 *fmt, ...)
-{//Format into a new heap string (free it with Free).
-    U8 *d = NULL, *res;  // first pass: count
-    KFmt(&d, fmt, argc, argv);
-    res = MAlloc(d(I64) + 1);
-    if (res) {
-        d = res;
-        KFmt(&d, fmt, argc, argv);
-    }
-    return res;
-}
+U8 *AMAlloc(I64 cnt, CTask *task = NULL) {return MAlloc(cnt, task);}
+U8 *ACAlloc(I64 cnt) {return CAlloc(cnt);}
+U8 *AStrNew(U8 *str) {return StrNew(str);}
+U8 *AMAllocIdent(U8 *ptr) {return MAllocIdent(ptr);}
 
 U0 HeapStats() {HeapStatsCtrl(&sys_heap);}

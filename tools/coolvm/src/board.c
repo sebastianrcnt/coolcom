@@ -6,6 +6,7 @@
  * and the /chosen + cpu-release-addr fix-ups from m1n1 src/kboot.c.
  */
 #include "coolvm.h"
+#include <time.h>
 
 /* dt-bindings/interrupt-controller/apple-aic.h and irq.h */
 #define AIC_IRQ 0
@@ -169,6 +170,13 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
     fdt_prop_empty(f, "ranges");
     fdt_prop_str(f, "stdout-path", "serial0");
     fdt_prop_str(f, "bootargs", bootargs ? bootargs : "");
+    { /* the host clock, for the guest's Now (coolcom os/Kernel/KDate.HC) */
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        fdt_prop_u64(f, "coolcom,unix-time", (uint64_t)now);
+        fdt_prop_u32(f, "coolcom,utc-offset", (uint32_t)(int32_t)tm.tm_gmtoff);
+    }
     snprintf(name, sizeof name, "framebuffer@%llx", (unsigned long long)FB_BASE);
     fdt_begin(f, name);
     { const char *compat[] = {"apple,simple-framebuffer", "simple-framebuffer"}; fdt_prop_strs(f, "compatible", compat, 2); }

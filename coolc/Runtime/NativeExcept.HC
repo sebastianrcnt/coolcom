@@ -1,4 +1,5 @@
-// Single-task exception stack for the native compiler process.
+// Exceptions (try/catch/throw) on Fs->next_except, for the native compiler
+// process and the kernel (os/Kernel/KHost.HC has NativeExit there).
 extern U0 NativeExit(I64 status);
 U8 *SysTry()
 {
@@ -19,7 +20,10 @@ U0 throw(I64 ch = 0, Bool no_log = FALSE)
     CExcept *entry = Fs->last_except;
     I64 saved[2048];
     if (entry == &Fs->next_except) {
+        Fs->except_ch = ch;
+#ifndef COOLCOM_KERNEL  // (the kernel's NativeExit says it)
         Print("Unhandled compiler exception %X\n", ch);
+#endif
         NativeExit(1);
     }
     MemCpy(saved, entry->AARCH64_except_pad, sizeof(saved));

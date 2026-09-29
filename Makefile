@@ -1,4 +1,4 @@
-KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
+KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
 .PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel seed
@@ -43,8 +43,8 @@ ASM_OBJS := $(B)/Boot.o $(B)/Arch.o $(B)/Blob.o
 
 $(B)/%.o: os/Kernel/%.S os/Kernel/Asm.h | $(B)
 	aarch64-elf-gcc -c $< -o $@
-# Blob.S embeds the compiler seed and the shell prelude (.incbin).
-$(B)/Blob.o: coolc/seed/Compiler.BIN build/ShellPrelude.HH
+# Blob.S embeds the compiler seed (.incbin); binlink puts the shell prelude in the module.
+$(B)/Blob.o: coolc/seed/Compiler.BIN
 build/ShellPrelude.HH: $(KSRC) tools/mkprelude.py | build
 	python3 tools/mkprelude.py os/Kernel/Kernel.HC > $@
 
@@ -59,8 +59,8 @@ $(B)/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
 	$(LD) $(B)/pre/syms.ld $(ASM_OBJS) -o $(B)/pre/arch.elf
 	aarch64-elf-nm $(B)/pre/arch.elf | grep ' [Tt] ' > $@
 
-$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py
-	python3 tools/binlink.py --org $(MODULE_BASE) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
+$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py build/ShellPrelude.HH
+	python3 tools/binlink.py --org $(MODULE_BASE) --prelude build/ShellPrelude.HH $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
 
 # Pass 2: the real link; check the assembly didn't move.
 $(B)/cool.elf: $(B)/kernel.raw $(B)/syms.ld $(ASM_OBJS) tools/Kernel.S

@@ -62,10 +62,5 @@ U0 ConsPutS(U8 *s)
         ConsPut(*s++);
 }
 
-U0 PutChars(U64 ch)
-{//Bare character statements ('a'; '\n';) compile to this.
-    while (ch) {
-        ConsPut(ch & 0xFF);
-        ch >>= 8;
-    }
-}
+// (PutChars, which bare character statements compile to, is TempleOS's, in
+// coolc/Runtime/StrPrint.HC; it prints through PutS, KPrint.HC.)

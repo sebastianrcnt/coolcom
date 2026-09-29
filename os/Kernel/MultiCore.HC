@@ -1,8 +1,6 @@
 // Secondary cores are released through m1n1 spin-table words.
 #define CORES_MAX     8
 
-extern class CTask;
-
 // HolyC classes are packed (no padding): atomics need 8-byte alignment, so keep
 // the size a multiple of 8 for arrays of CCPU and I64s ahead of smaller members.
 class CCPU
@@ -12,8 +10,7 @@ class CCPU
     CTask *seth_task,   // the core's first task, never exits
             *cur_task,
             *dying;       // exited task waiting to be freed
-    Bool online;
-    U8 pad[7];
+    Bool online;        // (Bool is a U64)
 };
 
 CCPU cpu_structs[CORES_MAX];

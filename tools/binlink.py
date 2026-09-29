@@ -23,13 +23,19 @@ import struct, sys
 # Each site is a byte offset from the module start of an 8-byte aligned U64.
 # The assembly is position independent (adrp/add), so it needs no entries;
 # tools/reloc-check.py proves that for the linked ELF and the final Image.
-# Usage: binlink.py [--org ADDR] <in.BIN> <out.raw> <out syms.ld> [arch.syms]
+# Usage: binlink.py [--org ADDR] [--prelude FILE] <in.BIN> <out.raw> <out syms.ld> [arch.syms]
+# --prelude appends FILE, NUL-terminated, after the symbol table (SHELL_PRELUDE:
+# the shell prelude text, too big for the boot stub's pc-relative reach).
 # arch.syms (`nm` output of the linked assembly) resolves HolyC `import`s of
 # assembly routines; every HolyC export is written to syms.ld as HC_<name>.
 ORG = 0x800400000  # module link address (MODULE_BASE in Kernel.ld); --org overrides
 args = sys.argv[1:]
 if args[:1] == ['--org']:
     ORG = int(args[1], 0)
+    args = args[2:]
+prelude = b''
+if args[:1] == ['--prelude']:
+    prelude = open(args[1], 'rb').read() + b'\0'
     args = args[2:]
 
 IET_REL_I8, IET_IMM_U8, IET_REL_I16, IET_IMM_U16 = 4, 5, 6, 7
@@ -164,6 +170,8 @@ ksym_table = ORG + len(image)
 pool = b''.join(n.encode() + b'\0' for n in ksym_names)
 ksym_at = len(image)
 image += bytes(8 + 16 * len(ksym_names)) + pool
+shell_prelude = ORG + len(image)
+image += prelude
 image += bytes(align(len(image)) - len(image))
 kbss_start = kbss = ORG + len(image)
 for name, init, refs in zeroed:
@@ -207,6 +215,7 @@ open(args[2], 'w').write(
     f'MAIN_TABLE = {main_table:#x};\n'
     f'RELOC_TABLE = {reloc_table:#x};\n'
     f'KSYM_TABLE = {ksym_table:#x};\n'
+    f'SHELL_PRELUDE = {shell_prelude:#x};\n'
     f'KBSS_START = {kbss_start:#x};\n'
     f'KBSS_END = {kbss_end:#x};\n')
 print(f'binlink: code {len(code):#x} bytes, {len(mains)} init chunks, '

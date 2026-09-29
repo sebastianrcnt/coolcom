@@ -1,7 +1,7 @@
 // Current directory, listing and making directories, from TempleOS by Terry
 // A. Davis (public domain) as kept in Aiwnios (nrootconauto, commit e155e87,
 // Src/DskDirB.HC). FAT32 only; no home directory ("~"). Dir prints plain
-// text: DOS month/day and time, hex size, name ("/" after directories).
+// text: month/day and local time, hex size, name ("/" after directories).
 
 extern Bool DirMk(U8 *filename, I64 entry_cnt = 0);
 
@@ -84,7 +84,8 @@ I64 Dir(U8 *files_find_mask = "*", Bool full = FALSE)
 {//List directory.
     CDirEntry *tmpde1 = NULL, *tmpde2;
     U8 *st;
-    I64 csize = 0xFFFF, c = 0xFFFF, res = 0, d, t;
+    I64 csize = 0xFFFF, c = 0xFFFF, res = 0;
+    CDateStruct ds;
     tmpde1 = FilesFind(files_find_mask);
     if (!(st = DirCur))
         PrintErr("Invalid Drive\n");
@@ -115,9 +116,8 @@ I64 Dir(U8 *files_find_mask = "*", Bool full = FALSE)
             while (tmpde1) {
                 tmpde2 = tmpde1->next;
                 res++;
-                d = tmpde1->datetime >> 16 & 0xFFFF;
-                t = tmpde1->datetime & 0xFFFF;
-                "%02d/%02d %02d:%02d %0*X ", d >> 5 & 15, d & 31, t >> 11, t >> 5 & 63, csize, tmpde1->size;
+                Date2Struct(&ds, tmpde1->datetime + local_time_offset);
+                "%02d/%02d %02d:%02d %0*X ", ds.mon, ds.day_of_mon, ds.hour, ds.min, csize, tmpde1->size;
                 if (full)
                     "%0*X ", c, tmpde1->clus;
                 if (tmpde1->attr & RS_ATTR_DIR)

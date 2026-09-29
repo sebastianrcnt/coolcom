@@ -56,6 +56,7 @@ Bool Blink(F64 Hz = 2.5)
     return ToI64(cnts.jiffies * 2 * Hz / JIFFY_FREQ) & 1;
 }
 
+#ifndef COOLCOM_KERNEL  // the kernel has its own (os/Kernel/Sched.HC)
 U0 SleepUntil(I64 wake_jiffy)
 {//Not for power-saving.  It is to make a program pause without hogging the CPU.
     Bool old_idle = LBts(&(Fs->task_flags), TASKf_IDLE);
@@ -79,6 +80,7 @@ U0 Sleep(I64 mS)
     else
         LBtr(&(Fs->task_flags), TASKf_IDLE);
 }
+#endif
 
 F64 Ona2Freq(I8 ona)
 {//Ona to freq. Ona=60 is 440.0Hz.
@@ -157,10 +159,12 @@ Bool Silent(Bool val = ON)
     return LBEqu(&(Fs->display_flags), DISPLAYf_SILENT, val);
 }
 
+#ifndef COOLCOM_KERNEL  // (the kernel's prints before it has tasks: Sched.HC)
 Bool IsSilent()
 {//Return StdOut turned-off?
     return Bt(&(Fs->display_flags), DISPLAYf_SILENT);
 }
+#endif
 
 Bool SysDbg(Bool val)
 {//Set SysDbg bit you can use while debugging.

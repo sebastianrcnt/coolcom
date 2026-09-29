@@ -9,17 +9,17 @@ U8 *except_vec_names[16] = {
 U0 ExceptDump(I64 vec, CExceptFrame *f)
 {
     I64 i;
-    "\n*** Exception: %s\n", except_vec_names[vec & 15];
-    "ESR=%016X (EC=%02X) ELR=%016X FAR=%016X SPSR=%08X\n",
-            f->esr, f->esr >> 26 & 0x3F, f->elr, f->far, f->spsr;
+    RawPrint("\n*** Exception: %s\n", except_vec_names[vec & 15]);
+    RawPrint("ESR=%016X (EC=%02X) ELR=%016X FAR=%016X SPSR=%08X\n",
+             f->esr, f->esr >> 26 & 0x3F, f->elr, f->far, f->spsr);
     for (i = 0; i < 31; i++) {
-        "x%-2d=%016X", i, f->x[i];
+        RawPrint("x%-2d=%016X", i, f->x[i]);
         if (i % 4 == 3)
-            '\n';
+            PutS("\n");
         else
-            "  ";
+            PutS("  ");
     }
-    '\n';
+    PutS("\n");
 }
 
 U8 *except_hook;  // I64 (*)(I64 vec, CExceptFrame *f): TRUE if it recovered (the shell)

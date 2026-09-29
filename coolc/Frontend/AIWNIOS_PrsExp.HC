@@ -1064,27 +1064,29 @@ U0 PrsFmtCheck(CCmpCtrl *cc, U8 *name, I64 kind, U8 *fmt, U8 *vk, I64 nvk)
             } else
                 break;
         }
-        switch (ch = *p++) {
-            case 'F': case 'Q': case 'q': case 'D': case 'T': case 's': case 'S':
-            case 'c': case 'C': case 'p': case 'P': case 'd': case 'u': case 'x':
-            case 'X': case 'b': case 'B':
+        if (!(ch = *p++)) {
+            p--;
+            goto fmt_next;
+        }
+        switch (PrtfArgKind(ch)) {  // Runtime/StrPrint.HC, as StrPrintJoin() reads it
+            case PRTF_ARG_I64:
                 if (n < FMT_ARGS_MAX) want[n] = 0;
                 n++;
                 break;
-            case 'z': case 'Z':
+            case PRTF_ARG_2I64:
                 if (n + 1 < FMT_ARGS_MAX) {
                     want[n] = 0;
                     want[n + 1] = 0;
                 }
                 n += 2;
                 break;
-            case 'f': case 'e': case 'g': case 'n':
+            case PRTF_ARG_F64:
                 if (n < FMT_ARGS_MAX) want[n] = 1;
                 n++;
                 break;
-            case 0:
-                p--;
-                break;
+            case PRTF_ARG_BAD:
+                LexWarn(cc, MStrPrint("%s: %%%c is not a conversion (it prints as written) at ", name, ch));
+                return;
         }
 fmt_next:;
     }
