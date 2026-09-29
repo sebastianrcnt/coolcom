@@ -1,7 +1,10 @@
 #!/bin/sh
 # Copy the C: drive's files into a FAT32 disk image with mtools: the programs of os/Disk,
-# and the kernel's own sources under C:/Kernel (for Man; C:/Kernel/Runtime holds the shared
-# TempleOS library files the kernel includes from coolc/Runtime).
+# and the kernel's own sources: os/Kernel in C:/Kernel, and the library files Kernel.HC
+# includes as ../../coolc/Runtime/... and ../../coolc/Fmt/HCTok.HC in C:/coolc (".." stops
+# at the root), so Cmp("C:/Kernel/Kernel.HC") in the OS compiles the kernel and Man finds
+# definitions. With build/BootStub.BIN (the prebuilt assembly, tools/mkbootstub.py) the
+# OS's MakeKernel rebuilds the whole Image (docs/kernel-rebuild.md).
 # Usage: disk-files.sh image [-n]   (-n: leave files that are already there alone)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -9,8 +12,10 @@ IMG=$1
 FLAG=-o
 [ "${2:-}" = "-n" ] && FLAG=-n
 cd "$ROOT"
-mmd -i "$IMG" ::Kernel ::Kernel/Runtime 2>/dev/null || true
-# put SRC... DIR: copy each file into ::DIR; with -n, leave existing files alone.
+for d in Kernel coolc coolc/Runtime coolc/Fmt; do
+    mmd -i "$IMG" ::$d 2>/dev/null || true
+done
+# put DIR SRC...: copy each file into ::DIR; with -n, leave existing files alone.
 # (mcopy -n / -D s exit non-zero when they skip a file, so check first.)
 put() {
     dir=$1; shift
@@ -22,5 +27,7 @@ put() {
     done
 }
 put "" os/Disk/*.HC
-put Kernel/ os/Kernel/*.HC os/Kernel/*.HH os/Kernel/*.S os/Kernel/*.h coolc/Fmt/HCTok.HC
-put Kernel/Runtime/ coolc/Runtime/*.HC
+put Kernel/ os/Kernel/*
+[ ! -f build/BootStub.BIN ] || put Kernel/ build/BootStub.BIN
+put coolc/Runtime/ coolc/Runtime/*.HC
+put coolc/Fmt/ coolc/Fmt/HCTok.HC

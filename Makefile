@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -67,6 +67,14 @@ $(B)/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
 	$(LD) $(B)/pre/syms.ld $(ASM_OBJS) -o $(B)/pre/arch.elf
 	aarch64-elf-nm $(B)/pre/arch.elf | grep ' [Tt] ' > $@
 
+# The assembly for MakeKernel, the in-OS linker (tools/mkbootstub.py): linked
+# like pass 1 but with stand-ins only for binlink's symbols, so the linker
+# script's own (__bss_*, boot_text_end, image_end) keep their real values.
+$(B)/BootStub.BIN: $(B)/arch.syms tools/mkbootstub.py
+	grep -v -e '^__bss_' -e '^boot_text_end ' -e '^image_end ' $(B)/pre/syms.ld > $(B)/pre/stub-syms.ld
+	$(LD) $(B)/pre/stub-syms.ld $(ASM_OBJS) -o $(B)/pre/stub.elf
+	python3 tools/mkbootstub.py $(B)/pre/stub.elf $(B)/arch.syms $@
+
 BLOBS := SHELL_PRELUDE=build/ShellPrelude.HH ARM64_OPS=os/Kernel/Arm64Ops.csv
 $(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
 	python3 tools/binlink.py --org $(MODULE_BASE) $(addprefix --blob ,$(BLOBS)) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
@@ -113,14 +121,18 @@ build/disk.img: | build
 # C:/Kernel.HH (the shell prelude) declares the kernel for programs compiled
 # with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
 # Cmp("C:/Compiler/Native.HC") in the OS rebuilds coolc/seed/Compiler.BIN.
-disk-install: build/disk.img build/ShellPrelude.HH
+# tools/disk-files.sh puts os/Kernel in C:/Kernel and the runtime files it
+# includes as ../../coolc/... in C:/coolc (".." stops at the root), and the
+# prebuilt assembly C:/Kernel/BootStub.BIN, so `MakeKernel` in the OS rebuilds
+# build/kernel.Image (docs/kernel-rebuild.md).
+disk-install: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
 	tools/native/prepare.sh
 	mmd -i build/disk.img ::Compiler 2>/dev/null || true
 	mcopy -o -i build/disk.img build/native-src/* ::Compiler/
 
-disk-seed: build/disk.img build/ShellPrelude.HH
+disk-seed: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
 	tools/disk-files.sh build/disk.img -n
 	@mdir -i build/disk.img ::Kernel.HH >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
 	@mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
@@ -151,6 +163,10 @@ syntax-test: build/kernel.Image coolvm
 # The OS compiles its own compiler: Cmp in the shell must reproduce the seed.
 selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH
 	tools/selfhost-test.sh $<
+
+# The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image.
+kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm
+	tools/kernel-rebuild-test.sh $<
 
 # Find, HexDump, Diff, Less and Man on C: (os/Disk); the kernel sources go to C:/Kernel (tools/disk-files.sh).
 text-test: build/kernel.Image coolvm

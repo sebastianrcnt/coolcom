@@ -2,12 +2,13 @@
 // The shell compiler's symbol table says what Name is. A symbol defined in a file the shell
 // compiled (Vim.HC, your own #include) carries its file and line, and Vim opens there. The
 // kernel's own symbols come from the compiler's prelude, so their source is looked up in
-// the kernel sources on the disk (C:/Kernel: os/Kernel and the shared library files) by
+// the kernel sources on the disk (C:/Kernel: os/Kernel; C:/coolc: the shared library files) by
 // the shape of a definition: a function is a line with a return type and Name(, a class is
 // "class Name", a global is a declaration at the start of a line, a #define is #define Name.
 // A file too big for Vim (over 128 KiB, e.g. KernelA.HH) opens in Less at the line.
 //   Man("StrLen");   Man("CTask");   Man("VimOpen");   Man("jiffies");
 #define MAN_SRC   "C:/Kernel/*"
+#define MAN_SRC2  "C:/coolc/*"
 #define MAN_FUN   1
 #define MAN_CLASS 2
 #define MAN_GLOBAL 3
@@ -111,32 +112,35 @@ I64 ManSearch(U8 *name, I64 kind, U8 *file, I64 *_line)
 {
     CDirEntry *list, *de;
     U8 *buf, *p, *q, *end;
-    I64 size, line, nl = StrLen(name), found = 0;
+    I64 size, line, nl = StrLen(name), found = 0, r;
     man_extra[0] = 0;
-    list = FilesFind(MAN_SRC, FUF_RECURSE | FUF_JUST_FILES | FUF_FLATTEN_TREE);
-    for (de = list; de; de = de->next) {
-        size = TextRead(de->full_name, &buf);
-        if (size <= 0) {Free(buf); goto man_next;}
-        end = buf + size;
-        line = 1;
-        for (p = buf; p < end; p = q + 1) {
-            q = p;
-            while (q < end && *q != '\n') q++;
-            if (ManDefLine(p, q - p, name, nl, kind)) {
-                if (!found) {
-                    StrCpy(file, de->full_name);
-                    *_line = line;
-                } else if (found < 4 && StrLen(man_extra) < 400) {
-                    StrPrint(man_extra + StrLen(man_extra), "  also %s:%d\n", de->full_name, line);
+    for (r = 0; r < 2; r++) {
+        if (r) list = FilesFind(MAN_SRC2, FUF_RECURSE | FUF_JUST_FILES | FUF_FLATTEN_TREE);
+        else list = FilesFind(MAN_SRC, FUF_RECURSE | FUF_JUST_FILES | FUF_FLATTEN_TREE);
+        for (de = list; de; de = de->next) {
+            size = TextRead(de->full_name, &buf);
+            if (size <= 0) {Free(buf); goto man_next;}
+            end = buf + size;
+            line = 1;
+            for (p = buf; p < end; p = q + 1) {
+                q = p;
+                while (q < end && *q != '\n') q++;
+                if (ManDefLine(p, q - p, name, nl, kind)) {
+                    if (!found) {
+                        StrCpy(file, de->full_name);
+                        *_line = line;
+                    } else if (found < 4 && StrLen(man_extra) < 400) {
+                        StrPrint(man_extra + StrLen(man_extra), "  also %s:%d\n", de->full_name, line);
+                    }
+                    found++;
                 }
-                found++;
+                line++;
             }
-            line++;
-        }
-        Free(buf);
+            Free(buf);
 man_next:
+        }
+        DirTreeDel(list);
     }
-    DirTreeDel(list);
     return found;
 }
 
@@ -177,7 +181,7 @@ U0 Man(U8 *name)
     n = ManSearch(name, kind, file, &line);
     if (!n && kind) n = ManSearch(name, 0, file, &line);
     if (!n) {
-        if (h) Print("Man: no source found for %s (looked in C:/Kernel)\n", name);
+        if (h) Print("Man: no source found for %s (looked in C:/Kernel and C:/coolc)\n", name);
         else Print("Man: unknown symbol %s\n", name);
         return;
     }
