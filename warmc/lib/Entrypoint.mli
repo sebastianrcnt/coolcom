@@ -10,3 +10,5 @@ open Identifier
 
 (** Given the env, and the name of the entrypoint function, generate the entrypoint code. *)
 val entrypoint_code : env -> qident -> string
+
+val hc_entrypoint : env -> qident -> string * string * string option

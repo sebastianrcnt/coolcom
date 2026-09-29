@@ -31,3 +31,5 @@ val compile_multiple : compiler -> module_source list -> compiler
 val compile_entrypoint : compiler -> module_name -> identifier -> compiler
 
 val post_compile : compiler -> compiler
+
+val compiler_hc : compiler -> (module_name * identifier) option -> string

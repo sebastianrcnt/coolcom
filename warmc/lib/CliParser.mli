@@ -27,6 +27,7 @@ type target =
   (** Stop at the type checking stage. *)
   | Executable of { bin_path: string; entrypoint: entrypoint; }
   (** Compile to C, generate an executable. *)
+  | HCStandalone of { output_path: string; entrypoint: entrypoint option; }
   | CStandalone of { output_path: string; entrypoint: entrypoint option; }
   (** Compile to a standalone C file. *)
 [@@deriving eq]
