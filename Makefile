@@ -104,7 +104,9 @@ disk-install: build/disk.img
 	mcopy -o -i build/disk.img $(DISK_FILES) ::
 
 disk-seed: build/disk.img
-	mcopy -D s -i build/disk.img $(DISK_FILES) ::
+	@for f in $(DISK_FILES); do \
+	  mdir -i build/disk.img ::$$(basename $$f) >/dev/null 2>&1 || mcopy -i build/disk.img $$f :: || exit 1; \
+	done
 
 run: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
