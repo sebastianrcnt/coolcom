@@ -558,11 +558,16 @@ lex_float_start:
                     case KW_INCLUDE:
                         if (Lex(cc) != TK_STR)
                             goto lex_end;
-                        fbuf = ExtDft(cc->cur_str, "HC.Z");
+                        fbuf = ExtDft(cc->cur_str, "HC");  // NATIVE: no .Z files
                         buf2 = FileNameAbs(fbuf);
                         Free(fbuf);
                         // NATIVE: include a plain file buffer; no DolDoc loader.
-                        LexIncludeStr(cc, buf2, FileRead(buf2, NULL), TRUE);
+                        if (!(fbuf = FileRead(buf2, NULL))) {
+                            PrintErr("File not found: %s\n", buf2);
+                            Free(buf2);
+                            LexExcept(cc);
+                        }
+                        LexIncludeStr(cc, buf2, fbuf, TRUE);
                         Free(buf2);
                         break;
                     case KW_DEFINE:

@@ -53,7 +53,17 @@ U8 *lex_caret_at;  // set just before LexExcept to point the caret somewhere els
 U0 LexPutPos(CCmpCtrl *cc)
 {//Print where the error is: file and line (unless it is typed input), the line and a caret.
     CLexFile *f = cc->lex_include_stk;
-    I64 col;
+    I64 col, line_num = f->line_num;
+    U8 *line_start = f->line_start, *end = cc->cur_buf_ptr;
+    if (cc->flags & CCF_USE_LAST_U16 && cc->last_U16 != TK_EOF && end) {
+        end--;  // Lex read one char past the token (lex_end)
+        if (cc->last_U16 == '\n' && line_start == end + 1 && line_num > 1) {
+            line_num--;  // and it was the newline: the token is on the line before
+            line_start = end;
+            while (line_start > f->buf && line_start[-1] != '\n')
+                line_start--;
+        }
+    }
     if (!IsRaw) {
         LexPutToken(cc);
         PutFileLink(f->full_name,, f->line_num);
@@ -64,15 +74,15 @@ U0 LexPutPos(CCmpCtrl *cc)
     }
     col = StrLen(f->full_name) - 12;  // typed input is compiled as NativeTmp.HC
     if (col < 0 || StrCmp(f->full_name + col, "NativeTmp.HC"))
-        "  %s,%d\n", f->full_name, f->line_num;
-    if (!f->line_start)
+        "  %s,%d\n", f->full_name, line_num;
+    if (!line_start)
         return;
     "  ";
-    LexPutLine(cc, f->line_start);
-    if (lex_caret_at && lex_caret_at >= f->line_start && lex_caret_at <= cc->cur_buf_ptr)
-        col = lex_caret_at - f->line_start;
+    LexPutLine(cc, line_start);
+    if (lex_caret_at && lex_caret_at >= line_start && lex_caret_at <= end)
+        col = lex_caret_at - line_start;
     else
-        col = cc->cur_buf_ptr - f->line_start - 1;  // the end of the current token
+        col = end - line_start - 1;  // the end of the current token
     lex_caret_at = NULL;
     if (col < 0)
         col = 0;

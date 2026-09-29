@@ -247,3 +247,12 @@ Root `make test` includes `warm-kernel-test`. The existing
 regression, and otherwise continues to run the portable C tests.
 The full `compare-hc.py` still reports the pre-existing unsupported Float32
 case (51 pass, 1 fail); this work does not skip or relabel that failure.
+## Independent compiler written in Cool
+
+[`Cool/`](Cool/README.md) now contains an independent Warm compiler written in
+HolyC, including module resolution, generic/typeclass checking, linearity and
+borrowing, monomorphization, HC output and caret/JSON diagnostics. It runs under
+native coolc and in the OS kernel shell (`WarmRun` uses the existing HolyC JIT).
+Its full-suite differential result is **296/296**: 86 runtime cases and 210
+expected errors. These are separate from the OCaml HC renderer counts above.
+See [the design](Cool/DESIGN.md) and [build, kernel and validation commands](Cool/README.md).

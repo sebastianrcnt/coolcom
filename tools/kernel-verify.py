@@ -70,7 +70,7 @@ SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
          ("text", r'Print("%d\n", 7);'), ("key", KEY_LEFT), ("key", KEY_LEFT), ("key", KEY_BACKSPACE),
          ("text", "42"), ("key", ENTER),
          ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER),
-         '#include "Test.HC"', r'Print("%d\n", Tripled(21));', r"""Print("%s%d\n", "\101", '\101' + '\e');"""]
+         '#include "Test.HC"', r'Print("%d\n", Tripled(21));', r"""Print("%s%d\n", "\101", '\101' + '\e');""", 'I64 bad = ;']  # a compile error prints ERROR, the line and a caret
 
 # One shell regression exercises all three protections and prompt recovery.
 SHELL += [

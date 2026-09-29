@@ -44,6 +44,7 @@
 #include "Ansi.HC"
 #include "Term.HC"
 #include "Key.HC"
+#include "Ime.HC"
 #include "Input.HC"
 #include "Blk.HC"
 #include "DskStrA.HC"

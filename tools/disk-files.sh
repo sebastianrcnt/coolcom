@@ -15,8 +15,19 @@ cd "$ROOT"
 for d in Kernel coolc coolc/Runtime coolc/Fmt; do
     mmd -i "$IMG" ::$d 2>/dev/null || true
 done
-mcopy $FLAG -i "$IMG" os/Disk/*.HC ::
-mcopy $FLAG -i "$IMG" os/Kernel/* ::Kernel/
-[ ! -f build/BootStub.BIN ] || mcopy $FLAG -i "$IMG" build/BootStub.BIN ::Kernel/
-mcopy $FLAG -i "$IMG" coolc/Runtime/*.HC ::coolc/Runtime/
-mcopy $FLAG -i "$IMG" coolc/Fmt/HCTok.HC ::coolc/Fmt/
+# put DIR SRC...: copy each file into ::DIR; with -n, leave existing files alone.
+# (mcopy -n / -D s exit non-zero when they skip a file, so check first.)
+put() {
+    dir=$1; shift
+    for f in "$@"; do
+        if [ "$FLAG" = -n ] && mdir -i "$IMG" "::$dir$(basename "$f")" >/dev/null 2>&1; then
+            continue
+        fi
+        mcopy -o -i "$IMG" "$f" "::$dir"
+    done
+}
+put "" os/Disk/*.HC
+put Kernel/ os/Kernel/*
+[ ! -f build/BootStub.BIN ] || put Kernel/ build/BootStub.BIN
+put coolc/Runtime/ coolc/Runtime/*.HC
+put coolc/Fmt/ coolc/Fmt/HCTok.HC
