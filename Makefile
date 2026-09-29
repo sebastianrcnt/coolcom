@@ -4,7 +4,7 @@ AIWBIN  := $(AIWNIOS)/aiwnios.app/Contents/MacOS/aiwnios
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
 QEMU    := qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 1G -smp 2 -nographic
 
-.PHONY: all run debug aiwnios clean
+.PHONY: all run debug aiwnios clean fmt fmt-check hooks
 all: build/cool.elf
 
 aiwnios: $(AIWBIN)
@@ -50,3 +50,12 @@ build:
 
 clean:
 	rm -rf build
+
+# HolyC formatting (coolc/Fmt). The pre-commit hook runs fmt-check on staged files.
+HC_FILES = $(shell git ls-files -- '*.HC' '*.HH' | grep -v -e '^coolc/third_party/' -e '^coolc/Fmt/tests/')
+fmt:
+	tools/hcfmt.sh $(HC_FILES)
+fmt-check:
+	tools/hcfmt.sh --check $(HC_FILES)
+hooks:
+	git config core.hooksPath tools/git-hooks

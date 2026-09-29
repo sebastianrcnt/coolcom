@@ -13,8 +13,8 @@ class CCPU
   U8 *stack;
   I64 lock;           // guards this core's task ring
   CTask *seth_task,   // the core's first task, never exits
-	*cur_task,
-	*dying;       // exited task waiting to be freed
+      *cur_task,
+      *dying;       // exited task waiting to be freed
   Bool online;
   U8 pad[7];
 };

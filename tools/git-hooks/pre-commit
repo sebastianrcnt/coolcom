@@ -1,0 +1,22 @@
+#!/bin/sh
+# Refuse commits whose staged HolyC files are not formatted with tools/hcfmt.sh.
+# Enabled by `git config core.hooksPath tools/git-hooks` (make hooks).
+ROOT=$(git rev-parse --show-toplevel)
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.HC' '*.HH' |
+  grep -v -e '^coolc/third_party/' -e '^coolc/Fmt/tests/')
+[ -z "$files" ] && exit 0
+# Check the staged versions, not the working tree.
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/hcfmt-hook.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT INT TERM
+for f in $files; do
+  mkdir -p "$tmp/$(dirname "$f")"
+  git show ":$f" > "$tmp/$f"
+done
+out=$(cd "$tmp" && "$ROOT/tools/hcfmt.sh" --check $files 2>&1)
+rc=$?
+[ $rc -eq 0 ] && exit 0
+echo "$out" | grep -v '^HCFMT OK' >&2
+echo "pre-commit: HolyC files are not formatted. Run:" >&2
+echo "  tools/hcfmt.sh" $files >&2
+echo "then stage the result (or commit with --no-verify to skip)." >&2
+exit 1

@@ -31,7 +31,7 @@ U0 GicCpuInit()
 
 U0 IrqSet(I64 irq,U0 (*fp)(I64 irq))
 {//Route irq to this core and call fp when it fires.
-//SGIs/PPIs (irq<32) are banked, so call this on each core that wants them.
+  //SGIs/PPIs (irq<32) are banked, so call this on each core that wants them.
   irq_handlers[irq]=fp;
   *(GICD_BASE+GICD_IPRIORITYR+irq)(U8 *)=0x80;
   if (irq>=32)  // SPIs need a target; SGIs/PPIs are per-core

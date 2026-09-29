@@ -11,7 +11,7 @@ U0 ExceptDump(I64 vec,CExceptFrame *f)
   I64 i;
   "\n*** Exception: %s\n",except_vec_names[vec&15];
   "ESR=%016X (EC=%02X) ELR=%016X FAR=%016X SPSR=%08X\n",
-	f->esr,f->esr>>26&0x3F,f->elr,f->far,f->spsr;
+      f->esr,f->esr>>26&0x3F,f->elr,f->far,f->spsr;
   for (i=0;i<31;i++) {
     "x%-2d=%016X",i,f->x[i];
     if (i%4==3)

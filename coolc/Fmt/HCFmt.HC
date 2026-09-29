@@ -62,7 +62,7 @@ Bool HCFIsWs(I64 c)
 Bool HCFIsId(I64 c)
 {
   return (c>='a' && c<='z') || (c>='A' && c<='Z') || (c>='0' && c<='9') ||
-    c=='_' || c=='@';
+      c=='_' || c=='@';
 }
 
 Bool HCFStrEq(U8 *p,I64 n,U8 *s)
@@ -347,7 +347,7 @@ U0 HCFTok(CHCFmt *s,I64 k,U8 *p,I64 n)
   }
   if (k=='{') {
     init=s->pd>0 || s->isenum || s->prev=='=' || s->prev==',' || s->prev=='(' ||
-      s->prev=='[' || (s->nf && s->kind[s->nf-1]==HCF_INIT);
+        s->prev=='[' || (s->nf && s->kind[s->nf-1]==HCF_INIT);
     if (init) {
       HCFSetCont(s);
       HCFPush(s,HCF_INIT,0);
