@@ -9,7 +9,7 @@ T=${1:?test file}; SECS=${2:-60}
 export PORT_INSTRUMENT=1
 "$ROOT/tools/porttest/mkportrt.sh" | tail -1
 mkdir -p "$RT/CoolTmpTrace" && cp "$ROOT"/coolc/tests/codegen/* "$RT/CoolTmpTrace/"
-printf 'b_use_port=TRUE;\nCd("CoolTmpTrace");\nCmp("%s",NULL,"Out.BIN");\nExitAiwnios;\n' "$T" > "$RT/CoolTmpTrace/Run.HC"
+printf 'extern I64 b_use_port;\nb_use_port=TRUE;\nCd("CoolTmpTrace");\nCmp("%s",NULL,"Out.BIN");\nExitAiwnios;\n' "$T" > "$RT/CoolTmpTrace/Run.HC"
 (cd "$RT" && gtimeout "$SECS" gstdbuf -oL -eL "$ROOT/coolc/third_party/aiwnios/aiwnios.app/Contents/MacOS/aiwnios" \
   -t . -c CoolTmpTrace/Run.HC < /dev/null > "$ROOT/build/portrt-trace.log" 2>&1); echo "exit $?"
 rm -rf "$RT/CoolTmpTrace"

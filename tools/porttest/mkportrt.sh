@@ -25,7 +25,7 @@ if [ -n "$PORT_INSTRUMENT" ]; then  # debug: trace every port function entry (se
   python3 "$ROOT/tools/porttest/addtrace.py" "$RT"/Src/Port/IRBind.HC "$RT"/Src/Port/OptPass.HC \
     "$RT"/Src/Port/ArmBackendA.HC "$RT"/Src/Port/ArmBackendB.HC "$RT"/Src/Port/BQSort.HC \
     "$RT"/Src/Port/Arm64Enc.HC "$RT"/Src/Port/BackendRT.HC
-  printf 'I64 b_trace_n;\nU0 BTrace(U8 *name)\n{\n  b_trace_n++;\n  if (b_trace_n<20000 || !(b_trace_n&0xFFFF))\n    Print("T %%d %%s\\n",b_trace_n,name);\n}\n' > "$RT/Src/Port/BTrace.HC"
+  printf '#define PORT_TRACE_ALL '"${PORT_TRACE_ALL:-0}"'\nI64 b_trace_n;\nU0 BTrace(U8 *name)\n{\n  b_trace_n++;\n  if (PORT_TRACE_ALL || b_trace_n<20000 || !(b_trace_n&0xFFFF))\n    Print("T %%d %%s\\n",b_trace_n,name);\n}\n' > "$RT/Src/Port/BTrace.HC"
   perl -0pi -e 's/#include "BackendA.HH"\n/#include "BackendA.HH"\n#include "BTrace.HC"\n/' "$RT/Src/Port/Backend.HC"
 fi
 python3 "$ROOT/tools/porttest/mkswitch.py" "$RT/Src/AIWNIOS_CodeGen.HC" "$RT/Src/Port/Switch.HC" > /dev/null

@@ -22,7 +22,7 @@ def split_params(p):
     return [x.strip() for x in out]
 
 decls = {}
-for m in re.finditer(r'^import\s+(\w+)\s*(\**)\s*(__HC_\w+)\s*\((.*)\)\s*;', cg, re.M):
+for m in re.finditer(r'^import\s+(\w+)\s*(\**)\s*(__HC_\w+)\s*\((.*?)\)\s*;?\s*(?://.*)?$', cg, re.M):  # ';' is missing on some lines; stop before trailing comments
     ret, stars, name, params = m.group(1), m.group(2), m.group(3), m.group(4)
     decls.setdefault(name, (ret + (' ' + stars if stars else ''), params))
 
