@@ -22,8 +22,11 @@ U0 ExceptDump(I64 vec, CExceptFrame *f)
     '\n';
 }
 
+U8 *except_hook;  // I64 (*)(I64 vec, CExceptFrame *f): TRUE if it recovered (the shell)
+
 U0 KExcept(I64 vec, CExceptFrame *f)
 {
+    I64 (*hook)(I64 vec, CExceptFrame *f);
     if (vec == EXC_CUR_SPX_IRQ) {
         IrqDispatch;
         return;
@@ -32,6 +35,10 @@ U0 KExcept(I64 vec, CExceptFrame *f)
         FiqDispatch;
         return;
     }
+    PrintBreakLock;
+    hook = except_hook;
+    if (hook && (*hook)(vec, f))
+        return;
     ExceptDump(vec, f);
     "System halted.\n";
     while (TRUE) {}

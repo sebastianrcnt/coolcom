@@ -232,11 +232,21 @@ U8 *StrPrint(U8 *dst, U8 *fmt, ...)
 }
 
 // Print to the UART. Bare string statements ("fmt", args;) compile to this.
-I64 print_lock;
+I64 print_lock, print_owner;  // print_owner: core number + 1 while printing
 
 U0 Print(U8 *fmt, ...)
 {//One core prints at a time so lines don't interleave.
     I64 daif = SpinLockIrq(&print_lock);
+    print_owner = ArchCpuNum + 1;
     KFmt(NULL, fmt, argc, argv);
+    print_owner = 0;
     SpinUnlockIrq(&print_lock, daif);
+}
+
+U0 PrintBreakLock()
+{//An exception inside Print on this core: take the lock back so the handler can print.
+    if (print_lock && print_owner == ArchCpuNum + 1) {
+        print_owner = 0;
+        print_lock = 0;
+    }
 }

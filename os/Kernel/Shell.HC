@@ -198,6 +198,35 @@ U0 RtExit(I64 status)
     }
 }
 
+I64 shell_fault_ctx[32];  // ArchSetJmp context around each typed statement
+Bool shell_in_stmt;
+CTask *shell_task;
+
+U0 ShellFaultResume()
+{//Where a faulting statement "returns" to: back into ShellExeCmdLine.
+    ArchLongJmp(shell_fault_ctx);
+}
+
+I64 ShellFault(I64 vec, CExceptFrame *f)
+{//except_hook: a typed statement faulted; report it and go back to the prompt.
+    I64 ec = f->esr >> 26 & 0x3F;
+    U8 *what = "exception";
+    if (vec != EXC_CUR_SPX_SYNC || !shell_in_stmt || Fs != shell_task)
+        return FALSE;
+    shell_in_stmt = FALSE;
+    if (ec == 0x25)
+        what = "bad memory access";
+    else if (ec == 0x21)
+        what = "bad jump";
+    else if (ec == 0x22 || ec == 0x26)
+        what = "misaligned access";
+    else if (ec == 0)
+        what = "invalid instruction";
+    Print("\nERROR: %s at address %X (code at %X)\n", what, f->far, f->elr);
+    f->elr = &ShellFaultResume;
+    return TRUE;
+}
+
 I64 ShellExeCmdLine(U8 *cc)
 {//Compile and run each statement of cc (TempleOS ExeCmdLine); returns the last value.
     I64 res = 0, type, *tok = cc + CC_TOKEN, *flags = cc + CC_FLAGS;
@@ -216,7 +245,11 @@ I64 ShellExeCmdLine(U8 *cc)
         code = (*stmt2bin)(cc, &type, CMPF_PRS_SEMICOLON);
         if (code && code != INVALID_PTR) {
             fp = code;
-            res = (*fp)();
+            if (!ArchSetJmp(shell_fault_ctx)) {
+                shell_in_stmt = TRUE;
+                res = (*fp)();
+            }
+            shell_in_stmt = FALSE;
             // The statement's code is not freed: a global may still point
             // at a string constant stored in it.
         }
@@ -369,6 +402,8 @@ U0 ShellTask(U8 *data)
 {//Read, compile and run lines: data of them, or forever if data < 0.
     I64 n = data;
     shell_state = 1;
+    shell_task = Fs;
+    except_hook = &ShellFault;
     if (!ShellInit) {
         Print("shell: compiler failed to load\n");
         shell_state = -1;
