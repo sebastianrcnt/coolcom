@@ -280,7 +280,16 @@ U0 VtDraw(CVTerm *v, I64 left, I64 top)
 {
     I64 x, y, fg = -1, bg = -1, f, b;
     CVtCell *p;
+    CVTerm snapshot;
     I64 daif = SpinLockIrq(&v->lock);
+    // Never hold the terminal lock while Print acquires print_lock: a worker
+    // on another core may already hold print_lock while writing this terminal.
+    MemCpy(&snapshot, v, sizeof(CVTerm));
+    snapshot.cells = MAlloc(v->cols * v->rows * sizeof(CVtCell));
+    MemCpy(snapshot.cells, v->cells, v->cols * v->rows * sizeof(CVtCell));
+    v->dirty = FALSE;
+    SpinUnlockIrq(&v->lock, daif);
+    v = &snapshot;
     for (y = 0; y < v->rows; y++) {
         Print("\x1b[%d;%dH", top + y + 1, left + 1);
         for (x = 0; x < v->cols; x++) {
@@ -297,8 +306,7 @@ U0 VtDraw(CVTerm *v, I64 left, I64 top)
         }
     }
     ConsPutS("\x1b[0m");
-    v->dirty = FALSE;
-    SpinUnlockIrq(&v->lock, daif);
+    Free(snapshot.cells);
 }
 
 U0 VtTaskGone(CTask *t)
