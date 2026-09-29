@@ -29,6 +29,7 @@
 #include "DskFind.HC"
 #include "DskDirB.HC"
 #include "DskFile.HC"
+#include "DskCopy.HC"
 #include "DskMount.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"

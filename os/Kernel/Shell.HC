@@ -178,14 +178,54 @@ U0 RtPutS(U8 *s)
         Print("%s", s);
 }
 
-U8 *RtFileNameAbs(U8 *name) {return RtStrNew(name);}
+// File services for #include and ExeFile, on the FAT32 drives (DskFile.HC).
 
-U8 *RtFileRead(U8 *name, I64 *size)
-{//No file system yet: #include finds nothing.
-    no_warn name;
-    if (size)
+U8 *RtExtDft(U8 *name, U8 *ext)
+{//Give name the extension ext if it has none.
+    U8 *res = MAlloc(StrLen(name) + StrLen(ext) + 2);
+    StrCpy(res, name);
+    if (!FileExtDot(name)) {
+        StrCat(res, ".");
+        StrCat(res, ext);
+    }
+    return res;
+}
+
+U8 *RtExtChg(U8 *name, U8 *ext)
+{//Replace name's extension with ext.
+    U8 *res = MAlloc(StrLen(name) + StrLen(ext) + 2);
+    StrCpy(res, name);
+    FileExtRem(res);
+    StrCat(res, ".");
+    StrCat(res, ext);
+    return res;
+}
+
+U8 *RtFileNameAbs(U8 *name, I64 flags = 0)
+{
+    no_warn flags;
+    if (!name)
+        name = "";
+    if (!DrvCur)
+        return StrNew(name);
+    return FileNameAbs(name);
+}
+
+U8 *RtFileRead(U8 *name, I64 *size, I64 *attr = NULL)
+{//NULL if there is no such file; the compiler reports that itself.
+    Bool old_silent = Silent;
+    U8 *res = NULL;
+    if (DrvCur)
+        res = FileRead(name, size, attr);
+    else if (size)
         *size = 0;
-    return NULL;
+    Silent(old_silent);
+    return res;
+}
+
+I64 RtFileWrite(U8 *name, U8 *data, I64 size)
+{//TRUE if written.
+    return FileWrite(name, data, size) > 0 || !size;
 }
 
 U0 RtExit(I64 status)
@@ -199,8 +239,20 @@ U0 RtExit(I64 status)
 }
 
 I64 shell_fault_ctx[32];  // ArchSetJmp context around each typed statement
+I64 shell_line_ctx[32];   // ... and around each whole line (compiling included)
 Bool shell_in_stmt;
 CTask *shell_task;
+
+U0 ShellTrap()
+{//bin_trap_hook: an unresolved import was called on the shell task; back to the prompt.
+    if (Fs != shell_task)
+        return;
+    if (shell_in_stmt) {
+        shell_in_stmt = FALSE;
+        ArchLongJmp(shell_fault_ctx);
+    }
+    ArchLongJmp(shell_line_ctx);
+}
 
 U0 ShellFaultResume()
 {//Where a faulting statement "returns" to: back into ShellExeCmdLine.
@@ -332,9 +384,11 @@ U0 ShellRtInit()
     ShellRt("NativeExit", &RtExit);
     ShellRt("AIWNIOS_SetJmp", &ArchSetJmp);
     ShellRt("AIWNIOS_LongJmp", &ArchLongJmp);
+    ShellRt("ExtDft", &RtExtDft);
+    ShellRt("ExtChg", &RtExtChg);
     ShellRt("FileNameAbs", &RtFileNameAbs);
     ShellRt("FileRead", &RtFileRead);
-    ShellRt("FileWrite", &RtZero);
+    ShellRt("FileWrite", &RtFileWrite);
     ShellRt("ExeCmdLine", &ShellExeCmdLine);
     ShellRt("SysSymImportsResolve", &RtZero);
     ShellRt("FlushMsgs", &RtZero);
@@ -395,6 +449,13 @@ U0 ShellSyms()
     ShellSym("FileWrite", &FileWrite);
     ShellSym("Cd", &Cd);
     ShellSym("Dir", &Dir);
+    ShellSym("DirMk", &DirMk);
+    ShellSym("MkDir", &MkDir);
+    ShellSym("Del", &Del);
+    ShellSym("Copy", &Copy);
+    ShellSym("Move", &Move);
+    ShellSym("Rename", &Rename);
+    ShellSym("Type", &Type);
 }
 
 I64 ShellExe(U8 *src)
@@ -437,6 +498,7 @@ U0 ShellTask(U8 *data)
     except_hook = &ShellFault;
     break_hook = &ShellBreak;
     task_break_hook = &ShellBreakNow;
+    bin_trap_hook = &ShellTrap;
     if (!ShellInit) {
         Print("shell: compiler failed to load\n");
         shell_state = -1;
@@ -446,7 +508,8 @@ U0 ShellTask(U8 *data)
     while (n) {
         Print("> ");
         GetLine(shell_line, SHELL_LINE_LEN);
-        ShellExe(shell_line);
+        if (!ArchSetJmp(shell_line_ctx))
+            ShellExe(shell_line);
         if (n > 0)
             n--;
     }

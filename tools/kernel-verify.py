@@ -7,7 +7,7 @@
 Disk: 128 sectors, sector s byte j = (s*31 + j*7) & 255. The kernel overwrites
 sectors 9 and 10 with byte j (0..1023) = (j*3 + 17) & 255.
 FAT: a 40 MiB FAT32 volume made by newfs_msdos (512-byte clusters) holding
-HostNote.txt, copied in with mtools. The kernel reads it and writes
+HostNote.txt and Test.HC, copied in with mtools (the shell #includes Test.HC). The kernel reads it and writes
 FromCoolcom.txt and Sub/Inner.TXT (os/Kernel/DevTest.HC DevTestFs); afterwards
 mtools must read them back and fsck_msdos must find the volume clean.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
@@ -65,7 +65,8 @@ SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
          'while (TRUE) {}', BREAK, 'Sleep(60000);', BREAK2, r'Print("%d\n", 51);',
          ("text", r'Print("%d\n", 7);'), ("key", KEY_LEFT), ("key", KEY_LEFT), ("key", KEY_BACKSPACE),
          ("text", "42"), ("key", ENTER),
-         ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER)]
+         ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER),
+         '#include "Test.HC"', r'Print("%d\n", Tripled(21));']
 
 # US layout, Linux key codes, as in os/Kernel/Input.HC: char -> (code, shifted).
 KEYS = {" ": (57, False), "`": (41, False), "~": (41, True), "\\": (43, False), "|": (43, True)}
@@ -100,6 +101,7 @@ def sector(s):
 
 FAT_SECTORS = 81920
 HOST_NOTE = b"Hello from the host\n"
+TEST_HC = b"// #include'd by the shell test\nI64 Tripled(I64 x)\n{\n    return 3 * x;\n}\n"
 
 
 def fs_data(n, seed):
@@ -119,6 +121,8 @@ def prepare_fat(d):
         "-v", "COOLFAT", str(img))
     (d / "note.txt").write_bytes(HOST_NOTE)
     run("mcopy", "-i", str(img), str(d / "note.txt"), "::HostNote.txt")
+    (d / "Test.HC").write_bytes(TEST_HC)
+    run("mcopy", "-i", str(img), str(d / "Test.HC"), "::Test.HC")
 
 
 def verify_fat(d):
