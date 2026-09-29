@@ -14,7 +14,8 @@ mtools must read them back and fsck_msdos must find the volume clean.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
 h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
 SHELL lines (the shell's output is checked by kernel-test.sh). A BREAK entry is
-"delay MS" then Ctrl+Alt+C, typed once the shell is running the line before it.
+"wait <the line before>" (coolvm waits for the shell's echo of it), "delay MS",
+then Ctrl+Alt+C, so a slow boot cannot make a break arrive early.
 Shell UART: a plain shell boot is fed a Korean line (UTF-8, with a Hangul typed and deleted
 by DEL): the screenshot must show it echoed and then printed, as Unifont wide glyphs.
 Screen: rows 0..4 of Unifont text (8x16 cells, wide glyphs two cells, white on
@@ -251,12 +252,13 @@ def prepare(d):
             text += typed(line[1], enter=False)
         elif isinstance(line, tuple) and line[0] == "key":
             text += keys_of(line[1])
-        elif isinstance(line, tuple):  # Ctrl+Alt+C after a delay
-            text += f"delay {line[1]}\n"
+        elif isinstance(line, tuple):  # Ctrl+Alt+C a delay after the shell echoed the line before
+            text += f"wait {last}\ndelay {line[1]}\n"
             keys = [LCTRL, LALT, KEY_C]
             text += "".join(f"1 {k} 1\n" for k in keys) + "".join(f"1 {k} 0\n" for k in reversed(keys))
         else:
             text += typed(line)
+            last = line
     (d / "input.txt").write_text(text)
     (d / "shell.in").write_bytes(SHELL_KO_IN)
 

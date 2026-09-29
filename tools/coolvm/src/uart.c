@@ -124,6 +124,7 @@ bool uart_mmio(cpu_t *c, uint64_t off, int size, bool wr, uint64_t *val)
             uint8_t ch = (uint8_t)v;
             ssize_t r = write(1, &ch, 1);
             (void)r;
+            input_uart_out(ch);
             break;
         }
         case UBRDIV: u.ubrdiv = v; break;

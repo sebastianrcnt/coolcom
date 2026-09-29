@@ -172,6 +172,7 @@ U0 Sleep(I64 mS)
     t->wake_jiffy = jiffies + mS * JIFFY_FREQ / 1000;
     while (jiffies < t->wake_jiffy)
         Yield;
+    TaskBreakCheck(t);  // a break that cleared wake_jiffy after Yield's check
 }
 
 U0 SleepUntil(I64 wake_jiffy)
@@ -180,6 +181,7 @@ U0 SleepUntil(I64 wake_jiffy)
     t->wake_jiffy = wake_jiffy;
     while (jiffies < t->wake_jiffy)
         Yield;
+    TaskBreakCheck(t);
 }
 
 I64 spawn_next_cpu;

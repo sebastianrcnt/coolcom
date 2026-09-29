@@ -40,6 +40,7 @@ class CShell
     U8 *stmt_cleanup; // UI cleanup belongs to this shell, even while another runs
     I64 fault_ctx[32], line_ctx[32], fault_daif, line_daif;
     Bool in_stmt, line_active;
+    I64 break_pending; // Ctrl+Alt+C for this line: run no more of it (2: Break printed)
     I64 next_slice;
     U8 line[SHELL_LINE_LEN];
 };
@@ -274,6 +275,7 @@ U0 ShellBreakNow()
     if (!ShellCur || !ShellCur->in_stmt)
         return;  // the statement already ended
     ShellCur->in_stmt = FALSE;
+    ShellCur->break_pending = 2;  // printed
     Print("\nBreak\n");
     ArchLongJmp(ShellCur->fault_ctx);
 }
@@ -282,18 +284,31 @@ U0 ShellBreak(CExceptFrame *f)
 {//break_hook, at the end of the input IRQ that saw Ctrl+Alt+C. If it interrupted the
     //shell's own statement, resume in ShellBreakNow instead. Otherwise the shell is switched
     //out inside the statement (Sleep, GetKey, or mid-Yield): flag it and wake it, and Yield
-    //calls ShellBreakNow when the shell next runs.
+    //calls ShellBreakNow when the shell next runs. The rest of the line is not run
+    //(break_pending), and a break while the line is compiling, or at the prompt with a
+    //line typed ahead (the input IRQ can see it before the shell reads the line), stops
+    //that line before it runs.
     CTask *t = shell_foreground;
     CShell *sh;
+    CVTerm *v;
     if (vt_focus) t = vt_focus->owner;
     if (!TaskValidate(t)) return;
     sh = t->shell_ctx;
-    if (!sh || !sh->in_stmt) return;
+    if (!sh) return;
+    if (!sh->line_active) {  // at the prompt: break the line typed ahead, if any
+        v = t->terminal;
+        if (key_head != key_tail || v && !v->direct && v->head != v->tail)
+            sh->break_pending = TRUE;
+        return;
+    }
+    sh->break_pending = TRUE;  // nothing more of this line runs
+    ArchDsb;  // ShellExeCmdLine sets in_stmt, then reads break_pending
+    if (!sh->in_stmt) return;  // compiling: it sees break_pending
     if (Fs == t && f->sp >= t->stk && f->sp <= t->stack_end)
         f->elr = &ShellBreakNow;
-    else {
-        t->wake_jiffy = 0;
+    else {  // the flag first: Sleep checks it after it sees wake_jiffy change
         LBts(&t->task_flags, TASKf_PENDING_BREAK);
+        ArchStoreRel(&t->wake_jiffy, 0);
     }
 }
 
@@ -383,12 +398,18 @@ I64 ShellExeCmdLine(U8 *cc)
             if (!ArchSetJmp(ShellCur->fault_ctx)) {
                 LBtr(&Fs->task_flags, TASKf_PENDING_BREAK);
                 ShellCur->in_stmt = TRUE;
-                res = (*fp)();
+                ArchDsb;  // a break from now on sees in_stmt; an earlier one set break_pending
+                if (!ShellCur->break_pending)
+                    res = (*fp)();
             }
             ShellCur->in_stmt = FALSE;
             cleanup = shell_stmt_cleanup;
             shell_stmt_cleanup = NULL;
             if (cleanup) (*cleanup)();
+            if (ShellCur->break_pending == TRUE) {  // Ctrl+Alt+C while compiling
+                ShellCur->break_pending = 2;
+                Print("\nBreak\n");
+            }
             // The statement's code is not freed: a global may still point
             // at a string constant stored in it.
         }
@@ -563,6 +584,7 @@ U0 ShellTask(U8 *data)
         if (!ArchSetJmp(ShellCur->line_ctx))
             ShellExe(ShellCur->line);
         ShellCur->line_active = FALSE;
+        ShellCur->break_pending = FALSE;
         if (n > 0)
             n--;
     }
