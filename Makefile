@@ -39,10 +39,12 @@ build/hcfmt.BIN: coolc/Fmt/Native.HC coolc/Fmt/HCFmt.HC coolc/seed/Compiler.BIN 
 
 # -q keeps relocations in the ELF for tools/reloc-check.py.
 LD := aarch64-elf-ld --no-warn-rwx-segments -q -T os/Kernel/Kernel.ld --defsym IMAGE_BASE=$(IMAGE_BASE) --defsym MODULE_BASE=$(MODULE_BASE)
-ASM_OBJS := $(B)/Boot.o $(B)/Arch.o
+ASM_OBJS := $(B)/Boot.o $(B)/Arch.o $(B)/Blob.o
 
 $(B)/%.o: os/Kernel/%.S os/Kernel/Asm.h | $(B)
 	aarch64-elf-gcc -c $< -o $@
+# Blob.S embeds the compiler seed and the shell prelude (.incbin).
+$(B)/Blob.o: coolc/seed/Compiler.BIN os/Kernel/KernelA.HH os/Kernel/ShellA.HH
 
 # Pass 1: link the assembly alone (HolyC symbols unresolved) to learn where its
 # routines land; the addresses don't depend on the HolyC module. The unresolved

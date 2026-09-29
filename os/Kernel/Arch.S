@@ -356,3 +356,79 @@ ArchTlbFlush:
 ArchL2Table:
   LA x0, l2_table
   ret
+
+// ArchICacheSync(U8 *addr, I64 len): make code just written at addr visible to
+// instruction fetch on every core (clean D to PoU, invalidate I, barriers).
+.global ArchICacheSync
+ArchICacheSync:
+  cbz x1, 3f
+  mrs x3, ctr_el0
+  mov x5, #4
+  add x1, x0, x1
+  ubfx x4, x3, #16, #4     // DminLine: log2 of the line size in words
+  lsl x4, x5, x4
+  sub x6, x4, #1
+  bic x2, x0, x6
+1:
+  dc cvau, x2
+  add x2, x2, x4
+  cmp x2, x1
+  b.lo 1b
+  dsb ish
+  and x4, x3, #0xf         // IminLine
+  lsl x4, x5, x4
+  sub x6, x4, #1
+  bic x2, x0, x6
+2:
+  ic ivau, x2
+  add x2, x2, x4
+  cmp x2, x1
+  b.lo 2b
+  dsb ish
+3:
+  isb
+  ret
+
+// Code built by the Cool compiler reads Fs through x28 (Fs = [x28]); kernel
+// HolyC never uses x28 and task switches preserve it. ArchX28Set(p) sets it
+// for the running task.
+.global ArchX28Set
+ArchX28Set:
+  mov x28, x0
+  ret
+
+// ArchSetJmp(I64 *ctx) / ArchLongJmp(I64 *ctx): the compiler's try/catch
+// context (AIWNIOS_SetJmp/LongJmp, layout as coolc/Host/except.S).
+.global ArchSetJmp
+ArchSetJmp:
+  stp x19, x20, [x0, #8]
+  stp x21, x22, [x0, #24]
+  stp x23, x24, [x0, #40]
+  stp x25, x26, [x0, #56]
+  str x27, [x0, #72]
+  stp x29, x30, [x0, #88]
+  stp d8, d9, [x0, #104]
+  stp d10, d11, [x0, #120]
+  stp d12, d13, [x0, #136]
+  stp d14, d15, [x0, #152]
+  mov x1, sp
+  str x1, [x0, #168]
+  mov x0, #0
+  ret
+
+.global ArchLongJmp
+ArchLongJmp:
+  ldp x19, x20, [x0, #8]
+  ldp x21, x22, [x0, #24]
+  ldp x23, x24, [x0, #40]
+  ldp x25, x26, [x0, #56]
+  ldr x27, [x0, #72]
+  ldp x29, x30, [x0, #88]
+  ldp d8, d9, [x0, #104]
+  ldp d10, d11, [x0, #120]
+  ldp d12, d13, [x0, #136]
+  ldp d14, d15, [x0, #152]
+  ldr x1, [x0, #168]
+  mov sp, x1
+  mov x0, #1
+  ret

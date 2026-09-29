@@ -53,3 +53,9 @@ class CExceptFrame
 import U0 ArchDsb();
 import U0 ArchTlbFlush();
 import I64 *ArchL2Table();  // boot translation table: entry i maps the 32 MiB block at i << 25
+import U0 ArchICacheSync(U8 *addr, I64 len);  // after writing code at addr
+import U0 ArchX28Set(I64 v);                  // Fs base register for compiler-built code
+import I64 ArchSetJmp(I64 *ctx);
+import U0 ArchLongJmp(I64 *ctx);
+import U8 *ArchCompilerBin(I64 *size);         // embedded coolc/seed/Compiler.BIN (Blob.S)
+import U8 *ArchShellPrelude();                 // embedded shell prelude text

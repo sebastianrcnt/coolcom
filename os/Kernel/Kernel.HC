@@ -18,6 +18,8 @@
 #include "Sched.HC"
 #include "Input.HC"
 #include "Blk.HC"
+#include "BinLoad.HC"
+#include "Shell.HC"
 #include "DevTest.HC"
 
 U0 KMainAP(I64 num)
@@ -97,7 +99,8 @@ U0 KMain(U8 *image_end, U8 *dt)
             ArchMmioWrite32(fdt_finisher, (code << 16) | 0x3333);
         else
             ArchMmioWrite32(fdt_finisher, 0x5555);
-    }
+    } else
+        ShellStart;
     while (TRUE) {
         Yield;
         ArchWfi;

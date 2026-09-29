@@ -106,14 +106,15 @@ U0 Sleep(I64 ms)
 
 I64 spawn_next_cpu;
 
-CTask *Spawn(U0 (*fp)(U8 *data), U8 *data = NULL, U8 *name = NULL, I64 cpu = -1)
+CTask *Spawn(U0 (*fp)(U8 *data), U8 *data = NULL, U8 *name = NULL, I64 cpu = -1,
+             I64 stack_size = TASK_STACK_SIZE)
 {//Start fp(data) as a new task on core cpu (-1: round robin).
     CTask *t = CAlloc(sizeof(CTask));
     CCtxFrame *f;
     CCPU *c;
     I64 daif;
-    t->stack = MAlloc(TASK_STACK_SIZE);
-    f = t->stack + TASK_STACK_SIZE - sizeof(CCtxFrame);
+    t->stack = MAlloc(stack_size);
+    f = t->stack + (stack_size & ~15) - sizeof(CCtxFrame);
     MemSet(f, 0, sizeof(CCtxFrame));
     f->x19 = fp;
     f->x20 = data;

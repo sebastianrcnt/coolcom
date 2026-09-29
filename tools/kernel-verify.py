@@ -7,7 +7,8 @@
 Disk: 128 sectors, sector s byte j = (s*31 + j*7) & 255. The kernel overwrites
 sectors 9 and 10 with byte j (0..1023) = (j*3 + 17) & 255.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
-h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA".
+h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
+SHELL lines (the shell's output is checked by kernel-test.sh).
 Screen: rows 0..3 of 8x8 TempleOS-font text (white on black), color bars at
 y=80, a gray ramp at y=128.
 """
@@ -45,6 +46,29 @@ INPUT = """# mouse
 1 28 0
 """
 
+# Typed into the kernel's shell after the "hiA" line; it must print 49.
+SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));']
+
+# US layout, Linux key codes, as in os/Kernel/Input.HC: char -> (code, shifted).
+KEYS = {" ": (57, False), "`": (41, False), "~": (41, True), "\\": (43, False), "|": (43, True)}
+for first, lo, up in ((2, "1234567890-=", "!@#$%^&*()_+"), (16, "qwertyuiop[]", "QWERTYUIOP{}"),
+                      (30, "asdfghjkl;'", 'ASDFGHJKL:"'), (44, "zxcvbnm,./", "ZXCVBNM<>?")):
+    for i, (a, b) in enumerate(zip(lo, up)):
+        KEYS[a] = (first + i, False)
+        KEYS[b] = (first + i, True)
+LSHIFT, ENTER = 42, 28
+
+
+def typed(line):
+    """Input records that type line, then ENTER."""
+    out = []
+    for ch in line:
+        code, shift = KEYS[ch]
+        keys = [LSHIFT, code] if shift else [code]
+        out += [f"1 {k} 1" for k in keys] + [f"1 {k} 0" for k in reversed(keys)]
+    out += [f"1 {ENTER} 1", f"1 {ENTER} 0"]
+    return "".join(r + "\n" for r in out)
+
 
 def sector(s):
     return bytes((s * 31 + j * 7) & 255 for j in range(512))
@@ -52,7 +76,7 @@ def sector(s):
 
 def prepare(d):
     (d / "disk.img").write_bytes(b"".join(sector(s) for s in range(SECTORS)))
-    (d / "input.txt").write_text(INPUT)
+    (d / "input.txt").write_text(INPUT + "".join(typed(line) for line in SHELL))
 
 
 def load_font():

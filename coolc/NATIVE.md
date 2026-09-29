@@ -12,6 +12,13 @@ Run `make test` for the kernel and relocation checks. `tools/hcfmt.sh --selftest
 checks the formatter; `make fmt-check` checks tracked HolyC source. The
 pre-commit hook installed by `make hooks` uses the same formatter.
 
+The kernel also embeds the seed and loads it at run time for its shell, with a
+HolyC port of `coolc/Host/native.c` (`os/Kernel/BinLoad.HC`, `os/Kernel/Shell.HC`;
+see os/Kernel/M1.md). The shell depends on the seed's exports `ExePutS`,
+`LexStmt2Bin` and `HashAdd`, on its imports, and on the `CCmpCtrl` and
+`CHashExport` offsets noted in `Shell.HC`; rebuilding the seed with other
+layouts or imports means updating the shell.
+
 To compile another HolyC entry point:
 
 ```sh

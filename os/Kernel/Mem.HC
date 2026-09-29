@@ -170,6 +170,15 @@ CMemBlk *HeapChk(CHeapCtrl *hc, U8 *p, U8 *who)
     return b;
 }
 
+// Is p a live block of hc? Like HeapChk, but silent.
+Bool HeapOwns(CHeapCtrl *hc, U8 *p)
+{
+    CMemBlk *b = p - HEAP_HDR;
+    if (p(I64) & 15 || p < hc->start + HEAP_HDR || p >= hc->end)
+        return FALSE;
+    return BlkMagicOk(b) && BlkUsed(b);
+}
+
 // Release used block b, coalescing with free neighbours.
 U0 HeapFreeBlk(CHeapCtrl *hc, CMemBlk *b)
 {
