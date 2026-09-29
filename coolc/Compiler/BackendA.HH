@@ -40,373 +40,373 @@ extern class CBBuddyPair;
 // aiwn_que.h
 class CBQue
 {
-  CBQue *last, *next;
+    CBQue *last, *next;
 };
 
 // aiwn_hash.h
 class CBArrayDim
 {
-  CBArrayDim *next;
-  I64 cnt, total_cnt;
+    CBArrayDim *next;
+    I64 cnt, total_cnt;
 };
 
 class CBMemberLst
 {
-  CBMemberLst *next, *last;
-  CBHashClass *member_class;
-  CBArrayDim dim;
-  CBHashFun *fun_ptr;
-  U8 *str;
-  I64 off, reg, use_cnt, flags;
-  union {
-    I64 dft_val;
-    F64 dft_val_flt;
-    // USed for MLF_STATIC,this is a heap allocated "static" variable
-    U8 *static_bytes;
-  };
+    CBMemberLst *next, *last;
+    CBHashClass *member_class;
+    CBArrayDim dim;
+    CBHashFun *fun_ptr;
+    U8 *str;
+    I64 off, reg, use_cnt, flags;
+    union {
+        I64 dft_val;
+        F64 dft_val_flt;
+        // USed for MLF_STATIC,this is a heap allocated "static" variable
+        U8 *static_bytes;
+    };
 };
 
 class CBHash
 {
-  CBHash *next;
-  U8 *str;
-  I32 type, use_cnt;
+    CBHash *next;
+    U8 *str;
+    I32 type, use_cnt;
 };
 
 class CBHashTable
 {
-  CBHashTable *next;
-  I64 mask, locked_flags;
-  CBHash **body;
+    CBHashTable *next;
+    I64 mask, locked_flags;
+    CBHash **body;
 };
 
 class CBHashDefineStr
 {
-  CBHash base;
-  U8 *src_link;
-  U8 *name;
-  U8 *data;
+    CBHash base;
+    U8 *src_link;
+    U8 *name;
+    U8 *data;
 };
 
 class CBHashKeyword
 {
-  CBHash base;
-  I64 tk;
+    CBHash base;
+    I64 tk;
 };
 
 class CBHashImport
 {
-  CBHash base;
-  U8 **address;
+    CBHash base;
+    U8 **address;
 };
 
 class CBHashClass
 {
-  CBHash base;
-  U8 *src_link;
-  U8 *import_name;
-  I64 member_cnt, ptr_star_cnt, raw_type, flags, use_cnt, sz;
-  CBHashClass *base_class;
-  CBMemberLst *members_lst;
-  CBHashClass *fwd_class;
+    CBHash base;
+    U8 *src_link;
+    U8 *import_name;
+    I64 member_cnt, ptr_star_cnt, raw_type, flags, use_cnt, sz;
+    CBHashClass *base_class;
+    CBMemberLst *members_lst;
+    CBHashClass *fwd_class;
 };
 
 class CBHashExport
 {
-  CBHash base;
-  U8 *val;
-  U8 *oval;
+    CBHash base;
+    U8 *val;
+    U8 *oval;
 };
 
 class CBHashFun
 {
-  CBHashClass base;
-  U8 *import_name;
-  CBHashClass *return_class;
-  I64 argc;
-  U8 *fun_ptr;
-  U8 *orig_fun_ptr;
+    CBHashClass base;
+    U8 *import_name;
+    CBHashClass *return_class;
+    I64 argc;
+    U8 *fun_ptr;
+    U8 *orig_fun_ptr;
 };
 
 class CBHashGlblVar
 {
-  CBHash base;
-  U8 *src_link, *import_name;
-  CBHashClass *var_class;
-  U8 *data_addr;
-  CBArrayDim dim;
-  CBHashFun *fun_ptr;
+    CBHash base;
+    U8 *src_link, *import_name;
+    CBHashClass *var_class;
+    U8 *data_addr;
+    CBArrayDim dim;
+    CBHashFun *fun_ptr;
 };
 
 // aiwn_mem.h / aiwn_multic.h
 class CBTask
 {
-  U8 *pad;
-  I64 task_signature;
-  CBQue *except; // CExcept
-  I64 except_ch;
-  I64 catch_except;
-  CBHashTable *hash_table;
-  U8 *stack;
-  U8 ctx[2048];
-  U8 throw_pad[192]; //INTEGRATION: jmp_buf (192 bytes on Apple AArch64), unused by the backend
-  CBHeapCtrl *heap, *code_heap;
+    U8 *pad;
+    I64 task_signature;
+    CBQue *except; // CExcept
+    I64 except_ch;
+    I64 catch_except;
+    CBHashTable *hash_table;
+    U8 *stack;
+    U8 ctx[2048];
+    U8 throw_pad[192]; //INTEGRATION: jmp_buf (192 bytes on Apple AArch64), unused by the backend
+    CBHeapCtrl *heap, *code_heap;
 };
 
 class CBMemUnused
 {
-  // MUST BE FIRST MEMBER
-  CBMemUnused *next;
-  CBMemUnused *last; // Used for used memory only
-  CBHeapCtrl *hc;
-  I64 caller1, caller2; // Used for used memory only
-  I64 which_bucket;
-  I64 sz; // MUST BE LAST MEMBER FOR MAllocAligned
+    // MUST BE FIRST MEMBER
+    CBMemUnused *next;
+    CBMemUnused *last; // Used for used memory only
+    CBHeapCtrl *hc;
+    I64 caller1, caller2; // Used for used memory only
+    I64 which_bucket;
+    I64 sz; // MUST BE LAST MEMBER FOR MAllocAligned
 };
 
 class CBHeapCtrlArena
 {
-  CBMemUnused *heap_hash[5];
-  CBMemUnused *used_next, *used_last;
-  CBMemUnused *malloc_free_lst;
+    CBMemUnused *heap_hash[5];
+    CBMemUnused *used_next, *used_last;
+    CBMemUnused *malloc_free_lst;
 };
 
 class CBBuddyPair
 {
-  I64 offset_l, offset_r;
-  CBBuddyPair *left, *right;
-  I8 occupied, partial;
+    I64 offset_l, offset_r;
+    CBBuddyPair *left, *right;
+    I8 occupied, partial;
 };
 
 class CBHeapCtrl
 {
-  U8 *pad; // Needed
-  I32 hc_signature;
-  I32 is_code_heap;
-  I64 locked_flags, alloced_u8s, used_u8s;
-  CBTask *mem_task;
-  I64 arena_lock;
-  CBHeapCtrlArena arenas[16];
-  CBQue mem_blks;
+    U8 *pad; // Needed
+    I32 hc_signature;
+    I32 is_code_heap;
+    I64 locked_flags, alloced_u8s, used_u8s;
+    CBTask *mem_task;
+    I64 arena_lock;
+    CBHeapCtrlArena arenas[16];
+    CBQue mem_blks;
 };
 
 class CBMemBlk
 {
-  CBQue base;
-  CBQue base2;
-  I64 pags;
+    CBQue base;
+    CBQue base2;
+    I64 pags;
 };
 
 // aiwn_lexparser.h
 // This represents a peice of text being lexed(it could be a file macro, or such)
 class CBLexFile
 {
-  // If we include a file,we put the current file on hold
-  // last will point to the "old" file we are in
-  CBLexFile *last;
-  U8 *filename, *text, *dir;
-  I64 ln, col, pos, is_file;
+    // If we include a file,we put the current file on hold
+    // last will point to the "old" file we are in
+    CBLexFile *last;
+    U8 *filename, *text, *dir;
+    I64 ln, col, pos, is_file;
 };
 
 class CBLexer
 {
-  CBLexFile *file;
-  // These are our lexer values,I put them in a union to save memory
-  I64 str_len;
-  union {
-    I64 integer;
-    F64 flt;
-    U8 string[864]; // STR_LEN*6
-  };
-  // Sometimes we are lexing and want to go back a charactor
-  // LEXF_USE_LAST_CHAR allows us to simulate this.
-  I64 flags, cur_char;
-  I64 cur_tok;
-  CBHeapCtrl *hc;
+    CBLexFile *file;
+    // These are our lexer values,I put them in a union to save memory
+    I64 str_len;
+    union {
+        I64 integer;
+        F64 flt;
+        U8 string[864]; // STR_LEN*6
+    };
+    // Sometimes we are lexing and want to go back a charactor
+    // LEXF_USE_LAST_CHAR allows us to simulate this.
+    I64 flags, cur_char;
+    I64 cur_tok;
+    CBHeapCtrl *hc;
 };
 
 class CBCodeCtrl
 {
-  CBCodeCtrl *next;
-  CBQue *ir_code;
-  CBQue *code_misc;
-  CBCodeMisc *break_to;
-  I64 final_pass; // See OptPassFinal
-  I64 min_ln;
-  U8 **dbg_info;
-  I64 statics_offset;
-  CBHeapCtrl *hc;
+    CBCodeCtrl *next;
+    CBQue *ir_code;
+    CBQue *code_misc;
+    CBCodeMisc *break_to;
+    I64 final_pass; // See OptPassFinal
+    I64 min_ln;
+    U8 **dbg_info;
+    I64 statics_offset;
+    CBHeapCtrl *hc;
 };
 
 class CBCodeMiscRef
 {
-  CBCodeMiscRef *next;
-  CBRPN *from_ic;
-  I32 *add_to, offset;
-  // For arm
-  // I32 (*)(I64, I64) and I32 (*)(I64), stored as U8 *: the C bootstrap compiler
-  // yields the member's address for p->fnptr_member. Call via BCallPatch*.
-  U8 *patch_cond_br;
-  U8 *patch_uncond_br;
-  I64 user_data1;
-  I64 user_data2;
-  I8 is_abs64;
-  // Used for RISC-V
-  I8 is_jal;     // Not JALR
-  I8 is_4_bytes; // Default is 8 bytes
-  //Used for bytecode
-  I8 is_rel;
+    CBCodeMiscRef *next;
+    CBRPN *from_ic;
+    I32 *add_to, offset;
+    // For arm
+    // I32 (*)(I64, I64) and I32 (*)(I64), stored as U8 *: the C bootstrap compiler
+    // yields the member's address for p->fnptr_member. Call via BCallPatch*.
+    U8 *patch_cond_br;
+    U8 *patch_uncond_br;
+    I64 user_data1;
+    I64 user_data2;
+    I8 is_abs64;
+    // Used for RISC-V
+    I8 is_jal;     // Not JALR
+    I8 is_4_bytes; // Default is 8 bytes
+    //Used for bytecode
+    I8 is_rel;
 };
 
 class CBCodeMisc
 {
-  CBQue base;
-  I32 type, flags;
-  // These are used for jump tables
-  I64 lo, hi;
-  U8 *str;
-  U8 *addr;
-  union {
-    CBCodeMisc *dft_lab;
-    I64 str_len;
-  };
-  U8 **patch_addr;
-  union {
-    CBCodeMisc **jmp_tab;
-    F64 flt;
-    I64 integer;
-  };
-  I32 aot_before_hint; // See __HC_SetAOTRelocBeforeRIP
-  I32 use_cnt;
-  I32 code_off; // Used for riscv_backend.c for choosing big/small jumps
-  // The bit is set if the floating point register is alive at this inst
-  I64 freg_alive_bmp;
-  CBCodeMiscRef *refs;
+    CBQue base;
+    I32 type, flags;
+    // These are used for jump tables
+    I64 lo, hi;
+    U8 *str;
+    U8 *addr;
+    union {
+        CBCodeMisc *dft_lab;
+        I64 str_len;
+    };
+    U8 **patch_addr;
+    union {
+        CBCodeMisc **jmp_tab;
+        F64 flt;
+        I64 integer;
+    };
+    I32 aot_before_hint; // See __HC_SetAOTRelocBeforeRIP
+    I32 use_cnt;
+    I32 code_off; // Used for riscv_backend.c for choosing big/small jumps
+    // The bit is set if the floating point register is alive at this inst
+    I64 freg_alive_bmp;
+    CBCodeMiscRef *refs;
 };
 
 class CBCmpCtrl
 {
-  CBLexer *lex;
-  I64 flags;
-  CBHashFun *cur_fun;
-  CBCodeCtrl *code_ctrl;
-  I64 backend_user_data0;
-  I64 backend_user_data1;
-  I64 backend_user_data2;
-  I64 backend_user_data3;
-  I64 backend_user_data4;
-  I64 backend_user_data5;
-  I64 backend_user_data6;
-  I64 backend_user_data7;
-  I64 backend_user_data8;
-  I64 backend_user_data9;
-  I64 backend_user_data10;
-  I64 backend_user_data11;
-  I64 prolog_stk_sz;
-  I64 used_iregs_bmp;
-  I64 used_fregs_bmp;
-  I32 found_used_iregs;
-  I32 found_used_fregs;
-  // Used for returns
-  CBCodeMisc *epilog_label, *statics_label;
-  // In SysV,the fregs are not saved,so i will make a mini function to save them
-  CBCodeMisc *fregs_save_label, *fregs_restore_label;
-  CBHeapCtrl *hc, *final_hc;
-  I64 is_lock_expr; // lock EXPRESSION;
-  // private for AARCH64 for use with IC_LOCK
-  // I will use the ldxsr/stxr instructions in a loop
-  I64 aarch64_atomic_loop_start;
-  CBRPN *cur_rpn;
+    CBLexer *lex;
+    I64 flags;
+    CBHashFun *cur_fun;
+    CBCodeCtrl *code_ctrl;
+    I64 backend_user_data0;
+    I64 backend_user_data1;
+    I64 backend_user_data2;
+    I64 backend_user_data3;
+    I64 backend_user_data4;
+    I64 backend_user_data5;
+    I64 backend_user_data6;
+    I64 backend_user_data7;
+    I64 backend_user_data8;
+    I64 backend_user_data9;
+    I64 backend_user_data10;
+    I64 backend_user_data11;
+    I64 prolog_stk_sz;
+    I64 used_iregs_bmp;
+    I64 used_fregs_bmp;
+    I32 found_used_iregs;
+    I32 found_used_fregs;
+    // Used for returns
+    CBCodeMisc *epilog_label, *statics_label;
+    // In SysV,the fregs are not saved,so i will make a mini function to save them
+    CBCodeMisc *fregs_save_label, *fregs_restore_label;
+    CBHeapCtrl *hc, *final_hc;
+    I64 is_lock_expr; // lock EXPRESSION;
+    // private for AARCH64 for use with IC_LOCK
+    // I will use the ldxsr/stxr instructions in a loop
+    I64 aarch64_atomic_loop_start;
+    CBRPN *cur_rpn;
 };
 
 class CBICArg
 {
-  // Feel free to define more in backend
-  I32 mode;
-  I32 raw_type;
-  I8 reg, reg2, fallback_reg;
-  // True on enter of things that want to set the flags
-  // True/False if the result of the thing set the flags or not
-  U8 want_use_flags; // This is reset by __OptPassFinal
-  U8 set_flags;
-  // keep the value in a temp location,good for removing reundant stores
-  U8 keep_in_tmp;
-  U8 keep_in_reg0; // RAX on X86_64
-  union {
-    CBCodeMisc *code_misc;
-    I64 integer;
-    I64 off;
-    F64 flt;
-  };
-  I8 __SIB_scale, pop_n_tmp_regs;
-  U8 is_tmp;
-  CBRPN *__sib_base_rpn, *__sib_idx_rpn;
+    // Feel free to define more in backend
+    I32 mode;
+    I32 raw_type;
+    I8 reg, reg2, fallback_reg;
+    // True on enter of things that want to set the flags
+    // True/False if the result of the thing set the flags or not
+    U8 want_use_flags; // This is reset by __OptPassFinal
+    U8 set_flags;
+    // keep the value in a temp location,good for removing reundant stores
+    U8 keep_in_tmp;
+    U8 keep_in_reg0; // RAX on X86_64
+    union {
+        CBCodeMisc *code_misc;
+        I64 integer;
+        I64 off;
+        F64 flt;
+    };
+    I8 __SIB_scale, pop_n_tmp_regs;
+    U8 is_tmp;
+    CBRPN *__sib_base_rpn, *__sib_idx_rpn;
 };
 
 class CBRPN
 {
-  CBQue base;
+    CBQue base;
 
-  I16 type, length, raw_type, flags, ic_line;
-  CBHashClass *ic_class;
-  CBHashFun *ic_fun;
-  CBArrayDim *ic_dim;
-  union {
-    F64 flt;
-    U8 *raw_bytes;
-    I64 integer;
-    U8 *string;
-    CBMemberLst *local_mem;
-    CBHashGlblVar *global_var;
-    CBCodeMisc *code_misc;
-    CBCodeMisc *break_to;
-  };
-  CBCodeMisc *code_misc2, *code_misc3, *code_misc4;
-  CBICArg res, tmp_res;
-  CBRPN *tree1, *tree2, *ic_fwd;
-  // Use with Bt,includes temporaries
-  U32 changes_iregs, changes_fregs;
-  U32 changes_iregs2, changes_fregs2;
-  // Will be stored into this reg if ICF_STUFF_IN_REG is set
-  U8 *start_ptr, *end_ptr;
-  U8 stuff_in_reg;
+    I16 type, length, raw_type, flags, ic_line;
+    CBHashClass *ic_class;
+    CBHashFun *ic_fun;
+    CBArrayDim *ic_dim;
+    union {
+        F64 flt;
+        U8 *raw_bytes;
+        I64 integer;
+        U8 *string;
+        CBMemberLst *local_mem;
+        CBHashGlblVar *global_var;
+        CBCodeMisc *code_misc;
+        CBCodeMisc *break_to;
+    };
+    CBCodeMisc *code_misc2, *code_misc3, *code_misc4;
+    CBICArg res, tmp_res;
+    CBRPN *tree1, *tree2, *ic_fwd;
+    // Use with Bt,includes temporaries
+    U32 changes_iregs, changes_fregs;
+    U32 changes_iregs2, changes_fregs2;
+    // Will be stored into this reg if ICF_STUFF_IN_REG is set
+    U8 *start_ptr, *end_ptr;
+    U8 stuff_in_reg;
 };
 
 // Local types of arm64_asm.c (https://github.com/fujitsu/xbyak_aarch64)
 class CBARMAdrRegReg
 {
-  I64 n, m;
-  I64 type;
-  I64 shift;
-  I64 init_sh;
+    I64 n, m;
+    I64 type;
+    I64 shift;
+    I64 init_sh;
 };
 class CBARMAdrRegImm
 {
-  I64 n;
-  I64 off;
+    I64 n;
+    I64 off;
 };
 class CBARMAdrPostImm
 {
-  I64 n;
-  I64 off;
+    I64 n;
+    I64 off;
 };
 class CBARMAdrPreImm
 {
-  I64 n;
-  I64 off;
+    I64 n;
+    I64 off;
 };
 class CBARMAdrScImm
 {
-  I64 n;
-  I64 off;
-  I64 ext;
+    I64 n;
+    I64 off;
+    I64 ext;
 };
 
 // Local type of optpass.c
 class CBOptMemberVar
 {
-  I64 score;
-  CBMemberLst *m;
+    I64 score;
+    CBMemberLst *m;
 };
 
 // ---------------------------------------------------------------- constants
@@ -1111,10 +1111,10 @@ extern I64 __ICFCallTOS(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin, I64 code_off);
 extern I64 ICMov(CBCmpCtrl *cctrl, CBICArg *dst, CBICArg *src, U8 *bin, I64 code_off);
 extern I64 SpillsTmpRegs(CBRPN *rpn);
 extern I64 __SexyWriteIntoDst(CBCmpCtrl *cctrl, CBRPN *deref, CBICArg *arg, U8 *bin, I64 code_off);
-extern I64 __SexyPreOp(CBCmpCtrl *cctrl, CBRPN *rpn, I64 (*i_imm_op)(I64,I64,I64), I64 (*i_reg_op)(I64,I64,I64), I32 (*f_op)(I64,I64,I64), U8 *bin, I64 code_off);
-extern I64 __SexyPostOp(CBCmpCtrl *cctrl, CBRPN *rpn, I64 (*i_imm_op)(I64,I64,I64), I64 (*i_reg_op)(I64,I64,I64), I64 (*f_op)(I64,I64,I64), U8 *bin, I64 code_off);
-extern I64 FBitOp(CBCmpCtrl *cctrl, CBICArg *res, CBICArg *next, CBICArg *next2, I32 (*bit_op)(I64,I64,I64), I32 shift, U8 *bin, I64 code_off);
-extern I64 __SexyAssignOp(CBCmpCtrl *cctrl, CBRPN *rpn, I32 (*i_op)(I64,I64,I64), I32 (*i_imm_op)(I64,I64,I64), I32 (*f_op)(I64,I64,I64), U8 *bin, I64 code_off);
+extern I64 __SexyPreOp(CBCmpCtrl *cctrl, CBRPN *rpn, I64 (*i_imm_op)(I64, I64, I64), I64 (*i_reg_op)(I64, I64, I64), I32 (*f_op)(I64, I64, I64), U8 *bin, I64 code_off);
+extern I64 __SexyPostOp(CBCmpCtrl *cctrl, CBRPN *rpn, I64 (*i_imm_op)(I64, I64, I64), I64 (*i_reg_op)(I64, I64, I64), I64 (*f_op)(I64, I64, I64), U8 *bin, I64 code_off);
+extern I64 FBitOp(CBCmpCtrl *cctrl, CBICArg *res, CBICArg *next, CBICArg *next2, I32 (*bit_op)(I64, I64, I64), I32 shift, U8 *bin, I64 code_off);
+extern I64 __SexyAssignOp(CBCmpCtrl *cctrl, CBRPN *rpn, I32 (*i_op)(I64, I64, I64), I32 (*i_imm_op)(I64, I64, I64), I32 (*f_op)(I64, I64, I64), U8 *bin, I64 code_off);
 extern I64 __FMod(I64 dst, I64 a, I64 b, U8 *bin, I64 code_off);
 extern I64 __CompileMod(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin, I64 code_off);
 extern I64 __FindPushedIRegs(CBCmpCtrl *cctrl, U8 *to_push);
@@ -1220,8 +1220,8 @@ extern CBCmpCtrl *__HC_CmpCtrlNew();
 extern CBCmpCtrl *__HC_CmpCtrlDel(CBCmpCtrl *d);
 extern CBCodeCtrl *__HC_CodeCtrlPush(CBCmpCtrl *ccmp);
 extern U0 __HC_CodeCtrlPop(CBCmpCtrl *ccmp);
-extern U8 *__HC_Compile(CBCmpCtrl *ccmp, I64 *sz=NULL, U8 **dbg_info=NULL, CBHeapCtrl *h);
-extern CBCodeMisc *__HC_CodeMiscLabelNew(CBCmpCtrl *ccmp, U8 **patch_addr=NULL);
+extern U8 *__HC_Compile(CBCmpCtrl *ccmp, I64 *sz = NULL, U8 **dbg_info = NULL, CBHeapCtrl *h);
+extern CBCodeMisc *__HC_CodeMiscLabelNew(CBCmpCtrl *ccmp, U8 **patch_addr = NULL);
 extern CBCodeMisc *__HC_CodeMiscStrNew(CBCmpCtrl *ccmp, U8 *str, I64 sz);
 extern CBCodeMisc *__HC_CodeMiscJmpTableNew(CBCmpCtrl *ccmp, CBCodeMisc *labels, U8 **table_address, I64 hi);
 extern CBRPN *__HC_ICAdd_Label(CBCodeCtrl *cc, CBCodeMisc *misc);
@@ -1266,7 +1266,7 @@ extern U0 BAssert(Bool cond, U8 *what); // print `what` and halt when cond is FA
 extern F64 BToF64(I64 x);
 extern I64 BToI64(F64 x);
 extern U64 BF64ToU64(F64 x);
-extern U8 *BCodeAlloc(I64 size,CBHeapCtrl *heap);
+extern U8 *BCodeAlloc(I64 size, CBHeapCtrl *heap);
 extern U0 BCodeCommit(U8 *obin);
 extern U8 *MemGetWritePtr(U8 *ptr);     // identity outside OpenBSD/NetBSD
 extern U8 *MemGetExecPtr(U8 *ptr);      // identity outside OpenBSD/NetBSD
@@ -1302,11 +1302,11 @@ extern F64 BPow(F64 a, F64 b);                                         //INTEGRA
 
 // Replacements for arm_backend.c macros, defined in ArmBackendA.HC and used by
 // both halves. Each returns the new code_off.
-extern I64 AIWNIOS_ADD_CODE(U8 *bin,I64 code_off,I64 val);
-extern I64 TYPECAST_ASSIGN_BEGIN(CBCmpCtrl *cctrl,CBRPN **dst,CBRPN *src,
-                                 CBICArg *_orig,I64 *pop,I64 *pop2,U8 *bin,I64 code_off);
-extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl,I64 pop,CBICArg *_orig,
-                               U8 *bin,I64 code_off);
+extern I64 AIWNIOS_ADD_CODE(U8 *bin, I64 code_off, I64 val);
+extern I64 TYPECAST_ASSIGN_BEGIN(CBCmpCtrl *cctrl, CBRPN **dst, CBRPN *src,
+                                 CBICArg *_orig, I64 *pop, I64 *pop2, U8 *bin, I64 code_off);
+extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl, I64 pop, CBICArg *_orig,
+                               U8 *bin, I64 code_off);
 
 // ---- Kernel heap/string/print functions used by the port (INTEGRATION: provided by the CoolC kernel) ----
 // These are only declared for standalone syntax checks (#define BACKEND_STANDALONE): the backend is

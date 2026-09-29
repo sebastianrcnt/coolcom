@@ -10,236 +10,236 @@ I64 Arm64EncPass = 0, Arm64EncFail = 0;
 
 U0 Arm64EncChk(U8 *name, I64 got, I64 exp)
 {
-  // Error codes (negative) are compared whole; encodings on the low 32 bits.
-  if (exp >= 0)
-    got = got & 0xFFFFFFFF;
-  if (got == exp) {
-    Arm64EncPass++;
-    Print("PASS %s\n", name);
-  } else {
-    Arm64EncFail++;
-    Print("FAIL %s got=0x%08X expected=0x%08X\n", name, got, exp);
-  }
+    // Error codes (negative) are compared whole; encodings on the low 32 bits.
+    if (exp >= 0)
+        got = got & 0xFFFFFFFF;
+    if (got == exp) {
+        Arm64EncPass++;
+        Print("PASS %s\n", name);
+    } else {
+        Arm64EncFail++;
+        Print("FAIL %s got=0x%08X expected=0x%08X\n", name, got, exp);
+    }
 }
 
 I64 Arm64EncTest()
 {
-  Arm64EncPass = 0;
-  Arm64EncFail = 0;
+    Arm64EncPass = 0;
+    Arm64EncFail = 0;
 
-  Arm64EncChk("add x1, x2, #3", ARM_addImmX(1,2,3), 0x91000c41);
-  // C-BUG: real assembler gives d13ffc83
-  Arm64EncChk("sub x3, x4, #4095 [C-BUG]", ARM_subImmX(3,4,0xfff), -2);
-  Arm64EncChk("subs x5, x6, #16", ARM_subsImmX(5,6,0x10), 0xf10040c5);
-  Arm64EncChk("cmp x7, #100", ARM_cmpImmX(7,0x64), 0xf10190ff);
-  Arm64EncChk("adds x1, x2, #7", ARM_addsImmX(1,2,7), 0xb1001c41);
-  Arm64EncChk("add sp, sp, #16", ARM_addImmX(0x1f,0x1f,0x10), 0x910043ff);
-  Arm64EncChk("ARM_addImmX(1,2,-1)", ARM_addImmX(1,2,-1), -2);
-  Arm64EncChk("ARM_addImmX(1,2,4096)", ARM_addImmX(1,2,0x1000), -2);
-  Arm64EncChk("add x1, x2, x3", ARM_addRegX(1,2,3), 0x8b030041);
-  Arm64EncChk("adds x1, x2, x3", ARM_addsRegX(1,2,3), 0xab030041);
-  Arm64EncChk("sub x4, x5, x6", ARM_subRegX(4,5,6), 0xcb0600a4);
-  Arm64EncChk("subs x4, x5, x6", ARM_subsRegX(4,5,6), 0xeb0600a4);
-  Arm64EncChk("cmp x4, x5", ARM_cmpRegX(4,5), 0xeb05009f);
-  Arm64EncChk("negs x1, x2", ARM_negsRegX(1,2), 0xeb0203e1);
-  Arm64EncChk("add sp, sp, x3", ARM_addRegX(0x1f,0x1f,3), 0x8b2363ff);
-  Arm64EncChk("add x1, x2, x3, lsl #4", ARM_addShiftRegX(1,2,3,4), 0x8b031041);
-  Arm64EncChk("sub x1, x2, x3, lsl #5", ARM_subShiftRegX(1,2,3,5), 0xcb031441);
-  Arm64EncChk("adds x1, x2, x3, lsl #6", ARM_addShiftRegXs(1,2,3,6), 0xab031841);
-  Arm64EncChk("subs x1, x2, x3, lsl #7", ARM_subShiftRegXs(1,2,3,7), 0xeb031c41);
-  Arm64EncChk("and x1, x2, x3", ARM_andRegX(1,2,3), 0x8a030041);
-  Arm64EncChk("orr x1, x2, x3", ARM_orrRegX(1,2,3), 0xaa030041);
-  Arm64EncChk("eor x1, x2, x3", ARM_eorRegX(1,2,3), 0xca030041);
-  Arm64EncChk("ands x1, x2, x3", ARM_andsRegX(1,2,3), 0xea030041);
-  Arm64EncChk("eor x1, x2, x3, asr #7", ARM_eorShiftX(1,2,3,2,7), 0xca831c41);
-  Arm64EncChk("mvn x1, x2", ARM_mvnRegX(1,2), 0xaa2203e1);
-  Arm64EncChk("mvn w1, w2", ARM_mvnReg(1,2), 0x2a2203e1);
-  Arm64EncChk("mvn x1, x2, lsr #3", ARM_mvnShiftX(1,2,1,3), 0xaa620fe1);
-  Arm64EncChk("mvn w1, w2, ror #4", ARM_mvnShift(1,2,3,4), 0x2ae213e1);
-  Arm64EncChk("mov x1, x2", ARM_movRegX(1,2), 0xaa0203e1);
-  Arm64EncChk("mov sp, x1", ARM_movRegX(0x1f,1), 0x9100003f);
-  Arm64EncChk("mov w1, w2", ARM_movReg(1,2), 0x2a0203e1);
-  // C-BUG: real assembler gives 1a831041
-  Arm64EncChk("csel w1, w2, w3, ne [C-BUG]", ARM_csel(1,2,3,1), 0x00031041);
-  Arm64EncChk("csel x1, x2, x3, ne", ARM_cselX(1,2,3,1), 0x9a831041);
-  // C-BUG: real assembler gives 1a9f17e1
-  Arm64EncChk("cset w1, eq [C-BUG]", ARM_cset(1,0), 0x001f17e1);
-  Arm64EncChk("cset x1, lt", ARM_csetX(1,0xb), 0x9a9fa7e1);
-  Arm64EncChk("mul x1, x2, x3", ARM_mulRegX(1,2,3), 0x9b037c41);
-  Arm64EncChk("umull x1, w2, w3", ARM_umullX(1,2,3), 0x9ba37c41);
-  Arm64EncChk("sdiv x1, x2, x3", ARM_sdivRegX(1,2,3), 0x9ac30c41);
-  Arm64EncChk("udiv x1, x2, x3", ARM_udivX(1,2,3), 0x9ac30841);
-  Arm64EncChk("lsl x1, x2, x3", ARM_lslvRegX(1,2,3), 0x9ac32041);
-  Arm64EncChk("lsr x1, x2, x3", ARM_lsrvRegX(1,2,3), 0x9ac32441);
-  Arm64EncChk("asr x1, x2, x3", ARM_asrvRegX(1,2,3), 0x9ac32841);
-  Arm64EncChk("ARM_sdivRegX(33,2,3)", ARM_sdivRegX(0x21,2,3), -3);
-  Arm64EncChk("uxtb w1, w2", ARM_uxtb(1,2), 0x53001c41);
-  Arm64EncChk("ubfx x1, x2, #0, #8", ARM_uxtbX(1,2), 0xd3401c41);
-  Arm64EncChk("uxth w1, w2", ARM_uxth(1,2), 0x53003c41);
-  Arm64EncChk("ubfx x1, x2, #0, #16", ARM_uxthX(1,2), 0xd3403c41);
-  Arm64EncChk("ubfx x1, x2, #0, #32", ARM_uxtwX(1,2), 0xd3407c41);
-  Arm64EncChk("sbfx x1, x2, #0, #8", ARM_sxtb(1,2), 0x93401c41);
-  Arm64EncChk("sxtb x1, w2", ARM_sxtbX(1,2), 0x93401c41);
-  Arm64EncChk("sxth w1, w2", ARM_sxth(1,2), 0x13003c41);
-  Arm64EncChk("sxth x1, w2", ARM_sxthX(1,2), 0x93403c41);
-  Arm64EncChk("sbfx w1, w2, #0, #32", ARM_sxtw(1,2), 0x13007c41);
-  Arm64EncChk("sxtw x1, w2", ARM_sxtwX(1,2), 0x93407c41);
-  Arm64EncChk("asr w1, w2, #5", ARM_asrImm(1,2,5), 0x13057c41);
-  Arm64EncChk("asr x1, x2, #5", ARM_asrImmX(1,2,5), 0x9345fc41);
-  // C-BUG: real assembler gives 531d7041
-  Arm64EncChk("lsl w1, w2, #3 [C-BUG]", ARM_lslImm(1,2,3), 0x533d7041);
-  Arm64EncChk("lsl x1, x2, #3", ARM_lslImmX(1,2,3), 0xd37df041);
-  Arm64EncChk("lsl x1, x2, #40", ARM_lslImmX(1,2,0x28), 0xd3585c41);
-  Arm64EncChk("lsr w1, w2, #3", ARM_lsrImm(1,2,3), 0x53037c41);
-  Arm64EncChk("lsr x1, x2, #60", ARM_lsrImmX(1,2,0x3c), 0xd37cfc41);
-  Arm64EncChk("ret", ARM_ret(), 0xd65f03c0);
-  Arm64EncChk("eret", ARM_eret(), 0xd69f03e0);
-  Arm64EncChk("br x5", ARM_br(5), 0xd61f00a0);
-  Arm64EncChk("blr x5", ARM_blr(5), 0xd63f00a0);
-  Arm64EncChk("ret x5", ARM_retReg(5), 0xd65f00a0);
-  Arm64EncChk("b .+8", ARM_b(8), 0x14000002);
-  Arm64EncChk("b .-134217728", ARM_b(-134217728), 0x16000000);
-  Arm64EncChk("bl .-16", ARM_bl(-16), 0x97fffffc);
-  Arm64EncChk("ARM_b(6)", ARM_b(6), -2);
-  Arm64EncChk("b.ne .+12", ARM_bcc(1,0xc), 0x54000061);
-  Arm64EncChk("b.ge .-20", ARM_bcc(0xa,-20), 0x54ffff6a);
-  Arm64EncChk("cbz w1, .+8", ARM_cbz(1,8), 0x34000041);
-  Arm64EncChk("cbz x1, .-8", ARM_cbzX(1,-8), 0xb4ffffc1);
-  Arm64EncChk("cbnz w1, .+16", ARM_cbnz(1,0x10), 0x35000081);
-  Arm64EncChk("cbnz x30, .+1000", ARM_cbnzX(0x1e,0x3e8), 0xb5001f5e);
-  Arm64EncChk("tbz w1, #3, .+8", ARM_tbz(1,3,8), 0x36180041);
-  Arm64EncChk("tbz x1, #40, .+8", ARM_tbz(1,0x28,8), 0xb6400041);
-  Arm64EncChk("tbnz x2, #40, .-8", ARM_tbnz(2,0x28,-8), 0xb747ffc2);
-  Arm64EncChk("ARM_tbnz(2,7,1)", ARM_tbnz(2,7,1), -2);
-  Arm64EncChk("strb w1, [x2, #5]", ARM_strbRegImm(1,2,5), 0x39001441);
-  // C-BUG: real assembler gives 397ffc41
-  Arm64EncChk("ldrb w1, [x2, #4095] [C-BUG]", ARM_ldrbRegImm(1,2,0xfff), -2);
-  Arm64EncChk("strh w1, [x2, #6]", ARM_strhRegImm(1,2,6), 0x79000c41);
-  // C-BUG: real assembler gives 797ffc41
-  Arm64EncChk("ldrh w1, [x2, #8190] [C-BUG]", ARM_ldrhRegImm(1,2,0x1ffe), -2);
-  Arm64EncChk("str w1, [x2, #8]", ARM_strRegImm(1,2,8), 0xb9000841);
-  // C-BUG: real assembler gives b97ffc41
-  Arm64EncChk("ldr w1, [x2, #16380] [C-BUG]", ARM_ldrRegImm(1,2,0x3ffc), -2);
-  Arm64EncChk("str x1, [x2, #16]", ARM_strRegImmX(1,2,0x10), 0xf9000841);
-  // C-BUG: real assembler gives f97ffc41
-  Arm64EncChk("ldr x1, [x2, #32760] [C-BUG]", ARM_ldrRegImmX(1,2,0x7ff8), -2);
-  Arm64EncChk("ARM_ldrRegImmX(1,2,4)", ARM_ldrRegImmX(1,2,4), -2);
-  Arm64EncChk("ARM_ldrRegImmX(1,2,32768)", ARM_ldrRegImmX(1,2,0x8000), -2);
-  Arm64EncChk("ARM_ldrRegImmX(1,2,-8)", ARM_ldrRegImmX(1,2,-8), 0xf97ffc41);
-  Arm64EncChk("strb w1, [x2, x3]", ARM_strbRegReg(1,2,3), 0x38236841);
-  Arm64EncChk("ldrb w1, [x2, x3]", ARM_ldrbRegReg(1,2,3), 0x38636841);
-  Arm64EncChk("strh w1, [x2, x3]", ARM_strhRegReg(1,2,3), 0x78236841);
-  Arm64EncChk("ldrh w1, [x2, x3]", ARM_ldrhRegReg(1,2,3), 0x78636841);
-  Arm64EncChk("str w1, [x2, x3]", ARM_strRegReg(1,2,3), 0xb8236841);
-  Arm64EncChk("ldr w1, [x2, x3]", ARM_ldrRegReg(1,2,3), 0xb8636841);
-  Arm64EncChk("str x1, [x2, x3]", ARM_strRegRegX(1,2,3), 0xf8236841);
-  Arm64EncChk("ldr x1, [x2, x3]", ARM_ldrRegRegX(1,2,3), 0xf8636841);
-  Arm64EncChk("strh w1, [x2, x3, lsl #1]", ARM_strhRegRegShift(1,2,3), 0x78237841);
-  Arm64EncChk("ldrh w1, [x2, x3, lsl #1]", ARM_ldrhRegRegShift(1,2,3), 0x78637841);
-  Arm64EncChk("str w1, [x2, x3, lsl #2]", ARM_strRegRegShift(1,2,3), 0xb8237841);
-  Arm64EncChk("ldr w1, [x2, x3, lsl #2]", ARM_ldrRegRegShift(1,2,3), 0xb8637841);
-  Arm64EncChk("str x1, [x2, x3, lsl #3]", ARM_strRegRegShiftX(1,2,3), 0xf8237841);
-  Arm64EncChk("ldr x1, [x2, x3, lsl #3]", ARM_ldrRegRegShiftX(1,2,3), 0xf8637841);
-  Arm64EncChk("ldrsb x1, [x2, #3]", ARM_ldrsbX(1,2,3), 0x39800c41);
-  Arm64EncChk("ldrsh x1, [x2, #6]", ARM_ldrshX(1,2,6), 0x79800c41);
-  Arm64EncChk("ldrsw x1, [x2, #8]", ARM_ldrswX(1,2,8), 0xb9800841);
-  Arm64EncChk("ldrsb x1, [x2, x3]", ARM_ldrsbRegRegX(1,2,3), 0x38a36841);
-  Arm64EncChk("ldrsh x1, [x2, x3]", ARM_ldrshRegRegX(1,2,3), 0x78a36841);
-  Arm64EncChk("ldrsw x1, [x2, x3]", ARM_ldrswRegRegX(1,2,3), 0xb8a36841);
-  Arm64EncChk("ldrsb x1, [x2, x3, lsl #0]", ARM_ldrsbRegRegShiftX(1,2,3), 0x38a37841);
-  Arm64EncChk("ldrsh x1, [x2, x3, lsl #1]", ARM_ldrshRegRegShiftX(1,2,3), 0x78a37841);
-  Arm64EncChk("ldrsw x1, [x2, x3, lsl #2]", ARM_ldrswRegRegShiftX(1,2,3), 0xb8a37841);
-  Arm64EncChk("stur x1, [x2, #-8]", ARM_stur(1,2,-8), 0xf81f8041);
-  Arm64EncChk("ldur x1, [x2, #255]", ARM_ldur(1,2,0xff), 0xf84ff041);
-  Arm64EncChk("stur w1, [x2, #3]", ARM_sturw(1,2,3), 0xb8003041);
-  Arm64EncChk("sturh w1, [x2, #-256]", ARM_sturh(1,2,-256), 0x78100041);
-  Arm64EncChk("sturb w1, [x2, #1]", ARM_sturb(1,2,1), 0x38001041);
-  Arm64EncChk("ldursb x1, [x2, #-1]", ARM_ldursbX(1,2,-1), 0x389ff041);
-  Arm64EncChk("ldursh x1, [x2, #-2]", ARM_ldurshX(1,2,-2), 0x789fe041);
-  Arm64EncChk("ldursw x1, [x2, #-4]", ARM_ldurswX(1,2,-4), 0xb89fc041);
-  Arm64EncChk("ARM_ldur(1,2,256)", ARM_ldur(1,2,0x100), -2);
-  // C-BUG: real assembler gives b81f0c41
-  Arm64EncChk("str w1, [x2, #-16]! [C-BUG]", ARM_strPreImm(1,2,-16), 0xf81f0c41);
-  // C-BUG: real assembler gives b8410c41
-  Arm64EncChk("ldr w1, [x2, #16]! [C-BUG]", ARM_ldrPreImm(1,2,0x10), 0xf8410c41);
-  // C-BUG: real assembler gives b8008441
-  Arm64EncChk("str w1, [x2], #8 [C-BUG]", ARM_strPostImm(1,2,8), 0xf8008441);
-  // C-BUG: real assembler gives b85f8441
-  Arm64EncChk("ldr w1, [x2], #-8 [C-BUG]", ARM_ldrPostImm(1,2,-8), 0xf85f8441);
-  Arm64EncChk("str x1, [x2, #-16]!", ARM_strPreImmX(1,2,-16), 0xf81f0c41);
-  Arm64EncChk("ldr x1, [x2, #16]!", ARM_ldrPreImmX(1,2,0x10), 0xf8410c41);
-  Arm64EncChk("str x1, [x2], #8", ARM_strPostImmX(1,2,8), 0xf8008441);
-  Arm64EncChk("ldr x1, [x2], #-8", ARM_ldrPostImmX(1,2,-8), 0xf85f8441);
-  Arm64EncChk("stp x1, x2, [sp, #-16]!", ARM_stpPreImmX(1,2,0x1f,-16), 0xa9bf0be1);
-  Arm64EncChk("ldp x1, x2, [sp], #16", ARM_ldpPostImmX(1,2,0x1f,0x10), 0xa8c10be1);
-  Arm64EncChk("stp w1, w2, [sp, #-8]!", ARM_stpPreImm(1,2,0x1f,-8), 0x29bf0be1);
-  Arm64EncChk("ldp w1, w2, [sp], #8", ARM_ldpPostImm(1,2,0x1f,8), 0x28c10be1);
-  Arm64EncChk("stp x29, x30, [sp], #504", ARM_stpPostImmX(0x1d,0x1e,0x1f,0x1f8), 0xa89ffbfd);
-  Arm64EncChk("ldp x29, x30, [sp, #-512]!", ARM_ldpPreImmX(0x1d,0x1e,0x1f,-512), 0xa9e07bfd);
-  Arm64EncChk("ldp w1, w2, [x3, #4]!", ARM_ldpPreImm(1,2,3,4), 0x29c08861);
-  Arm64EncChk("stp w1, w2, [x3], #-4", ARM_stpPostImm(1,2,3,-4), 0x28bf8861);
-  Arm64EncChk("stp x1, x2, [sp, #16]", ARM_stpImmX(1,2,0x1f,0x10), 0xa9010be1);
-  Arm64EncChk("ldp x1, x2, [sp, #-32]", ARM_ldpImmX(1,2,0x1f,-32), 0xa97e0be1);
-  Arm64EncChk("stp d1, d2, [sp, #16]", ARM_stpImmF64(1,2,0x1f,0x10), 0x6d010be1);
-  Arm64EncChk("ldp d1, d2, [sp, #-32]", ARM_ldpImmF64(1,2,0x1f,-32), 0x6d7e0be1);
-  Arm64EncChk("fmul d1, d2, d3", ARM_fmulReg(1,2,3), 0x1e630841);
-  Arm64EncChk("fdiv d1, d2, d3", ARM_fdivReg(1,2,3), 0x1e631841);
-  Arm64EncChk("fadd d1, d2, d3", ARM_faddReg(1,2,3), 0x1e632841);
-  Arm64EncChk("fsub d1, d2, d3", ARM_fsubReg(1,2,3), 0x1e633841);
-  Arm64EncChk("scvtf d1, x2", ARM_scvtf(1,2), 0x9e620041);
-  Arm64EncChk("ucvtf d1, x2", ARM_ucvtf(1,2), 0x9e630041);
-  Arm64EncChk("fcvtzs x1, d2", ARM_fcvtzs(1,2), 0x9e780041);
-  Arm64EncChk("fmov x1, d2", ARM_fmovI64F64(1,2), 0x9e660041);
-  Arm64EncChk("fmov d1, x2", ARM_fmovF64I64(1,2), 0x9e670041);
-  Arm64EncChk("fmov d1, d2", ARM_fmovReg(1,2), 0x1e604041);
-  Arm64EncChk("fneg d1, d2", ARM_fnegReg(1,2), 0x1e614041);
-  Arm64EncChk("fcmp d1, d2", ARM_fcmp(1,2), 0x1e622020);
-  Arm64EncChk("fcsel d1, d2, d3, ge", ARM_fcsel(1,2,3,0xa), 0x1e63ac41);
-  Arm64EncChk("ldr d1, [x2, #16]", ARM_ldrRegImmF64(1,2,0x10), 0xfd400841);
-  // C-BUG: real assembler gives fd3ffc41
-  Arm64EncChk("str d1, [x2, #32760] [C-BUG]", ARM_strRegImmF64(1,2,0x7ff8), -2);
-  Arm64EncChk("ldr d1, [x2, x3]", ARM_ldrRegRegF64(1,2,3), 0xfc636841);
-  Arm64EncChk("str d1, [x2, x3]", ARM_strRegRegF64(1,2,3), 0xfc236841);
-  Arm64EncChk("ldr d1, [x2, x3, lsl #3]", ARM_ldrRegRegShiftF64(1,2,3), 0xfc637841);
-  Arm64EncChk("str d1, [x2, x3, lsl #3]", ARM_strRegRegShiftF64(1,2,3), 0xfc237841);
-  Arm64EncChk("ldr d1, [x2, #-16]!", ARM_ldrPreImmF64(1,2,-16), 0xfc5f0c41);
-  Arm64EncChk("str d1, [x2, #16]!", ARM_strPreImmF64(1,2,0x10), 0xfc010c41);
-  Arm64EncChk("ldr d1, [x2], #8", ARM_ldrPostImmF64(1,2,8), 0xfc408441);
-  Arm64EncChk("str d1, [x2], #-8", ARM_strPostImmF64(1,2,-8), 0xfc1f8441);
-  Arm64EncChk("ldr w1, .+8", ARM_ldrLabel(1,8), 0x18000041);
-  Arm64EncChk("ldr x1, .-4", ARM_ldrLabelX(1,-4), 0x58ffffe1);
-  Arm64EncChk("ldr d1, .+12", ARM_ldrLabelF64(1,0xc), 0x5c000061);
-  Arm64EncChk("adr x1, .+100", ARM_adrX(1,0x64), 0x10000321);
-  Arm64EncChk("adr x2, .-3", ARM_adrX(2,-3), 0x30ffffe2);
-  Arm64EncChk("movz x1, #0x1234", ARM_movzImmX(1,0x1234,0), 0xd2824681);
-  Arm64EncChk("movk x1, #0xabcd, lsl #16", ARM_movkImmX(1,0xabcd,0x10), 0xf2b579a1);
-  Arm64EncChk("movn x1, #0xffff, lsl #48", ARM_movnImmX(1,0xffff,0x30), 0x92ffffe1);
-  Arm64EncChk("movz x30, #0x8000, lsl #32", ARM_movzImmX(0x1e,0x8000,0x20), 0xd2d0001e);
-  Arm64EncChk("ARM_movzImmX(1,65536,0)", ARM_movzImmX(1,0x10000,0), -2);
-  Arm64EncChk("and x1, x2, #0xff", ARM_andImmX(1,2,0xff), 0x92401c41);
-  Arm64EncChk("orr x1, x2, #0xf0", ARM_orrImmX(1,2,0xf0), 0xb27c0c41);
-  Arm64EncChk("eor x1, x2, #0xffff0000", ARM_eorImmX(1,2,0xffff0000), 0xd2703c41);
-  Arm64EncChk("ands x1, x2, #7", ARM_andsImmX(1,2,7), 0xf2400841);
-  // C-BUG: real assembler gives 9200f041
-  Arm64EncChk("and x1, x2, #0x5555555555555555 [C-BUG]", ARM_andImmX(1,2,0x5555555555555555), -2);
-  // C-BUG: real assembler gives 927ff841
-  Arm64EncChk("and x1, x2, #0xfffffffffffffffe [C-BUG]", ARM_andImmX(1,2,-2), -2);
-  // C-BUG: real assembler gives 92410441
-  Arm64EncChk("and x1, x2, #0x8000000000000001 [C-BUG]", ARM_andImmX(1,2,0x8000000000000001), -2);
-  Arm64EncChk("ARM_andImmX(1,2,0)", ARM_andImmX(1,2,0), -2);
-  Arm64EncChk("ARM_andImmX(1,2,4660)", ARM_andImmX(1,2,0x1234), -2);
-  // C-BUG: real assembler gives 085ffc41
-  Arm64EncChk("ldaxrb w1, [x2] [C-BUG]", ARM_ldaxrb(1,2), 0x085f7c41);
-  // C-BUG: real assembler gives 485ffc41
-  Arm64EncChk("ldaxrh w1, [x2] [C-BUG]", ARM_ldaxrh(1,2), 0x485f7c41);
-  // C-BUG: real assembler gives 885ffc41
-  Arm64EncChk("ldaxr w1, [x2] [C-BUG]", ARM_ldaxr(1,2), 0x885f7c41);
-  // C-BUG: real assembler gives c85ffc41
-  Arm64EncChk("ldaxr x1, [x2] [C-BUG]", ARM_ldaxrX(1,2), 0xc85f7c41);
-  Arm64EncChk("stlxrb w3, w1, [x2]", ARM_stlxrb(3,1,2), 0x0803fc41);
-  Arm64EncChk("stlxrh w3, w1, [x2]", ARM_stlxrh(3,1,2), 0x4803fc41);
-  Arm64EncChk("stlxr w3, w1, [x2]", ARM_stlxr(3,1,2), 0x8803fc41);
-  Arm64EncChk("stlxr w3, x1, [x2]", ARM_stlxrX(3,1,2), 0xc803fc41);
-  Print("Arm64EncTest: %d passed, %d failed\n", Arm64EncPass, Arm64EncFail);
-  return Arm64EncFail;
+    Arm64EncChk("add x1, x2, #3", ARM_addImmX(1, 2, 3), 0x91000c41);
+    // C-BUG: real assembler gives d13ffc83
+    Arm64EncChk("sub x3, x4, #4095 [C-BUG]", ARM_subImmX(3, 4, 0xfff), -2);
+    Arm64EncChk("subs x5, x6, #16", ARM_subsImmX(5, 6, 0x10), 0xf10040c5);
+    Arm64EncChk("cmp x7, #100", ARM_cmpImmX(7, 0x64), 0xf10190ff);
+    Arm64EncChk("adds x1, x2, #7", ARM_addsImmX(1, 2, 7), 0xb1001c41);
+    Arm64EncChk("add sp, sp, #16", ARM_addImmX(0x1f, 0x1f, 0x10), 0x910043ff);
+    Arm64EncChk("ARM_addImmX(1,2,-1)", ARM_addImmX(1, 2, -1), -2);
+    Arm64EncChk("ARM_addImmX(1,2,4096)", ARM_addImmX(1, 2, 0x1000), -2);
+    Arm64EncChk("add x1, x2, x3", ARM_addRegX(1, 2, 3), 0x8b030041);
+    Arm64EncChk("adds x1, x2, x3", ARM_addsRegX(1, 2, 3), 0xab030041);
+    Arm64EncChk("sub x4, x5, x6", ARM_subRegX(4, 5, 6), 0xcb0600a4);
+    Arm64EncChk("subs x4, x5, x6", ARM_subsRegX(4, 5, 6), 0xeb0600a4);
+    Arm64EncChk("cmp x4, x5", ARM_cmpRegX(4, 5), 0xeb05009f);
+    Arm64EncChk("negs x1, x2", ARM_negsRegX(1, 2), 0xeb0203e1);
+    Arm64EncChk("add sp, sp, x3", ARM_addRegX(0x1f, 0x1f, 3), 0x8b2363ff);
+    Arm64EncChk("add x1, x2, x3, lsl #4", ARM_addShiftRegX(1, 2, 3, 4), 0x8b031041);
+    Arm64EncChk("sub x1, x2, x3, lsl #5", ARM_subShiftRegX(1, 2, 3, 5), 0xcb031441);
+    Arm64EncChk("adds x1, x2, x3, lsl #6", ARM_addShiftRegXs(1, 2, 3, 6), 0xab031841);
+    Arm64EncChk("subs x1, x2, x3, lsl #7", ARM_subShiftRegXs(1, 2, 3, 7), 0xeb031c41);
+    Arm64EncChk("and x1, x2, x3", ARM_andRegX(1, 2, 3), 0x8a030041);
+    Arm64EncChk("orr x1, x2, x3", ARM_orrRegX(1, 2, 3), 0xaa030041);
+    Arm64EncChk("eor x1, x2, x3", ARM_eorRegX(1, 2, 3), 0xca030041);
+    Arm64EncChk("ands x1, x2, x3", ARM_andsRegX(1, 2, 3), 0xea030041);
+    Arm64EncChk("eor x1, x2, x3, asr #7", ARM_eorShiftX(1, 2, 3, 2, 7), 0xca831c41);
+    Arm64EncChk("mvn x1, x2", ARM_mvnRegX(1, 2), 0xaa2203e1);
+    Arm64EncChk("mvn w1, w2", ARM_mvnReg(1, 2), 0x2a2203e1);
+    Arm64EncChk("mvn x1, x2, lsr #3", ARM_mvnShiftX(1, 2, 1, 3), 0xaa620fe1);
+    Arm64EncChk("mvn w1, w2, ror #4", ARM_mvnShift(1, 2, 3, 4), 0x2ae213e1);
+    Arm64EncChk("mov x1, x2", ARM_movRegX(1, 2), 0xaa0203e1);
+    Arm64EncChk("mov sp, x1", ARM_movRegX(0x1f, 1), 0x9100003f);
+    Arm64EncChk("mov w1, w2", ARM_movReg(1, 2), 0x2a0203e1);
+    // C-BUG: real assembler gives 1a831041
+    Arm64EncChk("csel w1, w2, w3, ne [C-BUG]", ARM_csel(1, 2, 3, 1), 0x00031041);
+    Arm64EncChk("csel x1, x2, x3, ne", ARM_cselX(1, 2, 3, 1), 0x9a831041);
+    // C-BUG: real assembler gives 1a9f17e1
+    Arm64EncChk("cset w1, eq [C-BUG]", ARM_cset(1, 0), 0x001f17e1);
+    Arm64EncChk("cset x1, lt", ARM_csetX(1, 0xb), 0x9a9fa7e1);
+    Arm64EncChk("mul x1, x2, x3", ARM_mulRegX(1, 2, 3), 0x9b037c41);
+    Arm64EncChk("umull x1, w2, w3", ARM_umullX(1, 2, 3), 0x9ba37c41);
+    Arm64EncChk("sdiv x1, x2, x3", ARM_sdivRegX(1, 2, 3), 0x9ac30c41);
+    Arm64EncChk("udiv x1, x2, x3", ARM_udivX(1, 2, 3), 0x9ac30841);
+    Arm64EncChk("lsl x1, x2, x3", ARM_lslvRegX(1, 2, 3), 0x9ac32041);
+    Arm64EncChk("lsr x1, x2, x3", ARM_lsrvRegX(1, 2, 3), 0x9ac32441);
+    Arm64EncChk("asr x1, x2, x3", ARM_asrvRegX(1, 2, 3), 0x9ac32841);
+    Arm64EncChk("ARM_sdivRegX(33,2,3)", ARM_sdivRegX(0x21, 2, 3), -3);
+    Arm64EncChk("uxtb w1, w2", ARM_uxtb(1, 2), 0x53001c41);
+    Arm64EncChk("ubfx x1, x2, #0, #8", ARM_uxtbX(1, 2), 0xd3401c41);
+    Arm64EncChk("uxth w1, w2", ARM_uxth(1, 2), 0x53003c41);
+    Arm64EncChk("ubfx x1, x2, #0, #16", ARM_uxthX(1, 2), 0xd3403c41);
+    Arm64EncChk("ubfx x1, x2, #0, #32", ARM_uxtwX(1, 2), 0xd3407c41);
+    Arm64EncChk("sbfx x1, x2, #0, #8", ARM_sxtb(1, 2), 0x93401c41);
+    Arm64EncChk("sxtb x1, w2", ARM_sxtbX(1, 2), 0x93401c41);
+    Arm64EncChk("sxth w1, w2", ARM_sxth(1, 2), 0x13003c41);
+    Arm64EncChk("sxth x1, w2", ARM_sxthX(1, 2), 0x93403c41);
+    Arm64EncChk("sbfx w1, w2, #0, #32", ARM_sxtw(1, 2), 0x13007c41);
+    Arm64EncChk("sxtw x1, w2", ARM_sxtwX(1, 2), 0x93407c41);
+    Arm64EncChk("asr w1, w2, #5", ARM_asrImm(1, 2, 5), 0x13057c41);
+    Arm64EncChk("asr x1, x2, #5", ARM_asrImmX(1, 2, 5), 0x9345fc41);
+    // C-BUG: real assembler gives 531d7041
+    Arm64EncChk("lsl w1, w2, #3 [C-BUG]", ARM_lslImm(1, 2, 3), 0x533d7041);
+    Arm64EncChk("lsl x1, x2, #3", ARM_lslImmX(1, 2, 3), 0xd37df041);
+    Arm64EncChk("lsl x1, x2, #40", ARM_lslImmX(1, 2, 0x28), 0xd3585c41);
+    Arm64EncChk("lsr w1, w2, #3", ARM_lsrImm(1, 2, 3), 0x53037c41);
+    Arm64EncChk("lsr x1, x2, #60", ARM_lsrImmX(1, 2, 0x3c), 0xd37cfc41);
+    Arm64EncChk("ret", ARM_ret(), 0xd65f03c0);
+    Arm64EncChk("eret", ARM_eret(), 0xd69f03e0);
+    Arm64EncChk("br x5", ARM_br(5), 0xd61f00a0);
+    Arm64EncChk("blr x5", ARM_blr(5), 0xd63f00a0);
+    Arm64EncChk("ret x5", ARM_retReg(5), 0xd65f00a0);
+    Arm64EncChk("b .+8", ARM_b(8), 0x14000002);
+    Arm64EncChk("b .-134217728", ARM_b(-134217728), 0x16000000);
+    Arm64EncChk("bl .-16", ARM_bl(-16), 0x97fffffc);
+    Arm64EncChk("ARM_b(6)", ARM_b(6), -2);
+    Arm64EncChk("b.ne .+12", ARM_bcc(1, 0xc), 0x54000061);
+    Arm64EncChk("b.ge .-20", ARM_bcc(0xa, -20), 0x54ffff6a);
+    Arm64EncChk("cbz w1, .+8", ARM_cbz(1, 8), 0x34000041);
+    Arm64EncChk("cbz x1, .-8", ARM_cbzX(1, -8), 0xb4ffffc1);
+    Arm64EncChk("cbnz w1, .+16", ARM_cbnz(1, 0x10), 0x35000081);
+    Arm64EncChk("cbnz x30, .+1000", ARM_cbnzX(0x1e, 0x3e8), 0xb5001f5e);
+    Arm64EncChk("tbz w1, #3, .+8", ARM_tbz(1, 3, 8), 0x36180041);
+    Arm64EncChk("tbz x1, #40, .+8", ARM_tbz(1, 0x28, 8), 0xb6400041);
+    Arm64EncChk("tbnz x2, #40, .-8", ARM_tbnz(2, 0x28, -8), 0xb747ffc2);
+    Arm64EncChk("ARM_tbnz(2,7,1)", ARM_tbnz(2, 7, 1), -2);
+    Arm64EncChk("strb w1, [x2, #5]", ARM_strbRegImm(1, 2, 5), 0x39001441);
+    // C-BUG: real assembler gives 397ffc41
+    Arm64EncChk("ldrb w1, [x2, #4095] [C-BUG]", ARM_ldrbRegImm(1, 2, 0xfff), -2);
+    Arm64EncChk("strh w1, [x2, #6]", ARM_strhRegImm(1, 2, 6), 0x79000c41);
+    // C-BUG: real assembler gives 797ffc41
+    Arm64EncChk("ldrh w1, [x2, #8190] [C-BUG]", ARM_ldrhRegImm(1, 2, 0x1ffe), -2);
+    Arm64EncChk("str w1, [x2, #8]", ARM_strRegImm(1, 2, 8), 0xb9000841);
+    // C-BUG: real assembler gives b97ffc41
+    Arm64EncChk("ldr w1, [x2, #16380] [C-BUG]", ARM_ldrRegImm(1, 2, 0x3ffc), -2);
+    Arm64EncChk("str x1, [x2, #16]", ARM_strRegImmX(1, 2, 0x10), 0xf9000841);
+    // C-BUG: real assembler gives f97ffc41
+    Arm64EncChk("ldr x1, [x2, #32760] [C-BUG]", ARM_ldrRegImmX(1, 2, 0x7ff8), -2);
+    Arm64EncChk("ARM_ldrRegImmX(1,2,4)", ARM_ldrRegImmX(1, 2, 4), -2);
+    Arm64EncChk("ARM_ldrRegImmX(1,2,32768)", ARM_ldrRegImmX(1, 2, 0x8000), -2);
+    Arm64EncChk("ARM_ldrRegImmX(1,2,-8)", ARM_ldrRegImmX(1, 2, -8), 0xf97ffc41);
+    Arm64EncChk("strb w1, [x2, x3]", ARM_strbRegReg(1, 2, 3), 0x38236841);
+    Arm64EncChk("ldrb w1, [x2, x3]", ARM_ldrbRegReg(1, 2, 3), 0x38636841);
+    Arm64EncChk("strh w1, [x2, x3]", ARM_strhRegReg(1, 2, 3), 0x78236841);
+    Arm64EncChk("ldrh w1, [x2, x3]", ARM_ldrhRegReg(1, 2, 3), 0x78636841);
+    Arm64EncChk("str w1, [x2, x3]", ARM_strRegReg(1, 2, 3), 0xb8236841);
+    Arm64EncChk("ldr w1, [x2, x3]", ARM_ldrRegReg(1, 2, 3), 0xb8636841);
+    Arm64EncChk("str x1, [x2, x3]", ARM_strRegRegX(1, 2, 3), 0xf8236841);
+    Arm64EncChk("ldr x1, [x2, x3]", ARM_ldrRegRegX(1, 2, 3), 0xf8636841);
+    Arm64EncChk("strh w1, [x2, x3, lsl #1]", ARM_strhRegRegShift(1, 2, 3), 0x78237841);
+    Arm64EncChk("ldrh w1, [x2, x3, lsl #1]", ARM_ldrhRegRegShift(1, 2, 3), 0x78637841);
+    Arm64EncChk("str w1, [x2, x3, lsl #2]", ARM_strRegRegShift(1, 2, 3), 0xb8237841);
+    Arm64EncChk("ldr w1, [x2, x3, lsl #2]", ARM_ldrRegRegShift(1, 2, 3), 0xb8637841);
+    Arm64EncChk("str x1, [x2, x3, lsl #3]", ARM_strRegRegShiftX(1, 2, 3), 0xf8237841);
+    Arm64EncChk("ldr x1, [x2, x3, lsl #3]", ARM_ldrRegRegShiftX(1, 2, 3), 0xf8637841);
+    Arm64EncChk("ldrsb x1, [x2, #3]", ARM_ldrsbX(1, 2, 3), 0x39800c41);
+    Arm64EncChk("ldrsh x1, [x2, #6]", ARM_ldrshX(1, 2, 6), 0x79800c41);
+    Arm64EncChk("ldrsw x1, [x2, #8]", ARM_ldrswX(1, 2, 8), 0xb9800841);
+    Arm64EncChk("ldrsb x1, [x2, x3]", ARM_ldrsbRegRegX(1, 2, 3), 0x38a36841);
+    Arm64EncChk("ldrsh x1, [x2, x3]", ARM_ldrshRegRegX(1, 2, 3), 0x78a36841);
+    Arm64EncChk("ldrsw x1, [x2, x3]", ARM_ldrswRegRegX(1, 2, 3), 0xb8a36841);
+    Arm64EncChk("ldrsb x1, [x2, x3, lsl #0]", ARM_ldrsbRegRegShiftX(1, 2, 3), 0x38a37841);
+    Arm64EncChk("ldrsh x1, [x2, x3, lsl #1]", ARM_ldrshRegRegShiftX(1, 2, 3), 0x78a37841);
+    Arm64EncChk("ldrsw x1, [x2, x3, lsl #2]", ARM_ldrswRegRegShiftX(1, 2, 3), 0xb8a37841);
+    Arm64EncChk("stur x1, [x2, #-8]", ARM_stur(1, 2, -8), 0xf81f8041);
+    Arm64EncChk("ldur x1, [x2, #255]", ARM_ldur(1, 2, 0xff), 0xf84ff041);
+    Arm64EncChk("stur w1, [x2, #3]", ARM_sturw(1, 2, 3), 0xb8003041);
+    Arm64EncChk("sturh w1, [x2, #-256]", ARM_sturh(1, 2, -256), 0x78100041);
+    Arm64EncChk("sturb w1, [x2, #1]", ARM_sturb(1, 2, 1), 0x38001041);
+    Arm64EncChk("ldursb x1, [x2, #-1]", ARM_ldursbX(1, 2, -1), 0x389ff041);
+    Arm64EncChk("ldursh x1, [x2, #-2]", ARM_ldurshX(1, 2, -2), 0x789fe041);
+    Arm64EncChk("ldursw x1, [x2, #-4]", ARM_ldurswX(1, 2, -4), 0xb89fc041);
+    Arm64EncChk("ARM_ldur(1,2,256)", ARM_ldur(1, 2, 0x100), -2);
+    // C-BUG: real assembler gives b81f0c41
+    Arm64EncChk("str w1, [x2, #-16]! [C-BUG]", ARM_strPreImm(1, 2, -16), 0xf81f0c41);
+    // C-BUG: real assembler gives b8410c41
+    Arm64EncChk("ldr w1, [x2, #16]! [C-BUG]", ARM_ldrPreImm(1, 2, 0x10), 0xf8410c41);
+    // C-BUG: real assembler gives b8008441
+    Arm64EncChk("str w1, [x2], #8 [C-BUG]", ARM_strPostImm(1, 2, 8), 0xf8008441);
+    // C-BUG: real assembler gives b85f8441
+    Arm64EncChk("ldr w1, [x2], #-8 [C-BUG]", ARM_ldrPostImm(1, 2, -8), 0xf85f8441);
+    Arm64EncChk("str x1, [x2, #-16]!", ARM_strPreImmX(1, 2, -16), 0xf81f0c41);
+    Arm64EncChk("ldr x1, [x2, #16]!", ARM_ldrPreImmX(1, 2, 0x10), 0xf8410c41);
+    Arm64EncChk("str x1, [x2], #8", ARM_strPostImmX(1, 2, 8), 0xf8008441);
+    Arm64EncChk("ldr x1, [x2], #-8", ARM_ldrPostImmX(1, 2, -8), 0xf85f8441);
+    Arm64EncChk("stp x1, x2, [sp, #-16]!", ARM_stpPreImmX(1, 2, 0x1f, -16), 0xa9bf0be1);
+    Arm64EncChk("ldp x1, x2, [sp], #16", ARM_ldpPostImmX(1, 2, 0x1f, 0x10), 0xa8c10be1);
+    Arm64EncChk("stp w1, w2, [sp, #-8]!", ARM_stpPreImm(1, 2, 0x1f, -8), 0x29bf0be1);
+    Arm64EncChk("ldp w1, w2, [sp], #8", ARM_ldpPostImm(1, 2, 0x1f, 8), 0x28c10be1);
+    Arm64EncChk("stp x29, x30, [sp], #504", ARM_stpPostImmX(0x1d, 0x1e, 0x1f, 0x1f8), 0xa89ffbfd);
+    Arm64EncChk("ldp x29, x30, [sp, #-512]!", ARM_ldpPreImmX(0x1d, 0x1e, 0x1f, -512), 0xa9e07bfd);
+    Arm64EncChk("ldp w1, w2, [x3, #4]!", ARM_ldpPreImm(1, 2, 3, 4), 0x29c08861);
+    Arm64EncChk("stp w1, w2, [x3], #-4", ARM_stpPostImm(1, 2, 3, -4), 0x28bf8861);
+    Arm64EncChk("stp x1, x2, [sp, #16]", ARM_stpImmX(1, 2, 0x1f, 0x10), 0xa9010be1);
+    Arm64EncChk("ldp x1, x2, [sp, #-32]", ARM_ldpImmX(1, 2, 0x1f, -32), 0xa97e0be1);
+    Arm64EncChk("stp d1, d2, [sp, #16]", ARM_stpImmF64(1, 2, 0x1f, 0x10), 0x6d010be1);
+    Arm64EncChk("ldp d1, d2, [sp, #-32]", ARM_ldpImmF64(1, 2, 0x1f, -32), 0x6d7e0be1);
+    Arm64EncChk("fmul d1, d2, d3", ARM_fmulReg(1, 2, 3), 0x1e630841);
+    Arm64EncChk("fdiv d1, d2, d3", ARM_fdivReg(1, 2, 3), 0x1e631841);
+    Arm64EncChk("fadd d1, d2, d3", ARM_faddReg(1, 2, 3), 0x1e632841);
+    Arm64EncChk("fsub d1, d2, d3", ARM_fsubReg(1, 2, 3), 0x1e633841);
+    Arm64EncChk("scvtf d1, x2", ARM_scvtf(1, 2), 0x9e620041);
+    Arm64EncChk("ucvtf d1, x2", ARM_ucvtf(1, 2), 0x9e630041);
+    Arm64EncChk("fcvtzs x1, d2", ARM_fcvtzs(1, 2), 0x9e780041);
+    Arm64EncChk("fmov x1, d2", ARM_fmovI64F64(1, 2), 0x9e660041);
+    Arm64EncChk("fmov d1, x2", ARM_fmovF64I64(1, 2), 0x9e670041);
+    Arm64EncChk("fmov d1, d2", ARM_fmovReg(1, 2), 0x1e604041);
+    Arm64EncChk("fneg d1, d2", ARM_fnegReg(1, 2), 0x1e614041);
+    Arm64EncChk("fcmp d1, d2", ARM_fcmp(1, 2), 0x1e622020);
+    Arm64EncChk("fcsel d1, d2, d3, ge", ARM_fcsel(1, 2, 3, 0xa), 0x1e63ac41);
+    Arm64EncChk("ldr d1, [x2, #16]", ARM_ldrRegImmF64(1, 2, 0x10), 0xfd400841);
+    // C-BUG: real assembler gives fd3ffc41
+    Arm64EncChk("str d1, [x2, #32760] [C-BUG]", ARM_strRegImmF64(1, 2, 0x7ff8), -2);
+    Arm64EncChk("ldr d1, [x2, x3]", ARM_ldrRegRegF64(1, 2, 3), 0xfc636841);
+    Arm64EncChk("str d1, [x2, x3]", ARM_strRegRegF64(1, 2, 3), 0xfc236841);
+    Arm64EncChk("ldr d1, [x2, x3, lsl #3]", ARM_ldrRegRegShiftF64(1, 2, 3), 0xfc637841);
+    Arm64EncChk("str d1, [x2, x3, lsl #3]", ARM_strRegRegShiftF64(1, 2, 3), 0xfc237841);
+    Arm64EncChk("ldr d1, [x2, #-16]!", ARM_ldrPreImmF64(1, 2, -16), 0xfc5f0c41);
+    Arm64EncChk("str d1, [x2, #16]!", ARM_strPreImmF64(1, 2, 0x10), 0xfc010c41);
+    Arm64EncChk("ldr d1, [x2], #8", ARM_ldrPostImmF64(1, 2, 8), 0xfc408441);
+    Arm64EncChk("str d1, [x2], #-8", ARM_strPostImmF64(1, 2, -8), 0xfc1f8441);
+    Arm64EncChk("ldr w1, .+8", ARM_ldrLabel(1, 8), 0x18000041);
+    Arm64EncChk("ldr x1, .-4", ARM_ldrLabelX(1, -4), 0x58ffffe1);
+    Arm64EncChk("ldr d1, .+12", ARM_ldrLabelF64(1, 0xc), 0x5c000061);
+    Arm64EncChk("adr x1, .+100", ARM_adrX(1, 0x64), 0x10000321);
+    Arm64EncChk("adr x2, .-3", ARM_adrX(2, -3), 0x30ffffe2);
+    Arm64EncChk("movz x1, #0x1234", ARM_movzImmX(1, 0x1234, 0), 0xd2824681);
+    Arm64EncChk("movk x1, #0xabcd, lsl #16", ARM_movkImmX(1, 0xabcd, 0x10), 0xf2b579a1);
+    Arm64EncChk("movn x1, #0xffff, lsl #48", ARM_movnImmX(1, 0xffff, 0x30), 0x92ffffe1);
+    Arm64EncChk("movz x30, #0x8000, lsl #32", ARM_movzImmX(0x1e, 0x8000, 0x20), 0xd2d0001e);
+    Arm64EncChk("ARM_movzImmX(1,65536,0)", ARM_movzImmX(1, 0x10000, 0), -2);
+    Arm64EncChk("and x1, x2, #0xff", ARM_andImmX(1, 2, 0xff), 0x92401c41);
+    Arm64EncChk("orr x1, x2, #0xf0", ARM_orrImmX(1, 2, 0xf0), 0xb27c0c41);
+    Arm64EncChk("eor x1, x2, #0xffff0000", ARM_eorImmX(1, 2, 0xffff0000), 0xd2703c41);
+    Arm64EncChk("ands x1, x2, #7", ARM_andsImmX(1, 2, 7), 0xf2400841);
+    // C-BUG: real assembler gives 9200f041
+    Arm64EncChk("and x1, x2, #0x5555555555555555 [C-BUG]", ARM_andImmX(1, 2, 0x5555555555555555), -2);
+    // C-BUG: real assembler gives 927ff841
+    Arm64EncChk("and x1, x2, #0xfffffffffffffffe [C-BUG]", ARM_andImmX(1, 2, -2), -2);
+    // C-BUG: real assembler gives 92410441
+    Arm64EncChk("and x1, x2, #0x8000000000000001 [C-BUG]", ARM_andImmX(1, 2, 0x8000000000000001), -2);
+    Arm64EncChk("ARM_andImmX(1,2,0)", ARM_andImmX(1, 2, 0), -2);
+    Arm64EncChk("ARM_andImmX(1,2,4660)", ARM_andImmX(1, 2, 0x1234), -2);
+    // C-BUG: real assembler gives 085ffc41
+    Arm64EncChk("ldaxrb w1, [x2] [C-BUG]", ARM_ldaxrb(1, 2), 0x085f7c41);
+    // C-BUG: real assembler gives 485ffc41
+    Arm64EncChk("ldaxrh w1, [x2] [C-BUG]", ARM_ldaxrh(1, 2), 0x485f7c41);
+    // C-BUG: real assembler gives 885ffc41
+    Arm64EncChk("ldaxr w1, [x2] [C-BUG]", ARM_ldaxr(1, 2), 0x885f7c41);
+    // C-BUG: real assembler gives c85ffc41
+    Arm64EncChk("ldaxr x1, [x2] [C-BUG]", ARM_ldaxrX(1, 2), 0xc85f7c41);
+    Arm64EncChk("stlxrb w3, w1, [x2]", ARM_stlxrb(3, 1, 2), 0x0803fc41);
+    Arm64EncChk("stlxrh w3, w1, [x2]", ARM_stlxrh(3, 1, 2), 0x4803fc41);
+    Arm64EncChk("stlxr w3, w1, [x2]", ARM_stlxr(3, 1, 2), 0x8803fc41);
+    Arm64EncChk("stlxr w3, x1, [x2]", ARM_stlxrX(3, 1, 2), 0xc803fc41);
+    Print("Arm64EncTest: %d passed, %d failed\n", Arm64EncPass, Arm64EncFail);
+    return Arm64EncFail;
 }
