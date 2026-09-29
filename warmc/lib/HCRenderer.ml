@@ -192,6 +192,11 @@ let render units entry =
     end
   and embed t s args =
     let matches re = Str.string_match (Str.regexp re) s 0 in
+    let markers = List.mapi (fun i _ -> "$" ^ string_of_int (i + 1)) args in
+    let compact = Str.global_replace (Str.regexp "[ \t\r\n]+") "" in
+    let check_arguments tail =
+      let expected = join markers ^ ")" in
+      if compact tail <> compact expected then unsupported ("C embed: " ^ s) in
     match s, args with
     | "NULL", [] -> "0"
     | "$1", [a] -> convert t (typeof a) (expr a)
@@ -199,19 +204,36 @@ let render units entry =
     | "*($1)", [a] -> expr (CDeref a)
     | "AU_STORE($1, $2)", [a;b] -> let d = expr (CDeref a) in let v = expr b in assign (typeof b) d v; "0"
     | ("~ $1"), [a] -> convert t (typeof a) ("~" ^ par (expr a))
-    | _, [a] when matches "((\\([a-zA-Z0-9_]+\\))(\\$1))$" -> convert t (typeof a) (expr a)
+    | _, [a] when matches "((\\([a-zA-Z0-9_]+\\))(\\$1))$" ->
+        let cast_type = CNamedType (Str.matched_group 1 s) in
+        if typ cast_type <> typ t then unsupported ("C embed cast: " ^ s);
+        convert t (typeof a) (expr a)
     | _, [a;b] when matches "\\$1 \\([+*/&|^-]\\) \\$2$" ->
         let op = Str.matched_group 1 s in convert t (typeof a) (binary op a b)
     | _, [a;b;c] when matches "__builtin_\\(add\\|sub\\|mul\\)_overflow(\\$1, \\$2, &\\$3)$" ->
         let op = Str.matched_group 1 s in overflow op a b c
     | _, _ when matches "au_printf(" ->
+        (* Parse only a literal format plus placeholder arguments. Passing arbitrary
+           C text through here would reintroduce C precedence and ternaries. *)
+        if String.length s < 12 || s.[10] <> '"' then unsupported ("C embed: " ^ s);
+        let rec closing i =
+          if i >= String.length s then unsupported ("C embed: " ^ s)
+          else if s.[i] = '\\' then closing (i + 2)
+          else if s.[i] = '"' then i else closing (i + 1) in
+        let last = closing 11 in
+        let tail = String.trim (String.sub s (last + 1) (String.length s - last - 1)) in
+        let tail = if args = [] then tail else
+          if String.length tail > 0 && tail.[0] = ',' then String.sub tail 1 (String.length tail - 1)
+          else unsupported ("C embed: " ^ s) in
+        check_arguments tail;
+        let fmt = String.sub s 10 (last - 9) in
         let vs = List.map expr args in
-        let text = ref ("Print" ^ String.sub s 9 (String.length s - 9)) in
-        List.iteri (fun i v -> text := Str.global_replace (Str.regexp_string ("$" ^ string_of_int (i+1))) (par v) !text) vs;
-        emit (!text ^ ";"); "0"
+        emit ("Print(" ^ join (fmt :: vs) ^ ");"); "0"
     | _, _ when matches "\\(au_[a-z_]+\\)(" ->
         let n = Str.matched_group 1 s in
-        if List.mem_assoc n runtime then call n t args
+        let first = String.length n + 1 in
+        check_arguments (String.sub s first (String.length s - first));
+        if List.mem_assoc n runtime then call (fnname n) t args
         else unsupported ("runtime call " ^ n)
     | _, [] ->
         let constants = ["UINT8_MAX","255";"UINT16_MAX","65535";"UINT32_MAX","4294967295";
@@ -281,6 +303,10 @@ let render units entry =
     let params = if aggregate rt then (typ rt ^ " *wh_result") :: params else params in
     (if aggregate rt then "U0" else typ rt) ^ " " ^ fnname n ^ "(" ^ join params ^ ")" in
   emit HCRuntime.source;
+  List.iter (function
+    | CStructForwardDeclaration (_,n) when Hashtbl.mem used_types n ->
+        emit ("extern class " ^ typ (CNamedType n) ^ ";")
+    | _ -> ()) decls;
   emit (Buffer.contents type_output);
   List.iter (function CFunctionDefinition (_,n,ps,rt,_) when Hashtbl.mem used n ->
     emit ("extern " ^ signature n ps rt (List.mapi (fun i (CValueParam (_,t)) -> "wh_param_" ^ string_of_int i ^ if aggregate t then "_in" else "") ps) ^ ";") | _ -> ()) decls;
