@@ -59,3 +59,11 @@ fmt-check:
 	tools/hcfmt.sh --check $(HC_FILES)
 hooks:
 	git config core.hooksPath tools/git-hooks
+
+# coolvm: VM monitor on macOS Hypervisor.framework emulating a subset of the Apple M1 (t8103)
+# for developing the M1 drivers (tools/coolvm). Guests run under a timeout.
+.PHONY: coolvm coolvm-test
+coolvm:
+	tools/coolvm/build.sh
+coolvm-test: coolvm
+	tools/coolvm/test/run.sh
