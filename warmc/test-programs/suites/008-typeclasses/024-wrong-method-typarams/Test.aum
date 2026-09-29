@@ -1,0 +1,14 @@
+module body Test is
+    typeclass Check(T: Free) is
+        generic [R: Region]
+        method check(value: Span[T, R]): Unit;
+    end;
+    instance Check(Nat8) is
+        method check(value: Span[Nat8, Static]): Unit is
+            return nil;
+        end;
+    end;
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

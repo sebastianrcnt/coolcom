@@ -65,6 +65,7 @@ module body Standard.Test.Buffer is
         reverseEvenNumberTest();
         reverseOddNumberTest();
         insertCapacityResizeTest();
+        insertIntoFullInitializedBufferTest();
         capacityGrowthTest();
         edgeCaseInvariantsTest();
         
@@ -527,6 +528,19 @@ module body Standard.Test.Buffer is
         assertLength(&b, 17);
         assertNth(&b, 16, 16);
         
+        destroyFree(b);
+        return nil;
+    end;
+
+    function insertIntoFullInitializedBufferTest(): Unit is
+        testHeading("insert into a full initialized buffer");
+        var b: Buffer[Int32] := initialize(16, 7);
+        insertBack(&!b, 9);
+        assertLength(&b, 17);
+        for i from 0 to 15 do
+            assertNth(&b, i, 7);
+        end for;
+        assertNth(&b, 16, 9);
         destroyFree(b);
         return nil;
     end;

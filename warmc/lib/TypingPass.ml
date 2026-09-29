@@ -638,8 +638,7 @@ let rec augment_decl (module_name: module_name) (kind: module_kind) (env: env) (
          TTypeClass (decl_id, vis, name, typaram, List.map (augment_method_decl env rm typaram) methods, doc)
       | LInstance (decl_id, vis, name, typarams, arg, methods, doc) ->
          ps ("Kind", "Instance");
-         (* TODO: the universe of the type parameter matches the universe of the type argument *)
-         (* TODO: Check the methods in the instance match the methods in the class *)
+         (* ExtractionPass has checked the universe and method signatures. *)
          TInstance (decl_id, vis, name, typarams, arg, List.map (augment_method_def module_name env rm typarams) methods, doc))
 
 and lexenv_from_params (params: value_parameter list): lexenv =

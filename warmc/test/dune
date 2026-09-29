@@ -4,5 +4,6 @@
   UtilTest
   CliUtilTest
   CliParserTest
-  CRendererTest)
+  CRendererTest
+  TypeSafetyTest)
  (libraries austral_core ounit2))

@@ -27,6 +27,12 @@ not modify coolcom's root Makefile. To compile a program:
 ./warmc/warmc compile example.aum --entrypoint=Example:main --output=example
 ```
 
-From `warmc/`, run `opam exec --switch=austral -- ./run-tests.sh` for the upstream
-test suite. The copied upstream standard library test currently fails in the
-Buffer capacity-growth case; this is present in the pinned upstream source.
+From `warmc/`, run `opam exec --switch=austral -- ./run-tests.sh` for the full
+compiler, end-to-end, example, and standard library test suite.
+
+## Fixes since the fork
+
+Warm validates required typeclass methods, duplicate methods, and instance
+method signatures. It also corrects the built-in `Printable` instances, fixes
+Buffer growth after `realloc`, and checks `Index` and `ByteSize` literals against
+the host `size_t` width.

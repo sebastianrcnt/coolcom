@@ -100,8 +100,8 @@ module body Austral.Memory is
     end;
 
     function arraySizeInBytes(elem_size: ByteSize, count: Index): ByteSize is
-        -- FIXME: Use a proper Index->ByteSize conversion function.
-        let count_bytes: ByteSize := @embed(ByteSize, "$1", count);
+        -- Both Index and ByteSize use size_t in the C backend.
+        let count_bytes: ByteSize := @embed(ByteSize, "((size_t)($1))", count);
         let size: ByteSize := elem_size * count_bytes;
         return size;
     end;

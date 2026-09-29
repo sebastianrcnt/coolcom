@@ -1,0 +1,24 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    { "type": "text", "content": "Invalid instance method " },
+    { "type": "code", "content": "check" },
+    { "type": "text", "content": ": " },
+    { "type": "text", "content": "required method is missing" }
+  ],
+  "span": {
+    "filename": "test-programs/suites/008-typeclasses/021-missing-method/Test.aum",
+    "startp": { "line": 4, "column": 8 },
+    "end": { "line": 6, "column": 8 }
+  },
+  "context": [
+    [ 2, "    typeclass Check(T: Free) is" ],
+    [ 3, "        method check(value: T): Unit;" ],
+    [ 4, "    end;" ],
+    [ 5, "    instance Check(Nat8) is" ],
+    [ 6, "    end;" ],
+    [ 7, "    function main(): ExitCode is" ],
+    [ 8, "        return ExitSuccess();" ]
+  ]
+}

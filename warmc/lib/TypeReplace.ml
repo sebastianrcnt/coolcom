@@ -6,6 +6,7 @@
 *)
 
 open Stages.Tast
+open Type
 open TypeBindings
 
 let rec replace_tyvars_expr (bindings: type_bindings) (expr: texpr): texpr =
@@ -47,10 +48,15 @@ let rec replace_tyvars_expr (bindings: type_bindings) (expr: texpr): texpr =
      and substs = bindings_from_list (List.map (fun (n, t) -> (n, replace_variables bindings t)) (bindings_list substs)) in
      TMethodCall (meth_id, name, instance, args, rt, substs)
   | TVarMethodCall { source_module_name; typeclass_id; params; method_name; args; dispatch_ty; rt; bindings=bindings'; } ->
-     (* FIXME: Do we have to replace the params and the bindings? *)
      let args = List.map (replace_tyvars_expr bindings) args
+     and params = List.map
+       (fun (ValueParameter (name, ty)) ->
+         ValueParameter (name, replace_variables bindings ty)) params
      and dispatch_ty = replace_variables bindings dispatch_ty
      and rt = replace_variables bindings rt
+     and bindings' = bindings_from_list
+       (List.map (fun (tp, ty) -> (tp, replace_variables bindings ty))
+          (bindings_list bindings'))
      in
      TVarMethodCall { source_module_name; typeclass_id; params; method_name; args; dispatch_ty; rt; bindings=bindings'; }
   | TFptrCall (name, args, rt) ->

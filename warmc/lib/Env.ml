@@ -231,6 +231,7 @@ let make_type_class_method_decl (id: decl_id) (input: type_class_method_input): 
   TypeClassMethod { id; mod_id; vis; typeclass_id; name; docstring; typarams; value_params; rt }
 
 let add_type_class_method (env: env) (input: type_class_method_input): (env * decl_id) =
+  let _ = ensure_no_decl_with_name env input.mod_id input.name in
   let (Env { files; mods; methods; decls; monos; exports }) = env in
   let id = fresh_decl_id () in
   let decl = make_type_class_method_decl id input in
@@ -278,6 +279,12 @@ let get_method_from_typeclass_id_and_name (env: env) (typeclass_id: decl_id) (na
        false
   in
   List.find_opt pred decls
+
+let get_typeclass_methods (env: env) (typeclass_id: decl_id): decl list =
+  let (Env { decls; _ }) = env in
+  List.filter (function
+    | TypeClassMethod { typeclass_id=id; _ } -> equal_decl_id id typeclass_id
+    | _ -> false) decls
 
 let module_instances (env: env) (id: mod_id): decl list =
   let (Env { decls; _ }) = env

@@ -283,19 +283,22 @@ let parse_bigint (s: string): Z.t =
 
 (* Check the given value fits in the given type. *)
 let fits (signed : signedness) (width : integer_width) (n : Z.t) : bool =
+  let index_max = Z.pred (Z.shift_left Z.one Sys.word_size) in
+  let signed_index_max = Z.pred (Z.shift_left Z.one (Sys.word_size - 1)) in
+  let signed_index_min = Z.neg (Z.shift_left Z.one (Sys.word_size - 1)) in
   let min_bound, max_bound = match signed, width with
     | Unsigned, Width8        -> (Z.zero, Z.of_string "255")
     | Unsigned, Width16       -> (Z.zero, Z.of_string "65535")
     | Unsigned, Width32       -> (Z.zero, Z.of_string "4294967295")
     | Unsigned, Width64       -> (Z.zero, Z.of_string "18446744073709551615")
-    | Unsigned, WidthByteSize -> (Z.zero, Z.of_string "255")
-    | Unsigned, WidthIndex    -> (Z.zero, Z.of_string "18446744073709551615") (* TODO: Assuming 64-bit size_t *)
+    | Unsigned, WidthByteSize -> (Z.zero, index_max)
+    | Unsigned, WidthIndex    -> (Z.zero, index_max)
     | Signed, Width8          -> (Z.of_string "-128", Z.of_string "127")
     | Signed, Width16         -> (Z.of_string "-32768", Z.of_string "32767")
     | Signed, Width32         -> (Z.of_string "-2147483648", Z.of_string "2147483647")
     | Signed, Width64         -> (Z.of_string "-9223372036854775808", Z.of_string "9223372036854775807")
-    | Signed, WidthByteSize   -> (Z.of_string "-128", Z.of_string "127")
-    | Signed, WidthIndex      -> (Z.of_string "-9223372036854775808", Z.of_string "9223372036854775807") (* TODO: Assuming 64-bit ssize_t *)
+    | Signed, WidthByteSize   -> (signed_index_min, signed_index_max)
+    | Signed, WidthIndex      -> (signed_index_min, signed_index_max)
   in
   Z.compare min_bound n <= 0 && Z.compare n max_bound <= 0
 

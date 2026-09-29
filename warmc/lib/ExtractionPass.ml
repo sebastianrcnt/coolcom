@@ -24,6 +24,7 @@ open TypeSignature
 open TypeParameter
 open TypeParameters
 open TypeClasses
+open TypeBindings
 open RegionMap
 open BuiltIn
 open TypeVarSet
@@ -74,6 +75,14 @@ module Errors = struct
       Code (ident_string typeclass);
       Text " has no method named ";
       Code (ident_string method_name)
+    ]
+
+  let instance_method_error name reason =
+    austral_raise DeclarationError [
+      Text "Invalid instance method ";
+      Code (ident_string name);
+      Text ": ";
+      Text reason
     ]
 
   let typeclass_param_not_region name =
@@ -179,6 +188,46 @@ let check_all_type_parameters_appear_in_signature (typarams: typarams) (params: 
       Errors.typaram_not_in_signature tp
   in
   List.iter check_typaram (typarams_as_list typarams)
+
+let check_instance_methods (env: env) (typeclass_id: decl_id)
+    (class_param: type_parameter) (argument: ty)
+    (methods: (instance_method_input * astmt) list) =
+  let declarations = List.filter_map (function
+    | TypeClassMethod { typeclass_id=id; name; typarams; value_params; rt; _ }
+      when equal_decl_id id typeclass_id ->
+        Some (name, typarams, value_params, rt)
+    | _ -> None) (get_typeclass_methods env typeclass_id) in
+  let names = List.map (fun (input, _) -> input.name) methods in
+  List.iter (fun name ->
+    if List.length (List.filter (equal_identifier name) names) > 1 then
+      Errors.instance_method_error name "defined more than once") names;
+  List.iter (fun (name, declared_typarams, expected_params, expected_rt) ->
+    let implementation = List.find_opt
+      (fun (input, _) -> equal_identifier input.name name) methods in
+    match implementation with
+    | None -> Errors.instance_method_error name "required method is missing"
+    | Some (input, _) ->
+      let expected_tps = typarams_as_list declared_typarams in
+      let actual_tps = typarams_as_list input.typarams in
+      if List.length expected_tps <> List.length actual_tps then
+        Errors.instance_method_error name "type parameter count does not match";
+      let bindings = List.fold_left2 (fun bindings expected actual ->
+        if typaram_universe expected <> typaram_universe actual
+           || typaram_constraints expected <> typaram_constraints actual then
+          Errors.instance_method_error name "type parameter constraints do not match";
+        add_binding bindings expected (TyVar (typaram_to_tyvar actual)))
+        (add_binding empty_bindings class_param argument)
+        expected_tps actual_tps in
+      if List.length expected_params <> List.length input.value_params then
+        Errors.instance_method_error name "parameter count does not match";
+      let params_match = List.for_all2
+        (fun (ValueParameter (_, expected)) (ValueParameter (_, actual)) ->
+          equal_ty (replace_variables bindings expected) actual)
+        expected_params input.value_params in
+      if not params_match ||
+         not (equal_ty (replace_variables bindings expected_rt) input.rt) then
+        Errors.instance_method_error name "signature does not match")
+    declarations
 
 let rec extract_type_signatures (CombinedModule { decls; _ }): type_signature list =
   List.filter_map extract_type_signatures' decls
@@ -484,12 +533,12 @@ and extract_definition (env: env) (mod_id: mod_id) (mn: module_name) (local_type
          (* First add the instance to the env, then the methods. *)
          let argument = parse' rm typarams argument in
          (* Find typeclass info. *)
-         let (typeclass_id, typeclass_mod_id, typeclass_param_name, universe): decl_id * mod_id * identifier * universe =
+         let (typeclass_id, typeclass_mod_id, typeclass_param, universe): decl_id * mod_id * type_parameter * universe =
            match get_decl_by_name env (qident_to_sident name) with
            | Some decl ->
               (match decl with
                | TypeClass { id; mod_id; param; _ } ->
-                  (id, mod_id, typaram_name param, typaram_universe param)
+                  (id, mod_id, param, typaram_universe param)
                | _ ->
                   Errors.instance_for_non_typeclass typeclass_name)
            | None ->
@@ -501,7 +550,7 @@ and extract_definition (env: env) (mod_id: mod_id) (mn: module_name) (local_type
          let _ = check_instance_argument_has_right_shape typarams argument in
          (* Check that the non of the type parameters in the generic instance
             collide with the type parameter of the typeclass. *)
-         let _ = check_disjoint_typarams typeclass_param_name typarams in
+         let _ = check_disjoint_typarams (typaram_name typeclass_param) typarams in
          (* Local uniqueness: does this instance collide with other instances in this module? *)
          let _ =
            let other_instances: decl list =
@@ -546,6 +595,7 @@ and extract_definition (env: env) (mod_id: mod_id) (mn: module_name) (local_type
             body)
          in
          let methods: (instance_method_input * astmt) list = List.map method_map methods in
+         let _ = check_instance_methods env typeclass_id typeclass_param argument methods in
          (* Add the methods to the env *)
          let (env, linked_methods) = add_instance_methods env methods in
          (* Construct the decl *)

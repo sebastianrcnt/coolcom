@@ -166,7 +166,8 @@ let rec equal_ty a b =
      (match b with
       | NamedType (n', args', u') ->
          (equal_qident n n')
-         && (List.for_all (fun (a', b') -> equal_ty a' b') (List.map2 (fun a' b' -> (a',b')) args args'))
+         && (List.length args = List.length args')
+         && (List.for_all2 equal_ty args args')
          && (equal_universe u u')
       | _ ->
          false)
@@ -221,7 +222,8 @@ let rec equal_ty a b =
   | FnPtr (args, rt) ->
      (match b with
       | FnPtr (args', rt') ->
-         (List.for_all (fun (a', b') -> equal_ty a' b') (List.map2 (fun a' b' -> (a', b')) args args'))
+         (List.length args = List.length args')
+         && (List.for_all2 equal_ty args args')
          && (equal_ty rt rt')
       | _ ->
         false)

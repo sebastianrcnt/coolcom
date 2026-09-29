@@ -17,7 +17,6 @@ import Austral.Memory (
     negativeOffset,
     store,
     load,
-    memcpy,
     memmove,
     arraySizeInBytes,
     span,
@@ -54,10 +53,9 @@ module body Standard.Buffer is
     """
     generic [T: Type, R: Region]
     function invariants(buf: &[Buffer[T], R]): Unit is
-        -- Size is always strictly less than the capacity. When resizing, if
-        -- the size matches the capacity, we bump up.
-        if buf->size >= buf->capacity then
-            abort("Buffer size >= capacity");
+        -- A full buffer is valid; the next insertion grows it first.
+        if buf->size > buf->capacity then
+            abort("Buffer size > capacity");
         end if;
         -- Capacity is always non-zero.
         if buf->capacity = 0 then
@@ -276,11 +274,8 @@ module body Standard.Buffer is
         let new_addr: Address[T] := resizeArray(buf->array, new_capacity);
         case nullCheck(new_addr) of
             when Some(value as new_array: Pointer[T]) do
-                memcpy(
-                    destination => new_array,
-                    source => buf->array,
-                    count => arraySizeInBytes(sizeof(T), buf->size)
-                );
+                -- resizeArray uses realloc, which already preserves the old
+                -- contents and may invalidate the old pointer.
                 buf->capacity := new_capacity;
                 buf->array := new_array;
                 -- invariants(buf : &[Buffer[T], R]);
@@ -296,9 +291,8 @@ module body Standard.Buffer is
         if pos > buf->size then
             abort("insert: index out of range");
         end if;
-        -- If insertion would increase make `size` match `capacity`, resize
-        -- the array.
-        if (buf->size + 1) = buf->capacity then
+        -- Grow a full buffer before writing the new element.
+        if buf->size = buf->capacity then
             bump(&~buf);
         end if;
         -- If the array is non-empty, we have to move everything to the right of

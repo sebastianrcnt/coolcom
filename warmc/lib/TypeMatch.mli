@@ -28,6 +28,9 @@ val match_type_list : ctx -> ty list -> ty list -> type_bindings
 
 val match_typarams : ctx -> typarams -> ty list -> type_bindings
 
+(** Whether an integer literal fits in the corresponding C integer type. *)
+val fits : signedness -> integer_width -> Z.t -> bool
+
 (** Find an instance of the given typeclass given the dispatch type.
 
 Parameters are: environment, source module name, dispatch type, and ID of the

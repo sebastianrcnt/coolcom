@@ -1,0 +1,30 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    { "type": "text", "content": "Invalid instance method " },
+    { "type": "code", "content": "check" },
+    { "type": "text", "content": ": " },
+    { "type": "text", "content": "defined more than once" }
+  ],
+  "span": {
+    "filename": "test-programs/suites/008-typeclasses/023-duplicate-method/Test.aum",
+    "startp": { "line": 4, "column": 8 },
+    "end": { "line": 12, "column": 8 }
+  },
+  "context": [
+    [ 2, "    typeclass Check(T: Free) is" ],
+    [ 3, "        method check(value: T): Unit;" ],
+    [ 4, "    end;" ],
+    [ 5, "    instance Check(Nat8) is" ],
+    [ 6, "        method check(value: Nat8): Unit is" ],
+    [ 7, "            return nil;" ],
+    [ 8, "        end;" ],
+    [ 9, "        method check(value: Nat8): Unit is" ],
+    [ 10, "            return nil;" ],
+    [ 11, "        end;" ],
+    [ 12, "    end;" ],
+    [ 13, "    function main(): ExitCode is" ],
+    [ 14, "        return ExitSuccess();" ]
+  ]
+}
