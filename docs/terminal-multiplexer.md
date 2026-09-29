@@ -57,7 +57,9 @@ APIs; graphics programs that bypass the console are not confined to panes.
 Every shell loads its **own Compiler.BIN instance**, including mutable module
 globals, compiler task/hash tables and x28 TLS. `CShell` holds its export
 pointers, input line, statement/line exception contexts, interrupt masks and
-execution flags. `ArchCtxSwitch` already saves/restores x28. Runtime Fs/SetFs,
+execution flags. The Vim statement cleanup hook (`shell_stmt_cleanup`) is a
+task-local lvalue in `CShell`, so normal return, fault or break in one pane
+cannot close another pane's editor. `ArchCtxSwitch` already saves/restores x28. Runtime Fs/SetFs,
 loader trap names, debugger lookup, faults and breaks select the current
 shell's state. Kernel exports remain shared; **user functions, globals and
 macros are private to each shell**, and survive successive lines there.
@@ -93,3 +95,10 @@ several shells, runs one shell while another sleeps, and detaches/reattaches.
 The host checks actual framebuffer font pixels for LEFT-111 and RIGHT-223 in
 their respective panes. It also rejects heap corruption after boot self-tests.
 The input script, UART log and screenshot remain in `build/tmux-test/`.
+
+The Tmux test also runs two Vim editors concurrently, saves separate files,
+and breaks/faults the left editor while the right editor remains open. It
+checks both saved files and the two restored shell screens with cleared
+cleanup hooks. These artifacts remain in `build/tmux-vim-test/`. Vim takes
+its viewport dimensions from the bound terminal rather than the physical
+framebuffer.

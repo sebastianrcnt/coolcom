@@ -37,12 +37,14 @@ class CShell
     I64 tls[2];
     CBinMod *cmp;
     U8 *hash, *lex_stmt2bin, *exe_puts, *hash_add;
+    U8 *stmt_cleanup; // UI cleanup belongs to this shell, even while another runs
     I64 fault_ctx[32], line_ctx[32], fault_daif, line_daif;
     Bool in_stmt, line_active;
     I64 next_slice;
     U8 line[SHELL_LINE_LEN];
 };
 CShell *ShellCur() {return Fs->shell_ctx;}
+#define shell_stmt_cleanup (ShellCur->stmt_cleanup)
 CTask *shell_foreground;
 I64 shell_state, shell_check; // boot self-test only
 
@@ -364,6 +366,7 @@ I64 ShellExeCmdLine(U8 *cc)
     U8 *code, **h = cc + CC_HTC_TABLES;
     U8 *(*stmt2bin)(U8 *cc, I64 *type, I64 cmp_flags);
     I64 (*fp)();
+    U0 (*cleanup)();
     if (!ShellCur->hash) {  // CmpCtrlNew points every htc table at Fs->hash_table
         if (!h[0] || h[0] != h[1] || h[1] != h[2] || h[2] != h[3]) {
             Print("shell: unexpected CCmpCtrl layout\n");
@@ -383,6 +386,9 @@ I64 ShellExeCmdLine(U8 *cc)
                 res = (*fp)();
             }
             ShellCur->in_stmt = FALSE;
+            cleanup = shell_stmt_cleanup;
+            shell_stmt_cleanup = NULL;
+            if (cleanup) (*cleanup)();
             // The statement's code is not freed: a global may still point
             // at a string constant stored in it.
         }

@@ -29,7 +29,8 @@ void input_push(uint32_t type, uint32_t code, int32_t value)
 /* Records after a "delay MS" line are pushed by a feeder thread, MS
  * milliseconds (cumulative) after the script is loaded, so a script can type at
  * a running program: "delay 2000" then Ctrl+Alt+C. */
-#define SCRIPT_LATE_CAP 1024
+// Long modal-editor regressions share one boot; the guest FIFO stays bounded.
+#define SCRIPT_LATE_CAP 16384
 static struct { uint32_t type, code; int32_t value; unsigned ms; } late_q[SCRIPT_LATE_CAP];
 static unsigned late_n;
 
