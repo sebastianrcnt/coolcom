@@ -59,3 +59,11 @@ fmt-check:
 	tools/hcfmt.sh --check $(HC_FILES)
 hooks:
 	git config core.hooksPath tools/git-hooks
+
+# Apple Virtualization.framework UEFI probe (boot/uefi-probe, tools/vzrun).
+# Needs: brew install mtools gptfdisk llvm@21 lld@21
+.PHONY: vzprobe vzprobe-gui
+vzprobe:
+	tools/vzprobe.sh
+vzprobe-gui:
+	tools/vzprobe.sh --gui --cfg "wait=9 postwait=8"
