@@ -28,6 +28,17 @@ fixed point and compile `os/Kernel/Kernel.HC` to the same BIN as Aiwnios.
    compiler to a fixed point.
 4. Compile the kernel, compare with Aiwnios, and add an opt-in Makefile path.
 
+`tools/native/bootstrap.sh [out.BIN]` builds a stage-zero image from the owned
+frontend and runtime sources plus the existing backend. In a separate worktree,
+set `AIWNIOS_DIR` and `AIWNIOS_BIN` to the built stage-zero Aiwnios checkout.
+The script copies sources into `build/native-src` and renames colliding backend
+helpers there; it never changes the tracked backend translation.
+
+The current image compiles with `Errs:0`, but still has unresolved native
+runtime imports. This is a source integration check, not an executable native
+compiler yet. The native host probe (`coolc/Host/test.sh`) verifies BIN loading,
+relocation, initializers, and an exported function independently.
+
 ## Current integration risks
 
 - Aiwnios' `HCRT2.BIN` contains the whole graphical kernel, so it is unsuitable
@@ -38,3 +49,6 @@ fixed point and compile `os/Kernel/Kernel.HC` to the same BIN as Aiwnios.
   the owned HolyC runtime or by the small C host before a compiler BIN can run.
 - The frontend bugs documented in `tests/behavior/frontend/README.md` must
   be fixed in the owned frontend copy, then covered by native behavior tests.
+- Frontend fixes 6, 7, and 8 have source changes and native test inputs, but
+  their execution checks must wait until the native runtime can run the
+  compiler image. Class value assignment (5) still needs aggregate IR lowering.
