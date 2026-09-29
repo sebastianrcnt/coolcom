@@ -12,6 +12,9 @@
  * retransmission towards the guest, in-order-only acceptance from the guest).
  * UDP: one host socket per guest source port. ICMP echo to the outside uses
  * macOS's unprivileged SOCK_DGRAM/IPPROTO_ICMP sockets.
+ * Inbound forwarding (--net-forward [addr:]host:guest): coolvm listens on the
+ * host port; each accepted connection opens a TCP connection to the guest port
+ * from 10.0.2.2 (an ephemeral port), then relays like an outbound one.
  *
  * All state is protected by g.lock: the vCPU threads call net_mmio with it
  * held, the poll thread and the DNS threads take it.
@@ -534,7 +537,7 @@ static void udp_readable(struct udpc *c)
 #define NTCP 64
 #define SBUF (256 * 1024)
 #define RTO_MS 300
-enum { T_FREE, T_CONNECTING, T_SYN_RCVD, T_EST };
+enum { T_FREE, T_CONNECTING, T_SYN_RCVD, T_EST, T_SYN_SENT /* forwarded: our SYN to the guest */ };
 #define TH_FIN 1
 #define TH_SYN 2
 #define TH_RST 4
@@ -547,7 +550,7 @@ static struct tcb {
     uint32_t iss, snd_una, snd_nxt, rcv_nxt, snd_wnd;
     uint8_t *sbuf; size_t slen;      /* bytes from the host starting at snd_una */
     bool host_eof, fin_sent, fin_acked, guest_fin;
-    uint64_t rtx_t, idle_t;
+    uint64_t rtx_t, idle_t, syn_t;
 } tcbs[NTCP];
 static uint64_t stat_tcp_conns;
 
@@ -647,6 +650,18 @@ static void tcp_input(uint32_t src, uint32_t dst, uint8_t *s, size_t len)
     }
     t->idle_t = now_ms();
     if (flags & TH_RST) { tcb_free(t); return; }
+    if (t->state == T_SYN_SENT) {
+        if ((flags & (TH_SYN | TH_ACK)) != (TH_SYN | TH_ACK) || ack != t->iss + 1) return;
+        t->rcv_nxt = seq + 1;
+        t->snd_una = t->snd_nxt = t->iss + 1;
+        t->snd_wnd = be16(s + 14);
+        t->state = T_EST;
+        t->rtx_t = now_ms();
+        tcp_send(t, TH_ACK, t->snd_nxt, NULL, 0);
+        tcp_push(t);
+        wake();
+        return;
+    }
     if (flags & TH_SYN) {
         if (t->state == T_SYN_RCVD) tcp_send(t, TH_SYN | TH_ACK, t->iss, NULL, 0);
         return;
@@ -735,8 +750,16 @@ static void tcp_timers(uint64_t now)
             tcb_free(t);
             continue;
         }
+        if (t->state == T_SYN_SENT && now - t->syn_t > 10000) { /* the guest never answered */
+            if (dbg) LOGE("net: forward to guest port %d timed out\n", t->gport);
+            tcb_free(t);
+            continue;
+        }
         if (t->state == T_CONNECTING || now - t->rtx_t < RTO_MS) continue;
-        if (t->state == T_SYN_RCVD) {
+        if (t->state == T_SYN_SENT) {
+            t->rtx_t = now;
+            tcp_send(t, TH_SYN, t->iss, NULL, 0);
+        } else if (t->state == T_SYN_RCVD) {
             t->rtx_t = now;
             tcp_send(t, TH_SYN | TH_ACK, t->iss, NULL, 0);
         } else if (t->snd_nxt != t->snd_una) { /* go back N */
@@ -749,6 +772,87 @@ static void tcp_timers(uint64_t now)
             t->rtx_t = now;
         }
     }
+}
+
+/* ---- inbound port forwarding ------------------------------------------- */
+#define NFWD 16
+static struct fwd { uint32_t bind; int hport, gport, fd; } fwds[NFWD];
+static int nfwd;
+static uint16_t fwd_port = 40000;
+
+/* "[addr:]hostport:guestport"; addr defaults to 127.0.0.1. Implies --net. */
+bool net_add_forward(const char *spec)
+{
+    char buf[128], *parts[3];
+    int n = 0;
+    if (nfwd == NFWD || strlen(spec) >= sizeof buf) return false;
+    strcpy(buf, spec);
+    for (char *p = buf, *tok; (tok = strsep(&p, ":")); ) { if (n == 3) return false; parts[n++] = tok; }
+    if (n < 2) return false;
+    struct fwd *f = &fwds[nfwd];
+    struct in_addr a = {htonl(IP4(127, 0, 0, 1))};
+    if (n == 3 && !inet_aton(parts[0], &a)) return false;
+    char *e1, *e2;
+    long hp = strtol(parts[n - 2], &e1, 10), gp = strtol(parts[n - 1], &e2, 10);
+    if (*e1 || *e2 || hp < 1 || hp > 65535 || gp < 1 || gp > 65535) return false;
+    f->bind = ntohl(a.s_addr); f->hport = (int)hp; f->gport = (int)gp; f->fd = -1;
+    nfwd++;
+    g.net = true;
+    return true;
+}
+
+static void fwd_listen(void)
+{
+    for (int i = 0; i < nfwd; i++) {
+        struct fwd *f = &fwds[i];
+        int fd = nb_socket(SOCK_STREAM, 0), one = 1;
+        if (fd < 0) continue;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        struct sockaddr_in a = {0};
+        a.sin_len = sizeof a; a.sin_family = AF_INET;
+        a.sin_port = htons((uint16_t)f->hport); a.sin_addr.s_addr = htonl(f->bind);
+        if (bind(fd, (struct sockaddr *)&a, sizeof a) < 0 || listen(fd, 16) < 0) {
+            LOGE("net: cannot forward host port %d: %s\n", f->hport, strerror(errno));
+            close(fd);
+            continue;
+        }
+        f->fd = fd;
+        if (dbg) LOGE("net: forwarding host port %d to guest port %d\n", f->hport, f->gport);
+    }
+}
+
+/* A host client connected: open a connection to the guest from 10.0.2.2. */
+static void fwd_accept(struct fwd *f)
+{
+    int fd = accept(f->fd, NULL, NULL);
+    if (fd < 0) return;
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+    struct tcb *t = NULL;
+    for (int i = 0; i < NTCP; i++) if (!tcbs[i].state) { t = &tcbs[i]; break; }
+    if (!t) { close(fd); return; }
+    int port = 0;
+    for (int tries = 0; tries < 30000 && !port; tries++) {
+        int p = fwd_port;
+        fwd_port = fwd_port >= 48999 ? 40000 : fwd_port + 1;
+        bool used = false;
+        for (int i = 0; i < NTCP; i++)
+            if (tcbs[i].state && tcbs[i].rip == NET_GW && tcbs[i].rport == p && tcbs[i].gport == f->gport) used = true;
+        if (!used) port = p;
+    }
+    if (!port) { close(fd); return; }
+    memset(t, 0, sizeof *t);
+    t->state = T_SYN_SENT; t->fd = fd;
+    t->rip = NET_GW; t->rport = port; t->gport = f->gport;
+    t->iss = arc4random();
+    t->snd_una = t->iss; t->snd_nxt = t->iss + 1;
+    t->sbuf = malloc(SBUF);
+    t->idle_t = t->rtx_t = t->syn_t = now_ms();
+    stat_tcp_conns++;
+    if (dbg) LOGE("net: forward host port %d -> guest port %d (from 10.0.2.2:%d)\n", f->hport, f->gport, port);
+    tcp_send(t, TH_SYN, t->iss, NULL, 0);
 }
 
 /* ---- IP ----------------------------------------------------------------- */
@@ -787,9 +891,9 @@ static void eth_input(uint8_t *f, size_t len)
 /* ---- poll thread -------------------------------------------------------- */
 static void *net_main(void *arg)
 {
-    enum { K_TCP, K_UDP, K_PING };
-    struct pollfd pf[1 + NTCP + NUDP + NPING];
-    struct { int kind, idx, fd; } who[1 + NTCP + NUDP + NPING];
+    enum { K_TCP, K_UDP, K_PING, K_FWD };
+    struct pollfd pf[1 + NTCP + NUDP + NPING + NFWD];
+    struct { int kind, idx, fd; } who[1 + NTCP + NUDP + NPING + NFWD];
     uint64_t last_timer = 0;
     while (!atomic_load(&g.stop)) {
         int n = 1;
@@ -807,6 +911,8 @@ static void *net_main(void *arg)
             if (udps[i].fd > 0) { pf[n].fd = udps[i].fd; pf[n].events = POLLIN; who[n].kind = K_UDP; who[n].idx = i; who[n].fd = udps[i].fd; n++; }
         for (int i = 0; i < NPING; i++)
             if (pings[i].fd > 0) { pf[n].fd = pings[i].fd; pf[n].events = POLLIN; who[n].kind = K_PING; who[n].idx = i; who[n].fd = pings[i].fd; n++; }
+        for (int i = 0; i < nfwd; i++)
+            if (fwds[i].fd >= 0) { pf[n].fd = fwds[i].fd; pf[n].events = POLLIN; who[n].kind = K_FWD; who[n].idx = i; who[n].fd = fwds[i].fd; n++; }
         pthread_mutex_unlock(&g.lock);
         for (int i = 0; i < n; i++) pf[i].revents = 0;
         poll(pf, (nfds_t)n, 50);
@@ -821,6 +927,8 @@ static void *net_main(void *arg)
                 else tcp_readable(t);
             } else if (who[i].kind == K_UDP) {
                 if (udps[who[i].idx].fd == who[i].fd) udp_readable(&udps[who[i].idx]);
+            } else if (who[i].kind == K_FWD) {
+                fwd_accept(&fwds[who[i].idx]);
             } else if (pings[who[i].idx].fd == who[i].fd) ping_readable(&pings[who[i].idx]);
         }
         uint64_t now = now_ms();
@@ -849,6 +957,7 @@ void net_start(void)
         fcntl(wake_pipe[0], F_SETFD, FD_CLOEXEC);
         fcntl(wake_pipe[1], F_SETFD, FD_CLOEXEC);
     }
+    fwd_listen();
     pthread_t th;
     pthread_create(&th, NULL, net_main, NULL);
     pthread_detach(th);

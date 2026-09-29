@@ -4,7 +4,8 @@ coolcom has a small TCP/IP stack written in Cool (HolyC) for this kernel, a virt
 under coolvm, a user-mode NAT on the host (`coolvm --net`, see
 [tools/coolvm/README.md](../tools/coolvm/README.md)). The guest network is QEMU's user network:
 the guest is `10.0.2.15/24`, the gateway `10.0.2.2` and the DNS server `10.0.2.3`, all handed out
-by DHCP.
+by DHCP. `coolvm --net-forward 2323:23` forwards a TCP port of the Mac (on 127.0.0.1) into the guest,
+so the Mac can connect to servers in the guest; the guest sees those connections come from `10.0.2.2`.
 
 ## Why a new stack and not lwIP through c2hc
 
