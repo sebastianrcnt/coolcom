@@ -1,0 +1,15 @@
+module body Test is
+    function main(): ExitCode is
+        printLn(modularAdd(255 : Nat8, 1 : Nat8));
+        printLn(modularAdd(127 : Int8, 1 : Int8));
+        printLn(modularAdd(65535 : Nat16, 1 : Nat16));
+        printLn(modularAdd(32767 : Int16, 1 : Int16));
+        printLn(modularAdd(4294967295 : Nat32, 1 : Nat32));
+        printLn(modularAdd(2147483647 : Int32, 1 : Int32));
+        printLn(modularAdd(18446744073709551615 : Nat64, 1 : Nat64));
+        printLn(modularAdd(9223372036854775807 : Int64, 1 : Int64));
+        printLn(bitwiseOr(2 : Int32, 4 : Int32) + (3 : Int32));
+        printLn(trappingMultiply(-7 : Int64, -9 : Int64));
+        return ExitSuccess();
+    end;
+end module body.

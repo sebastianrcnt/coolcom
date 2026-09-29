@@ -40,12 +40,25 @@ let test_compile_default _ =
   in
   assert_bool "commands are equal" (equal_cmd cmd expected)
 
+let test_compile_hc _ =
+  List.iter (fun (flag, expected) ->
+    let cmd = parse_cmd ["warmc"; "compile"; "foo.aum"; "--target-type=hc";
+                         "--output=out.HC"; flag] in
+    match cmd with
+    | WholeProgramCompile { target = HCStandalone {output_path; entrypoint}; _ } ->
+        assert_equal "out.HC" output_path;
+        assert_equal expected entrypoint
+    | _ -> assert_failure "expected a HolyC source target")
+    ["--no-entrypoint", None;
+     "--entrypoint=Foo:main", Some (Entrypoint (make_mod_name "Foo", make_ident "main"))]
+
 let suite =
   "CliParser" >::: [
       "--help" >:: test_help_cmd;
       "--version" >:: test_version_cmd;
       "compile --help" >:: test_compile_help_cmd;
       "compile default" >:: test_compile_default;
+      "compile hc" >:: test_compile_hc;
     ]
 
 let _ = run_test_tt_main suite

@@ -29,3 +29,10 @@ COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
 
 `tools/native/prepare.sh` stages the owned compiler source under
 `build/native-src`; frontend fixes are enabled by default.
+
+Standalone programs can be executed with `build/coolc --run program.BIN [args...]`.
+`NativeArgCount()` and `NativeArg(index)` expose the BIN path as argument zero
+and the remaining arguments; an out-of-range index returns NULL.
+`NativeErrPutS(text)` writes a string to stderr without adding a newline, and
+`NativeExit(status)` terminates the host process. These imports are used by
+Warm's native Cool runtime; they are not kernel shell services.

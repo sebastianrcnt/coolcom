@@ -1003,9 +1003,8 @@ re_number:;
                         if (I64SetHas(graph->connects[tmp], tmp2)) {
                             if (tmp != tmp2) {
                                 color = coloring->colors[tmp2];
-                                // Uncolored/spilled neighbours have color -1.
-                                // They do not occupy a register (or a candidate slot).
-                                if (color >= 0 && color < reg_cnt)
+                                // Uncolored/spilled neighbors have no register to exclude.
+                                if (color != -1)
                                     canidates[color] = FALSE;
                             }
                         }
@@ -1065,7 +1064,7 @@ skip:;
                 adj_score = I16_MAX;
                 for (tmp2 = 0; tmp2 != adjacent->cnt; tmp2++) {
                     color = coloring->colors[adjacent->body[tmp2]];
-                    if (color >= 0 && color < reg_cnt) {
+                    if (color != -1) {
                         canidates[color] = FALSE;
                         adj_score = MinI64(adj_score, flat[tmp2]->use_cnt);
                     }

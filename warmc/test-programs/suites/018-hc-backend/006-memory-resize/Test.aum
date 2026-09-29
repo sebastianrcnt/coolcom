@@ -1,0 +1,25 @@
+pragma Unsafe_Module;
+import Austral.Memory (Pointer, Address, allocateBuffer, nullCheck, store, load,
+    positiveOffset, resizeArray, memmove, deallocate);
+module body Test is
+    function checked(addr: Address[Nat8]): Pointer[Nat8] is
+        case nullCheck(addr) of
+            when Some(value: Pointer[Nat8]) do return value;
+            when None do abort("allocation failed");
+        end case;
+    end;
+    function main(): ExitCode is
+        let p: Pointer[Nat8] := checked(allocateBuffer(3) : Address[Nat8]);
+        store(p, 10 : Nat8);
+        store(positiveOffset(p, 1), 20 : Nat8);
+        store(positiveOffset(p, 2), 30 : Nat8);
+        let q: Pointer[Nat8] := checked(resizeArray(p, 5));
+        memmove(q, positiveOffset(q, 1), 3);
+        printLn(load(q));
+        printLn(load(positiveOffset(q, 1)));
+        printLn(load(positiveOffset(q, 2)));
+        printLn(load(positiveOffset(q, 3)));
+        deallocate(q);
+        return ExitSuccess();
+    end;
+end module body.

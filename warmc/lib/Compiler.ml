@@ -46,12 +46,12 @@ let append_import_to_body (cb: concrete_module_body) (import: concrete_import_li
   else
     ConcreteModuleBody (mn, kind, docstring, import :: imports, decls)
 
-type compiler = Compiler of env * string
+type compiler = Compiler of env * string * c_unit list
 
 (** Extract the env from the compiler. *)
-let cenv (Compiler (m, _)): env = m
+let cenv (Compiler (m, _, _)): env = m
 
-let compiler_code (Compiler (_, c)): string = c
+let compiler_code (Compiler (_, c, _)): string = c
 
 type module_source =
   | TwoFileModuleSource of {
@@ -106,7 +106,7 @@ let rec compile_mod (c: compiler) (source: module_source): compiler =
           let unit: c_unit = gen_module env mono in
           let unit_code: string = render_unit unit in
           let code: string = (compiler_code c) ^ "\n" ^ unit_code in
-          Compiler (env, code)))
+          Compiler (env, code, (let Compiler (_, _, units) = c in units @ [unit]))))
 
 let rec compile_multiple c modules =
   match modules with
@@ -115,9 +115,9 @@ let rec compile_multiple c modules =
 
 let compile_entrypoint c mn i =
   let qi = make_qident (mn, i, i) in
-  let (Compiler (m, code)) = c in
+  let (Compiler (m, code, units)) = c in
   let entry_code: string = entrypoint_code m qi in
-  Compiler (m, code ^ "\n" ^ entry_code)
+  Compiler (m, code ^ "\n" ^ entry_code, units)
 
 let fake_mod_source (is: string) (bs: string): module_source =
   TwoFileModuleSource { int_filename = ""; int_code = is; body_filename = ""; body_code = bs }
@@ -135,7 +135,7 @@ let post_compile (compiler: compiler): compiler =
   let wrappers: c_unit = CUnit ("Wrappers", all_wrappers env) in
   let wrapper_code: string = render_unit wrappers in
   let code: string = (compiler_code compiler) ^ "\n" ^ unit_code ^ "\n" ^ wrapper_code in
-  Compiler (env, code)
+  Compiler (env, code, (let Compiler (_, _, units) = compiler in units @ [unit; wrappers]))
 
 let empty_compiler: compiler =
   with_frame "Compile built-in modules"
@@ -144,7 +144,7 @@ let empty_compiler: compiler =
          Austral.Memory, since the latter uses declarations from the former. *)
       let env: env = empty_env in
       (* Start with the C prelude. *)
-      let c = Compiler (env, prelude_c) in
+      let c = Compiler (env, prelude_c, []) in
       let c =
         (* Handle errors during the compilation of the Austral,Pervasive
            module. Otherwise, a typo in the source code of this module will cause a
@@ -166,3 +166,8 @@ let empty_compiler: compiler =
           dump_and_die ()
       in
       c)
+
+let compiler_hc (Compiler (env, _, units)) entry =
+  let entry = Option.map (fun (mn, i) ->
+    Entrypoint.hc_entrypoint env (make_qident (mn, i, i))) entry in
+  HCRenderer.render units entry
