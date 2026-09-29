@@ -12,11 +12,11 @@ F64 FAdd(F64 a,F64 b){return a+b;}
 I64 Dft1(I64 a,I64 b=10){return a+b;}
 I64 Dft2(I64 a=1,I64 b=2,I64 c=3){return a*100+b*10+c;}
 F64 Dft3(F64 a,F64 b=2.5){return a*b;}
-I64 Dft4(I64 a,U8 *s="abc"){return a+s[1];}
+I64 Dft4(I64 a,I64 s=97){return a+s;}  // not a string default: Aiwnios embeds its compile-time heap address
 I64 Dft5(I64 a=-1,F64 b=0.5){return a+b;}
 I64 UseDft(){return Dft1(1)+Dft1(1,2)+Dft2()+Dft2(5)+Dft2(5,6)+Dft2(5,6,7);}
 F64 UseDft2(){return Dft3(2.0)+Dft3(2.0,3.0)+Dft5()+Dft5(4);}
-I64 UseDft3(){return Dft4(1)+Dft4(1,"xyz");}
+I64 UseDft3(){return Dft4(1)+Dft4(1,120);}
 I64 Sum(...){I64 i,s=0;for(i=0;i<argc;i++)s+=argv[i];return s;}
 I64 Sum2(I64 base,...){I64 i,s=base;for(i=0;i<argc;i++)s+=argv[i]*i;return s;}
 I64 Cnt(...){return argc;}

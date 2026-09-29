@@ -1531,7 +1531,7 @@ load_r2:
         code_off = __ICMoveF64(cctrl, dst->reg, src->integer, bin, code_off);
       } else if (src->mode == MD_F64 && dst->raw_type != BRT_F64) {
         //PORT-NOTE: C converts the double to uint64_t here; HolyC converts F64 to U64 with its own rounding (same for in-range positive values).
-        code_off = __ICMoveI64(cctrl, dst->reg, src->flt, bin, code_off);
+        code_off = __ICMoveI64(cctrl, dst->reg, BF64ToU64(src->flt), bin, code_off); // PORT-NOTE: C passes the F64 to a uint64_t parameter
       } else if (src->mode == MD_STATIC) {
         use_reg2 = BAIWNIOS_TMP_IREG_POOP;
         indir_off = 0;

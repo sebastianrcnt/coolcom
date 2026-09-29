@@ -1263,6 +1263,9 @@ extern U0 ICFree(CBRPN *ic);
 
 // Function-like macros of the C headers / files, as functions (bodies in IRBind.HC)
 extern U0 BAssert(Bool cond, U8 *what); // print `what` and halt when cond is FALSE (C assert())
+extern F64 BToF64(I64 x);
+extern I64 BToI64(F64 x);
+extern U64 BF64ToU64(F64 x);
 extern U8 *BCodeAlloc(I64 size,CBHeapCtrl *heap);
 extern U0 BCodeCommit(U8 *obin);
 extern U8 *MemGetWritePtr(U8 *ptr);     // identity outside OpenBSD/NetBSD

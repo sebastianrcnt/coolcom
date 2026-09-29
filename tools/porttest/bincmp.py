@@ -26,22 +26,23 @@ def norm(path):
                 d[0x20 + at:0x20 + at + 8] = bytes(8)
     return d, po
 
-a, pa = norm(sys.argv[1])
-b, pb = norm(sys.argv[2])
-if a == b:
-    sys.exit(0)
-if pa != pb:
-    print(f'code size differs: {pa - 0x20:#x} vs {pb - 0x20:#x}')
-n = min(len(a), len(b))
-diffs = [k for k in range(n) if a[k] != b[k]]
-if diffs:
-    k = diffs[0]
-    region = 'code' if k < min(pa, pb) else 'patch table'
-    print(f'{len(diffs)} differing bytes; first at file offset {k:#x} ({region}, '
-          f'code offset {k - 0x20:#x})')
-    w = (k - 0x20) & ~3
-    for off in range(max(0, w - 8), min(w + 12, min(pa, pb) - 0x20), 4):
-        x = struct.unpack_from('<I', a, 0x20 + off)[0]
-        y = struct.unpack_from('<I', b, 0x20 + off)[0]
-        print(f'  {off:#06x}: {x:08x} {y:08x}' + ('  <--' if x != y else ''))
-sys.exit(1)
+if __name__ == '__main__':
+    a, pa = norm(sys.argv[1])
+    b, pb = norm(sys.argv[2])
+    if a == b:
+        sys.exit(0)
+    if pa != pb:
+        print(f'code size differs: {pa - 0x20:#x} vs {pb - 0x20:#x}')
+    n = min(len(a), len(b))
+    diffs = [k for k in range(n) if a[k] != b[k]]
+    if diffs:
+        k = diffs[0]
+        region = 'code' if k < min(pa, pb) else 'patch table'
+        print(f'{len(diffs)} differing bytes; first at file offset {k:#x} ({region}, '
+              f'code offset {k - 0x20:#x})')
+        w = (k - 0x20) & ~3
+        for off in range(max(0, w - 8), min(w + 12, min(pa, pb) - 0x20), 4):
+            x = struct.unpack_from('<I', a, 0x20 + off)[0]
+            y = struct.unpack_from('<I', b, 0x20 + off)[0]
+            print(f'  {off:#06x}: {x:08x} {y:08x}' + ('  <--' if x != y else ''))
+    sys.exit(1)

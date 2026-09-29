@@ -415,7 +415,7 @@ F64 SumComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   a = ICFwd(b);
   if (BIsConst(a) && !first) {
     if (a->type != BIC_F64)
-      cur = cur + a->integer(F64);
+      cur = cur + BToF64(a->integer);
     else
       cur = cur + a->flt;
     ICFree(rpn);
@@ -424,7 +424,7 @@ F64 SumComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   }
   if (BIsConst(b) && !first) {
     if (b->type != BIC_F64)
-      cur = cur + b->integer(F64);
+      cur = cur + BToF64(b->integer);
     else
       cur = cur + b->flt;
     ICFree(rpn);
@@ -434,7 +434,7 @@ F64 SumComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   if (first) {
     if (BIsConst(a)) {
       if (a->type != BIC_F64)
-        cur = cur + a->integer(F64);
+        cur = cur + BToF64(a->integer);
       else
         cur = cur + a->flt;
       cur = SumComConstsF64(cctrl, b, operator, cur, 0);
@@ -442,7 +442,7 @@ F64 SumComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
       a->flt = cur;
     } else if (BIsConst(b)) {
       if (b->type != BIC_F64)
-        cur = cur + b->integer(F64);
+        cur = cur + BToF64(b->integer);
       else
         cur = cur + b->flt;
       cur = SumComConstsF64(cctrl, a, operator, cur, 0);
@@ -465,7 +465,7 @@ I64 SumComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
     if (a->type != BIC_F64)
       cur = cur + a->integer;
     else
-      cur = (cur(F64) + a->flt)(I64);
+      cur = BToI64((BToF64(cur) + a->flt));
     ICFree(rpn);
     ICFree(a);
     return SumComConstsI64(cctrl, b, operator, cur, 0);
@@ -474,7 +474,7 @@ I64 SumComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
     if (b->type != BIC_F64)
       cur = cur + b->integer;
     else
-      cur = (cur(F64) + b->flt)(I64);
+      cur = BToI64((BToF64(cur) + b->flt));
     ICFree(rpn);
     ICFree(b);
     return SumComConstsI64(cctrl, a, operator, cur, 0);
@@ -484,7 +484,7 @@ I64 SumComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
       if (a->type != BIC_F64)
         cur = cur + a->integer;
       else
-        cur = (cur(F64) + a->flt)(I64);
+        cur = BToI64((BToF64(cur) + a->flt));
       cur = SumComConstsI64(cctrl, b, operator, cur, 0);
       a->type = BIC_I64;
       a->integer = cur;
@@ -492,7 +492,7 @@ I64 SumComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
       if (b->type != BIC_F64)
         cur = cur + b->integer;
       else
-        cur = (cur(F64) + b->flt)(I64);
+        cur = BToI64((BToF64(cur) + b->flt));
       cur = SumComConstsI64(cctrl, a, operator, cur, 0);
       b->type = BIC_I64;
       b->integer = cur;
@@ -511,7 +511,7 @@ F64 MulComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   a = ICFwd(b);
   if (BIsConst(a) && !first) {
     if (a->type != BIC_F64)
-      cur = cur * a->integer(F64);
+      cur = cur * BToF64(a->integer);
     else
       cur = cur * a->flt;
     ICFree(rpn);
@@ -520,7 +520,7 @@ F64 MulComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   }
   if (BIsConst(b) && !first) {
     if (b->type != BIC_F64)
-      cur = cur * b->integer(F64);
+      cur = cur * BToF64(b->integer);
     else
       cur = cur * b->flt;
     ICFree(rpn);
@@ -530,7 +530,7 @@ F64 MulComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   if (first) {
     if (BIsConst(a)) {
       if (a->type != BIC_F64)
-        cur = cur * a->integer(F64);
+        cur = cur * BToF64(a->integer);
       else
         cur = cur * a->flt;
       cur = MulComConstsF64(cctrl, b, operator, cur, 0);
@@ -538,7 +538,7 @@ F64 MulComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
       a->flt = cur;
     } else if (BIsConst(b)) {
       if (b->type != BIC_F64)
-        cur = cur * b->integer(F64);
+        cur = cur * BToF64(b->integer);
       else
         cur = cur * b->flt;
       cur = MulComConstsF64(cctrl, a, operator, cur, 0);
@@ -561,7 +561,7 @@ I64 MulComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
     if (a->type != BIC_F64)
       cur = cur * a->integer;
     else
-      cur = (cur(F64) * a->flt)(I64);
+      cur = BToI64((BToF64(cur) * a->flt));
     ICFree(rpn);
     ICFree(a);
     return MulComConstsI64(cctrl, b, operator, cur, 0);
@@ -570,7 +570,7 @@ I64 MulComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
     if (b->type != BIC_F64)
       cur = cur * b->integer;
     else
-      cur = (cur(F64) * b->flt)(I64);
+      cur = BToI64((BToF64(cur) * b->flt));
     ICFree(rpn);
     ICFree(b);
     return MulComConstsI64(cctrl, a, operator, cur, 0);
@@ -580,7 +580,7 @@ I64 MulComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
       if (a->type != BIC_F64)
         cur = cur * a->integer;
       else
-        cur = (cur(F64) * a->flt)(I64);
+        cur = BToI64((BToF64(cur) * a->flt));
       cur = MulComConstsI64(cctrl, b, operator, cur, 0);
       a->type = BIC_I64;
       a->integer = cur;
@@ -588,7 +588,7 @@ I64 MulComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
       if (b->type != BIC_F64)
         cur = cur * b->integer;
       else
-        cur = (cur(F64) * b->flt)(I64);
+        cur = BToI64((BToF64(cur) * b->flt));
       cur = MulComConstsI64(cctrl, a, operator, cur, 0);
       b->type = BIC_I64;
       b->integer = cur;
@@ -609,7 +609,7 @@ F64 SumComConstsF642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   //for this variant (only_rightside == 1) and was dropped.
   if (BIsConst(b) && !first) {
     if (b->type != BIC_F64)
-      cur = cur + b->integer(F64);
+      cur = cur + BToF64(b->integer);
     else
       cur = cur + b->flt;
     ICFree(rpn);
@@ -619,7 +619,7 @@ F64 SumComConstsF642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   if (first) {
     if (BIsConst(b)) {
       if (b->type != BIC_F64)
-        cur = cur + b->integer(F64);
+        cur = cur + BToF64(b->integer);
       else
         cur = cur + b->flt;
       cur = SumComConstsF642(cctrl, a, operator, cur, 0);
@@ -644,7 +644,7 @@ I64 SumComConstsI642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
     if (b->type != BIC_F64)
       cur = cur + b->integer;
     else
-      cur = (cur(F64) + b->flt)(I64);
+      cur = BToI64((BToF64(cur) + b->flt));
     ICFree(rpn);
     ICFree(b);
     return SumComConstsI642(cctrl, a, operator, cur, 0);
@@ -654,7 +654,7 @@ I64 SumComConstsI642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
       if (b->type != BIC_F64)
         cur = cur + b->integer;
       else
-        cur = (cur(F64) + b->flt)(I64);
+        cur = BToI64((BToF64(cur) + b->flt));
       cur = SumComConstsI642(cctrl, a, operator, cur, 0);
       b->type = BIC_I64;
       b->integer = cur;
@@ -675,7 +675,7 @@ F64 MulComConstsF642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   //for this variant (only_rightside == 1) and was dropped.
   if (BIsConst(b) && !first) {
     if (b->type != BIC_F64)
-      cur = cur * b->integer(F64);
+      cur = cur * BToF64(b->integer);
     else
       cur = cur * b->flt;
     ICFree(rpn);
@@ -685,7 +685,7 @@ F64 MulComConstsF642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
   if (first) {
     if (BIsConst(b)) {
       if (b->type != BIC_F64)
-        cur = cur * b->integer(F64);
+        cur = cur * BToF64(b->integer);
       else
         cur = cur * b->flt;
       cur = MulComConstsF642(cctrl, a, operator, cur, 0);
@@ -710,7 +710,7 @@ I64 MulComConstsI642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
     if (b->type != BIC_F64)
       cur = cur * b->integer;
     else
-      cur = (cur(F64) * b->flt)(I64);
+      cur = BToI64((BToF64(cur) * b->flt));
     ICFree(rpn);
     ICFree(b);
     return MulComConstsI642(cctrl, a, operator, cur, 0);
@@ -720,7 +720,7 @@ I64 MulComConstsI642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
       if (b->type != BIC_F64)
         cur = cur * b->integer;
       else
-        cur = (cur(F64) * b->flt)(I64);
+        cur = BToI64((BToF64(cur) * b->flt));
       cur = MulComConstsI642(cctrl, a, operator, cur, 0);
       b->type = BIC_I64;
       b->integer = cur;
@@ -770,23 +770,23 @@ U0 SET_AB(CBRPN **next, F64 *a, F64 *b)
   if ((*next)->type == BIC_F64)
     *b = (*next)->flt;
   else
-    *b = (*next)->integer(F64);
+    *b = BToF64((*next)->integer);
   *next = ICFwd(*next);
   if ((*next)->type == BIC_F64)
     *a = (*next)->flt;
   else
-    *a = (*next)->integer(F64);
+    *a = BToF64((*next)->integer);
 }
 U0 SET_A2B2(CBRPN **next, I64 *a2, I64 *b2)
 {
   // Like C, this assigns the F64 to an int64_t (truncation).
   if ((*next)->type == BIC_F64)
-    *b2 = (*next)->flt(I64);
+    *b2 = BToI64((*next)->flt);
   else
     *b2 = (*next)->integer;
   *next = ICFwd(*next);
   if ((*next)->type == BIC_F64)
-    *a2 = (*next)->flt(I64);
+    *a2 = BToI64((*next)->flt);
   else
     *a2 = (*next)->integer;
 }
@@ -807,7 +807,7 @@ loop:
         next = rpn->base.next;
         if (BIsConst(next)) {
           if (next->type == BIC_F64)
-            a2 = next->flt(I64);
+            a2 = BToI64(next->flt);
           else
             a2 = next->integer;
           rpn->integer = !!a2;
@@ -999,7 +999,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = ((*(&a)(I64 *)) & (*(&b)(I64 *)))(F64);
+            rpn->flt = BToF64(((*(&a)(I64 *)) & (*(&b)(I64 *))));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1014,7 +1014,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = ((*(&a)(I64 *)) ^ (*(&b)(I64 *)))(F64);
+            rpn->flt = BToF64(((*(&a)(I64 *)) ^ (*(&b)(I64 *))));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1048,7 +1048,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = ((*(&a)(I64 *)) | (*(&b)(I64 *)))(F64);
+            rpn->flt = BToF64(((*(&a)(I64 *)) | (*(&b)(I64 *))));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1063,7 +1063,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = (a < b)(F64);
+            rpn->flt = BToF64((a < b));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1078,7 +1078,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = (a > b)(F64);
+            rpn->flt = BToF64((a > b));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1093,7 +1093,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = (a == b)(F64);
+            rpn->flt = BToF64((a == b));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1108,7 +1108,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = (a != b)(F64);
+            rpn->flt = BToF64((a != b));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1123,7 +1123,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = (a <= b)(F64);
+            rpn->flt = BToF64((a <= b));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1138,7 +1138,7 @@ binop_next:
           if (rpn->raw_type == BRT_F64) {
             SET_AB(&next, &a, &b);
             rpn->type = BIC_F64;
-            rpn->flt = (a >= b)(F64);
+            rpn->flt = BToF64((a >= b));
           } else {
             SET_A2B2(&next, &a2, &b2);
             rpn->type = BIC_I64;
@@ -1489,7 +1489,7 @@ I64 RPN_IS_VALUE(CBRPN *rpn, I64 v)
       is_value = (rpn->integer == v);
       break;
     case BIC_F64:
-      is_value = (rpn->flt == v(F64));
+      is_value = (rpn->flt == BToF64(v));
   }
   return is_value;
 }

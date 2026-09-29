@@ -188,6 +188,38 @@ I32 BCallPatchUncond(U8 *fp,I64 a)
   return (*f)(a);
 }
 
+// Numeric conversions as C's (double)x and (int64_t)x. HolyC's postfix
+// casts x(F64)/x(I64) reinterpret the bits; only assignment converts.
+F64 BToF64(I64 x)
+{
+  F64 r = x;
+  return r;
+}
+
+I64 BToI64(F64 x)
+{
+  I64 r = x;
+  return r;
+}
+
+U64 BF64ToU64(F64 x)
+{//C's (uint64_t)x on AArch64 (fcvtzu): truncates, saturates, NaN->0.
+  //HolyC's own F64->integer conversion is signed, so -1.9 would give -1.
+  //2^64 and 2^63 are built from their bits: the lexer can't read such literals.
+  F64 two64 = 0x43F0000000000000(F64), two63 = 0x43E0000000000000(F64);
+  I64 r;
+  if (!(x > 0.0))  // negative, zero and NaN
+    return 0;
+  if (x >= two64)
+    return -1;
+  if (x >= two63) {
+    r = x - two63;
+    return r + 0x8000000000000000;
+  }
+  r = x;
+  return r;
+}
+
 F64 BFMod(F64 a,F64 b)
 {
   return a%b;

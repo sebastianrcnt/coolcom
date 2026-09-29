@@ -56,6 +56,10 @@ mask or by assigning to a `U32`/`I32` variable.
 - No ternary `?:`: use `if`/`else` into a temporary.
 - No designated initializers or compound literals: assign fields one by one.
 - Classes are packed (no padding). Don't rely on `sizeof` equalling C's.
+- **Postfix casts reinterpret bits, they don't convert**: `i(F64)` is the
+  double whose bits are `i`, `x(I64)` the bits of `x`. For C's numeric
+  `(double)i` / `(int64_t)x` use `BToF64`/`BToI64` (or assign to a variable
+  of the other type); for C's `(uint64_t)x` use `BF64ToU64`.
 - **Assigning a class by value copies only its first 8 bytes** (`a = b;`,
   `*p = *q;`). Write struct copies as `MemCpy(&a, &b, sizeof(CBFoo))` and
   `CBFoo x = {0};` as a declaration plus `MemSet`. `tools/porttest/classassign.py`
