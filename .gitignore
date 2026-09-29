@@ -3,3 +3,4 @@ build/
 .claude/
 tools/zed-holyc/grammars/
 __pycache__/
+vendor/
