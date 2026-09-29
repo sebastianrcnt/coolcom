@@ -17,6 +17,10 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     --bootargs 'coolcom.test=1' --input-script "$dir/input.txt" --disk "$dir/disk.img" --disk "$dir/fat.img" \
     --screenshot "$dir/screen.png" "$@" "$image" >"$log" 2>&1 \
     && grep -q 'SELFTEST PASS' "$log" && grep -q '2 cores online' "$log" \
+    && grep -q 'Free: heap overflow block=.*allocated at' "$log" \
+    && grep -q 'stack overflow, task Shell' "$log" \
+    && grep -q 'ERROR: kernel text write' "$log" \
+    && tr -d '\r' <"$log" | grep -qx 'MEMSAFE RECOVERED 81' \
     && grep -q 'KERNEL TEST PASS' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
     && [ "$(tr -d '\r' <"$log" | grep -cx 'Break')" = 2 ] \
     && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx '63' && tr -d '\r' <"$log" | grep -qx 'A92' && python3 tools/kernel-verify.py verify "$dir"; then

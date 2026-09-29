@@ -72,6 +72,16 @@ SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
          ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER),
          '#include "Test.HC"', r'Print("%d\n", Tripled(21));', r"""Print("%s%d\n", "\101", '\101' + '\e');"""]
 
+# One shell regression exercises all three protections and prompt recovery.
+SHELL += [
+    'U8 *over = MAlloc(13); over[13] ^= 1; Free(over);',
+    'over[13] ^= 1; Free(over);',
+    'I64 Deep(I64 n) { U8 pad[1024]; MemSet(pad, n, 1024); return Deep(n+1)+pad[0]; }',
+    'Deep(0);',
+    'U8 *text = &StrLen; *text = 0;',
+    r'Print("MEMSAFE RECOVERED %d\n", Sq(9));',
+]
+
 # US layout, Linux key codes, as in os/Kernel/Input.HC: char -> (code, shifted).
 KEYS = {" ": (57, False), "`": (41, False), "~": (41, True), "\\": (43, False), "|": (43, True)}
 for first, lo, up in ((2, "1234567890-=", "!@#$%^&*()_+"), (16, "qwertyuiop[]", "QWERTYUIOP{}"),
