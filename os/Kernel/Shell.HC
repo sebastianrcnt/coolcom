@@ -207,6 +207,31 @@ U0 ShellFaultResume()
     ArchLongJmp(shell_fault_ctx);
 }
 
+U0 ShellBreakNow()
+{//Ctrl+Alt+C stopped the statement: back to the prompt.
+    if (!shell_in_stmt)
+        return;  // the statement already ended
+    shell_in_stmt = FALSE;
+    Print("\nBreak\n");
+    ArchLongJmp(shell_fault_ctx);
+}
+
+U0 ShellBreak(CExceptFrame *f)
+{//break_hook, at the end of the input IRQ that saw Ctrl+Alt+C. If it interrupted the
+    //shell's own statement, resume in ShellBreakNow instead. Otherwise the shell is switched
+    //out inside the statement (Sleep, GetKey, or mid-Yield): flag it and wake it, and Yield
+    //calls ShellBreakNow when the shell next runs.
+    U8 *stack = shell_task->stack;
+    if (!shell_in_stmt)
+        return;
+    if (Fs == shell_task && f >= stack && f < stack + SHELL_STACK)
+        f->elr = &ShellBreakNow;
+    else {
+        shell_task->wake_jiffy = 0;
+        shell_task->flags |= TASKf_BREAK;
+    }
+}
+
 I64 ShellFault(I64 vec, CExceptFrame *f)
 {//except_hook: a typed statement faulted; report it and go back to the prompt.
     I64 ec = f->esr >> 26 & 0x3F;
@@ -246,6 +271,7 @@ I64 ShellExeCmdLine(U8 *cc)
         if (code && code != INVALID_PTR) {
             fp = code;
             if (!ArchSetJmp(shell_fault_ctx)) {
+                shell_task->flags &= ~TASKf_BREAK;
                 shell_in_stmt = TRUE;
                 res = (*fp)();
             }
@@ -404,6 +430,8 @@ U0 ShellTask(U8 *data)
     shell_state = 1;
     shell_task = Fs;
     except_hook = &ShellFault;
+    break_hook = &ShellBreak;
+    task_break_hook = &ShellBreakNow;
     if (!ShellInit) {
         Print("shell: compiler failed to load\n");
         shell_state = -1;

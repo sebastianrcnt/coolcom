@@ -1,5 +1,6 @@
 #include "coolvm.h"
 #include <errno.h>
+#include <time.h>
 #include <unistd.h>
 
 /* Simple VM-only input FIFO. A record is three 32-bit words: type, code, value.
@@ -25,18 +26,57 @@ void input_push(uint32_t type, uint32_t code, int32_t value)
     pthread_mutex_unlock(&g.lock);
 }
 
+/* Records after a "delay MS" line are pushed by a feeder thread, MS
+ * milliseconds (cumulative) after the script is loaded, so a script can type at
+ * a running program: "delay 2000" then Ctrl+Alt+C. */
+#define SCRIPT_LATE_CAP 1024
+static struct { uint32_t type, code; int32_t value; unsigned ms; } late_q[SCRIPT_LATE_CAP];
+static unsigned late_n;
+
+static void *late_main(void *arg)
+{
+    unsigned now = 0;
+    for (unsigned i = 0; i < late_n; i++) {
+        if (late_q[i].ms > now) {
+            unsigned d = late_q[i].ms - now;
+            struct timespec ts = {d / 1000, (long)(d % 1000) * 1000000L};
+            nanosleep(&ts, NULL);
+            now = late_q[i].ms;
+        }
+        input_push(late_q[i].type, late_q[i].code, late_q[i].value);
+    }
+    return NULL;
+}
+
 bool input_load_script(const char *path)
 {
     FILE *f = fopen(path, "r");
     if (!f) { perror(path); return false; }
     char line[256];
-    int n = 0;
+    int n = 0, lineno = 0;
+    unsigned delay = 0;
     while (fgets(line, sizeof line, f)) {
-        unsigned type, code; int value;
+        unsigned type, code, ms; int value;
+        lineno++;
         if (line[0] == '#' || line[0] == '\n') continue;
+        if (sscanf(line, "delay %u", &ms) == 1) {
+            delay += ms;
+            continue;
+        }
         if (sscanf(line, "%u %u %d", &type, &code, &value) != 3 || type > 0x1f || code > 0xffff) {
-            LOGE("invalid input script line %d\n", n + 1);
+            LOGE("invalid input script line %d\n", lineno);
             fclose(f); return false;
+        }
+        if (delay) {
+            if (late_n >= SCRIPT_LATE_CAP) {
+                LOGE("input script exceeds %d delayed records\n", SCRIPT_LATE_CAP);
+                fclose(f); return false;
+            }
+            late_q[late_n].type = type;
+            late_q[late_n].code = code;
+            late_q[late_n].value = value;
+            late_q[late_n++].ms = delay;
+            continue;
         }
         if (n >= INPUT_CAP - 1) {
             LOGE("input script exceeds %d records\n", INPUT_CAP - 1);
@@ -47,6 +87,11 @@ bool input_load_script(const char *path)
     }
     bool ok = !ferror(f);
     fclose(f);
+    if (ok && late_n) {
+        pthread_t th;
+        ok = pthread_create(&th, NULL, late_main, NULL) == 0;
+        if (ok) pthread_detach(th);
+    }
     return ok;
 }
 

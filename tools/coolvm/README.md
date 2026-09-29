@@ -110,7 +110,9 @@ Three successive 32-bit reads of `INPUT_BASE+4` return `type`, `code`, and signe
 record. IRQ 700 stays asserted while records remain, and AIC EVENT auto-masks it like other AIC sources.
 The window sends key press/release, mouse button, relative movement, and wheel events. `--input-script`
 loads up to 255 records before the guest starts, one `type code value` decimal triple per line; blank
-lines and `#` comments are allowed. Example:
+lines and `#` comments are allowed. A `delay MS` line holds back every record after it until MS
+milliseconds (cumulative) after coolvm loaded the script (to type at a program that is already running;
+delayed records are not part of the 255-record preload limit). Example:
 
 ```
 1 30 1    # KEY_A down

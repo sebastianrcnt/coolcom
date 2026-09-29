@@ -27,6 +27,7 @@
 #define KEY_LEFTCTRL   29
 #define KEY_LEFTSHIFT  42
 #define KEY_RIGHTSHIFT 54
+#define KEY_C          46
 #define KEY_LEFTALT    56
 #define KEY_CAPSLOCK   58
 #define KEY_NUMLOCK    69
@@ -139,6 +140,10 @@ U0 KbdKey(I64 code, I64 value)
             kbd_locks ^= SCF_SCROLL;
     }
     m = KbdMods;
+    if (code == KEY_C && value == 1 && (m & SCF_CTRL) && (m & SCF_ALT)) {
+        break_req = TRUE;  // TempleOS Ctrl+Alt+C: acted on in KExcept, which has the frame
+        return;
+    }
     if (code < 128) {
         if (m & SCF_SHIFT)
             ascii = kbd_shift[code];

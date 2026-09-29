@@ -24,11 +24,21 @@ U0 ExceptDump(I64 vec, CExceptFrame *f)
 
 U8 *except_hook;  // I64 (*)(I64 vec, CExceptFrame *f): TRUE if it recovered (the shell)
 
+I64 break_req;    // set by the input IRQ handler on Ctrl+Alt+C
+U8 *break_hook;   // U0 (*)(CExceptFrame *f): called with the interrupted frame after such an IRQ (the shell)
+
 U0 KExcept(I64 vec, CExceptFrame *f)
 {
     I64 (*hook)(I64 vec, CExceptFrame *f);
+    U0 (*brk)(CExceptFrame *f);
     if (vec == EXC_CUR_SPX_IRQ) {
         IrqDispatch;
+        if (break_req) {
+            break_req = 0;
+            brk = break_hook;
+            if (brk)
+                (*brk)(f);
+        }
         return;
     }
     if (vec == EXC_CUR_SPX_FIQ) {
