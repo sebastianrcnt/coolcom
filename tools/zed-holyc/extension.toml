@@ -1,0 +1,12 @@
+id = "holyc"
+name = "HolyC"
+description = "HolyC (TempleOS) syntax highlighting, outline, brackets and indents. Grammar only, no language server."
+version = "0.1.0"
+schema_version = 1
+authors = ["coolcom"]
+repository = "https://github.com/project-solomon/zed-holyc"
+
+# Grammar and queries are from project-solomon/tree-sitter-holyc / zed-holyc (MIT).
+[grammars.holyc]
+repository = "https://github.com/project-solomon/tree-sitter-holyc"
+rev = "c1b84cc02006f4dac84b12721935ef27211975dc"

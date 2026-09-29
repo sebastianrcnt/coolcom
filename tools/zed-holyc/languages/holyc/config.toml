@@ -1,0 +1,14 @@
+name = "HolyC"
+grammar = "holyc"
+path_suffixes = ["HC", "HH", "hc", "hh"]
+line_comments = ["// "]
+block_comment = ["/* ", " */"]
+autoclose_before = ";:.,=}])>"
+tab_size = 2
+brackets = [
+  { start = "{", end = "}", close = true, newline = true },
+  { start = "[", end = "]", close = true, newline = true },
+  { start = "(", end = ")", close = true, newline = true },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+  { start = "'", end = "'", close = true, newline = false, not_in = ["string", "comment"] },
+]
