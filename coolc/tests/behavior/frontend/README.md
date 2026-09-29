@@ -9,6 +9,7 @@ These files document frontend bugs inherited from Aiwnios.
 | 6 | `B06LargeFloat.HC` | `43F0000000000000` | `0` |
 | 7 | `B07StringDefault.HC` | AOT relocation for `"abc"` | A process heap pointer is embedded in the code; two builds differ in the pointer immediate |
 | 8 | `B08FunctionPointerArray.HC` | Compiles | `PrsType`: `Missing ')'` after `a` |
+| 9 | `B09StringIndex.HC` | `65` | `16961` (`0x4241`) |
 
 The same results for bugs 5 and 6 occur with `b_use_port=FALSE` and `TRUE`.
 
@@ -23,5 +24,8 @@ The same results for bugs 5 and 6 occur with `b_use_port=FALSE` and `TRUE`.
   `ImplicitFunCall` later emit that pointer as `IC_IMM_I64` for AOT code.
 - **8:** `PrsVar.HC:PrsType` requires `)` immediately after the identifier in
   `(*name)`. It parses array dimensions only after the closing `)`.
+- **9:** `AIWNIOS_PrsExp.HC:AssignRawTypeToNode` gives `IC_STR_CONST` the
+  class of `RT_PTR`, whose element is eight bytes, so `"AB"[0]` loads a word
+  (`0x4241`) instead of the byte `'A'`. A string constant is a `U8 *`.
 
 Run `tools/native/behavior.sh` to compile and check the corrected cases.
