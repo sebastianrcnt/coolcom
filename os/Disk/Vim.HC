@@ -134,7 +134,7 @@ U0 VimCsi(I64 row, I64 col)
 
 U0 VimDraw()
 {
-    I64 rows = 24, cols = 80, p, q, y, x, k, cw, cursor_row = 1, line = 1;
+    I64 rows = 24, cols = 80, p, q, y, x, k, cw, cursor_row = 1;
     if (fb.base) {rows = fb.rows; cols = fb.cols;}
     if (rows < 3) rows = 3;
     if (cols < 2) cols = 2;

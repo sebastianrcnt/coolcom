@@ -7,10 +7,16 @@ U0 Tmux()
     left[0] = right[0] = 0;
     ConsPutS("\x1b[?1049h");
     while (TRUE) {
-        rows = fb.base ? fb.rows: 24;
-        cols = fb.base ? fb.cols: 80;
+        if (fb.base) {
+            rows = fb.rows;
+            cols = fb.cols;
+        } else {
+            rows = 24;
+            cols = 80;
+        }
         ConsPutS("\x1b[H\x1b[2J");
-        limit = split ? cols / 2: cols;
+        if (split) limit = cols / 2;
+        else limit = cols;
         ConsPutS(left);
         if (split) {
             for (y = 1; y < rows; y++) {
@@ -24,22 +30,27 @@ U0 Tmux()
         ConsPutS("\x1b[7m tmux  Ctrl-B % split | o switch | q quit  pane ");
         VimPutNum(active + 1);
         ConsPutS(" \x1b[0m\x1b[K");
-        VimCsi(2, active ? limit + 1: 1);
+        if (active) VimCsi(2, limit + 1);
+        else VimCsi(2, 1);
         c = GetKey(&sc, FALSE);
         if (c == 2) {
             c = GetKey(&sc, FALSE);
             if (c == 'q') break;
             if (c == '%') split = TRUE;
             if (c == 'o' && split) active = !active;
-            continue;
+        } else {
+            if (active) {
+                pane = right;
+                i = rn;
+            } else {
+                pane = left;
+                i = ln;
+            }
+            if (c == 8 || c == 127) {if (i) pane[--i] = 0;}
+            else if (c >= 32 && c < 127 && i < 4094) {pane[i++] = c; pane[i] = 0;}
+            if (active) rn = i;
+            else ln = i;
         }
-        pane = active ? right: left;
-        i = active ? rn: ln;
-        if (c == 8 || c == 127) {if (i) pane[--i] = 0;}
-        else if (c >= 32 && c < 127 && i < 4094) {pane[i++] = c; pane[i] = 0;}
-        if (active) rn = i;
-        else ln = i;
     }
-}
-ConsPutS("\x1b[?1049l");
+    ConsPutS("\x1b[?1049l");
 }
