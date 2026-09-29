@@ -251,6 +251,7 @@ I64 LexInStr(CCmpCtrl *cc, U8 *buf, I64 size, Bool *done)
 I64 Lex(CCmpCtrl *cc)
 {//Fetch next token.
     I64 i, j, k, l, ch;
+    F64 float_digits;
     CHash *tmph;
     Bool str_done, in_str, neg_e;
     U8 *fbuf, *buf2, *buf3, buf[STR_LEN];
@@ -327,6 +328,8 @@ lex_ident:
                 break;
             case '0'...'9':
                 i = ch - '0';
+                // FIX(6): Keep a floating significand while scanning decimal digits.
+                float_digits = i;
                 ch = ToUpper(LexGetChar(cc));
                 if (ch == 'X') {
                     while (TRUE) {
@@ -359,9 +362,10 @@ lex_ident:
                     }
                 }
                 while (TRUE) {
-                    if (Bt(char_bmp_dec_numeric, ch))
+                    if (Bt(char_bmp_dec_numeric, ch)) {
                         i = i * 10 + ch - '0';
-                    else {
+                        float_digits = float_digits * 10.0 + (ch - '0');
+                    } else {
                         if (ch == '.' || ch == 'e' || ch == 'E') break;
 lex_is_int:
                         cc->cur_i64 = i;
@@ -383,11 +387,12 @@ lex_float_start:
                 while (TRUE) {
                     if (Bt(char_bmp_dec_numeric, ch)) {
                         i = i * 10 + ch - '0';
+                        float_digits = float_digits * 10.0 + (ch - '0');
                         k++;
                     } else {
                         if (ch == 'e' || ch == 'E')
                             break;
-                        cc->cur_f64 = i * Pow10I64(-k);
+                        cc->cur_f64 = float_digits * Pow10I64(-k);
                         cc->flags |= CCF_USE_LAST_U16;
                         cc->token = TK_F64;
                         goto lex_end;
@@ -406,9 +411,9 @@ lex_float_start:
                         j = j * 10 + ch - '0';
                     else {
                         if (neg_e)
-                            cc->cur_f64 = i * Pow10I64(-j - k);
+                            cc->cur_f64 = float_digits * Pow10I64(-j - k);
                         else
-                            cc->cur_f64 = i * Pow10I64(j - k);
+                            cc->cur_f64 = float_digits * Pow10I64(j - k);
                         cc->flags |= CCF_USE_LAST_U16;
                         cc->token = TK_F64;
                         goto lex_end;
