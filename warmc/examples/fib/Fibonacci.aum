@@ -1,0 +1,15 @@
+module body Example.Fibonacci is
+    function Fibonacci(n: Nat64): Nat64 is
+        -- A simple recursive implementation.
+        if n < 2 then
+            return n;
+        else
+            return Fibonacci(n - 1) + Fibonacci(n - 2);
+        end if;
+    end;
+
+    function main(): ExitCode is
+        Fibonacci(30);
+        return ExitSuccess();
+    end;
+end module body.

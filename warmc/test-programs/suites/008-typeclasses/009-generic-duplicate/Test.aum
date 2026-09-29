@@ -1,0 +1,27 @@
+module body Test is
+    typeclass Foo(T: Type) is
+        method Accept(x: T): Unit;
+    end;
+
+    record Bar[T: Type]: Type is
+    end;
+
+    generic [U: Linear]
+    instance Foo(Bar[U]) is
+        method Accept(x: Bar[U]): Unit is
+            let {} := x;
+            return nil;
+        end;
+    end;
+
+    generic [U: Free]
+    instance Foo(Bar[U]) is
+        method Accept(x: Bar[U]): Unit is
+            return nil;
+        end;
+    end;
+
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

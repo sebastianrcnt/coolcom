@@ -1,0 +1,9 @@
+module body Test is
+    typeclass Check(T: Free) is
+        method check(value: T): Unit;
+        method check(value: T): Unit;
+    end;
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

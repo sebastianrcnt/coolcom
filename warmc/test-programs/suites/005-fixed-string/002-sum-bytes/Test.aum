@@ -1,0 +1,14 @@
+module body Test is
+    function sum(array: Span[Nat8, Static]) : Nat8 is
+        var res : Nat8 := 0;
+        for i from 0 to spanLength(array) - 1 do
+            res := res + array[i];
+        end for;
+        return res;
+    end;
+
+    function main(): ExitCode is
+        printLn(sum("000")); -- 48 + 48 + 48
+        return ExitSuccess();
+    end;
+end module body.

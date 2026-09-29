@@ -1,0 +1,27 @@
+pragma Unsafe_Module;
+
+module body Test is
+    pragma Foreign_Import(External_Name => "putchar");
+    function Put_Character(character: Nat8): Int32 is
+    end;
+
+    record Foo: Linear is
+        bar: Nat8;
+    end;
+
+    function main(): ExitCode is
+        -- Create a linear record.
+        let foo: Foo := Foo(bar => 'a');
+        -- Borrow it.
+        borrow fooref: &[Foo, rho] := &foo do
+            -- Extract a free value from the reference.
+            let subref: &[Nat8, rho] := &(fooref->bar);
+            let b: Nat8 := !subref;
+            -- Print it.
+            Put_Character(b);
+        end borrow;
+        -- Consume the record by destructuring.
+        let { bar: Nat8 } := foo;
+        return ExitSuccess();
+    end;
+end module body.

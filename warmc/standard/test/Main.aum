@@ -1,0 +1,32 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+import Standard.Test.Tuples (tuplesTestSuite);
+import Standard.Test.Bounded (boundedTestSuite);
+import Standard.Test.Equality (equalityTestSuite);
+import Standard.Test.Order (orderTestSuite);
+import Standard.Test.Box (boxTestSuite);
+import Standard.Test.Buffer (bufferTestSuite);
+import Standard.Test.String (byteStringTestSuite);
+import Standard.Test.StringBuilder (stringBuilderTestSuite);
+import Standard.Test.IO.Terminal (terminalTestSuite);
+
+module body Standard.Test is
+    function Main(root: RootCapability): ExitCode is
+        var root2: RootCapability := root;
+        tuplesTestSuite();
+        boundedTestSuite();
+        equalityTestSuite();
+        orderTestSuite();
+        boxTestSuite();
+        bufferTestSuite();
+        byteStringTestSuite();
+        stringBuilderTestSuite();
+        terminalTestSuite(&!root2);
+        surrenderRoot(root2);
+        return ExitSuccess();
+    end;
+end module body.

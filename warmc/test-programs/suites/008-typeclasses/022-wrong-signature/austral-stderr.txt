@@ -1,0 +1,27 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    { "type": "text", "content": "Invalid instance method " },
+    { "type": "code", "content": "check" },
+    { "type": "text", "content": ": " },
+    { "type": "text", "content": "signature does not match" }
+  ],
+  "span": {
+    "filename": "test-programs/suites/008-typeclasses/022-wrong-signature/Test.aum",
+    "startp": { "line": 4, "column": 8 },
+    "end": { "line": 9, "column": 8 }
+  },
+  "context": [
+    [ 2, "    typeclass Check(T: Free) is" ],
+    [ 3, "        method check(value: T): Unit;" ],
+    [ 4, "    end;" ],
+    [ 5, "    instance Check(Nat8) is" ],
+    [ 6, "        method check(value: Nat16): Unit is" ],
+    [ 7, "            return nil;" ],
+    [ 8, "        end;" ],
+    [ 9, "    end;" ],
+    [ 10, "    function main(): ExitCode is" ],
+    [ 11, "        return ExitSuccess();" ]
+  ]
+}

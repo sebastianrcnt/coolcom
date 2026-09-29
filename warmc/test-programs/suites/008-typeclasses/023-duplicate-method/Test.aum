@@ -1,0 +1,16 @@
+module body Test is
+    typeclass Check(T: Free) is
+        method check(value: T): Unit;
+    end;
+    instance Check(Nat8) is
+        method check(value: Nat8): Unit is
+            return nil;
+        end;
+        method check(value: Nat8): Unit is
+            return nil;
+        end;
+    end;
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

@@ -1,0 +1,15 @@
+module body Test is
+    record R : Linear is
+        x: Int32;
+    end;
+
+    function main(): ExitCode is
+        let r: R := R(x => 32);
+        if true then
+            skip;
+        else
+            let { x: Int32 } := r;
+        end if;
+        return ExitSuccess();
+    end;
+end module body.

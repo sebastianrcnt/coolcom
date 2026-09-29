@@ -1,0 +1,27 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    { "type": "text", "content": "Invalid instance method " },
+    { "type": "code", "content": "check" },
+    { "type": "text", "content": ": " },
+    { "type": "text", "content": "type parameter count does not match" }
+  ],
+  "span": {
+    "filename": "test-programs/suites/008-typeclasses/024-wrong-method-typarams/Test.aum",
+    "startp": { "line": 5, "column": 8 },
+    "end": { "line": 10, "column": 8 }
+  },
+  "context": [
+    [ 3, "        generic [R: Region]" ],
+    [ 4, "        method check(value: Span[T, R]): Unit;" ],
+    [ 5, "    end;" ],
+    [ 6, "    instance Check(Nat8) is" ],
+    [ 7, "        method check(value: Span[Nat8, Static]): Unit is" ],
+    [ 8, "            return nil;" ],
+    [ 9, "        end;" ],
+    [ 10, "    end;" ],
+    [ 11, "    function main(): ExitCode is" ],
+    [ 12, "        return ExitSuccess();" ]
+  ]
+}

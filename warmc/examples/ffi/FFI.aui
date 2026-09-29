@@ -1,0 +1,3 @@
+module Example.FFI is
+    function main(): ExitCode;
+end module.

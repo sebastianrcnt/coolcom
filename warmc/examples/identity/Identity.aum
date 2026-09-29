@@ -1,0 +1,16 @@
+module body Example.Identity is
+    generic [T: Type]
+    function Identity(value: T): T is
+        return value;
+    end;
+
+    function Test(): Int32 is
+        let x: Int32 := Identity(10);
+        let y: Float64 := Identity(3.14);
+        return x;
+    end;
+
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

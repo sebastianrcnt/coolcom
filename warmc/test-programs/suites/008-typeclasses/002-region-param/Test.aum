@@ -1,0 +1,9 @@
+module body Test is
+    typeclass AcceptsRegion(R: Region) is
+        method Accept(x: R): Unit;
+    end;
+
+    function main(): ExitCode is
+        return ExitSuccess();
+    end;
+end module body.

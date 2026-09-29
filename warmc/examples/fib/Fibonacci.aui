@@ -1,0 +1,7 @@
+module Example.Fibonacci is
+    """
+    The fibonacci function.
+    """
+    function Fibonacci(n: Nat64): Nat64;
+    function main(): ExitCode;
+end module.

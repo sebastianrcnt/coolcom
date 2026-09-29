@@ -1,0 +1,34 @@
+module body Test is
+    union Color: Free is
+        case Red;
+        case Green;
+        case Blue;
+    end;
+
+    union Number: Free is
+        case Integer is
+            value: Int32;
+        case Float is
+            value: Float64;
+    end;
+
+    function main(): ExitCode is
+        let C : Color := Red();
+        case C of
+            when Red do
+                skip;
+            when Green do
+                skip;
+            when Blue do
+                skip;
+        end case;
+        let N : Number := Integer(value => 10);
+        case N of
+            when Integer(value: Int32) do
+                skip;
+            when Float(value: Float64) do
+                skip;
+        end case;
+        return ExitSuccess();
+    end;
+end module body.

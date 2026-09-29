@@ -1,0 +1,20 @@
+{
+  "module": "Test",
+  "kind": "Linearity Error",
+  "text": [
+    { "type": "text", "content": "Cannot dereference non-free type " },
+    { "type": "type", "content": "Foo" }
+  ],
+  "span": {
+    "filename": "test-programs/suites/007-borrowing/009-dereference-linear/Test.aum",
+    "startp": { "line": 7, "column": 12 },
+    "end": { "line": 7, "column": 27 }
+  },
+  "context": [
+    [ 5, "        let foo: Foo := Foo();" ],
+    [ 6, "        borrow ref: &[Foo, R] := &foo do" ],
+    [ 7, "            let {} := !ref;" ],
+    [ 8, "        end borrow;" ],
+    [ 9, "        let {} := foo;" ]
+  ]
+}

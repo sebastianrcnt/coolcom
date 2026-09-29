@@ -1,0 +1,25 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [
+    { "type": "text", "content": "A declaration with the name " },
+    { "type": "code", "content": "check" },
+    { "type": "text", "content": " already exists in the module " },
+    { "type": "code", "content": "Test" },
+    { "type": "text", "content": "." }
+  ],
+  "span": {
+    "filename": "test-programs/suites/008-typeclasses/025-duplicate-class-method/Test.aum",
+    "startp": { "line": 2, "column": 4 },
+    "end": { "line": 5, "column": 8 }
+  },
+  "context": [
+    [ 1, "module body Test is" ],
+    [ 2, "    typeclass Check(T: Free) is" ],
+    [ 3, "        method check(value: T): Unit;" ],
+    [ 4, "        method check(value: T): Unit;" ],
+    [ 5, "    end;" ],
+    [ 6, "    function main(): ExitCode is" ],
+    [ 7, "        return ExitSuccess();" ]
+  ]
+}

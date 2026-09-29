@@ -1,0 +1,17 @@
+pragma Unsafe_Module;
+
+module body Example.FFI is
+    pragma Foreign_Import(External_Name => "putchar");
+    function Put_Character(character: Int32): Int32 is
+    end;
+
+    pragma Foreign_Import(External_Name => "puts");
+    function Put_String(str: Span[Nat8, Static]): Int32 is
+    end;
+
+    function main(): ExitCode is
+        Put_Character(97);
+        Put_String("Hello, world!");
+        return ExitSuccess();
+    end;
+end module body.

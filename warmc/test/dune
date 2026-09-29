@@ -1,0 +1,9 @@
+(tests
+ (names
+  ExpressionParserTest
+  UtilTest
+  CliUtilTest
+  CliParserTest
+  CRendererTest
+  TypeSafetyTest)
+ (libraries austral_core ounit2))

@@ -1,0 +1,1 @@
+Test we can borrow a variable explicitly inside a borrow of the same variable.

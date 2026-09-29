@@ -1,0 +1,337 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+module Austral.Pervasive is
+    union Option[T: Type]: Type is
+        case None;
+        case Some is
+            value: T;
+    end;
+
+    union Either[L: Type, R: Type]: Type is
+        case Left is
+            left: L;
+        case Right is
+            right: R;
+    end;
+
+    generic [T: Type, R: Region]
+    function spanLength(sp: Span[T, R]): Index;
+
+    generic [T: Type, R: Region]
+    function spanWriteLength(sp: Span![T, R]): Index;
+
+    function abort(message: Span[Nat8, Static]): Unit;
+
+    type RootCapability : Linear;
+
+    function surrenderRoot(cap: RootCapability): Unit;
+
+    function argumentCount(): Index;
+
+    function nthArgument(n: Index): Span[Nat8, Static];
+
+    union ExitCode: Free is
+        case ExitSuccess;
+        case ExitFailure;
+    end;
+
+    constant maximum_nat8: Nat8;
+    constant maximum_nat16: Nat16;
+    constant maximum_nat32: Nat32;
+    constant maximum_nat64: Nat64;
+
+    constant minimum_int8: Int8;
+    constant maximum_int8: Int8;
+
+    constant minimum_int16: Int16;
+    constant maximum_int16: Int16;
+
+    constant minimum_int32: Int32;
+    constant maximum_int32: Int32;
+
+    constant minimum_int64: Int64;
+    constant maximum_int64: Int64;
+
+    constant minimum_index: Index;
+    constant maximum_index: Index;
+
+    constant minimum_bytesize: ByteSize;
+    constant maximum_bytesize: ByteSize;
+
+    typeclass TrappingArithmetic(T: Type) is
+        method trappingAdd(lhs: T, rhs: T): T;
+        method trappingSubtract(lhs: T, rhs: T): T;
+        method trappingMultiply(lhs: T, rhs: T): T;
+        method trappingDivide(lhs: T, rhs: T): T;
+    end;
+
+    typeclass ModularArithmetic(T: Type) is
+        method modularAdd(lhs: T, rhs: T): T;
+        method modularSubtract(lhs: T, rhs: T): T;
+        method modularMultiply(lhs: T, rhs: T): T;
+        method modularDivide(lhs: T, rhs: T): T;
+    end;
+
+    typeclass BitwiseOperations(T: Type) is
+        method bitwiseAnd(lhs: T, rhs: T): T;
+        method bitwiseOr(lhs: T, rhs: T): T;
+        method bitwiseXor(lhs: T, rhs: T): T;
+        method bitwiseNot(value: T): T;
+    end;
+
+    instance TrappingArithmetic(Nat8);
+    instance TrappingArithmetic(Int8);
+    instance TrappingArithmetic(Nat16);
+    instance TrappingArithmetic(Int16);
+    instance TrappingArithmetic(Nat32);
+    instance TrappingArithmetic(Int32);
+    instance TrappingArithmetic(Nat64);
+    instance TrappingArithmetic(Int64);
+    instance TrappingArithmetic(Index);
+    instance TrappingArithmetic(ByteSize);
+    instance TrappingArithmetic(Float64);
+
+    instance ModularArithmetic(Nat8);
+    instance ModularArithmetic(Int8);
+    instance ModularArithmetic(Nat16);
+    instance ModularArithmetic(Int16);
+    instance ModularArithmetic(Nat32);
+    instance ModularArithmetic(Int32);
+    instance ModularArithmetic(Nat64);
+    instance ModularArithmetic(Int64);
+    instance ModularArithmetic(Index);
+    instance ModularArithmetic(ByteSize);
+
+    instance BitwiseOperations(Nat8);
+    instance BitwiseOperations(Int8);
+    instance BitwiseOperations(Nat16);
+    instance BitwiseOperations(Int16);
+    instance BitwiseOperations(Nat32);
+    instance BitwiseOperations(Int32);
+    instance BitwiseOperations(Nat64);
+    instance BitwiseOperations(Int64);
+    instance BitwiseOperations(Index);
+    instance BitwiseOperations(ByteSize);
+
+    typeclass Printable(A: Free) is
+        method print(value: A): Unit;
+
+        generic [R: Region]
+        method printSpan(value: Span[A, R]): Unit;
+    end;
+
+    instance Printable(Unit);
+    instance Printable(Bool);
+    instance Printable(Nat8);
+    instance Printable(Int8);
+    instance Printable(Nat16);
+    instance Printable(Int16);
+    instance Printable(Nat32);
+    instance Printable(Int32);
+    instance Printable(Nat64);
+    instance Printable(Int64);
+    instance Printable(Index);
+    instance Printable(ByteSize);
+    instance Printable(Float32);
+    instance Printable(Float64);
+
+    generic [B: Free(Printable), R: Region]
+    instance Printable(Span[B, R]);
+
+    generic [T: Free(Printable)]
+    function printLn(value: T): Unit;
+
+    typeclass ToNat8(T: Type) is
+        method toNat8(value: T): Option[Nat8];
+    end;
+
+    instance ToNat8(Nat8);
+    instance ToNat8(Nat16);
+    instance ToNat8(Nat32);
+    instance ToNat8(Nat64);
+    instance ToNat8(Int8);
+    instance ToNat8(Int16);
+    instance ToNat8(Int32);
+    instance ToNat8(Int64);
+    instance ToNat8(Index);
+    instance ToNat8(Float32);
+    instance ToNat8(Float64);
+
+    typeclass ToNat16(T: Type) is
+        method toNat16(value: T): Option[Nat16];
+    end;
+
+    instance ToNat16(Nat8);
+    instance ToNat16(Nat16);
+    instance ToNat16(Nat32);
+    instance ToNat16(Nat64);
+    instance ToNat16(Int8);
+    instance ToNat16(Int16);
+    instance ToNat16(Int32);
+    instance ToNat16(Int64);
+    instance ToNat16(Index);
+    instance ToNat16(Float32);
+    instance ToNat16(Float64);
+
+    typeclass ToNat32(T: Type) is
+        method toNat32(value: T): Option[Nat32];
+    end;
+
+    instance ToNat32(Nat8);
+    instance ToNat32(Nat16);
+    instance ToNat32(Nat32);
+    instance ToNat32(Nat64);
+    instance ToNat32(Int8);
+    instance ToNat32(Int16);
+    instance ToNat32(Int32);
+    instance ToNat32(Int64);
+    instance ToNat32(Index);
+    instance ToNat32(Float32);
+    instance ToNat32(Float64);
+
+    typeclass ToNat64(T: Type) is
+        method toNat64(value: T): Option[Nat64];
+    end;
+
+    instance ToNat64(Nat8);
+    instance ToNat64(Nat16);
+    instance ToNat64(Nat32);
+    instance ToNat64(Nat64);
+    instance ToNat64(Int8);
+    instance ToNat64(Int16);
+    instance ToNat64(Int32);
+    instance ToNat64(Int64);
+    instance ToNat64(Index);
+    instance ToNat64(Float32);
+    instance ToNat64(Float64);
+
+    typeclass ToInt8(T: Type) is
+        method toInt8(value: T): Option[Int8];
+    end;
+
+    instance ToInt8(Nat8);
+    instance ToInt8(Nat16);
+    instance ToInt8(Nat32);
+    instance ToInt8(Nat64);
+    instance ToInt8(Int8);
+    instance ToInt8(Int16);
+    instance ToInt8(Int32);
+    instance ToInt8(Int64);
+    instance ToInt8(Index);
+    instance ToInt8(Float32);
+    instance ToInt8(Float64);
+
+    typeclass ToInt16(T: Type) is
+        method toInt16(value: T): Option[Int16];
+    end;
+
+    instance ToInt16(Nat8);
+    instance ToInt16(Nat16);
+    instance ToInt16(Nat32);
+    instance ToInt16(Nat64);
+    instance ToInt16(Int8);
+    instance ToInt16(Int16);
+    instance ToInt16(Int32);
+    instance ToInt16(Int64);
+    instance ToInt16(Index);
+    instance ToInt16(Float32);
+    instance ToInt16(Float64);
+
+    typeclass ToInt32(T: Type) is
+        method toInt32(value: T): Option[Int32];
+    end;
+
+    instance ToInt32(Nat8);
+    instance ToInt32(Nat16);
+    instance ToInt32(Nat32);
+    instance ToInt32(Nat64);
+    instance ToInt32(Int8);
+    instance ToInt32(Int16);
+    instance ToInt32(Int32);
+    instance ToInt32(Int64);
+    instance ToInt32(Index);
+    instance ToInt32(Float32);
+    instance ToInt32(Float64);
+
+    typeclass ToInt64(T: Type) is
+        method toInt64(value: T): Option[Int64];
+    end;
+
+    instance ToInt64(Nat8);
+    instance ToInt64(Nat16);
+    instance ToInt64(Nat32);
+    instance ToInt64(Nat64);
+    instance ToInt64(Int8);
+    instance ToInt64(Int16);
+    instance ToInt64(Int32);
+    instance ToInt64(Int64);
+    instance ToInt64(Index);
+    instance ToInt64(Float32);
+    instance ToInt64(Float64);
+
+    typeclass ToIndex(T: Type) is
+        method toIndex(value: T): Option[Index];
+    end;
+
+    instance ToIndex(Nat8);
+    instance ToIndex(Nat16);
+    instance ToIndex(Nat32);
+    instance ToIndex(Nat64);
+    instance ToIndex(Int8);
+    instance ToIndex(Int16);
+    instance ToIndex(Int32);
+    instance ToIndex(Int64);
+    instance ToIndex(Index);
+    instance ToIndex(Float32);
+    instance ToIndex(Float64);
+
+    typeclass ToFloat32(T: Type) is
+        method toFloat32(value: T): Option[Float32];
+    end;
+
+    instance ToFloat32(Nat8);
+    instance ToFloat32(Nat16);
+    instance ToFloat32(Nat32);
+    instance ToFloat32(Nat64);
+    instance ToFloat32(Int8);
+    instance ToFloat32(Int16);
+    instance ToFloat32(Int32);
+    instance ToFloat32(Int64);
+    instance ToFloat32(Index);
+    instance ToFloat32(Float32);
+    instance ToFloat32(Float64);
+
+    typeclass ToFloat64(T: Type) is
+        method toFloat64(value: T): Option[Float64];
+    end;
+
+    instance ToFloat64(Nat8);
+    instance ToFloat64(Nat16);
+    instance ToFloat64(Nat32);
+    instance ToFloat64(Nat64);
+    instance ToFloat64(Int8);
+    instance ToFloat64(Int16);
+    instance ToFloat64(Int32);
+    instance ToFloat64(Int64);
+    instance ToFloat64(Index);
+    instance ToFloat64(Float32);
+    instance ToFloat64(Float64);
+
+    typeclass Remainder(T: Type) is
+        method rem(lhs: T, rhs: T): T;
+    end;
+
+    instance Remainder(Nat8);
+    instance Remainder(Nat16);
+    instance Remainder(Nat32);
+    instance Remainder(Nat64);
+    instance Remainder(Int8);
+    instance Remainder(Int16);
+    instance Remainder(Int32);
+    instance Remainder(Int64);
+    instance Remainder(Index);
+end module.

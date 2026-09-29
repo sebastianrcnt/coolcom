@@ -1,0 +1,205 @@
+--
+-- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
+-- See LICENSE file for details.
+--
+-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+--
+"""
+This module implements the Buffer type, a linear, resizable, heap-allocated buffer.
+"""
+module Standard.Buffer is
+    """
+    The buffer type.
+    """
+    type Buffer[T: Type]: Linear;
+
+    ---
+    --- Lifecycle
+    ---
+
+    """
+    Allocates an empty buffer. Aborts on allocation failure.
+    """
+    generic [T: Type]
+    function allocateEmpty(): Buffer[T];
+
+    """
+    Allocates an empty buffer. Returns `None` on allocation
+    failure.
+    """
+    generic [T: Type]
+    function safeAllocateEmpty(): Option[Buffer[T]];
+
+    """
+    Create a buffer of the given size, filling all slots with copies of the given
+    initial element.
+
+    The contained type has to be Free so it can be copied any number of times.
+
+    Aborts on allocation failure.
+    """
+    generic [T: Free]
+    function initialize(size: Index, initialElement: T): Buffer[T];
+
+    """
+    Like `initialize`, but returns `None` on allocation failure.
+    """
+    generic [T: Free]
+    function safeInitialize(size: Index, initialElement: T): Option[Buffer[T]];
+
+    """
+    Deallocate a buffer with Free elements.
+    """
+    generic [T: Free]
+    function destroyFree(buffer: Buffer[T]): Unit;
+
+    """
+    Destroy an empty buffer.
+    """
+    generic [T: Type]
+    function destroyEmpty(buffer: Buffer[T]): Unit;
+
+    ---
+    --- Retrieve
+    ---
+
+    """
+    Return the length of the buffer.
+    """
+    generic [T: Type, R: Region]
+    function length(buf: &[Buffer[T], R]): Index;
+
+    """
+    Return the nth element of `buf`.
+    """
+    generic [T: Free, R: Region]
+    function nth(buf: &[Buffer[T], R], pos: Index): T;
+
+    ---
+    --- Update
+    ---
+
+    """
+    Store `element` in the given position of `buf`.
+    """
+    generic [T: Free, R: Region]
+    function storeNth(buf: &![Buffer[T], R], pos: Index, element: T): Unit;
+
+    """
+    Store `element` in the given position of `buf`, and return the element
+    that was previoulys there.
+    """
+    generic [T: Type, R: Region]
+    function swapNth(buf: &![Buffer[T], R], pos: Index, element: T): T;
+
+    """
+    Swap two elements in the given buffer by their indices.
+    """
+    generic [T: Type, R: Region]
+    function swapIndex(buf: &![Buffer[T], R], a: Index, b: Index): Unit;
+
+    """
+    Take the element at `pos`, transform it through `fn`, and store the result
+    in place.
+    """
+    generic [T: Type, R: Region]
+    function swapTransform(buf: &![Buffer[T], R], pos: Index, fn: Fn[T, T]): Unit;
+
+    """
+    Store `element` in every position of `buf`.
+    """
+    generic [T: Free, R: Region]
+    function fill(buf: &![Buffer[T], R], element: T): Unit;
+
+    ---
+    --- Insertion
+    ---
+
+    """
+    Insert an element into the buffer in the given position, resizing if
+    needed. Aborts on allocation failure.
+
+    Range for `pos` is from 0 to the length of the buffer.
+    """
+    generic [T: Type, R: Region]
+    function insert(buf: &![Buffer[T], R], pos: Index, element: T): Unit;
+
+    """
+    Insert the given element at the zeroth position of the buffer, pushing
+    everything to the right and resizing if needed. Aborts on allocation
+    failure.
+    """
+    generic [T: Type, R: Region]
+    function insertFront(buf: &![Buffer[T], R], element: T): Unit;
+
+    """
+    Insert the given element at the end of the buffer and resizing if needed.
+    Aborts on allocation failure.
+    """
+    generic [T: Type, R: Region]
+    function insertBack(buf: &![Buffer[T], R], element: T): Unit;
+
+    ---
+    --- Removal
+    ---
+
+    """
+    Remove the element from the given position in the buffer, and return it.
+    """
+    generic [T: Type, R: Region]
+    function remove(buf: &![Buffer[T], R], pos: Index): T;
+
+    """
+    Remove the first element from the buffer and return it.
+    """
+    generic [T: Type, R: Region]
+    function removeFirst(buf: &![Buffer[T], R]): T;
+
+    """
+    Remove the last element from the buffer and return it.
+    """
+    generic [T: Type, R: Region]
+    function removeLast(buf: &![Buffer[T], R]): T;
+
+    ---
+    --- Reversal
+    ---
+
+    """
+    Reverse the buffer in place.
+    """
+    generic [T: Type, R: Region]
+    function reverse(buf: &![Buffer[T], R]): Unit;
+
+    ---
+    --- Map
+    ---
+
+    """
+    Iterate over each element in the buffer, transforming it through `fn`, and
+    store the result in place. Like `swapTransform` applied to the whole
+    buffer.
+    """
+    generic [T: Type, R: Region]
+    function inPlaceMap(buf: &![Buffer[T], R], fn: Fn[T, T]): Unit;
+
+    """
+    Consumes the buffer and returns a new buffer of the same length, whose
+    elements are the result of applying `fn` to the element from `buf` with the
+    same index.
+    """
+    generic [T: Type, U: Type]
+    function map(buf: Buffer[T], fn: Fn[T, U]): Buffer[U];
+
+    """
+    Get a span from the buffer.
+    """
+    generic [T: Type, R: Region]
+    function getSpan(buf: &[Buffer[T], R], start: Index, final: Index): Span[T, R];
+
+    """
+    Get a mutable span from the buffer.
+    """
+    generic [T: Type, R: Region]
+    function getSpanMut(buf: &![Buffer[T], R], start: Index, final: Index): Span![T, R];
+end module.
