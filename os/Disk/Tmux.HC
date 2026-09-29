@@ -3,7 +3,7 @@
 U0 Tmux()
 {
     U8 left[4096], right[4096], *pane;
-    I64 ln = 0, rn = 0, active = 0, split = FALSE, c, sc, rows, cols, y, i, limit;
+    I64 ln = 0, rn = 0, active = 0, split = FALSE, c, rows, cols, y, i, limit;
     left[0] = right[0] = 0;
     ConsPutS("\x1b[?1049h");
     while (TRUE) {
@@ -32,9 +32,9 @@ U0 Tmux()
         ConsPutS(" \x1b[0m\x1b[K");
         if (active) VimCsi(2, limit + 1);
         else VimCsi(2, 1);
-        c = GetKey(&sc, FALSE);
-        if (c == 2) {
-            c = GetKey(&sc, FALSE);
+        c = GetKey;
+        if (c == (KF_CTRL | 'b')) {  // the prefix, from the window or the terminal
+            c = GetKey;
             if (c == 'q') break;
             if (c == '%') split = TRUE;
             if (c == 'o' && split) active = !active;
@@ -46,7 +46,7 @@ U0 Tmux()
                 pane = left;
                 i = ln;
             }
-            if (c == 8 || c == 127) {if (i) pane[--i] = 0;}
+            if (c == KEY_BACKSPACE) {if (i) pane[--i] = 0;}
             else if (c >= 32 && c < 127 && i < 4094) {pane[i++] = c; pane[i] = 0;}
             if (active) rn = i;
             else ln = i;

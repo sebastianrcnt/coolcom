@@ -1,0 +1,503 @@
+// Key events: one layer for both keyboards. The VM window's input FIFO (Input.HC:
+// Linux key codes and modifier state) and the host terminal on the UART (raw bytes:
+// Ctrl+letter as 0x01..0x1A, ESC, ESC [ / ESC O sequences, UTF-8) both become the
+// same event: a key code in the low bits plus KF_SHIFT/KF_CTRL/KF_ALT.
+//
+// Key codes: a character key is its Unicode code point with Shift already applied
+// ('A', '%', 0xD55C), and Shift is not reported for it (a terminal cannot tell).
+// Ctrl+letter is the lowercase letter with KF_CTRL (Ctrl+B = KF_CTRL | 'b'). Enter,
+// Tab, Backspace and Esc are 10, 9, 8 and 27; keys without a character are
+// KEY_SPECIAL and up, and report Shift. A terminal sends Ctrl+H/I/M/[ as
+// Backspace/Tab/Enter/Esc, so those arrive as the latter from the UART.
+#define KEY_CODE      0xFFFFFF  // mask of the key code in an event
+#define KF_SHIFT      0x1000000
+#define KF_CTRL       0x2000000
+#define KF_ALT        0x4000000
+#define KEY_BACKSPACE 8
+#define KEY_TAB       9
+#define KEY_ENTER     10
+#define KEY_ESC       27
+#define KEY_SPECIAL   0x110000  // first code that is not a character
+#define KEY_UP        0x110001
+#define KEY_DOWN      0x110002
+#define KEY_LEFT      0x110003
+#define KEY_RIGHT     0x110004
+#define KEY_HOME      0x110005
+#define KEY_END       0x110006
+#define KEY_PGUP      0x110007
+#define KEY_PGDN      0x110008
+#define KEY_INS       0x110009
+#define KEY_DEL       0x11000A
+#define KEY_F1        0x110011  // KEY_F1 + n - 1 is Fn, up to F12
+
+#define KEY_BUF     256
+#define KEY_ESC_MS  50  // an ESC not followed by more bytes within this is the Esc key
+
+I64 key_buf[KEY_BUF];
+I64 key_head, key_tail, key_lock;
+
+U0 KeyPush(I64 ev)
+{//Queue an event (from the input IRQ or the UART decoder).
+    I64 daif = SpinLockIrq(&key_lock), next = (key_tail + 1) % KEY_BUF;
+    if (next != key_head) {
+        key_buf[key_tail] = ev;
+        key_tail = next;
+    }
+    SpinUnlockIrq(&key_lock, daif);
+}
+
+// ---- UART decoder ----
+// States: 0 idle, 1 after ESC, 2 in ESC [ (CSI), 3 after ESC O (SS3).
+I64 ku_state, ku_alt, ku_deadline, ku_np, ku_lock;
+I64 ku_par[4];
+U8 *ku_ctrl_sym = "\\]^_";  // bytes 0x1C..0x1F
+I64 ku_cp, ku_left;  // UTF-8 code point being assembled, continuation bytes still due
+
+I64 KeyXtermMods(I64 m)
+{//xterm modifier parameter (1 + shift 1, alt 2, ctrl 4, meta 8) -> KF_ flags.
+    I64 f = 0;
+    if (m < 2)
+        return 0;
+    m--;
+    if (m & 1)
+        f |= KF_SHIFT;
+    if (m & 10)
+        f |= KF_ALT;
+    if (m & 4)
+        f |= KF_CTRL;
+    return f;
+}
+
+U0 KeyUartEmit(I64 ev)
+{
+    KeyPush(ev | ku_alt);
+    ku_alt = 0;
+}
+
+U0 KeyUartSeq(I64 fin)
+{//The final byte of ESC [ ... or ESC O: emit the key it names, if known.
+    I64 k = 0, n = ku_par[0], f = 0;
+    if (ku_np >= 2)
+        f = KeyXtermMods(ku_par[1]);
+    else if (fin != '~' && n > 1)
+        f = KeyXtermMods(n);  // ESC O 2 P style
+    switch (fin) {
+        case 'A': k = KEY_UP; break;
+        case 'B': k = KEY_DOWN; break;
+        case 'C': k = KEY_RIGHT; break;
+        case 'D': k = KEY_LEFT; break;
+        case 'H': k = KEY_HOME; break;
+        case 'F': k = KEY_END; break;
+        case 'P': k = KEY_F1; break;
+        case 'Q': k = KEY_F1 + 1; break;
+        case 'R': k = KEY_F1 + 2; break;
+        case 'S': k = KEY_F1 + 3; break;
+        case 'Z':
+            k = KEY_TAB;
+            f |= KF_SHIFT;
+            break;
+        case '~':
+            if (n == 1 || n == 7) k = KEY_HOME;
+            else if (n == 2) k = KEY_INS;
+            else if (n == 3) k = KEY_DEL;
+            else if (n == 4 || n == 8) k = KEY_END;
+            else if (n == 5) k = KEY_PGUP;
+            else if (n == 6) k = KEY_PGDN;
+            else if (n >= 11 && n <= 15) k = KEY_F1 + n - 11;
+            else if (n >= 17 && n <= 21) k = KEY_F1 + 5 + n - 17;
+            else if (n == 23 || n == 24) k = KEY_F1 + 10 + n - 23;
+            break;
+    }
+    if (k)
+        KeyUartEmit(k | f);
+    else
+        ku_alt = 0;
+}
+
+U0 KeyUartByte(I64 b)
+{
+    if (ku_state == 1) {
+        if (b == '[' || b == 'O') {
+            ku_state = 2 + (b == 'O');
+            ku_np = 0;
+            ku_par[0] = ku_par[1] = 0;
+            return;
+        }
+        ku_state = 0;  // ESC + key: Alt+key (the terminal's Meta sends ESC)
+        ku_alt = KF_ALT;
+    } else if (ku_state >= 2) {
+        if (b >= '0' && b <= '9') {
+            if (!ku_np)
+                ku_np = 1;
+            if (ku_np <= 4)
+                ku_par[ku_np - 1] = ku_par[ku_np - 1] * 10 + b - '0';
+        } else if (b == ';') {
+            if (!ku_np)
+                ku_np = 1;
+            if (ku_np < 4)
+                ku_par[ku_np] = 0;
+            ku_np++;
+        } else if (b >= 0x40 && b <= 0x7E) {
+            ku_state = 0;
+            KeyUartSeq(b);
+        } else if (b < 0x20 || b > 0x7E) {
+            ku_state = 0;  // not a sequence after all: drop it
+            ku_alt = 0;
+        }
+        return;
+    }
+    if (ku_left) {
+        if ((b & 0xC0) == 0x80) {
+            ku_cp = (ku_cp << 6) | (b & 0x3F);
+            if (!--ku_left)
+                KeyUartEmit(ku_cp);
+            return;
+        }
+        ku_left = 0;  // truncated sequence: drop it, then take b afresh
+    }
+    if (b == 27) {
+        ku_state = 1;
+        ku_deadline = ArchCntVct + ArchCntFrq * KEY_ESC_MS / 1000;
+    } else if (b == '\r' || b == '\n')
+        KeyUartEmit(KEY_ENTER);
+    else if (b == 9)
+        KeyUartEmit(KEY_TAB);
+    else if (b == 8 || b == 127)
+        KeyUartEmit(KEY_BACKSPACE);
+    else if (!b)
+        KeyUartEmit(KF_CTRL | ' ');
+    else if (b < 27)
+        KeyUartEmit(KF_CTRL | ('a' + b - 1));
+    else if (b < 32)
+        KeyUartEmit(KF_CTRL | ku_ctrl_sym[b - 28]);
+    else if (b < 0x80)
+        KeyUartEmit(b);
+    else if (Utf8Len(b) > 1) {
+        ku_left = Utf8Len(b) - 1;
+        ku_cp = b & (0x7F >> (ku_left + 1));
+    } else
+        ku_alt = 0;
+}
+
+U0 KeyUartPoll()
+{//Decode the bytes the host terminal has sent; a lone ESC becomes Esc after KEY_ESC_MS.
+    I64 b, daif = SpinLockIrq(&ku_lock);
+    while ((b = UartGet) >= 0)
+        KeyUartByte(b);
+    if (ku_state && ArchCntVct >= ku_deadline) {
+        if (ku_state == 1)
+            KeyUartEmit(KEY_ESC);
+        else if (ku_state == 2 && !ku_np)
+            KeyUartEmit('[' | KF_ALT);  // ESC [ alone is Alt+[
+        else if (ku_state == 3)
+            KeyUartEmit('O' | KF_ALT);
+        ku_state = 0;
+        ku_alt = 0;
+    }
+    SpinUnlockIrq(&ku_lock, daif);
+}
+
+// ---- reading keys ----
+I64 KeyPending()
+{//Events waiting to be read.
+    KeyUartPoll;
+    return (key_tail + KEY_BUF - key_head) % KEY_BUF;
+}
+
+I64 KeyPop()
+{//The oldest event, or 0 if none.
+    I64 ev = 0, daif;
+    KeyUartPoll;
+    daif = SpinLockIrq(&key_lock);
+    if (key_head != key_tail) {
+        ev = key_buf[key_head];
+        key_head = (key_head + 1) % KEY_BUF;
+    }
+    SpinUnlockIrq(&key_lock, daif);
+    return ev;
+}
+
+I64 Utf8Enc(U8 *buf, I64 cp)
+{//Write cp as UTF-8 to buf; returns the byte count.
+    if (cp < 0x80) {
+        buf[0] = cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        buf[0] = 0xC0 | (cp >> 6);
+        buf[1] = 0x80 | (cp & 0x3F);
+        return 2;
+    }
+    if (cp < 0x10000) {
+        buf[0] = 0xE0 | (cp >> 12);
+        buf[1] = 0x80 | ((cp >> 6) & 0x3F);
+        buf[2] = 0x80 | (cp & 0x3F);
+        return 3;
+    }
+    buf[0] = 0xF0 | (cp >> 18);
+    buf[1] = 0x80 | ((cp >> 12) & 0x3F);
+    buf[2] = 0x80 | ((cp >> 6) & 0x3F);
+    buf[3] = 0x80 | (cp & 0x3F);
+    return 4;
+}
+
+U0 ConsPutCp(I64 cp)
+{//Print a code point as UTF-8.
+    U8 b[4];
+    I64 i, n = Utf8Enc(b, cp);
+    for (i = 0; i < n; i++)
+        ConsPut(b[i]);
+}
+
+I64 KeyChar(I64 ev)
+{//The character an event types: its code point, Ctrl+letter as 1..26, 0 for other keys.
+    I64 c = ev & KEY_CODE;
+    if ((ev & KF_ALT) || c >= KEY_SPECIAL)
+        return 0;
+    if (ev & KF_CTRL) {
+        if (c >= 'a' && c <= 'z')
+            return c - 'a' + 1;
+        return 0;
+    }
+    return c;
+}
+
+I64 GetKey(Bool echo = FALSE)
+{//Wait for a key event (key code | KF_ flags) from the window or the terminal.
+    I64 ev, c;
+    while (!(ev = KeyPop)) {
+        Yield;
+        ArchWfi;
+    }
+    c = KeyChar(ev);
+    if (echo && (c >= 32 || c == KEY_ENTER || c == KEY_BACKSPACE || c == KEY_TAB))
+        ConsPutCp(c);
+    return ev;
+}
+
+I64 GetChar(I64 *_ev = NULL, Bool echo = TRUE)
+{//Wait for a key that types a character (KeyChar) and return that; *_ev gets the event.
+    I64 ev, c;
+    do {
+        ev = GetKey;
+        c = KeyChar(ev);
+    } while (!c);
+    if (_ev)
+        *_ev = ev;
+    if (echo && (c >= 32 || c == KEY_ENTER || c == KEY_BACKSPACE || c == KEY_TAB))
+        ConsPutCp(c);
+    return c;
+}
+
+// ---- GetLine: a line editor with history ----
+#define HIST_N   32
+#define HIST_LEN 512
+U8 kbd_hist[HIST_N * HIST_LEN];
+U8 hist_edit[HIST_LEN];  // the line being typed while a history entry is shown
+I64 hist_n, hist_head;   // entries kept; next slot to write
+
+U8 *HistGet(I64 back)
+{//The back-th newest entry (1 = newest).
+    return kbd_hist + ((hist_head - back + 2 * HIST_N) % HIST_N) * HIST_LEN;
+}
+
+U0 HistAdd(U8 *line)
+{
+    if (!*line || (hist_n && !StrCmp(HistGet(1), line)))
+        return;
+    StrCpy(kbd_hist + hist_head * HIST_LEN, line);
+    hist_head = (hist_head + 1) % HIST_N;
+    if (hist_n < HIST_N)
+        hist_n++;
+}
+
+// The line is UTF-8 in b[0..n); pos is a byte offset on a character boundary.
+// The screen is kept in step with ConsPut(8) (backspace) and reprinting
+// characters, which both the UART terminal and the framebuffer understand.
+I64 LineWidth(U8 *b, I64 from, I64 to)
+{//Terminal columns of b[from..to).
+    I64 w = 0, k;
+    while (from < to) {
+        k = Utf8Len(b[from]);
+        if (!k || from + k > to)
+            k = 1;
+        w += Utf8Width(Utf8Cp(b + from, k));
+        from += k;
+    }
+    return w;
+}
+
+I64 LinePrev(U8 *b, I64 pos)
+{//Start of the character before pos.
+    if (pos > 0)
+        pos--;
+    while (pos > 0 && (b[pos] & 0xC0) == 0x80)
+        pos--;
+    return pos;
+}
+
+I64 LineNext(U8 *b, I64 pos, I64 n)
+{//End of the character at pos.
+    I64 k = Utf8Len(b[pos]);
+    if (!k)
+        k = 1;
+    if (pos + k > n)
+        k = n - pos;
+    return pos + k;
+}
+
+U0 LineOut(U8 *b, I64 from, I64 to)
+{
+    while (from < to)
+        ConsPut(b[from++]);
+}
+
+U0 LineBack(I64 cols)
+{
+    while (cols-- > 0)
+        ConsPut(8);
+}
+
+U0 LineBlank(I64 cols)
+{
+    while (cols-- > 0)
+        ConsPut(' ');
+}
+
+U0 LineSet(U8 *b, I64 size, I64 *_n, I64 *_pos, U8 *s)
+{//Replace the whole line with s.
+    I64 w;
+    LineOut(b, *_pos, *_n);
+    w = LineWidth(b, 0, *_n);
+    LineBack(w);
+    LineBlank(w);
+    LineBack(w);
+    *_n = StrLen(s);
+    if (*_n > size - 1)
+        *_n = size - 1;
+    MemCpy(b, s, *_n);
+    b[*_n] = 0;
+    LineOut(b, 0, *_n);
+    *_pos = *_n;
+}
+
+U0 LineInsert(U8 *b, I64 size, I64 *_n, I64 *_pos, U8 *ch, I64 k)
+{//Insert the k bytes of one character at the cursor.
+    I64 i, n = *_n, pos = *_pos;
+    if (n + k > size - 1)
+        return;
+    for (i = n; i >= pos; i--)  // slide the tail up, including the NUL
+        b[i + k] = b[i];
+    MemCpy(b + pos, ch, k);
+    n += k;
+    LineOut(b, pos, n);
+    pos += k;
+    LineBack(LineWidth(b, pos, n));
+    *_n = n;
+    *_pos = pos;
+}
+
+U0 LineDelete(U8 *b, I64 *_n, I64 *_pos, I64 from, I64 to)
+{//Delete b[from..to), the character just before or at the cursor, and redraw.
+    I64 n = *_n, w = LineWidth(b, from, to), i;
+    for (i = to; i <= n; i++)
+        b[i - (to - from)] = b[i];
+    n -= to - from;
+    if (from < *_pos)  // backspace: the cursor moves back over it first
+        LineBack(w);
+    LineOut(b, from, n);
+    LineBlank(w);
+    LineBack(LineWidth(b, from, n) + w);
+    *_n = n;
+    *_pos = from;
+}
+
+U8 *GetLine(U8 *buf, I64 size)
+{//Read a line with editing (Left/Right/Home/End or Ctrl+A/E, Backspace and Delete at the
+    //cursor, UTF-8), and Up/Down through the history of earlier lines.
+    I64 n = 0, pos = 0, hi = 0, ev, c, e;
+    U8 ubuf[4];
+    if (size > HIST_LEN)
+        size = HIST_LEN;
+    buf[0] = 0;
+    while (TRUE) {
+        ev = GetKey;
+        c = ev & KEY_CODE;
+        if (c == KEY_ENTER)
+            break;
+        if (c == KEY_LEFT) {
+            if (pos > 0) {
+                e = LinePrev(buf, pos);
+                LineBack(LineWidth(buf, e, pos));
+                pos = e;
+            }
+        } else if (c == KEY_RIGHT) {
+            if (pos < n) {
+                e = LineNext(buf, pos, n);
+                LineOut(buf, pos, e);
+                pos = e;
+            }
+        } else if (c == KEY_HOME || ev == (KF_CTRL | 'a')) {
+            LineBack(LineWidth(buf, 0, pos));
+            pos = 0;
+        } else if (c == KEY_END || ev == (KF_CTRL | 'e')) {
+            LineOut(buf, pos, n);
+            pos = n;
+        } else if (c == KEY_DEL) {
+            if (pos < n)
+                LineDelete(buf, &n, &pos, pos, LineNext(buf, pos, n));
+        } else if (c == KEY_BACKSPACE) {
+            if (pos > 0)
+                LineDelete(buf, &n, &pos, LinePrev(buf, pos), pos);
+        } else if (c == KEY_UP) {
+            if (hi < hist_n) {
+                if (!hi)
+                    StrCpy(hist_edit, buf);
+                hi++;
+                LineSet(buf, size, &n, &pos, HistGet(hi));
+            }
+        } else if (c == KEY_DOWN) {
+            if (hi > 0) {
+                hi--;
+                if (hi)
+                    LineSet(buf, size, &n, &pos, HistGet(hi));
+                else
+                    LineSet(buf, size, &n, &pos, hist_edit);
+            }
+        } else if (c >= 32 && c < KEY_SPECIAL && !(ev & (KF_CTRL | KF_ALT)))
+            LineInsert(buf, size, &n, &pos, ubuf, Utf8Enc(ubuf, c));
+    }
+    LineOut(buf, pos, n);
+    ConsPut('\n');
+    buf[n] = 0;
+    HistAdd(buf);
+    return buf;
+}
+
+U8 *GetStr(U8 *buf, I64 size, Bool echo = TRUE)
+{//Read a line into buf (at most size-1 chars) with echo and backspace editing.
+    I64 n = 0, c;
+    while (TRUE) {
+        c = GetChar(NULL, FALSE);
+        if (c == KEY_ENTER)
+            break;
+        if (c == KEY_BACKSPACE) {
+            if (n > 0) {
+                n--;
+                if (echo) {
+                    ConsPut(8);
+                    ConsPut(' ');
+                    ConsPut(8);
+                }
+            }
+        } else if (c >= 32 && c < 127 && n < size - 1) {
+            buf[n++] = c;
+            if (echo)
+                ConsPut(c);
+        }
+    }
+    if (echo)
+        ConsPut('\n');
+    buf[n] = 0;
+    return buf;
+}
