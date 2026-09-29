@@ -15,6 +15,7 @@
 
 #include <Hypervisor/Hypervisor.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -44,6 +45,16 @@
  * Unlike the PSCI-style HVC it also works for guests running at EL2. */
 #define FINISHER_BASE 0x1ff000000ULL
 #define FINISHER_SIZE 0x1000ULL
+
+/* VM-only devices, deliberately outside the t8103 SoC MMIO window. */
+#define INPUT_BASE 0x1ff001000ULL
+#define INPUT_SIZE 0x1000ULL
+#define INPUT_IRQ 700
+#define BLK_BASE 0x1ff010000ULL
+#define BLK_STRIDE 0x1000ULL
+#define BLK_IRQ_BASE 704
+#define MAX_DISKS 4
+#define FB_BASE 0x900000000ULL
 
 #define MAX_CPUS 8
 
@@ -89,6 +100,14 @@ struct vm {
     cpu_t cpus[MAX_CPUS];
     uint8_t *ram;
     uint64_t ram_size;
+    uint8_t *fb;
+    uint64_t fb_size;
+    uint32_t fb_width, fb_height;
+    bool headless;
+    const char *screenshot;
+    int disk_fd[MAX_DISKS];
+    uint64_t disk_size[MAX_DISKS];
+    int ndisks;
     pthread_mutex_t lock; /* protects all device state (uart, aic) */
     _Atomic bool stop;
     _Atomic int exit_code;
@@ -132,6 +151,17 @@ uint8_t *fdt_finish(fdt_t *f, uint32_t *size);
 uint64_t board_cpu_reg(int idx);
 uint64_t board_spin_target_addr(int idx);
 uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs);
+
+/* devices.c / display.m */
+bool input_mmio(uint64_t off, int size, bool wr, uint64_t *val);
+bool input_irq_level(void);
+void input_push(uint32_t type, uint32_t code, int32_t value);
+bool input_load_script(const char *path);
+bool blk_mmio(int disk, uint64_t off, int size, bool wr, uint64_t *val);
+bool blk_irq_level(int disk);
+void display_init(void);
+void display_pump(void);
+bool display_screenshot(const char *path);
 
 /* aic.c (all called with g.lock held except the fast-IPI helpers) */
 void aic_init(void);
