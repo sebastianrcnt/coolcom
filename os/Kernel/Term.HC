@@ -243,11 +243,18 @@ U0 VtResize(CVTerm *v, I64 cols, I64 rows)
     v->saved = CAlloc(cols * rows * sizeof(CVtCell));
     v->cols = cols; v->rows = rows;
     VtErase(v, 0, 0, cols - 1, rows - 1);
+    MemCpy(v->saved, v->cells, cols * rows * sizeof(CVtCell));
     for (y = 0; y < rows && y < orows; y++)
         for (x = 0; x < cols && x < oc; x++) {
             MemCpy(&v->cells[y * cols + x], &old[y * oc + x], sizeof(CVtCell));
             MemCpy(&v->saved[y * cols + x], &saved[y * oc + x], sizeof(CVtCell));
-            if (x == cols - 1 && v->cells[y * cols + x].width == 2) VtBlank(v, x, y);
+            if (x == cols - 1) {
+                if (v->cells[y * cols + x].width == 2) VtBlank(v, x, y);
+                if (v->saved[y * cols + x].width == 2) {
+                    v->saved[y * cols + x].cp = ' ';
+                    v->saved[y * cols + x].width = 1;
+                }
+            }
         }
     if (v->cx >= cols) v->cx = cols - 1;
     if (v->cy >= rows) v->cy = rows - 1;

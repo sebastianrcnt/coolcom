@@ -31,6 +31,12 @@ U0 DevTestTerm()
     VtResize(a, 5, 2);
     if (a->cells[0].cp != 't' || a->cells[5].cp != 't' || a->cy != 1)
         KTFail("terminal resize preservation");
+    VtAlt(a, TRUE);
+    VtResize(a, 7, 3);
+    VtAlt(a, FALSE);
+    if (a->cells[0].cp != 't' || a->cells[6].cp != ' ' || a->cells[6].width != 1 ||
+            a->cells[20].cp != ' ' || a->cells[20].width != 1)
+        KTFail("terminal resize of saved screen");
     VtBind(Fs, old);
     VtRelease(a); VtRelease(b);
     if (kt_fails == f0) Print("  terminals: PASS\n");
