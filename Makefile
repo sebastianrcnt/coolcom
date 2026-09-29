@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test selfhost-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test selfhost-test m1n1-payload disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -80,6 +80,16 @@ $(B)/cool.elf: $(B)/kernel.raw $(B)/syms.ld $(ASM_OBJS) tools/Kernel.S
 
 $(B)/kernel.Image: $(B)/cool.elf
 	aarch64-elf-objcopy -O binary $< $@
+
+# Real-hardware boot payload (docs/m1-platform.md section 2.2): m1n1 + the Mac
+# mini (j274) DTB + our gzip'd Image, checked by parsing it back. Install it as
+# m1n1's stage 2 or chainload it; M1N1_BOOTARGS sets /chosen/bootargs. m1n1 and
+# the DTB are fetched and built in vendor/ by tools/vendor-m1n1.sh (the first
+# m1n1 build takes about 10 minutes; needs brew llvm@21 lld@21, rustup rust-src, dtc).
+m1n1-payload: build/m1n1-payload.bin
+build/m1n1-payload.bin: build/kernel.Image tools/m1n1-payload.py tools/vendor-m1n1.sh
+	tools/vendor-m1n1.sh > build/m1n1-vendor.txt
+	python3 tools/m1n1-payload.py $$(tail -2 build/m1n1-vendor.txt) $< $@ $(if $(M1N1_BOOTARGS),--bootargs "$(M1N1_BOOTARGS)")
 
 # Relocation completeness: no absolute relocations in the assembly, and a second
 # Image linked 4 MiB higher differs from the first exactly at the table's sites.
