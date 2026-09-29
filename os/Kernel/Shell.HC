@@ -168,8 +168,8 @@ I64 RtTrue() {return TRUE;}
 I64 RtZero() {return 0;}
 
 U0 RtStrPrintFunSeg(U8 *out, I64 addr)
-{//StrPrintFunSeg(out, addr, field_len, flags): no symbol lookup yet.
-    StrPrint(out, "0x%X", addr);
+{//StrPrintFunSeg(out, addr, field_len, flags): kernel functions only.
+    StrPrintFunSeg(out, addr);
 }
 
 U0 RtPutS(U8 *s)
@@ -287,7 +287,7 @@ U0 ShellBreak(CExceptFrame *f)
 I64 ShellFault(I64 vec, CExceptFrame *f)
 {//except_hook: a typed statement faulted; report it and go back to the prompt.
     I64 ec = f->esr >> 26 & 0x3F;
-    U8 *what = "exception";
+    U8 *what = "exception", where[80];
     if (vec != EXC_CUR_SPX_SYNC || !shell_in_stmt || Fs != shell_task)
         return FALSE;
     shell_in_stmt = FALSE;
@@ -299,7 +299,7 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
         what = "misaligned access";
     else if (ec == 0)
         what = "invalid instruction";
-    Print("\nERROR: %s at address %X (code at %X)\n", what, f->far, f->elr);
+    Print("\nERROR: %s at address %X (code at %s)\n", what, f->far, StrPrintFunSeg(where, f->elr));
     f->elr = &ShellFaultResume;
     return TRUE;
 }
@@ -396,7 +396,7 @@ U0 ShellRtInit()
 }
 
 U0 ShellSym(U8 *name, U8 *addr)
-{//Make a kernel routine a system symbol; `extern` in ShellA.HH binds it.
+{//Make a kernel symbol a system symbol; an `extern` of the prelude binds it.
     U8 *e = CAlloc(HASH_EXPORT_SIZE), **str = e + HASH_STR;
     U32 *type = e + HASH_TYPE;
     U8 **val = e + HASH_EXPORT_VAL;
@@ -409,53 +409,10 @@ U0 ShellSym(U8 *name, U8 *addr)
 }
 
 U0 ShellSyms()
-{//Every prototype in ShellA.HH needs its symbol here.
-    ShellSym("Print", &Print);
-    ShellSym("StrPrint", &StrPrint);
-    ShellSym("MStrPrint", &MStrPrint);
-    ShellSym("PutChars", &PutChars);
-    ShellSym("MAlloc", &MAlloc);
-    ShellSym("CAlloc", &CAlloc);
-    ShellSym("Free", &Free);
-    ShellSym("ReAlloc", &ReAlloc);
-    ShellSym("MSize", &MSize);
-    ShellSym("StrNew", &StrNew);
-    ShellSym("MemSet", &MemSet);
-    ShellSym("MemCpy", &MemCpy);
-    ShellSym("MemCmp", &MemCmp);
-    ShellSym("StrLen", &StrLen);
-    ShellSym("StrCpy", &StrCpy);
-    ShellSym("StrCat", &StrCat);
-    ShellSym("StrCmp", &StrCmp);
-    ShellSym("StrNCmp", &StrNCmp);
-    ShellSym("StrICmp", &StrICmp);
-    ShellSym("ToUpper", &ToUpper);
-    ShellSym("ToLower", &ToLower);
-    ShellSym("StrFind", &StrFind);
-    ShellSym("GetKey", &GetKey);
-    ShellSym("GetChar", &GetChar);
-    ShellSym("GetStr", &GetStr);
-    ShellSym("Yield", &Yield);
-    ShellSym("Sleep", &Sleep);
-    ShellSym("TaskRep", &TaskRep);
-    ShellSym("HeapStats", &HeapStats);
-    ShellSym("ConsClear", &ConsClear);
-    ShellSym("FbFillRect", &FbFillRect);
-    ShellSym("BlkCount", &BlkCount);
-    ShellSym("BlkSectors", &BlkSectors);
-    ShellSym("BlkRead", &BlkRead);
-    ShellSym("BlkWrite", &BlkWrite);
-    ShellSym("FileRead", &FileRead);
-    ShellSym("FileWrite", &FileWrite);
-    ShellSym("Cd", &Cd);
-    ShellSym("Dir", &Dir);
-    ShellSym("DirMk", &DirMk);
-    ShellSym("MkDir", &MkDir);
-    ShellSym("Del", &Del);
-    ShellSym("Copy", &Copy);
-    ShellSym("Move", &Move);
-    ShellSym("Rename", &Rename);
-    ShellSym("Type", &Type);
+{//Every kernel symbol (KSym.HC); the prelude's externs bind to them.
+    I64 i, n = KSymCnt;
+    for (i = 0; i < n; i++)
+        ShellSym(KSymName(i), KSymAddr(i));
 }
 
 I64 ShellExe(U8 *src)

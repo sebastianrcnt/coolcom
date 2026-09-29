@@ -7,6 +7,7 @@
 #include "Spin.HC"
 #include "StrPrint.HC"
 #include "StrA.HC"
+#include "KSym.HC"
 #include "Mem.HC"
 #include "Font8x8.HC"
 #include "Fb.HC"
