@@ -76,15 +76,18 @@ CWToken *WLex(CWUnit *u, CWSource *src)
         } else if (c == '"') {
             quote = 1; k = 5;
             if (s[i + 1] == '"' && s[i + 2] == '"') {quote = 3; k = 6;}
-            i += quote; value = WAlloc(u, (src->size - i) + 1); n = 0;
+            i += quote; j = i;
             while (i < src->size) {
-                if (s[i] == 92 && s[i + 1] == '"' && (quote == 1 || (s[i + 2] == '"' && s[i + 3] == '"'))) {
-                    i++; for (j = 0; j < quote; j++) value[n++] = s[i++];
-                } else if (s[i] == '"' && (quote == 1 || (s[i + 1] == '"' && s[i + 2] == '"'))) break;
-                else value[n++] = s[i++];
+                if (s[i] == 92 && s[i + 1] == '"' && (quote == 1 || (s[i + 2] == '"' && s[i + 3] == '"'))) i += quote + 1;
+                else if (s[i] == '"' && (quote == 1 || (s[i + 1] == '"' && s[i + 2] == '"'))) break;
+                else i++;
             }
-            if (i == src->size) k = -1;
-            else i += quote;
+            value = WAlloc(u, (i - j) + 1); n = 0;
+            while (j < i) {
+                if (s[j] == 92 && s[j + 1] == '"' && (quote == 1 || (s[j + 2] == '"' && s[j + 3] == '"'))) j++;
+                value[n++] = s[j++];
+            }
+            if (i == src->size) k = -1; else i += quote;
         } else {
             if (WPrefix(s + i, "@embed")) {i += 6;}
             else if (WPrefix(s + i, "&!") || WPrefix(s + i, "&~") || WPrefix(s + i, "&(") || WPrefix(s + i, "/=") || WPrefix(s + i, "<=") || WPrefix(s + i, ">=") || WPrefix(s + i, "->") || WPrefix(s + i, "=>") || WPrefix(s + i, ":=")) i += 2;

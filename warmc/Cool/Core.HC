@@ -6,7 +6,7 @@ class CWNode {
     CWNode *next, *first, *last;
     CWToken *token, *finish;
     U8 *tag, *name, *role;
-    CWNode *resolved, *ty, *owner, *scope, *pair;
+    CWNode *resolved, *ty, *owner, *scope, *pair, *lowered;
     I64 flags;
 };
 class CWUnit {
@@ -16,7 +16,7 @@ class CWUnit {
     CWNode *modules, *last_module;
     CWToken *error_token;
     U8 *error_kind, *error_message;
-    I64 nodes, tokens, depth;
+    I64 nodes, tokens, depth, symbol_base, instance_depth;
 };
 U8 *WAlloc(CWUnit *u, I64 size)
 {
@@ -104,4 +104,9 @@ U8 *WTriple(CWUnit *u, U8 *s)
             if (joined[i]) out[k++] = '\n'; start = i + 1;
         }
     return out;
+}
+U8 *WConcat(CWUnit *u, U8 *a, U8 *b)
+{
+    I64 na = StrLen(a), nb = StrLen(b); U8 *s = WAlloc(u, na + nb + 1);
+    MemCpy(s, a, na); MemCpy(s + na, b, nb); return s;
 }

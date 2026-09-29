@@ -34,16 +34,27 @@ Bool WVisibleInstance(CWNode *from, CWNode *inst)
 }
 CWNode *WFindInstance(CWUnit *u, CWNode *from, CWNode *tc, CWNode *ty)
 {
-    CWNode *m, *d, *env, *c;
+    CWNode *m, *d, *env, *p, *c, *actual, *result = NULL;
+    Bool valid;
+    if (!ty || u->instance_depth >= 64) return NULL;
     if (WTypeVar(ty)) {
         for (c = ty->resolved->first; c; c = c->next) if (WEq(c->role, "constraint") && c->resolved == tc) return ty->resolved;
         return NULL;
     }
-    for (m = u->modules; m; m = m->next) for (d = m->first; d; d = d->next)
-            if (WEq(d->tag, "instance") && d->resolved == tc && WVisibleInstance(from, d)) {
-                env = WScope(u, NULL); if (WMatch(u, WChild(d, "argument"), ty, env)) return d;
+    u->instance_depth++;
+    for (m = u->modules; m && !result; m = m->next) for (d = m->first; d && !result; d = d->next)
+            if (WEq(d->tag, "instance") && d->resolved == tc && !(d->flags & 1024) && WVisibleInstance(from, d)) {
+                env = WScope(u, NULL);
+                if (WMatch(u, WChild(d, "argument"), ty, env)) {
+                    valid = TRUE;
+                    for (p = d->first; p && valid; p = p->next) if (WEq(p->role, "type-parameter")) {
+                            actual = WBinding(env, p);
+                            for (c = p->first; c && valid; c = c->next) if (WEq(c->role, "constraint") && !WFindInstance(u, from, c->resolved, actual)) valid = FALSE;
+                        }
+                    if (valid) result = d;
+                }
             }
-    return NULL;
+    u->instance_depth--; return result;
 }
 U0 WConstraints(CWUnit *u, CWNode *from, CWNode *decl, CWNode *bindings, CWToken *at)
 {
@@ -126,6 +137,26 @@ CWNode *WCall(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
     }
     return WSubst(u, result, bindings);
 }
+CWNode *WClone(CWUnit *u, CWNode *n)
+{
+    CWNode *c = WAlloc(u, sizeof(CWNode)); MemCpy(c, n, sizeof(CWNode)); c->next = NULL; return c;
+}
+CWNode *WArithmetic(CWUnit *u, CWNode *n, CWNode *type, CWNode *fun)
+{
+    U8 *name = "trappingAdd";
+    CWNode *call = WNode(u, "call", n->token), *arg, *left, *right, *pervasive;
+    if (WEq(n->name, "-")) name = "trappingSubtract";
+    if (WEq(n->name, "*")) name = "trappingMultiply";
+    if (WEq(n->name, "/")) name = "trappingDivide";
+    pervasive = WModule(u, "Austral.Pervasive", "interface"); call->name = name; call->resolved = WLocal(pervasive->scope, name);
+    if (WEq(n->tag, "unary")) {
+        left = WNode(u, "literal", n->token); left->name = "0"; left->token = WAlloc(u, sizeof(CWToken)); MemCpy(left->token, n->token, sizeof(CWToken)); left->token->kind = 3;
+        right = WChild(n, "value");
+    } else {left = WChild(n, "left"); right = WChild(n, "right");}
+    arg = WNode(u, "argument", left->token); WAdd(arg, WClone(u, left), "value"); WAdd(call, arg, "argument");
+    arg = WNode(u, "argument", right->token); WAdd(arg, WClone(u, right), "value"); WAdd(call, arg, "argument");
+    call->ty = WCall(u, call, type, fun); n->lowered = call; return call->ty;
+}
 CWNode *WPathType(CWUnit *u, CWNode *n, CWNode *ty, CWNode *fun)
 {
     CWNode *part, *d, *slot, *env, *region, *inner;
@@ -138,11 +169,13 @@ CWNode *WPathType(CWUnit *u, CWNode *n, CWNode *ty, CWNode *fun)
                 inner = ty;
                 if (refpath && inner && (WEq(inner->name, "&") || WEq(inner->name, "&!"))) inner = inner->first;
                 if (!inner || (!WEq(inner->name, "Span") && !WEq(inner->name, "Span!"))) {WFail(u, n->token, "Type Error", "Index requires a span"); break;}
+                if ((n->flags & 2) && WEq(inner->name, "Span")) WFail(u, n->token, "Type Error", "Cannot write through a read-only span");
                 region = inner->first->next; if (WEq(inner->name, "Span!")) mode = "&!";
                 ty = inner->first;
             } else {
                 if (WEq(part->tag, "->")) {
                     if (!ty || (!WEq(ty->name, "&") && !WEq(ty->name, "&!"))) {WFail(u, n->token, "Generic Error", "Arrow requires a reference"); break;}
+                    if ((n->flags & 2) && WEq(ty->name, "&")) WFail(u, n->token, "Type Error", "Cannot write through a read-only reference");
                     region = ty->first->next; mode = ty->name; ty = ty->first;
                 } else if (refpath) {WFail(u, n->token, "Type Error", "Reference transform field requires an arrow"); break;}
                 d = NULL; if (ty) d = WCanon(ty->resolved);
@@ -154,6 +187,10 @@ CWNode *WPathType(CWUnit *u, CWNode *n, CWNode *ty, CWNode *fun)
             if (refpath && region) ty = WRefType(u, mode, ty, region);
             part->ty = ty;
         }
+    if (!refpath && ty && WUniverseOf(ty) != 0) {
+        if (n->flags & 2) WFail(u, n->token, "Linearity Error", "Cannot overwrite a linear path payload");
+        else WFail(u, n->token, "Linearity Error", "Path extraction requires a Free result type");
+    }
     return ty;
 }
 CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
@@ -193,12 +230,17 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
         WRequire(u, n, b, a); ty = a;
         if (!cmp && !WEq(name, "and") && !WEq(name, "or") && !WNumber(a)) WFail(u, n->token, "Type Error", "Arithmetic requires numeric operands");
         if (cmp) ty = WTypeNamed(u, scope, "Bool");
+        else if (!WEq(name, "and") && !WEq(name, "or") && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
     } else if (WEq(tag, "unary")) {
         a = expected; if (WEq(name, "not")) a = WTypeNamed(u, scope, "Bool");
         ty = WInfer(u, WChild(n, "value"), a, fun);
         if (WEq(name, "-") && !WNumber(ty)) WFail(u, n->token, "Type Error", "Negation requires a number");
+        if (WEq(name, "-") && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
     } else if (WEq(tag, "cast")) {
-        ty = WChild(n, "type"); WValidateType(u, ty); a = WInfer(u, WChild(n, "value"), ty, fun);
+        ty = WChild(n, "type"); WValidateType(u, ty); v = WChild(n, "value");
+        if (WEq(ty->name, "&") && (WEq(v->tag, "variable") || WEq(v->tag, "path"))) a = WInfer(u, v, NULL, fun);
+        else a = WInfer(u, v, ty, fun);
+        if (a && WEq(a->name, "&!") && WEq(ty->name, "&") && WTypeEq(a->first, ty->first) && WTypeEq(a->first->next, ty->first->next)) a = ty;
         // Literal/asserted-type casts are checked by the operand; explicit numeric
         // conversions are builtin functions in Warm.
         WRequire(u, n, a, ty);
@@ -211,7 +253,12 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
     } else if (WEq(tag, "borrow-expression")) {
         v = WChild(n, "value"); a = WInfer(u, v, NULL, fun); d = v->resolved;
         if (WEq(name, "&!") && d && !(d->flags & 1)) WFail(u, n->token, "Type Error", "Cannot mutably borrow an immutable binding");
-        b = WTypeNamed(u, scope, "Static");
+        b = WNode(u, "type", n->token); b->name = "_anonymous_region";
+        if (!n->owner) {
+            n->owner = WNode(u, "primitive", n->token); n->owner->name = b->name;
+            CWNode *universe = WNode(u, "universe", n->token); universe->name = "Region"; WAdd(n->owner, universe, "universe");
+        }
+        b->resolved = n->owner;
         if (WEq(name, "&~")) {
             if (!a || !WEq(a->name, "&!")) WFail(u, n->token, "Type Error", "Reborrow requires a mutable reference");
             else ty = WRefType(u, "&!", a->first, b);
@@ -226,6 +273,17 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
     } else WFail(u, n->token, "Unsupported Feature", "Expression typing not implemented");
     n->ty = ty; WRequire(u, n, ty, expected); return ty;
 }
+U0 WCompleteBindings(CWUnit *u, CWNode *pattern, CWNode *aggregate)
+{
+    CWNode *slot, *binding; I64 ns = 0, nb = 0;
+    for (binding = pattern->first; binding; binding = binding->next) if (WEq(binding->role, "binding")) nb++;
+    for (slot = aggregate->first; slot; slot = slot->next) if (WEq(slot->role, "slot")) {
+            ns++;
+            for (binding = pattern->first; binding; binding = binding->next) if (WEq(binding->role, "binding") && WEq(binding->name, slot->name)) break;
+            if (!binding) WFail(u, pattern->token, "Type Error", "Destructuring must bind every payload field");
+        }
+    if (ns != nb) WFail(u, pattern->token, "Type Error", "Destructuring field count differs from payload");
+}
 extern U0 WCheckBlock(CWUnit *u, CWNode *block, CWNode *fun);
 U0 WCheckStmt(CWUnit *u, CWNode *n, CWNode *fun)
 {
@@ -238,16 +296,20 @@ U0 WCheckStmt(CWUnit *u, CWNode *n, CWNode *fun)
     } else if (WEq(tag, "destructure")) {
         ty = WInfer(u, WChild(n, "value"), NULL, fun); d = NULL; if (ty) d = WCanon(ty->resolved);
         if (!d || !WEq(d->tag, "record")) {WFail(u, n->token, "Type Error", "Destructure requires a record"); return;}
-        env = WTypeParameters(u, ty);
+        env = WTypeParameters(u, ty); WCompleteBindings(u, n, d);
         for (b = n->first; b && !u->error_kind; b = b->next) if (WEq(b->role, "binding")) {
                 for (slot = d->first; slot; slot = slot->next) if (WEq(slot->role, "slot") && WEq(slot->name, b->name)) break;
                 if (!slot) WFail(u, b->token, "Generic Error", "Unknown destructured field");
                 else {a = WSubst(u, WChild(slot, "type"), env); b->ty = WChild(b, "type"); WRequire(u, b, a, b->ty); b->resolved = slot;}
             }
     } else if (WEq(tag, "assign")) {
-        v = WChild(n, "target"); ty = WInfer(u, v, NULL, fun); d = v->resolved;
+        v = WChild(n, "target"); v->flags |= 2; ty = WInfer(u, v, NULL, fun); d = v->resolved;
         if (d && WEq(d->tag, "constant")) WFail(u, n->token, "Generic Error", "Cannot assign to a constant");
-        else if (d && !(d->flags & 1)) WFail(u, n->token, "Generic Error", "Cannot assign to an immutable binding");
+        else if (d && !(d->flags & 1)) {
+            CWNode *base = WDeclType(d);
+            Bool through = WEq(v->tag, "path") && base && (WEq(base->name, "&!") || WEq(base->name, "Span!"));
+            if (!through) WFail(u, n->token, "Generic Error", "Cannot assign to an immutable binding");
+        }
         WInfer(u, WChild(n, "value"), ty, fun);
     } else if (WEq(tag, "return")) WInfer(u, WChild(n, "value"), WChild(fun, "result"), fun);
     else if (WEq(tag, "discard")) WInfer(u, WChild(n, "value"), NULL, fun);
@@ -276,7 +338,7 @@ U0 WCheckStmt(CWUnit *u, CWNode *n, CWNode *fun)
         for (c = n->first; c && !u->error_kind; c = c->next) if (WEq(c->role, "when")) {
                 for (cons = d->first; cons; cons = cons->next) if (WEq(cons->role, "constructor") && WEq(cons->name, c->name)) break;
                 if (!cons) {WFail(u, c->token, "Type Error", "Unknown union constructor"); break;}
-                c->resolved = cons;
+                c->resolved = cons; WCompleteBindings(u, c, cons);
                 for (other = n->first; other != c; other = other->next) if (WEq(other->role, "when") && WEq(other->name, c->name)) WFail(u, c->token, "Type Error", "Duplicate case arm");
                 for (b = c->first; b; b = b->next) if (WEq(b->role, "binding")) {
                         for (slot = cons->first; slot; slot = slot->next) if (WEq(slot->role, "slot") && WEq(slot->name, b->name)) break;
@@ -325,11 +387,19 @@ Bool WReturn(CWNode *n)
 }
 U0 WSignature(CWUnit *u, CWNode *decl, CWNode *def, CWNode *env)
 {
-    CWNode *p, *q, *v, *b, *x, *y;
+    CWNode *p, *q, *v, *b, *x, *y, *cx, *cy;
     q = WChild(def, "type-parameter");
     for (p = decl->first; p; p = p->next) if (WEq(p->role, "type-parameter")) {
             if (!q) {WFail(u, def->token, "Declaration Error", "Type parameter count differs from declaration"); return;}
             if (!WSameSyntax(WChild(p, "universe"), WChild(q, "universe"))) WFail(u, q->token, "Declaration Error", "Type parameter universe differs from declaration");
+            for (cx = p->first; cx; cx = cx->next) if (WEq(cx->role, "constraint")) {
+                    for (cy = q->first; cy; cy = cy->next) if (WEq(cy->role, "constraint") && cy->resolved == cx->resolved) break;
+                    if (!cy) WFail(u, q->token, "Declaration Error", "Type parameter constraints differ from declaration");
+                }
+            for (cx = q->first; cx; cx = cx->next) if (WEq(cx->role, "constraint")) {
+                    for (cy = p->first; cy; cy = cy->next) if (WEq(cy->role, "constraint") && cy->resolved == cx->resolved) break;
+                    if (!cy) WFail(u, q->token, "Declaration Error", "Type parameter constraints differ from declaration");
+                }
             v = WNode(u, "type", q->token); v->name = q->name; v->resolved = q;
             b = WNode(u, "substitution", p->token); b->resolved = p; b->ty = v; WAdd(env, b, "binding");
             q = q->next; while (q && !WEq(q->role, "type-parameter")) q = q->next;
@@ -420,6 +490,13 @@ U0 WDeclarationTypes(CWUnit *u, CWNode *n)
         if (WEq(univ->name, "Region")) WFail(u, n->token, "Declaration Error", "Typeclass parameter cannot inhabit Region");
     }
     if (WEq(n->tag, "function")) {
+        I64 imports = 0, exports = 0;
+        for (p = n->first; p; p = p->next) if (WEq(p->tag, "pragma")) {
+                if (WEq(p->name, "Foreign_Import")) imports++;
+                if (WEq(p->name, "Foreign_Export")) exports++;
+            }
+        if (imports && exports) WFail(u, n->token, "Declaration Error", "Function cannot be both imported and exported");
+        if (exports && WChild(n, "type-parameter")) WFail(u, n->token, "Declaration Error", "Cannot export a generic function");
         for (p = n->first; p; p = p->next) if (WEq(p->role, "type-parameter")) {
                 I64 used = 0;
                 for (c = n->first; c; c = c->next) {
@@ -429,18 +506,34 @@ U0 WDeclarationTypes(CWUnit *u, CWNode *n)
                 if (!used) WFail(u, p->token, "Declaration Error", "Unused type parameter in function signature");
             }
     }
+    if (n->pair && WEq(n->tag, "constant") && WChild(n, "value") && !WTypeEq(WChild(n, "type"), WChild(n->pair, "type"))) WFail(u, n->token, "Declaration Error", "Constant type differs from interface");
+    if (n->pair && WEq(n->pair->tag, "type") && !WSameSyntax(WChild(n, "universe"), WChild(n->pair, "universe"))) WFail(u, n->token, "Declaration Error", "Opaque type universe differs from implementation");
     if (WEq(n->tag, "instance")) WInstanceContract(u, n);
     if (WEq(n->tag, "function") && n->pair && WChild(n, "body")) WSignature(u, n->pair, n, WScope(u, NULL));
     for (c = n->first; c && !u->error_kind; c = c->next) if (!WEq(c->role, "body") && !WEq(c->role, "value") && !WEq(c->role, "doc")) WDeclarationTypes(u, c);
 }
+Bool WConstantExpr(CWNode *n)
+{
+    CWNode *c;
+    if (WEq(n->tag, "literal") || WEq(n->tag, "embed") || WEq(n->tag, "sizeof") || WEq(n->tag, "cast")) return TRUE;
+    if (WEq(n->tag, "variable")) return n->resolved && (WEq(n->resolved->tag, "constant") || WEq(n->resolved->tag, "function"));
+    if (WEq(n->tag, "call") && (!n->resolved || (!WEq(n->resolved->tag, "record") && !WEq(n->resolved->tag, "constructor")))) return FALSE;
+    if (WEq(n->tag, "dereference") || WEq(n->tag, "borrow-expression")) return FALSE;
+    for (c = n->first; c; c = c->next) if (!WEq(c->role, "type") && !WConstantExpr(c)) return FALSE;
+    return TRUE;
+}
 U0 WTypeCheck(CWUnit *u)
 {
+    WFoldUnit(u);
     CWNode *m, *d, *f, *body;
     for (m = u->modules; m && !u->error_kind; m = m->next)
         for (d = m->first; d && !u->error_kind; d = d->next) if (WEq(d->role, "declaration")) WDeclarationTypes(u, d);
     for (m = u->modules; m && !u->error_kind; m = m->next) {
         for (d = m->first; d && !u->error_kind; d = d->next) if (WEq(d->role, "declaration")) {
-                if (WEq(d->tag, "constant") && WChild(d, "value")) WInfer(u, WChild(d, "value"), WChild(d, "type"), d);
+                if (WEq(d->tag, "constant") && WChild(d, "value")) {
+                    WInfer(u, WChild(d, "value"), WChild(d, "type"), d);
+                    if (!WConstantExpr(WChild(d, "value"))) WFail(u, d->token, "Type Error", "Invalid constant expression");
+                }
                 if (WEq(d->tag, "instance")) f = WChild(d, "method"); else f = d;
                 while (f && !u->error_kind) {
                     body = WChild(f, "body");

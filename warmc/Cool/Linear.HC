@@ -126,7 +126,7 @@ U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow)
         WLinearExpr(u, WChild(n, "value"), flow); WReleaseTemps(flow); WCheckLive(u, n, flow->states, NULL); flow->returned = TRUE;
     } else if (WEq(n->tag, "discard")) {
         v = WChild(n, "value"); WLinearExpr(u, v, flow); WReleaseTemps(flow);
-        if (WMustConsume(v->ty)) WFail(u, n->token, "Linearity Error", "Discarded expression has a linear type");
+        if (WMustConsume(v->ty)) WFail(u, n->token, "Type Error", "Discarded expression has a linear type");
     } else if (WEq(n->tag, "if")) {
         WLinearExpr(u, WChild(n, "condition"), flow); WReleaseTemps(flow);
         a = WFork(u, flow); other = WFork(u, flow); WLinearStmt(u, WChild(n, "then"), a);

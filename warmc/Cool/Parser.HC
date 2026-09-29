@@ -14,7 +14,7 @@ Bool WAccept(CWUnit *u, U8 *s)
 CWToken *WExpect(CWUnit *u, U8 *s)
 {
     CWToken *t = u->cursor;
-    if (!WAccept(u, s)) WFail(u, t, "Parse Error", s);
+    if (!WAccept(u, s)) WFail(u, t, "Parse Error", WConcat(u, "Expected token: ", s));
     return t;
 }
 CWToken *WIdent(CWUnit *u)

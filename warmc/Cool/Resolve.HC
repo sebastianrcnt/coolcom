@@ -19,7 +19,7 @@ CWNode *WLookup(CWNode *scope, U8 *name)
 U0 WBind(CWUnit *u, CWNode *scope, U8 *name, CWNode *decl, U8 *kind)
 {
     CWNode *s;
-    if (WLocal(scope, name)) {WFail(u, decl->token, kind, "Duplicate declaration or binding"); return;}
+    if (WLocal(scope, name)) {WFail(u, decl->token, kind, WConcat(u, "Duplicate declaration or binding: ", name)); return;}
     s = WNode(u, "symbol", decl->token); s->name = name; s->resolved = decl; WAdd(scope, s, "symbol");
 }
 CWNode *WModule(CWUnit *u, U8 *name, U8 *tag)
@@ -62,7 +62,7 @@ U0 WIndex(CWUnit *u)
     }
     for (m = u->modules; m && !u->error_kind; m = m->next) {
         for (p = u->modules; p != m; p = p->next) if (WEq(m->name, p->name) && WEq(m->tag, p->tag)) WFail(u, m->token, "Declaration Error", "Duplicate module");
-        m->scope = WScope(u, base);
+        m->scope = WScope(u, base); m->scope->owner = m;
         for (d = m->first; d; d = d->next) if (WEq(d->role, "declaration")) WIndexDecl(u, m->scope, d, m);
     }
     // Pair interfaces before importing, and give the body its public type declarations.
@@ -122,9 +122,10 @@ U0 WResolveType(CWUnit *u, CWNode *n, CWNode *scope)
 {
     CWNode *c, *d;
     if (!n || u->error_kind) return;
+    n->scope = scope;
     if (!WEq(n->name, "&") && !WEq(n->name, "&!") && !WEq(n->name, "Span") && !WEq(n->name, "Span!")) {
         d = WLookup(scope, n->name); n->resolved = d;
-        if (!d) WFail(u, n->token, "Declaration Error", "Unknown type name");
+        if (!d) WFail(u, n->token, "Declaration Error", WConcat(u, "Unknown type: ", n->name));
         else if (!WEq(d->tag, "primitive") && !WEq(d->tag, "type-parameter") && !WEq(d->tag, "record") && !WEq(d->tag, "union") && !WEq(d->tag, "type")) WFail(u, n->token, "Declaration Error", "Name does not denote a type");
     }
     for (c = n->first; c; c = c->next) WResolveType(u, c, scope);
@@ -138,7 +139,7 @@ U0 WResolveTree(CWUnit *u, CWNode *n, CWNode *scope)
     if (WEq(n->tag, "type")) {WResolveType(u, n, scope); return;}
     if (WEq(n->tag, "variable") || WEq(n->tag, "call") || WEq(n->tag, "path") || WEq(n->tag, "ref-path")) {
         n->resolved = WLookup(scope, n->name);
-        if (!n->resolved) WFail(u, n->token, "Generic Error", "Unknown value or function name");
+        if (!n->resolved) WFail(u, n->token, "Generic Error", WConcat(u, "Unknown value or function: ", n->name));
     }
     if (WEq(n->tag, "block")) {
         s = WScope(u, scope); n->scope = s;

@@ -3,6 +3,7 @@
 #include "Parser.HC"
 #include "Resolve.HC"
 #include "Types.HC"
+#include "Fold.HC"
 #include "Check.HC"
 #include "Linear.HC"
 #include "Emit.HC"

@@ -117,3 +117,14 @@ U32 wc_f64_to_f32(F64 value) {
     if (exponent > 127) return sign | 0x7f800000;
     return sign | ((exponent + 127) << 23) | (mantissa & 0x7fffff);
 }
+// Native Cool uses signed float-to-integer conversion. Split the upper half.
+U64 wc_f64_to_u64(F64 value)
+{
+    I64 part;
+    if (value >= 0x43e0000000000000(F64)) {
+        part = value - 0x43e0000000000000(F64);
+        return part(U64) + 0x8000000000000000;
+    }
+    part = value;
+    return part(U64);
+}

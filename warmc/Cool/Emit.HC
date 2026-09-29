@@ -4,7 +4,7 @@ class CWGen {
     CWUnit *unit;
     CWBuffer *types_text, *body;
     CWNode *types, *names, *functions, *last_function, *current, *bindings;
-    I64 serial;
+    I64 serial; Bool native;
 };
 U0 WGPut(CWUnit *u, CWBuffer *b, U8 *text)
 {
@@ -151,6 +151,9 @@ CWNode *WGRequest(CWGen *g, CWNode *decl, CWNode *env)
         }
     for (f = g->functions; f; f = f->next) if (f->resolved == decl && WTypeEq(f->ty, signature)) return f;
     f = WNode(u, "specialization", decl->token); f->resolved = decl; f->pair = env; f->ty = signature; f->name = WGFresh(g, "wf");
+    for (p = decl->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Export")) {
+            CWNode *arg = WChild(p, "argument"); if (arg) f->name = WChild(arg, "value")->name;
+        }
     if (g->last_function) g->last_function->next = f; else g->functions = f; g->last_function = f; return f;
 }
 extern U8 *WGExpr(CWGen *g, CWNode *n);
@@ -176,15 +179,30 @@ U8 *WGInteger(CWUnit *u, U8 *s)
     for (; s[i]; i++) if (s[i] != 39) {ch[0] = s[i]; WGPut(u, b, ch);}
     return b->data;
 }
+U8 *WGFloat(CWUnit *u, U8 *text)
+{
+    U64 bits = WBFloatBits(u, text); U8 hex[19], *digits = "0123456789abcdef"; I64 i;
+    hex[0] = '0'; hex[1] = 'x'; hex[18] = 0;
+    for (i = 0; i < 16; i++) hex[i + 2] = digits[(bits >> ((15 - i) * 4)) & 15];
+    return WG3(u, "(", WText(u, hex, 18), "(F64))");
+}
 U8 *WGStringValue(CWUnit *u, CWNode *n)
 {
-    // String lexer has already decoded escaped quotes. Warm preserves other
-    // escapes for its C-compatible string renderer; decode them once here.
     U8 *s = n->name, *out = WAlloc(u, StrLen(s) + 1); I64 i = 0, j = 0, c;
     while (s[i]) {
         c = s[i++];
-        if (c == 92 && s[i]) {c = s[i++]; if (c == 'n') c = 10; else if (c == 'r') c = 13; else if (c == 't') c = 9;}
+        if (c == 92 && s[i]) {
+            c = s[i];
+            if (c == 'n' || c == 'r' || c == 't' || c == 39 || c == '"' || c == 92) {
+                i++; if (c == 'n') c = 10; else if (c == 'r') c = 13; else if (c == 't') c = 9;
+            } else if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+                while (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') i++;
+                if (s[i] != 92) {WFail(u, n->token, "Generic Error", "Bad whitespace escape sequence"); return out;}
+                i++; goto string_next;
+            } else {out[j++] = 92; i++;}
+        }
         out[j++] = c;
+string_next:
     }
     return out;
 }
@@ -223,6 +241,27 @@ U8 *WGExpand(CWUnit *u, U8 *text, CWNode *values)
     if (!b->data) return "";
     return b->data;
 }
+U8 *WGKernelFormat(CWUnit *u, U8 *fmt)
+{
+    CWBuffer *out = WAlloc(u, sizeof(CWBuffer)); I64 i = 0; U8 ch[2]; ch[1] = 0;
+    Bool precision;
+    while (fmt[i]) {
+        if (fmt[i] != '%') {ch[0] = fmt[i++]; WGPut(u, out, ch);}
+        else {
+            WGPut(u, out, "%"); i++; precision = FALSE;
+            if (fmt[i] == '%') {WGPut(u, out, "%"); i++;}
+            else {
+                while (fmt[i] && !WAlpha(fmt[i])) {if (fmt[i] == '.') precision = TRUE; ch[0] = fmt[i++]; WGPut(u, out, ch);}
+                while (fmt[i] == 'l' || fmt[i] == 'z' || fmt[i] == 'h') i++;
+                ch[0] = fmt[i]; if (fmt[i]) i++;
+                if (ch[0] == 'i') ch[0] = 'd';
+                if (ch[0] == 'f' && !precision) WGPut(u, out, ".6");
+                WGPut(u, out, ch);
+            }
+        }
+    }
+    return out->data;
+}
 U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
 {
     CWUnit *u = g->unit; CWNode *ty = WGConcrete(g, n->ty), *a = args, *b = NULL, *c = NULL, *bound;
@@ -258,12 +297,15 @@ U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
     else if (WEq(s, "*($1)") && a && !b) expr = WG3(u, "(*(", a->name, "))");
     else if (WEq(s, "~ $1") && a && !b) expr = WG3(u, "(~(", a->name, "))");
     else if (WEq(s, "AU_STORE($1, $2)") && b && !c) {WGCopy(g, WG3(u, "(*(", a->name, "))"), b->name, b->ty); return "0";}
-    else if (b && !c && (WEq(s, "$1 + $2") || WEq(s, "$1 - $2") || WEq(s, "$1 * $2") || WEq(s, "$1 / $2") || WEq(s, "$1 & $2") || WEq(s, "$1 | $2") || WEq(s, "$1 ^ $2") || WEq(s, "($1 % $2)"))) expr = WG3(u, "(", WGExpand(u, s, args), ")");
+    else if (b && !c && (WEq(s, "$1 + $2") || WEq(s, "$1 - $2") || WEq(s, "$1 * $2") || WEq(s, "$1 / $2") || WEq(s, "$1 & $2") || WEq(s, "$1 | $2") || WEq(s, "$1 ^ $2") || WEq(s, "($1 % $2)"))) {
+        if (WEq(ty->name, "Float32")) {a->name = WG3(u, "wc_f32_to_f64(", a->name, ")"); b->name = WG3(u, "wc_f32_to_f64(", b->name, ")");}
+        expr = WG3(u, "(", WGExpand(u, s, args), ")"); if (WEq(ty->name, "Float32")) expr = WG3(u, "wc_f64_to_f32(", expr, ")");
+    }
     else if (WPrefix(s, "au_printf(\"")) {
         i = 11;
         while (s[i] && s[i] != '"') {if (s[i] == 92 && s[i + 1]) i++; i++;}
         if (s[i] != '"') {WFail(u, n->token, "Unsupported Feature", "Malformed printf embed"); return "0";}
-        fmt = WText(u, s + 10, (i - 10) + 1); tail = s + i + 1;
+        fmt = WText(u, s + 10, (i - 10) + 1); if (!g->native) fmt = WGKernelFormat(u, fmt); tail = s + i + 1;
         // Only comma-separated placeholders are accepted after the literal format.
         CWBuffer *expected = WAlloc(u, sizeof(CWBuffer)); j = 1;
         for (bound = args; bound; bound = bound->next) {WGPut(u, expected, ", $"); WGPut(u, expected, WGDec(u, j++));}
@@ -299,7 +341,10 @@ U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
     else if ((WEq(s, "au_memcpy($1, $2, $3)") || WEq(s, "au_memmove($1, $2, $3)")) && c && !c->next) expr = WGExpand(u, s, args);
     if (!expr) {WFail(u, n->token, "Unsupported Feature", "Unsupported C embed pattern"); return "0";}
     if (a && WIntBits(ty->name) && (WEq(a->ty->name, "Float64") || WEq(a->ty->name, "Float32")) && (WEq(s, "$1") || WPrefix(s, "(("))) {
-        U8 *numeric = WGFresh(g, "wc"); WGLine(g, WG3(u, "I64 ", numeric, ";")); WGLine(g, WG3(u, numeric, " = ", WGCat(u, expr, ";"))); expr = numeric;
+        if (WIntBits(ty->name) == 64 && !WPrefix(ty->name, "Int")) expr = WG3(u, "wc_f64_to_u64(", expr, ")");
+        else {
+            U8 *numeric = WGFresh(g, "wc"); WGLine(g, WG3(u, "I64 ", numeric, ";")); WGLine(g, WG3(u, numeric, " = ", WGCat(u, expr, ";"))); expr = numeric;
+        }
     }
     tmp = WGTemp(g, ty); WGCopy(g, tmp, expr, ty); return tmp;
 }
@@ -413,11 +458,12 @@ U8 *WGExpr(CWGen *g, CWNode *n)
     CWUnit *u = g->unit; CWNode *ty = WGConcrete(g, n->ty), *d, *v, *args;
     U8 *a, *b, *tmp, *op, *text;
     if (u->error_kind) return "0";
+    if (n->lowered) return WGExpr(g, n->lowered);
     if (WEq(n->tag, "literal")) {
         if (WEq(n->name, "nil") || WEq(n->name, "false")) return "0";
         if (WEq(n->name, "true")) return "1";
         if (n->token->kind == 3 || n->token->kind == 4) {
-            text = WGInteger(u, n->name);
+            text = WGInteger(u, n->name); if (n->token->kind == 4) text = WGFloat(u, n->name);
             if (WEq(ty->name, "Float32")) {
                 tmp = WGTemp(g, ty); WGCopy(g, tmp, WG3(u, "wc_f64_to_f32(", text, ")"), ty); return tmp;
             }
@@ -547,17 +593,26 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
     CWGen *g = WAlloc(u, sizeof(CWGen)); CWNode *m, *d, *f, *p, *ty, *entryfun = NULL;
     CWBuffer *result = WAlloc(u, sizeof(CWBuffer)), *protos = WAlloc(u, sizeof(CWBuffer));
     U8 *mn, *fn, *sig, *value, *call; I64 i = 0;
-    g->unit = u; g->types_text = WAlloc(u, sizeof(CWBuffer));
-    while (entry[i] && entry[i] != ':') i++;
-    if (!entry[i]) {WFail(u, NULL, "Entrypoint Definition Error", "Expected Module:function entrypoint"); return NULL;}
-    mn = WText(u, entry, i); fn = entry + i + 1; m = WModule(u, mn, "module");
-    d = NULL; if (m) d = WLocal(m->scope, fn);
-    if (!d || !WEq(d->tag, "function")) {WFail(u, NULL, "Entrypoint Definition Error", "Entrypoint function not found"); return NULL;}
-    ty = WChild(d, "result"); p = WChild(d, "parameter");
-    if (WChild(d, "type-parameter") || !ty || !WEq(ty->name, "ExitCode") || (p && (!WEq(WChild(p, "type")->name, "RootCapability") || (p->next && WEq(p->next->role, "parameter"))))) {
-        WFail(u, d->token, "Entrypoint Definition Error", "Entrypoint requires ExitCode and at most one RootCapability"); return NULL;
+    g->unit = u; g->native = native; g->serial = u->symbol_base; g->types_text = WAlloc(u, sizeof(CWBuffer));
+    if (entry && *entry) {
+        while (entry[i] && entry[i] != ':') i++;
+        if (!entry[i]) {WFail(u, NULL, "Entrypoint Definition Error", "Expected Module:function entrypoint"); return NULL;}
+        mn = WText(u, entry, i); fn = entry + i + 1; m = WModule(u, mn, "module");
+        d = NULL; if (m) d = WLocal(m->scope, fn);
+        if (!d || !WEq(d->tag, "function")) {WFail(u, NULL, "Entrypoint Definition Error", "Entrypoint function not found"); return NULL;}
+        ty = WChild(d, "result"); p = WChild(d, "parameter");
+        if (WChild(d, "type-parameter") || !ty || !WEq(ty->name, "ExitCode") || (p && (!WEq(WChild(p, "type")->name, "RootCapability") || (p->next && WEq(p->next->role, "parameter"))))) {
+            WFail(u, d->token, "Entrypoint Definition Error", "Entrypoint requires ExitCode and at most one RootCapability"); return NULL;
+        }
+        entryfun = WGRequest(g, d, WScope(u, NULL));
+    } else {
+        for (m = u->modules; m; m = m->next) if (WEq(m->tag, "module") && !WPrefix(m->name, "Austral."))
+                for (d = m->first; d; d = d->next) if (WEq(d->tag, "function") && !WChild(d, "type-parameter")) WGRequest(g, d, WScope(u, NULL));
     }
-    entryfun = WGRequest(g, d, WScope(u, NULL));
+    // Exports are roots even when the entrypoint never calls them.
+    for (m = u->modules; m; m = m->next) if (WEq(m->tag, "module") && !WPrefix(m->name, "Austral."))
+            for (d = m->first; d; d = d->next) if (WEq(d->tag, "function"))
+                    for (p = d->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Export")) WGRequest(g, d, WScope(u, NULL));
     for (f = g->functions; f && !u->error_kind; f = f->next) {
         g->current = f; g->bindings = f->pair; g->body = WAlloc(u, sizeof(CWBuffer));
         sig = WGSignature(g, f); WGLine(g, WGCat(u, sig, " {"));
@@ -570,18 +625,23 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
             }
         WGStmt(g, WChild(f->resolved, "body")); WGLine(g, "}"); f->role = g->body->data;
         WGPut(u, protos, WG3(u, "extern ", sig, ";\n"));
-        if (g->serial > 100000) WFail(u, f->token, "Unsupported Feature", "Specialization limit exceeded");
+        if (g->serial - u->symbol_base > 100000) WFail(u, f->token, "Unsupported Feature", "Specialization limit exceeded");
     }
-    g->body = WAlloc(u, sizeof(CWBuffer)); g->current = entryfun; g->bindings = entryfun->pair;
-    WGLine(g, "U0 WarmMain() {"); ty = WChild(entryfun->resolved, "result"); value = WGTemp(g, ty);
-    call = WG3(u, entryfun->name, "(&", value); p = WChild(entryfun->resolved, "parameter");
-    if (p) {fn = WGTemp(g, WChild(p, "type")); WGLine(g, WG3(u, "MemSet(&", fn, WG3(u, ",0,sizeof(", WGType(g, WChild(p, "type")), "));"))); call = WG3(u, call, ", &", fn);}
-    WGLine(g, WGCat(u, call, ");"));
-    if (native) WGLine(g, WG3(u, "if (", value, ".tag != 0) NativeExit(1);"));
-    WGLine(g, "}\nWarmMain();");
+    g->body = WAlloc(u, sizeof(CWBuffer));
+    if (entryfun) {
+        g->body = WAlloc(u, sizeof(CWBuffer)); g->current = entryfun; g->bindings = entryfun->pair;
+        U8 *mainname = "WarmMain"; if (u->symbol_base) mainname = WGCat(u, "WarmMain", WGDec(u, u->symbol_base));
+        WGLine(g, WG3(u, "U0 ", mainname, "() {")); ty = WChild(entryfun->resolved, "result"); value = WGTemp(g, ty);
+        call = WG3(u, entryfun->name, "(&", value); p = WChild(entryfun->resolved, "parameter");
+        if (p) {fn = WGTemp(g, WChild(p, "type")); WGLine(g, WG3(u, "MemSet(&", fn, WG3(u, ",0,sizeof(", WGType(g, WChild(p, "type")), "));"))); call = WG3(u, call, ", &", fn);}
+        WGLine(g, WGCat(u, call, ");"));
+        if (native) WGLine(g, WG3(u, "if (", value, ".tag != 0) NativeExit(1);"));
+        else WGLine(g, WG3(u, "if (", value, ".tag != 0) WKernelExit(1);"));
+        WGLine(g, WG3(u, "}\n", mainname, "();"));
+    }
     if (u->error_kind) return NULL;
     WGPut(u, result, runtime); if (g->types_text->data) WGPut(u, result, g->types_text->data);
-    WGPut(u, result, protos->data);
+    if (protos->data) WGPut(u, result, protos->data);
     for (f = g->functions; f; f = f->next) WGPut(u, result, f->role);
-    WGPut(u, result, g->body->data); return result->data;
+    if (g->body->data) WGPut(u, result, g->body->data); return result->data;
 }

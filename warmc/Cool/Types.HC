@@ -83,9 +83,19 @@ Bool WMatch(CWUnit *u, CWNode *pattern, CWNode *actual, CWNode *bindings)
     while (x && y) {if (!WMatch(u, x, y, bindings)) return FALSE; x = x->next; y = y->next;}
     return !x && !y;
 }
+U8 *WTypeDisplay(CWUnit *u, CWNode *t)
+{
+    U8 *s = t->name; CWNode *c;
+    if (t->first) {
+        s = WConcat(u, s, "[");
+        for (c = t->first; c; c = c->next) {if (c != t->first) s = WConcat(u, s, ", "); s = WConcat(u, s, WTypeDisplay(u, c));}
+        s = WConcat(u, s, "]");
+    }
+    return s;
+}
 U0 WRequire(CWUnit *u, CWNode *n, CWNode *actual, CWNode *expected)
 {
-    if (expected && actual && !WTypeEq(actual, expected)) WFail(u, n->token, "Type Error", "Type mismatch");
+    if (expected && actual && !WTypeEq(actual, expected)) WFail(u, n->token, "Type Error", WConcat(u, WConcat(u, "Expected ", WTypeDisplay(u, expected)), WConcat(u, ", found ", WTypeDisplay(u, actual))));
 }
 I64 WIntBits(U8 *name)
 {
@@ -152,6 +162,7 @@ CWNode *WTypeParameters(CWUnit *u, CWNode *type)
             }
     return bindings;
 }
+extern U0 WConstraints(CWUnit *u, CWNode *from, CWNode *decl, CWNode *bindings, CWToken *at);
 U0 WValidateType(CWUnit *u, CWNode *t)
 {
     CWNode *d, *p, *a, *b;
@@ -176,4 +187,9 @@ U0 WValidateType(CWUnit *u, CWNode *t)
     } else if (WEq(t->name, "Pointer") || WEq(t->name, "Address")) arity = 1;
     else if (WEq(t->name, "Fn")) arity = count;
     if (count != arity) WFail(u, t->token, "Generic Error", "Wrong number of type arguments");
+    if (!u->error_kind && d && WChild(d, "type-parameter")) {
+        CWNode *scope = t->scope;
+        while (scope && !scope->owner) scope = scope->resolved;
+        if (scope) WConstraints(u, scope->owner, d, WTypeParameters(u, t), t->token);
+    }
 }

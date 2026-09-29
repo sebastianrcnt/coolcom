@@ -17,23 +17,11 @@ import I64 FileWrite(U8 *path, U8 *data, I64 size);
 import I64 NativeArgCount();
 import U8 *NativeArg(I64 index);
 import U0 NativeExit(I64 code);
+import U0 NativeErrPutS(U8 *text);
 #include "Warm.HC"
 #include "../../build/warmcool/Builtins.HC"
 #include "../../build/warmcool/RuntimeText.HC"
-U0 WDiagnostic(CWUnit *u)
-{
-    CWToken *t = u->error_token;
-    I64 line = 1, col = 1, i, start = 0, end;
-    U8 *s;
-    if (!t) {Print("%s: %s\n", u->error_kind, u->error_message); return;}
-    s = t->source->text;
-    for (i = 0; i < t->start; i++) {if (s[i] == '\n') {line++; col = 1; start = i + 1;} else col++;}
-    end = start; while (s[end] && s[end] != '\n' && s[end] != '\r') end++;
-    Print("%s:%d:%d: %s: %s\n", t->source->path, line, col, u->error_kind, u->error_message);
-    Print("%s\n", WText(u, s + start, end - start));
-    for (i = 1; i < col; i++) {if (s[(start + i) - 1] == '\t') Print("\t"); else Print(" ");}
-    Print("^\n");
-}
+#include "Diagnostic.HC"
 U0 WDump(CWNode *n, I64 indent)
 {
     CWNode *c; I64 i;
@@ -46,7 +34,7 @@ I64 WNativeMain()
     CWUnit *u = WNew();
     U8 *arg, *source, *part, *output = NULL, *entry = "Test:main", *generated;
     I64 i, j, start, size, n, code = 0;
-    Bool dump = FALSE, parse = FALSE;
+    Bool dump = FALSE, parse = FALSE, json = FALSE;
     CWNode *m;
     for (i = 1; i < NativeArgCount(); i++) {
         arg = NativeArg(i);
@@ -55,7 +43,10 @@ I64 WNativeMain()
         else if (WEq(arg, "compile")) {}
         else if (WPrefix(arg, "--output=")) output = arg + 9;
         else if (WPrefix(arg, "--entrypoint=")) entry = arg + 13;
-        else if (WPrefix(arg, "--")) {}
+        else if (WEq(arg, "--no-entrypoint")) entry = NULL;
+        else if (WEq(arg, "--error-format=json")) json = TRUE;
+        else if (WEq(arg, "--target-type=hc") || WEq(arg, "--error-format=plain")) {}
+        else if (WPrefix(arg, "--")) {WFail(u, NULL, "Command Line Arguments Error", "Unsupported compiler option"); break;}
         else {
             start = 0; n = StrLen(arg);
             for (j = 0; j <= n; j++) if (arg[j] == ',' || !arg[j]) {
@@ -78,7 +69,7 @@ I64 WNativeMain()
             else if (!FileWrite(output, generated, StrLen(generated))) WFail(u, NULL, "Command Line Arguments Error", "Cannot write output");
         }
     }
-    if (u->error_kind) {WDiagnostic(u); code = 1;}
+    if (u->error_kind) {if (json) NativeErrPutS(WDiagnosticJson(u)); else WDiagnostic(u); code = 1;}
     WDestroy(u); return code;
 }
 NativeExit(WNativeMain());
