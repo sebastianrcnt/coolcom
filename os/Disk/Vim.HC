@@ -782,6 +782,7 @@ U0 VimDraw()
         else StrCpy(status, "NORMAL");
         StrCat(status, " "); StrCat(status, vim_name);
         if (vim_dirty) StrCat(status, " [+]");
+        if (ime_on) StrCat(status, " [한]");
         StrCat(status, "  "); StrCat(status, vim_msg);
         VimText(status, cols - 1);
         AnsiCursor(row, 7 + col - vim_left);
