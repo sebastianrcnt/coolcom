@@ -1,8 +1,10 @@
 // ARM64 disassembler, from Aiwnios (nrootconauto, BSD-3, commit e155e87,
 // Src/UAsmARM64.HC). Changes: the opcode table comes from Arm64Ops.csv in
 // the Image (LoadOpcodes), opcodes are not added to the compiler's asm hash,
-// DisasOpc prints plain text (DocPrint prints, KHost.HC), and GenTests is left
-// out. Uf, Disas and backtraces are in KDbg.HC.
+// and GenTests is left out. DisasOpc is rewritten: the table still names the
+// instruction, but operands are decoded from its bits and printed the way
+// objdump does (Aiwnios printed raw fields, unsigned offsets and x31 for sp
+// and zr). Uf, Disas and backtraces are in KDbg.HC.
 
 I64 Sext(I64 v, I64 bits) {
     if (v & (1 << (bits - 1)))
@@ -214,6 +216,7 @@ U0 LoadOpcodes() {
         Free(name);
         //Specific
         field = ReadAFeild(&ln);
+        opc->flags = StrNew(field);  // the variant, e.g. "Double_precision_to_64_bit" (DisasOpc)
         if (field && field[0] != 'v')
             opc->specific = field[0];
         else {
@@ -397,424 +400,826 @@ U8 *ArmOption2Str(I64 opt) {
     }
     return NULL;
 }
-U8 *DisasOpc(CDoc *doc, U32 *ptr) {
+// ---- Printing. Operands are decoded from the instruction's bits (the
+// table above identifies the instruction), in objdump's syntax: lower case,
+// sp/xzr/wzr for register 31, #immediates, [base, #offset], and objdump's
+// aliases (mov, cmp, cset, lsl, ubfx, mul, ...). ----
+
+I64 DBits(U32 inst, I64 hi, I64 lo)
+{//Field inst[hi:lo].
+    return inst >> lo & (1 << (hi - lo + 1) - 1);
+}
+
+I64 DSBits(U32 inst, I64 hi, I64 lo)
+{//Sign-extended field inst[hi:lo].
+    return Sext(DBits(inst, hi, lo), hi - lo + 1);
+}
+
+U0 DReg(U8 *line, I64 n, I64 kind, Bool sp = FALSE)
+{//Append register n; kind 'X' 'W' (31 is sp/wsp if sp, else xzr/wzr) or 'B' 'H' 'S' 'D' 'Q'.
+    if (kind == 'X') {
+        if (n != 31)
+            CatPrint(line, "x%d", n);
+        else if (sp)
+            CatPrint(line, "sp");
+        else
+            CatPrint(line, "xzr");
+    } else if (kind == 'W') {
+        if (n != 31)
+            CatPrint(line, "w%d", n);
+        else if (sp)
+            CatPrint(line, "wsp");
+        else
+            CatPrint(line, "wzr");
+    } else
+        CatPrint(line, "%c%d", ToLower(kind), n);
+}
+
+U0 DSep(U8 *line)
+{
+    CatPrint(line, ", ");
+}
+
+U0 DTarget(U8 *line, U8 *target)
+{//A branch or literal address: absolute, and the function it is in.
+    U8 buf[STR_LEN];
+    StrPrintFunSeg(buf, target);
+    if (buf[0] == '0' && buf[1] == 'x')
+        CatPrint(line, "0x%X", target);
+    else
+        CatPrint(line, "0x%X <%s>", target, buf);
+}
+
+U0 DMem(U8 *line, I64 rn, I64 off, I64 mode)
+{//Base-register address: mode 0 [xn, #off], 1 pre-index [xn, #off]!, 2 post-index [xn], #off.
+    CatPrint(line, "[");
+    DReg(line, rn, 'X', TRUE);
+    if (mode == 2)
+        CatPrint(line, "], #%d", off);
+    else {
+        if (off || mode == 1)
+            CatPrint(line, ", #%d", off);
+        CatPrint(line, "]");
+        if (mode == 1)
+            CatPrint(line, "!");
+    }
+}
+
+I64 DInvCond(I64 cond)
+{
+    return cond ^ 1;
+}
+
+U0 DCond(U8 *line, I64 cond)
+{
+    U8 *s = ArmCond2Str(cond), buf[4];
+    StrCpy(buf, s);
+    CatPrint(line, "%s", StrUtil(buf, SUF_TO_LOWER));
+}
+
+I64 DKindOfWord(U8 *s)
+{//Register kind of one side of a conversion's name ("Double_precision", "64_bit", ...).
+    if (!StrNCmp(s, "Single", 6) || !StrNCmp(s, "single", 6))
+        return 'S';
+    if (!StrNCmp(s, "Double", 6) || !StrNCmp(s, "double", 6))
+        return 'D';
+    if (!StrNCmp(s, "Half", 4) || !StrNCmp(s, "half", 4))
+        return 'H';
+    if (!StrNCmp(s, "32_bit", 6))
+        return 'W';
+    if (!StrNCmp(s, "64_bit", 6))
+        return 'X';
+    return 'D';
+}
+
+Bool DConvKinds(CArm64Opc *opc, I64 *_dst, I64 *_src)
+{//"X_to_Y" in the opcode's variant: Rd is Y, Rn is X.
+    U8 *v = opc->flags, *to;
+    if (!v || !(to = StrMatch("_to_", v)))
+        return FALSE;
+    *_src = DKindOfWord(v);
+    *_dst = DKindOfWord(to + 4);
+    return TRUE;
+}
+
+I64 DKind(CArm64Opc *opc)
+{//Register kind of a data or load/store register: the table's, else by name.
+    U8 *s = opc->str;
+    if (opc->specific && StrOcc("WXBHSDQ", opc->specific))
+        return opc->specific;
+    if (StrMatch("SW", s))
+        return 'X';  // LDRSW, LDPSW
+    return 'W';      // byte and halfword loads and stores
+}
+
+I64 DScale(CArm64Opc *opc)
+{//Bytes per element of a load or store, from its register kind and name.
+    I64 k = DKind(opc);
+    U8 *s = opc->str;
+    if (k == 'Q')
+        return 16;
+    if (k == 'D')
+        return 8;
+    if (k == 'S')
+        return 4;
+    if (k == 'H')
+        return 2;
+    if (k == 'B')
+        return 1;
+    if (StrMatch("SW", s))
+        return 4;
+    if (StrMatch("B", s + 3) || !StrCmp(s, "STRB") || !StrCmp(s, "LDRB") || !StrCmp(s, "STURB") ||
+            !StrCmp(s, "LDURB") || !StrCmp(s, "STTRB") || !StrCmp(s, "LDTRB") || StrMatch("SB", s))
+        return 1;
+    if (StrMatch("H", s + 3) || StrMatch("SH", s) || !StrCmp(s, "STRH") || !StrCmp(s, "LDRH"))
+        return 2;
+    if (k == 'X')
+        return 8;
+    return 4;
+}
+
+// System registers and SYS operations by instruction bits 20..5:
+// op0:op1:CRn:CRm:op2 (op0 is 1 for SYS, 2 or 3 for MRS/MSR).
+U16 dsys_reg_nums[40] = {0xDA10, 0xDA11, 0xDA20, 0xDA21, 0xD801, 0xD807, 0xDE82, 0xDE83, 0xDF00, 0xDF01, 0xDF02, 0xDF10, 0xDF11, 0xDF12, 0xDF18, 0xDF19, 0xDF1A, 0xC000, 0xC005, 0xC038, 0xC080, 0xC082, 0xC100, 0xC101, 0xC102, 0xC200, 0xC201, 0xC208, 0xC210, 0xC212, 0xC290, 0xC300, 0xC510, 0xC600, 0xC684, 0xC708, 0xE088, 0xE200, 0xE201, 0xE708};
+U8 *dsys_reg_names[40] = {"nzcv", "daif", "fpcr", "fpsr", "ctr_el0", "dczid_el0", "tpidr_el0", "tpidrro_el0", "cntfrq_el0", "cntpct_el0", "cntvct_el0", "cntp_tval_el0", "cntp_ctl_el0", "cntp_cval_el0", "cntv_tval_el0", "cntv_ctl_el0", "cntv_cval_el0", "midr_el1", "mpidr_el1", "id_aa64mmfr0_el1", "sctlr_el1", "cpacr_el1", "ttbr0_el1", "ttbr1_el1", "tcr_el1", "spsr_el1", "elr_el1", "sp_el0", "spsel", "currentel", "esr_el1", "far_el1", "mair_el1", "vbar_el1", "tpidr_el1", "cntkctl_el1", "hcr_el2", "spsr_el2", "elr_el2", "cnthctl_el2"};
+
+U8 *DSysRegName(I64 n)
+{//MRS/MSR register name, NULL if not known.
+    I64 i;
+    for (i = 0; i < 40; i++)
+        if (dsys_reg_nums[i] == n)
+            return dsys_reg_names[i];
+    return NULL;
+}
+
+U16 dsys_op_nums[21] = {0x4388, 0x43A8, 0x5BA9, 0x5BA1, 0x43B1, 0x43B2, 0x5BD1, 0x43D2, 0x5BD9, 0x5BF1, 0x43F2, 0x4418, 0x4419, 0x441A, 0x441B, 0x4438, 0x4439, 0x443A, 0x443B, 0x443D, 0x643C};
+U8 *dsys_op_names[21] = {"ic ialluis", "ic iallu", "ic ivau", "dc zva", "dc ivac", "dc isw", "dc cvac", "dc csw", "dc cvau", "dc civac", "dc cisw", "tlbi vmalle1is", "tlbi vae1is", "tlbi aside1is", "tlbi vaae1is", "tlbi vmalle1", "tlbi vae1", "tlbi aside1", "tlbi vaae1", "tlbi vale1", "tlbi alle1"};
+
+U8 *DSysOpName(I64 n)
+{//SYS aliases: cache and TLB maintenance.
+    I64 i;
+    for (i = 0; i < 21; i++)
+        if (dsys_op_nums[i] == n)
+            return dsys_op_names[i];
+    return NULL;
+}
+
+U8 *DisasOpc(CDoc *doc, U32 *ptr)
+{
     U32 inst = *ptr;
     CArm64Opc **opcs, *opc;
-    I64 off, mul;
-    U8 specific, specific2;
+    U8 line[STR_LEN * 2], mnem[STR_LEN], *nm;
+    I64 k, rd, rn, rm, ra, rt2, imm, sh, immr, imms, size, cond, opt, amt, dk, sk;
+    Bool sf;
     opcs = arm64_opcodes_flat;
-    if (!opcs) return ptr + 1;
+    if (!opcs)
+        return ptr + 1;
     while (opc = *opcs) {
-        if (opc->mask & inst == opc->value) {
-            if (!(specific = opc->specific))
-                specific = 'X';
-            DocPrint(doc, "%P\t%s ", ptr, opc->str);
-            switch (opc->num) {
-                case 6...9:
-                    DocPrint(doc, "%c,%P",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG,, specific),
-                             ptr + Arm64GetValue(opc, inst, ARM64_OP_IMM19));
-                    break;
-                case 11...12:
-                    DocPrint(doc, "%c,%d,%P",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG,, specific),
-                             (Arm64GetValue(opc, inst, ARM64_OP_B5) << 5) | Arm64GetValue(opc, inst, ARM64_OP_B40),
-                             ptr + Arm64GetValue(opc, inst, ARM64_OP_IMM14));
-                    break;
-                case 14:
-                    DocPrint(doc, ".%s,%P",
-                             ArmCond2Str(Arm64GetValue(opc, inst, ARM64_OP_COND)),
-                             ptr + Arm64GetValue(opc, inst, ARM64_OP_IMM19));
-                    break;
-                case 16...23:
-                    DocPrint(doc, "%P",
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM16));
-                    break;
-                case 26:
-                    DocPrint(doc, "%d", inst >> 5 & 127);
-                    break;
-                case 36...40:
-                    DocPrint(doc, "%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG,, specific));
-                    break;
-                case 41...43:
-                    DocPrint(doc, "%P",
-                             ptr + Arm64GetValue(opc, inst, ARM64_OP_IMM26));
-                    break;
-                case 46...77:
-                    DocPrint(doc, "%c,%c,%c,[%c]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 4, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3));
-                    break;
-                case 79...85:
-                    DocPrint(doc, "%c,%P",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG,, specific),
-                             ptr + Arm64GetValue(opc, inst, ARM64_OP_IMM19));
-                    break;
-                case 87...88:
-                case 89...90:
-                    DocPrint(doc, "%c,%c,[%c:%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 4);
-                    break;
-                case 91...94:
-                    DocPrint(doc, "%c,%c,[%c:%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 8);
-                    break;
-                case 95...96:
-                    DocPrint(doc, "%c,%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 16);
-                    break;
-                case 98...102:
-                    DocPrint(doc, "%c,%c,[%c,+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 4);
-                    break;
-                case 103...106:
-                    DocPrint(doc, "%c,%c,[%c,+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 8);
-                    break;
-                case 107...108:
-                    DocPrint(doc, "%c,%c,[%c,+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 16);
-                    break;
-                case 110...114:
-                    DocPrint(doc, "%c,%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 4);
-                    break;
-                case 115...118:
-                    DocPrint(doc, "%c,%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 8);
-                    break;
-                case 119...120:
-                    DocPrint(doc, "%c,%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 16);
-                    break;
-                case 122...126:
-                    DocPrint(doc, "%c,%c,[%c+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 4);
-                    break;
-                case 127...130:
-                    DocPrint(doc, "%c,%c,[%c+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 8);
-                    break;
-                case 131...132:
-                    DocPrint(doc, "%c,%c,[%c+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM7) * 16);
-                    break;
-                case 134...157:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM9) * 8);
-                    break;
-                case 158...172:
-                    DocPrint(doc, "%c,[%c,+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM9));
-                    break;
-                case 173...177:
-                    DocPrint(doc, "%c,[%c+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM9) * 4);
-                    break;
-                case 178...181:
-                    DocPrint(doc, "%c,[%c+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM9) * 8);
-                    break;
-                case 183...196:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM9));
-                    break;
-                case 197...219:
-                    DocPrint(doc, "%c,[%c+=%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM9));
-                    break;
-                case 220...245:
-                    mul = 1;
-                    switch (opc->num) {
-                        case 220...226:
-                            mul = 1;
-                            break;
-                        case 227...228:
-                            mul = 16;
-                            break;
-                        case 229...234:
-                            mul = 2;
-                            break;
-                        case 235...239:
-                            mul = 4;
-                            break;
-                        case 240...245:
-                            mul = 8;
-                            break;
-                    }
-                    if (inst & 1 << 12)
-                        DocPrint(doc, "%c,[%c+%c,%s,%d]",
-                                 Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                                 Arm64GetValue(opc, inst, ARM64_OP_REG, 3),
-                                 Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                                 ArmOption2Str(inst >> 13 & 0b111),
-                                 mul
-                                 );
-                    else
-                        DocPrint(doc, "%c,[%c+%c]",
-                                 Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                                 Arm64GetValue(opc, inst, ARM64_OP_REG, 3),
-                                 Arm64GetValue(opc, inst, ARM64_OP_REG, 1));
-                    break;
-                start:
-                    off = Arm64GetValue(opc, inst, ARM64_OP_IMM12);
-                    if (off < 0) off = (-(-off - 1 << 12)) & (1 << 12 - 1);
-                case 246...251:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             off);
-                    break;
-                case 252...253:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             off * 16);
-                    break;
-
-                case 254...259:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             off * 2);
-                    break;
-                case 260...264:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             off * 4);
-                    break;
-                case 265...269:
-                    DocPrint(doc, "%c,[%c+%X]",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             off * 8);
-                    break;
-                end:;
-                    break;
-                case 272:
-                    off = Arm64GetValue(opc, inst, ARM64_OP_IMMLO) |
-                            (Arm64GetValue(opc, inst, ARM64_OP_IMMHI) << 2);
-                    off = Sext(off, 19 + 2);
-                    DocPrint(doc, "%c,%P",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             ptr(U8 *) + off);
-                    break;
-                case 273:
-                    off = Arm64GetValue(opc, inst, ARM64_OP_IMMLO) |
-                            (Arm64GetValue(opc, inst, ARM64_OP_IMMHI) << 2);
-                    off = Sext(off, 19 + 2);
-                    off <<= 12;
-                    DocPrint(doc, "%c,%P",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             ptr(U8 *) + off);
-                    break;
-                case 275...282:
-                    off = Arm64GetValue(opc, inst, ARM64_OP_IMM12);
-                    if (off < 0) off = (-(-off - 1 << 12)) & (1 << 12 - 1);
-                    DocPrint(doc, "%c,%c,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1),
-                             off);
-                    break;
-                case 284...287:
-                    DocPrint(doc, "%c,%c,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             ImmSImmR2Val(inst) & (1 << 32 - 1));
-                    break;
-                case 288...291:
-                    DocPrint(doc, "%c,%c,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             ImmSImmR2Val(inst));
-                    break;
-
-                case 293...298:
-                    DocPrint(doc, "%c,%X,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_IMM16),
-                             inst >> 21 & 0b11);
-                    break;
-                case 300...302:
-                    DocPrint(doc, "%c,%c,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             ImmSImmR2Val(inst) & (1 << 32 - 1));
-                    break;
-                case 303...305:
-                    DocPrint(doc, "%c,%c,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             ImmSImmR2Val(inst));
-                    break;
-                case 307...308:
-                    DocPrint(doc, "%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 310...318:
-                case 319...326:
-                case 328...331:
-                case 332...335:
-                    DocPrint(doc, "%c,%c,%c,%s,%X",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific),
-                             ArmShmod2Str(Arm64GetValue(opc, inst, ARM64_OP_SHIFT)),
-                             (inst >> 10) & (1 << 6 - 1));
-                    break;
-                case 337...344:
-                    DocPrint(doc, "%c,%c,%s %c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             ArmOption2Str(Arm64GetValue(opc, inst, ARM64_OP_OPTION)),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 346...353:
-                    DocPrint(doc, "%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                    //TODO conditional compare
-                case 364...372:
-                    DocPrint(doc, ".%s %c,%c,%c",
-                             ArmCond2Str(Arm64GetValue(opc, inst, ARM64_OP_COND)),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 374...383:
-                    DocPrint(doc, "%c,%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 4, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG,, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific));
-                    break;
-                case 385...404:
-                    DocPrint(doc, "%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 406...434:
-                    DocPrint(doc, "%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 441...458:
-                    DocPrint(doc, "%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 460...461:
-                    DocPrint(doc, ".%s %c,%c,%c",
-                             ArmCond2Str(Arm64GetValue(opc, inst, ARM64_OP_COND)),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 466...473:
-                    DocPrint(doc, "%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 475...557:
-                    specific2 = specific;
-                    if (opc->num == 510)
-                        specific = 'W', specific2 = 'S';
-                    else if (opc->num == 511)
-                        specific = 'S', specific2 = 'W';
-                    else if (opc->num == 548)
-                        specific = 'X', specific2 = 'D';
-                    else if (opc->num == 549)
-                        specific = 'D', specific2 = 'X';
-
-                    DocPrint(doc, "%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific2));
-                    break;
-                case 559...566:
-                    DocPrint(doc, "%c,%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 4, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG,, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific));
-                    break;
-                case 568...603:
-                    DocPrint(doc, "%c,%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 3, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-                case 604...714:
-                    DocPrint(doc, "%c,%c",
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 2, specific),
-                             Arm64GetValue(opc, inst, ARM64_OP_REG, 1, specific));
-                    break;
-
-                    //TODO conditional compare flaoting point
-            }
-            "\n";
-            goto pass;
-        }
+        if (opc->mask & inst == opc->value)
+            goto found;
         opcs++;
     }
-    "???\n";
-pass:;
+    DocPrint(doc, "%P\t.word 0x%08X\n", ptr, inst);
+    return ptr + 1;
+found:
+    StrCpy(mnem, opc->str);
+    StrUtil(mnem, SUF_TO_LOWER);
+    line[0] = 0;
+    k = DKind(opc);
+    sf = k == 'X';
+    size = 32;
+    if (sf)
+        size = 64;
+    rd = inst & 31;
+    rn = inst >> 5 & 31;
+    rm = inst >> 16 & 31;
+    ra = inst >> 10 & 31;
+    rt2 = ra;
+    switch (opc->num) {
+        case 3:
+            StrCpy(mnem, ".word");
+            CatPrint(line, "0x%08X", inst);
+            break;
+        case 6...9:  // cbz, cbnz
+            DReg(line, rd, k);
+            DSep(line);
+            DTarget(line, ptr + DSBits(inst, 23, 5));
+            break;
+        case 11...12:  // tbz, tbnz
+            imm = DBits(inst, 31, 31) << 5 | DBits(inst, 23, 19);
+            if (imm < 32)
+                DReg(line, rd, 'W');
+            else
+                DReg(line, rd, 'X');
+            CatPrint(line, ", #%d, ", imm);
+            DTarget(line, ptr + DSBits(inst, 18, 5));
+            break;
+        case 14:  // b.cond
+            StrCpy(mnem, "b.");
+            DCond(mnem, inst & 15);
+            DTarget(line, ptr + DSBits(inst, 23, 5));
+            break;
+        case 16...23:  // svc hvc smc brk hlt dcps
+            CatPrint(line, "#0x%X", DBits(inst, 20, 5));
+            break;
+        case 26:  // hint
+            imm = DBits(inst, 11, 5);
+            switch (imm) {
+                case 0: StrCpy(mnem, "nop"); break;
+                case 1: StrCpy(mnem, "yield"); break;
+                case 2: StrCpy(mnem, "wfe"); break;
+                case 3: StrCpy(mnem, "wfi"); break;
+                case 4: StrCpy(mnem, "sev"); break;
+                case 5: StrCpy(mnem, "sevl"); break;
+                default: CatPrint(line, "#0x%X", imm);
+            }
+            break;
+        case 28...30:  // dsb dmb isb
+            imm = DBits(inst, 11, 8);
+            if (opc->num == 30 && imm == 15)
+                break;
+            switch (imm) {
+                case 15: CatPrint(line, "sy"); break;
+                case 14: CatPrint(line, "st"); break;
+                case 13: CatPrint(line, "ld"); break;
+                case 11: CatPrint(line, "ish"); break;
+                case 10: CatPrint(line, "ishst"); break;
+                case 9: CatPrint(line, "ishld"); break;
+                case 7: CatPrint(line, "nsh"); break;
+                case 3: CatPrint(line, "osh"); break;
+                default: CatPrint(line, "#0x%X", imm);
+            }
+            break;
+        case 27:  // clrex
+        case 39...40:  // eret drps
+            break;
+        case 25:  // msr (immediate): pstate field
+            imm = DBits(inst, 18, 16) << 3 | DBits(inst, 7, 5);
+            if (imm == 0x1E)
+                CatPrint(line, "daifset");
+            else if (imm == 0x1F)
+                CatPrint(line, "daifclr");
+            else if (imm == 0x05)
+                CatPrint(line, "spsel");
+            else
+                CatPrint(line, "pstate_%d_%d", DBits(inst, 18, 16), DBits(inst, 7, 5));
+            CatPrint(line, ", #0x%X", DBits(inst, 11, 8));
+            break;
+        case 31...34:  // sys msr sysl mrs
+            imm = DBits(inst, 20, 5);
+            if (opc->num == 31 && (nm = DSysOpName(imm))) {  // dc ic tlbi
+                StrCpy(mnem, nm);
+                *StrFirstOcc(mnem, " ") = 0;
+                CatPrint(line, "%s", StrFirstOcc(nm, " ") + 1);
+                if (rd != 31 || mnem[0] != 't') {
+                    DSep(line);
+                    DReg(line, rd, 'X');
+                }
+                break;
+            }
+            if (opc->num == 33 || opc->num == 34) {
+                DReg(line, rd, 'X');
+                DSep(line);
+            }
+            if (nm = DSysRegName(imm))
+                CatPrint(line, "%s", nm);
+            else
+                CatPrint(line, "s%d_%d_c%d_c%d_%d", DBits(inst, 20, 19), DBits(inst, 18, 16),
+                         DBits(inst, 15, 12), DBits(inst, 11, 8), DBits(inst, 7, 5));
+            if (opc->num == 31 || opc->num == 32) {
+                DSep(line);
+                DReg(line, rd, 'X');
+            }
+            break;
+        case 36...38:  // br blr ret
+            if (opc->num != 38 || rn != 30)
+                DReg(line, rn, 'X');
+            break;
+        case 42...43:  // b bl
+            DTarget(line, ptr + DSBits(inst, 25, 0));
+            break;
+        case 46...77:  // exclusive and acquire/release
+            if (mnem[0] == 's' && StrMatch("x", mnem)) {  // stxr stlxr stxp stlxp: status
+                DReg(line, rm, 'W');
+                DSep(line);
+            }
+            DReg(line, rd, k);
+            if (StrMatch("xp", mnem)) {
+                DSep(line);
+                DReg(line, rt2, k);
+            }
+            DSep(line);
+            DMem(line, rn, 0, 0);
+            break;
+        case 79...85:  // ldr (literal), prfm
+            if (opc->num == 85)
+                CatPrint(line, "#%d", rd);
+            else
+                DReg(line, rd, k);
+            DSep(line);
+            DTarget(line, ptr + DSBits(inst, 23, 5));
+            break;
+        case 87...132:  // pairs: 87-96 non-temporal, 98-108 post, 110-120 offset, 122-132 pre
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rt2, k);
+            DSep(line);
+            if (98 <= opc->num <= 108)
+                DMem(line, rn, DSBits(inst, 21, 15) * DScale(opc), 2);
+            else if (122 <= opc->num)
+                DMem(line, rn, DSBits(inst, 21, 15) * DScale(opc), 1);
+            else
+                DMem(line, rn, DSBits(inst, 21, 15) * DScale(opc), 0);
+            break;
+        case 134...219:  // imm9: 134-157 unscaled, 159-181 post, 183-195 unprivileged, 197-219 pre
+            if (StrMatch("prf", mnem))
+                CatPrint(line, "#%d", rd);
+            else
+                DReg(line, rd, k);
+            DSep(line);
+            imm = DSBits(inst, 20, 12);
+            if (159 <= opc->num <= 181)
+                DMem(line, rn, imm, 2);
+            else if (197 <= opc->num)
+                DMem(line, rn, imm, 1);
+            else
+                DMem(line, rn, imm, 0);
+            break;
+        case 220...245:  // register offset
+            if (StrMatch("prf", mnem))
+                CatPrint(line, "#%d", rd);
+            else
+                DReg(line, rd, k);
+            CatPrint(line, ", [");
+            DReg(line, rn, 'X', TRUE);
+            DSep(line);
+            opt = DBits(inst, 15, 13);
+            if (opt & 1)
+                DReg(line, rm, 'X');
+            else
+                DReg(line, rm, 'W');
+            amt = 0;
+            if (DBits(inst, 12, 12))
+                amt = Bsf(DScale(opc));
+            if (opt == 3) {
+                if (DBits(inst, 12, 12))
+                    CatPrint(line, ", lsl #%d", amt);
+            } else {
+                CatPrint(line, ", %s", ArmOption2Str(opt));
+                StrUtil(line, SUF_TO_LOWER);
+                if (DBits(inst, 12, 12))
+                    CatPrint(line, " #%d", amt);
+            }
+            CatPrint(line, "]");
+            break;
+        case 246...269:  // unsigned offset
+            if (StrMatch("prf", mnem))
+                CatPrint(line, "#%d", rd);
+            else
+                DReg(line, rd, k);
+            DSep(line);
+            DMem(line, rn, DBits(inst, 21, 10) * DScale(opc), 0);
+            break;
+        case 272:  // adr
+            DReg(line, rd, 'X');
+            DSep(line);
+            DTarget(line, ptr(U8 *) + Sext(DBits(inst, 23, 5) << 2 | DBits(inst, 30, 29), 21));
+            break;
+        case 273:  // adrp
+            DReg(line, rd, 'X');
+            DSep(line);
+            DTarget(line, ptr(I64) & ~0xFFF + Sext(DBits(inst, 23, 5) << 2 | DBits(inst, 30, 29), 21) << 12);
+            break;
+        case 275...282:  // add/sub (immediate)
+            imm = DBits(inst, 21, 10);
+            if (DBits(inst, 22, 22))
+                imm <<= 12;
+            if (StrMatch("s", mnem + 3) && rd == 31) {  // adds/subs to zr: cmn/cmp
+                if (mnem[0] == 'a')
+                    StrCpy(mnem, "cmn");
+                else
+                    StrCpy(mnem, "cmp");
+                DReg(line, rn, k, TRUE);
+            } else if (!imm && mnem[0] == 'a' && !mnem[3] && (rd == 31 || rn == 31)) {
+                StrCpy(mnem, "mov");
+                DReg(line, rd, k, TRUE);
+                DSep(line);
+                DReg(line, rn, k, TRUE);
+                break;
+            } else {
+                DReg(line, rd, k, !mnem[3]);
+                DSep(line);
+                DReg(line, rn, k, TRUE);
+            }
+            CatPrint(line, ", #0x%X", imm);
+            break;
+        case 284...291:  // logical (immediate)
+            imm = ImmSImmR2Val(inst);
+            if (!sf)
+                imm &= 0xFFFFFFFF;
+            if (!StrCmp(mnem, "orr") && rn == 31) {
+                StrCpy(mnem, "mov");
+                DReg(line, rd, k, TRUE);
+            } else if (!StrCmp(mnem, "ands") && rd == 31) {
+                StrCpy(mnem, "tst");
+                DReg(line, rn, k);
+            } else {
+                DReg(line, rd, k, StrCmp(mnem, "ands"));
+                DSep(line);
+                DReg(line, rn, k);
+            }
+            CatPrint(line, ", #0x%X", imm);
+            break;
+        case 293...298:  // movn movz movk
+            imm = DBits(inst, 20, 5);
+            sh = DBits(inst, 22, 21) * 16;
+            DReg(line, rd, k);
+            if (!StrCmp(mnem, "movk")) {
+                CatPrint(line, ", #0x%X", imm);
+                if (sh)
+                    CatPrint(line, ", lsl #%d", sh);
+            } else if (!StrCmp(mnem, "movz") && (imm || !sh)) {
+                StrCpy(mnem, "mov");
+                CatPrint(line, ", #0x%X", imm << sh);
+            } else if (!StrCmp(mnem, "movn") && (imm || !sh)) {
+                StrCpy(mnem, "mov");
+                imm = ~(imm << sh);
+                if (!sf)
+                    imm &= 0xFFFFFFFF;
+                CatPrint(line, ", #0x%X", imm);
+            } else {
+                CatPrint(line, ", #0x%X", imm);
+                if (sh)
+                    CatPrint(line, ", lsl #%d", sh);
+            }
+            break;
+        case 300...305:  // sbfm bfm ubfm and their aliases
+            immr = DBits(inst, 21, 16);
+            imms = DBits(inst, 15, 10);
+            if (!StrCmp(mnem, "ubfm")) {
+                if (imms == size - 1) {
+                    StrCpy(mnem, "lsr");
+                    amt = immr;
+                    goto bf_shift;
+                } else if (imms + 1 == immr) {
+                    StrCpy(mnem, "lsl");
+                    amt = size - 1 - imms;
+                    goto bf_shift;
+                } else if (!sf && !immr && (imms == 7 || imms == 15)) {
+                    if (imms == 7)
+                        StrCpy(mnem, "uxtb");
+                    else
+                        StrCpy(mnem, "uxth");
+                    goto bf_ext;
+                } else if (imms < immr) {
+                    StrCpy(mnem, "ubfiz");
+                    goto bf_iz;
+                } else {
+                    StrCpy(mnem, "ubfx");
+                    goto bf_x;
+                }
+            } else if (!StrCmp(mnem, "sbfm")) {
+                if (imms == size - 1) {
+                    StrCpy(mnem, "asr");
+                    amt = immr;
+                    goto bf_shift;
+                } else if (!immr && (imms == 7 || imms == 15 || imms == 31 && sf)) {
+                    if (imms == 7)
+                        StrCpy(mnem, "sxtb");
+                    else if (imms == 15)
+                        StrCpy(mnem, "sxth");
+                    else
+                        StrCpy(mnem, "sxtw");
+                    DReg(line, rd, k);
+                    DSep(line);
+                    DReg(line, rn, 'W');
+                    break;
+                } else if (imms < immr) {
+                    StrCpy(mnem, "sbfiz");
+                    goto bf_iz;
+                } else {
+                    StrCpy(mnem, "sbfx");
+                    goto bf_x;
+                }
+            } else {  // bfm
+                if (imms < immr) {
+                    StrCpy(mnem, "bfi");
+                    goto bf_iz;
+                } else {
+                    StrCpy(mnem, "bfxil");
+                    goto bf_x;
+                }
+            }
+bf_shift:
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, k);
+            CatPrint(line, ", #%d", amt);
+            break;
+bf_ext:
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, 'W');
+            break;
+bf_iz:
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, k);
+            CatPrint(line, ", #%d, #%d", size - immr, imms + 1);
+            break;
+bf_x:
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, k);
+            CatPrint(line, ", #%d, #%d", immr, imms - immr + 1);
+            break;
+        case 307...308:  // extr, ror
+            if (rn == rm) {
+                StrCpy(mnem, "ror");
+                DReg(line, rd, k);
+                DSep(line);
+                DReg(line, rn, k);
+            } else {
+                DReg(line, rd, k);
+                DSep(line);
+                DReg(line, rn, k);
+                DSep(line);
+                DReg(line, rm, k);
+            }
+            CatPrint(line, ", #%d", DBits(inst, 15, 10));
+            break;
+        case 311...335:  // logical and add/sub (shifted register)
+            sh = DBits(inst, 23, 22);
+            amt = DBits(inst, 15, 10);
+            if (rn == 31 && !sh && !amt && !StrCmp(mnem, "orr")) {
+                StrCpy(mnem, "mov");
+                DReg(line, rd, k);
+                DSep(line);
+                DReg(line, rm, k);
+                break;
+            }
+            if (rn == 31 && !StrCmp(mnem, "orn")) {
+                StrCpy(mnem, "mvn");
+                DReg(line, rd, k);
+            } else if (rn == 31 && (!StrCmp(mnem, "sub") || !StrCmp(mnem, "subs"))) {
+                if (mnem[3])
+                    StrCpy(mnem, "negs");
+                else
+                    StrCpy(mnem, "neg");
+                DReg(line, rd, k);
+            } else if (rd == 31 && (!StrCmp(mnem, "subs") || !StrCmp(mnem, "adds") || !StrCmp(mnem, "ands"))) {
+                if (mnem[0] == 's')
+                    StrCpy(mnem, "cmp");
+                else if (mnem[1] == 'd')
+                    StrCpy(mnem, "cmn");
+                else
+                    StrCpy(mnem, "tst");
+                DReg(line, rn, k);
+            } else {
+                DReg(line, rd, k);
+                DSep(line);
+                DReg(line, rn, k);
+            }
+            DSep(line);
+            DReg(line, rm, k);
+            if (sh || amt) {
+                CatPrint(line, ", %s #%d", ArmShmod2Str(sh), amt);
+                StrUtil(line, SUF_TO_LOWER);
+            }
+            break;
+        case 337...344:  // add/sub (extended register)
+            opt = DBits(inst, 15, 13);
+            amt = DBits(inst, 12, 10);
+            if (StrMatch("s", mnem + 3) && rd == 31) {
+                if (mnem[0] == 'a')
+                    StrCpy(mnem, "cmn");
+                else
+                    StrCpy(mnem, "cmp");
+                DReg(line, rn, k, TRUE);
+            } else {
+                DReg(line, rd, k, !mnem[3]);
+                DSep(line);
+                DReg(line, rn, k, TRUE);
+            }
+            DSep(line);
+            if (sf && opt & 3 == 3)  // uxtx/sxtx: an X register (in 64-bit ops)
+                DReg(line, rm, 'X');
+            else
+                DReg(line, rm, 'W');
+            if ((rd == 31 || rn == 31) && opt == 2 + sf) {
+                if (amt)
+                    CatPrint(line, ", lsl #%d", amt);
+            } else {
+                CatPrint(line, ", %s", ArmOption2Str(opt));
+                StrUtil(line, SUF_TO_LOWER);
+                if (amt)
+                    CatPrint(line, " #%d", amt);
+            }
+            break;
+        case 346...353:  // adc sbc
+            if (rn == 31 && mnem[0] == 's') {
+                if (mnem[3])
+                    StrCpy(mnem, "ngcs");
+                else
+                    StrCpy(mnem, "ngc");
+            } else {
+                DReg(line, rd, k);
+                DSep(line);
+                DReg(line, rn, k);
+                DSep(line);
+                DReg(line, rm, k);
+                break;
+            }
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rm, k);
+            break;
+        case 355...363:  // ccmn ccmp
+            DReg(line, rn, k);
+            if (opc->num >= 360)
+                CatPrint(line, ", #%d", rm);
+            else {
+                DSep(line);
+                DReg(line, rm, k);
+            }
+            CatPrint(line, ", #0x%X, ", inst & 15);
+            DCond(line, DBits(inst, 15, 12));
+            break;
+        case 365...372:  // csel csinc csinv csneg
+            cond = DBits(inst, 15, 12);
+            if (cond < 14 && rn == rm && mnem[2] != 'e') {  // (not csel)
+                if (rn == 31 && StrCmp(mnem, "csneg")) {
+                    if (!StrCmp(mnem, "csinc"))
+                        StrCpy(mnem, "cset");
+                    else
+                        StrCpy(mnem, "csetm");
+                    DReg(line, rd, k);
+                } else {
+                    if (!StrCmp(mnem, "csinc"))
+                        StrCpy(mnem, "cinc");
+                    else if (!StrCmp(mnem, "csinv"))
+                        StrCpy(mnem, "cinv");
+                    else
+                        StrCpy(mnem, "cneg");
+                    DReg(line, rd, k);
+                    DSep(line);
+                    DReg(line, rn, k);
+                }
+                DSep(line);
+                DCond(line, DInvCond(cond));
+                break;
+            }
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, k);
+            DSep(line);
+            DReg(line, rm, k);
+            DSep(line);
+            DCond(line, cond);
+            break;
+        case 374...383:  // madd msub smaddl umaddl smsubl umsubl smulh umulh
+            if (opc->num >= 382) {  // smulh umulh
+                DReg(line, rd, 'X');
+                DSep(line);
+                DReg(line, rn, 'X');
+                DSep(line);
+                DReg(line, rm, 'X');
+                break;
+            }
+            sk = k;
+            dk = k;
+            if (StrMatch("l", mnem + 4)) {  // long: W sources, X result
+                sk = 'W';
+                dk = 'X';
+            }
+            if (ra == 31) {
+                if (!StrCmp(mnem, "madd"))
+                    StrCpy(mnem, "mul");
+                else if (!StrCmp(mnem, "msub"))
+                    StrCpy(mnem, "mneg");
+                else if (!StrCmp(mnem, "smaddl"))
+                    StrCpy(mnem, "smull");
+                else if (!StrCmp(mnem, "umaddl"))
+                    StrCpy(mnem, "umull");
+                else if (!StrCmp(mnem, "smsubl"))
+                    StrCpy(mnem, "smnegl");
+                else
+                    StrCpy(mnem, "umnegl");
+            }
+            DReg(line, rd, dk);
+            DSep(line);
+            DReg(line, rn, sk);
+            DSep(line);
+            DReg(line, rm, sk);
+            if (ra != 31) {
+                DSep(line);
+                DReg(line, ra, dk);
+            }
+            break;
+        case 385...404:  // crc32, udiv sdiv, lslv lsrv asrv rorv
+            if (397 <= opc->num) {
+                mnem[3] = 0;  // lslv -> lsl, ...
+            }
+            if (opc->num <= 392) {
+                DReg(line, rd, 'W');
+                DSep(line);
+                DReg(line, rn, 'W');
+                DSep(line);
+                if (mnem[StrLen(mnem) - 1] == 'x')
+                    DReg(line, rm, 'X');
+                else
+                    DReg(line, rm, 'W');
+                break;
+            }
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, k);
+            DSep(line);
+            DReg(line, rm, k);
+            break;
+        case 406...416:  // rbit clz cls rev rev16 rev32
+            if (opc->num == 416)
+                k = 'X';
+            DReg(line, rd, k);
+            DSep(line);
+            DReg(line, rn, k);
+            break;
+        default:
+            if (opc->num >= 419) {  // floating point and SIMD scalar
+                k = 'D';
+                if (StrMatch("Single", opc->flags) || StrMatch("single", opc->flags))
+                    k = 'S';
+                if (DConvKinds(opc, &dk, &sk)) {
+                    if (556 <= opc->num <= 557) {  // fmov to/from the top half
+                        if (opc->num == 556)
+                            CatPrint(line, "x%d, v%d.d[1]", rd, rn);
+                        else
+                            CatPrint(line, "v%d.d[1], x%d", rd, rn);
+                        break;
+                    }
+                    DReg(line, rd, dk);
+                    DSep(line);
+                    DReg(line, rn, sk);
+                    if (opc->num <= 434)  // fixed point: fraction bits
+                        CatPrint(line, ", #%d", 64 - DBits(inst, 15, 10));
+                    break;
+                }
+                switch (opc->num) {
+                    case 436...439:  // fccmp
+                        DReg(line, rn, k);
+                        DSep(line);
+                        DReg(line, rm, k);
+                        CatPrint(line, ", #0x%X, ", inst & 15);
+                        DCond(line, DBits(inst, 15, 12));
+                        break;
+                    case 441...458:  // fmul fdiv fadd fsub fmax fmin ... fnmul
+                    case 568...603:
+                        DReg(line, rd, k);
+                        DSep(line);
+                        DReg(line, rn, k);
+                        DSep(line);
+                        DReg(line, rm, k);
+                        break;
+                    case 460...461:  // fcsel
+                        DReg(line, rd, k);
+                        DSep(line);
+                        DReg(line, rn, k);
+                        DSep(line);
+                        DReg(line, rm, k);
+                        DSep(line);
+                        DCond(line, DBits(inst, 15, 12));
+                        break;
+                    case 463...464:  // fmov (immediate): imm8 = a:b:c:d:e:f:g:h
+                        imm = DBits(inst, 20, 13);
+                        DReg(line, rd, k);
+                        CatPrint(line, ", #0x%02X", imm);
+                        break;
+                    case 466...473:  // fcmp fcmpe
+                        DReg(line, rn, k);
+                        if (StrMatch("zero", opc->flags))
+                            CatPrint(line, ", #0.0");
+                        else {
+                            DSep(line);
+                            DReg(line, rm, k);
+                        }
+                        break;
+                    case 559...566:  // fmadd fmsub fnmadd fnmsub
+                        DReg(line, rd, k);
+                        DSep(line);
+                        DReg(line, rn, k);
+                        DSep(line);
+                        DReg(line, rm, k);
+                        DSep(line);
+                        DReg(line, ra, k);
+                        break;
+                    default:  // one source: fmov fabs fneg fsqrt frint* ...
+                        DReg(line, rd, k);
+                        DSep(line);
+                        DReg(line, rn, k);
+                }
+            } else
+                CatPrint(line, "0x%08X", inst);
+    }
+    DocPrint(doc, "%P\t%-7s %s\n", ptr, mnem, line);
     return ptr + 1;
 }

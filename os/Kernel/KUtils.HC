@@ -269,3 +269,33 @@ Bool IsValidPtr(U8 *p)
 {//DRAM only (the kernel has no page faults to try an access with).
     return 0x800000000 <= p(I64) < 0xC00000000;
 }
+
+// Compiler intrinsics on TARGET_AARCH64 (KernelA.HH); the kernel is built
+// without that define (its Fs/Gs are functions), so here they are functions.
+I64 MinI64(I64 a, I64 b)
+{
+    if (a < b)
+        return a;
+    return b;
+}
+
+I64 MaxI64(I64 a, I64 b)
+{
+    if (a > b)
+        return a;
+    return b;
+}
+
+U64 MinU64(U64 a, U64 b)
+{
+    if (a < b)
+        return a;
+    return b;
+}
+
+U64 MaxU64(U64 a, U64 b)
+{
+    if (a > b)
+        return a;
+    return b;
+}
