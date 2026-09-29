@@ -28,6 +28,20 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx '63' && tr -d '\r' <"$log" | grep -qx 'A92' && python3 tools/kernel-verify.py verify "$dir"; then
     tail -n 12 "$log"
     grep -E '^net: (address|HTTP|DNS failed)' "$log" | tr -d '\r'
+    # The network commands typed at the shell (prelude): NetRep and Ping to the gateway always,
+    # Dns and HttpGet of example.com unless the first boot found the host offline.
+    printf 'NetRep;\nPing("10.0.2.2", 1);\n' >"$dir/net.in"
+    grep -q 'net: DNS failed' "$log" || printf 'Dns("example.com");\nHttpGet("http://example.com/");\n' >>"$dir/net.in"
+    gtimeout -k 2 30 build/coolvm --headless --cpus 2 --mem 1024 --timeout 10 --net "$@" "$image" \
+        <"$dir/net.in" >"$dir/net.log" 2>&1 || true
+    tr -d '\r' <"$dir/net.log" >"$dir/net.txt"
+    if ! grep -q '^inet   10.0.2.15 ' "$dir/net.txt" || ! grep -q '^1 packets transmitted, 1 received' "$dir/net.txt" \
+        || { ! grep -q 'net: DNS failed' "$log" && ! { grep -q '^example.com has address ' "$dir/net.txt" \
+            && grep -q '^HTTP/1.1 200' "$dir/net.txt" && grep -q 'Example Domain' "$dir/net.txt"; }; }; then
+        cat "$dir/net.log"
+        exit 1
+    fi
+    echo "net shell commands: OK"
     # Compile the real startup files under the heap canaries as a regression
     # for GraphColor indexing its candidate array with an uncolored (-1) neighbor.
     mcopy -o -i "$dir/fat.img" os/Disk/*.HC ::
