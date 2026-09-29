@@ -99,7 +99,7 @@ build/disk.img: | build
 
 # make run only adds os/Disk files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
-DISK_FILES := os/Disk/Init.HC os/Disk/Vim.HC os/Disk/Tmux.HC
+DISK_FILES := os/Disk/Init.HC os/Disk/Vim.HC os/Disk/Tmux.HC os/Disk/Nyan.HC
 disk-install: build/disk.img
 	mcopy -o -i build/disk.img $(DISK_FILES) ::
 
