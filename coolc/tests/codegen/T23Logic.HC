@@ -1,71 +1,71 @@
 #include "TestBase.HH"
-I64 g,h;F64 gf;
-I64 V1(I64 a,I64 b){I64 r=a<b;return r;}
-I64 V2(I64 a,I64 b){I64 r=a<b&&b<10;return r*5;}
-I64 V3(I64 a,I64 b){I64 r=a||b;return r+1;}
-I64 V4(I64 a,I64 b){I64 r=a^^b;return r+1;}
-I64 V5(I64 a,I64 b){return (a<b)+(b<a)+(a==b);}
-I64 V6(I64 a,I64 b){return (a&&b)+(a||b)+(a^^b);}
-I64 V7(I64 a,I64 b){return (a&&b)*10+(a||b);}
-I64 V8(I64 a){return !a+!!a*2;}
-I64 V9(I64 a,I64 b){return !(a<b);}
-I64 V10(I64 a,I64 b){return !(a&&b);}
-I64 V11(I64 a,I64 b){return !(a||b);}
-I64 V12(I64 a,I64 b,I64 c,I64 d){return a<b&&c<d;}
-I64 V13(I64 a,I64 b,I64 c,I64 d){return a<b||c<d;}
-I64 V14(I64 a,I64 b,I64 c,I64 d){return (a<b||c<d)&&(a>c||b>d);}
-I64 V15(I64 a,I64 b,I64 c,I64 d){return a<b&&c<d||a>b&&c>d;}
-I64 V16(I64 a,I64 b,I64 c,I64 d){return a&&b&&c&&d;}
-I64 V17(I64 a,I64 b,I64 c,I64 d){return a||b||c||d;}
-I64 V18(I64 a,I64 b,I64 c,I64 d){return a^^b^^c^^d;}
-I64 V19(I64 a,I64 b,I64 c,I64 d){return a&&b||c&&d;}
-I64 V20(I64 a,I64 b,I64 c,I64 d){return (a||b)&&(c||d);}
-I64 V21(I64 a,I64 b,I64 c,I64 d){return a&&(b||c)&&d;}
-I64 V22(I64 a,I64 b,I64 c,I64 d){return !a&&!b||!c&&!d;}
-I64 V23(I64 a,I64 b,I64 c,I64 d){return a^^b&&c^^d;}
-I64 V24(I64 a,I64 b,I64 c,I64 d){return a==b&&c==d||a!=c;}
-I64 V25(I64 a,I64 b){return a&&g++;}
-I64 V26(I64 a,I64 b){return a||g++;}
-I64 V27(I64 a,I64 b){return a&&(g=b);}
-I64 V29(I64 a,I64 b){if(a&&b){g=1;}else if(a||b){g=2;}else{g=3;}return g;}
-I64 V30(I64 a,I64 b){if(!(a&&b)){g=1;}return g;}
-I64 V31(I64 a,I64 b){while(a&&b){a--;b--;}return a+b;}
-I64 V32(I64 a,I64 b){while(a||b){if(a)a--;else b--;}return a+b;}
-I64 V33(I64 a,I64 b){I64 n=0;for(;a<b&&n<100;a++)n++;return n;}
-I64 V34(I64 a,I64 b){I64 n=0;do{n++;a++;}while(a<b&&n<50);return n;}
-I64 V35(I64 a,I64 b){I64 n=0;while(a!=b&&(a<b||a>b)){a+=(a<b)-(a>b);n++;}return n;}
-I64 V36(U8 *s){I64 n=0;while(*s&&*s!=' '&&*s!='\n'){s++;n++;}return n;}
-I64 V37(I64 *p,I64 n,I64 x){I64 i=0;while(i<n&&p[i]!=x)i++;return i;}
-I64 V38(F64 a,F64 b){return a<b&&b<10.0||a==0;}
-I64 V39(F64 a,I64 b){return a<b&&b||!a;}
-I64 V40(F64 a,F64 b,F64 c){I64 r=a<b;r+=b<c;r+=a<c;return r;}
-I64 V41(I64 a,I64 b){g=a<b;h=a>=b;return g*2+h;}
-I64 V42(I64 a,I64 b){U8 x=a<b;I8 y=a==b;return x+y;}
-I64 V43(I64 a,I64 b){I64 *p=&g;*p=a&&b;return g;}
-I64 V44(I64 a,I64 b){I64 arr[2];arr[0]=a<b;arr[1]=a||b;return arr[0]*2+arr[1];}
-F64 V45(I64 a,I64 b){F64 f=a<b;gf=a&&b;return f+gf;}
-I64 V46(I64 a){return a&&1;}
-I64 V47(I64 a){return a||0;}
-I64 V48(I64 a){return a&&0;}
-I64 V49(I64 a){return a||1;}
-I64 V50(I64 a){return 1&&a;}
-I64 V51(I64 a){return 0||a;}
-I64 V52(I64 a){return 1&&1;}
-I64 V53(I64 a){return 0||0;}
-I64 V54(I64 a){if(1)return a;return 0;}
-I64 V55(I64 a){if(0)return a;return 1;}
-I64 V56(I64 a){while(0)a++;return a;}
-I64 V57(I64 a){if(a&&0)return 1;return 2;}
-I64 V58(I64 a){if(a||1)return 1;return 2;}
-I64 V59(I64 a){if(a<a)return 1;return 2;}
-I64 V60(I64 a){if(a==a)return 1;return 2;}
-I64 V61(I64 a,I64 b){if(a<b){if(b<10){if(a>0)return 1;}}return 0;}
-I64 V62(I64 a,I64 b){if(a<b)if(b<10)if(a>0)return 1;else return 2;return 0;}
-I64 V63(I64 a,I64 b,I64 c){if(a){if(b)return 1;}else{if(c)return 2;}return 3;}
-I64 V64(I64 a,I64 b){I64 r=0;if(a>b)r=1;else if(a<b)r=2;else r=3;if(r==1&&a>100)r=4;return r;}
-I64 V65(U8 a,U8 b){return a&&b;}
-I64 V66(I8 a,I8 b){return a||b;}
-I64 V67(U16 *a,U16 *b){return *a&&*b;}
-I64 V68(I64 a,F64 b){return a&&b;}
-I64 V69(F64 a){return a&&a;}
-I64 V70(F64 a){return !a&&1;}
+I64 g, h; F64 gf;
+I64 V1(I64 a, I64 b) {I64 r = a < b; return r;}
+I64 V2(I64 a, I64 b) {I64 r = a < b && b < 10; return r * 5;}
+I64 V3(I64 a, I64 b) {I64 r = a || b; return r + 1;}
+I64 V4(I64 a, I64 b) {I64 r = a ^^ b; return r + 1;}
+I64 V5(I64 a, I64 b) {return (a < b) + (b < a) + (a == b);}
+I64 V6(I64 a, I64 b) {return (a && b) + (a || b) + (a ^^ b);}
+I64 V7(I64 a, I64 b) {return (a && b) * 10 + (a || b);}
+I64 V8(I64 a) {return !a + !!a * 2;}
+I64 V9(I64 a, I64 b) {return !(a < b);}
+I64 V10(I64 a, I64 b) {return !(a && b);}
+I64 V11(I64 a, I64 b) {return !(a || b);}
+I64 V12(I64 a, I64 b, I64 c, I64 d) {return a < b && c < d;}
+I64 V13(I64 a, I64 b, I64 c, I64 d) {return a < b || c < d;}
+I64 V14(I64 a, I64 b, I64 c, I64 d) {return (a < b || c < d) && (a > c || b > d);}
+I64 V15(I64 a, I64 b, I64 c, I64 d) {return a < b && c < d || a > b && c > d;}
+I64 V16(I64 a, I64 b, I64 c, I64 d) {return a && b && c && d;}
+I64 V17(I64 a, I64 b, I64 c, I64 d) {return a || b || c || d;}
+I64 V18(I64 a, I64 b, I64 c, I64 d) {return a ^^ b ^^ c ^^ d;}
+I64 V19(I64 a, I64 b, I64 c, I64 d) {return a && b || c && d;}
+I64 V20(I64 a, I64 b, I64 c, I64 d) {return (a || b) && (c || d);}
+I64 V21(I64 a, I64 b, I64 c, I64 d) {return a && (b || c) && d;}
+I64 V22(I64 a, I64 b, I64 c, I64 d) {return !a && !b || !c && !d;}
+I64 V23(I64 a, I64 b, I64 c, I64 d) {return a ^^ b && c ^^ d;}
+I64 V24(I64 a, I64 b, I64 c, I64 d) {return a == b && c == d || a != c;}
+I64 V25(I64 a, I64 b) {return a && g++;}
+I64 V26(I64 a, I64 b) {return a || g++;}
+I64 V27(I64 a, I64 b) {return a && (g = b);}
+I64 V29(I64 a, I64 b) {if (a && b) {g = 1;} else if (a || b) {g = 2;} else {g = 3;} return g;}
+I64 V30(I64 a, I64 b) {if (!(a && b)) {g = 1;} return g;}
+I64 V31(I64 a, I64 b) {while (a && b) {a--; b--;} return a + b;}
+I64 V32(I64 a, I64 b) {while (a || b) {if (a) a--; else b--;} return a + b;}
+I64 V33(I64 a, I64 b) {I64 n = 0; for (; a < b && n < 100; a++) n++; return n;}
+I64 V34(I64 a, I64 b) {I64 n = 0; do {n++; a++;} while (a < b && n < 50); return n;}
+I64 V35(I64 a, I64 b) {I64 n = 0; while (a != b && (a < b || a > b)) {a += (a < b) - (a > b); n++;} return n;}
+I64 V36(U8 *s) {I64 n = 0; while (*s && *s != ' ' && *s != '\n') {s++; n++;} return n;}
+I64 V37(I64 *p, I64 n, I64 x) {I64 i = 0; while (i < n && p[i] != x) i++; return i;}
+I64 V38(F64 a, F64 b) {return a < b && b < 10.0 || a == 0;}
+I64 V39(F64 a, I64 b) {return a < b && b || !a;}
+I64 V40(F64 a, F64 b, F64 c) {I64 r = a < b; r += b < c; r += a < c; return r;}
+I64 V41(I64 a, I64 b) {g = a < b; h = a >= b; return g * 2 + h;}
+I64 V42(I64 a, I64 b) {U8 x = a < b; I8 y = a == b; return x + y;}
+I64 V43(I64 a, I64 b) {I64 *p = &g; *p = a && b; return g;}
+I64 V44(I64 a, I64 b) {I64 arr[2]; arr[0] = a < b; arr[1] = a || b; return arr[0] * 2 + arr[1];}
+F64 V45(I64 a, I64 b) {F64 f = a < b; gf = a && b; return f + gf;}
+I64 V46(I64 a) {return a && 1;}
+I64 V47(I64 a) {return a || 0;}
+I64 V48(I64 a) {return a && 0;}
+I64 V49(I64 a) {return a || 1;}
+I64 V50(I64 a) {return 1 && a;}
+I64 V51(I64 a) {return 0 || a;}
+I64 V52(I64 a) {return 1 && 1;}
+I64 V53(I64 a) {return 0 || 0;}
+I64 V54(I64 a) {if (1) return a; return 0;}
+I64 V55(I64 a) {if (0) return a; return 1;}
+I64 V56(I64 a) {while (0) a++; return a;}
+I64 V57(I64 a) {if (a && 0) return 1; return 2;}
+I64 V58(I64 a) {if (a || 1) return 1; return 2;}
+I64 V59(I64 a) {if (a < a) return 1; return 2;}
+I64 V60(I64 a) {if (a == a) return 1; return 2;}
+I64 V61(I64 a, I64 b) {if (a < b) {if (b < 10) {if (a > 0) return 1;}} return 0;}
+I64 V62(I64 a, I64 b) {if (a < b) if (b < 10) if (a > 0) return 1; else return 2; return 0;}
+I64 V63(I64 a, I64 b, I64 c) {if (a) {if (b) return 1;} else {if (c) return 2;} return 3;}
+I64 V64(I64 a, I64 b) {I64 r = 0; if (a > b) r = 1; else if (a < b) r = 2; else r = 3; if (r == 1 && a > 100) r = 4; return r;}
+I64 V65(U8 a, U8 b) {return a && b;}
+I64 V66(I8 a, I8 b) {return a || b;}
+I64 V67(U16 *a, U16 *b) {return *a && *b;}
+I64 V68(I64 a, F64 b) {return a && b;}
+I64 V69(F64 a) {return a && a;}
+I64 V70(F64 a) {return !a && 1;}

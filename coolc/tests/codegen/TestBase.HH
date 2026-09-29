@@ -17,11 +17,11 @@ I64i union I64 {I8i i8[8]; U8i u8[8]; I16 i16[4]; U16 u16[4]; I32 i32[2]; U32 u3
 #define I64_MIN (-0x7FFFFFFFFFFFFFFF-1)
 #define I64_MAX 0x7FFFFFFFFFFFFFFF
 #define F64_MAX 1.7976931348623157e308
-extern U0 Print(U8 *fmt,...);
+extern U0 Print(U8 *fmt, ...);
 extern U0 PutChars(U64 ch);
-extern F64 Pow(F64 a,F64 b);
+extern F64 Pow(F64 a, F64 b);
 extern U8 *SysTry();
 extern U0 SysUntry();
 extern U0 EndCatch();
 extern I64 AIWNIOS_SetJmp(U8 *);
-extern U0 throw(I64 v=0,Bool no_log=FALSE);
+extern U0 throw(I64 v = 0, Bool no_log = FALSE);

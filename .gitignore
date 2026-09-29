@@ -2,3 +2,4 @@ build/
 .DS_Store
 .claude/
 tools/zed-holyc/grammars/
+__pycache__/
