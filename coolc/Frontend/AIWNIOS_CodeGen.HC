@@ -794,7 +794,8 @@ CVarRenumbers *GenerateRenumbersForVar(CCmpCtrl *cc, I64 member, I64 *foff) {
     CVarRenumbers *ret = CAlloc(sizeof CVarRenumbers);
     CVarRenumber *renum;
     CI64Set *tset;
-    CRPN *cur2, *next2, cnt2;
+    CRPN *cur2, *next2;
+    I64 cnt2;
     ret->body = CAlloc(16 * 8);
     ret->cap = 16;
     ret->foffset = mlst->offset;
