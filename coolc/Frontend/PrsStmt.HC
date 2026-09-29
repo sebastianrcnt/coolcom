@@ -490,7 +490,7 @@ U0 PrsIf(CCmpCtrl *cc, I64 try_cnt, CCodeMisc *lb_break)
         LexExcept(cc, "Expecting '(' at ");
     Lex(cc);
     if (!PrsExpression(cc, NULL, FALSE, &stk))
-        throw('Compiler');
+        LexExcept(cc, "Expected an expression at ");
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
     Lex(cc);
@@ -521,7 +521,7 @@ U0 PrsWhile(CCmpCtrl *cc, I64 try_cnt)
     lb = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_LABEL, lb,, FALSE);
     if (!PrsExpression(cc, NULL, FALSE))
-        throw('Compiler');
+        LexExcept(cc, "Expected an expression at ");
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
     Lex(cc);
@@ -545,7 +545,7 @@ U0 PrsDoWhile(CCmpCtrl *cc, I64 try_cnt)
         LexExcept(cc, "Expecting '(' at ");
     Lex(cc);
     if (!PrsExpression(cc, NULL, FALSE))
-        throw('Compiler');
+        LexExcept(cc, "Expected an expression at ");
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
     RPNAddNew(cc, IC_BR_NOT_ZERO, lb,, FALSE);
@@ -568,7 +568,7 @@ U0 PrsFor(CCmpCtrl *cc, I64 try_cnt)
     lb = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_LABEL, lb,, FALSE);
     if (!PrsExpression(cc, NULL, FALSE))
-        throw('Compiler');
+        LexExcept(cc, "Expected an expression at ");
     lb_done = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_BR_ZERO, lb_done,, FALSE);
 
@@ -631,7 +631,7 @@ U0 PrsSwitch(CCmpCtrl *cc, I64 try_cnt)
     mc_jt->begin = COCMiscNew(cc, CMT_LABEL);
     mc_jt->begin->use_cnt++;
     if (!PrsExpression(cc, NULL, FALSE))
-        throw('Compiler');
+        LexExcept(cc, "Expected an expression at ");
     tmpi_sub = RPNAddNew(cc, IC_IMM_I64, 0, cmp.internal_types[RT_I64], FALSE);
     RPNAddNew(cc, IC_SUB,, cmp.internal_types[RT_I64], FALSE);
     if (nobound) {

@@ -70,6 +70,7 @@ def vim_panes(kernel):
     script += line('Broken+=vim_active || shell_stmt_cleanup || FaultReturned;')
     script += line('Print("\\x1b[2J\\x1b[HLEFT-CLEAN-%d\\n",Broken);')
     script += prefix('o') + text('A!\x1b:wq\n') + 'delay 200\n'
+    script += line('I64 bad = ;')  # a compile error in a pane prints ERROR
     script += line('Vim("C:/Page.txt");') + 'delay 300\n'
     script += vim.keys_of(109) + 'delay 100\n'  # PageDown: 28 text rows in a 29-row pane
     script += '1 29 1\n' + vim.keys_of(22) + '1 29 0\n'  # Ctrl+U: back 14 rows
@@ -86,6 +87,7 @@ def vim_panes(kernel):
     vim.check_init_log(log)
     after_boot = log.split('SELFTEST PASS', 1)[-1]
     assert 'heap overflow' not in after_boot and '*** Exception:' not in after_boot, 'kernel failure in Vim panes'
+    assert 'ERROR: Expected an expression' in after_boot, 'no compile error in the pane'
     # Recovery restores the primary screen before a compositor tick can copy
     # alternate-screen diagnostics. Broken instead checks that both statements
     # aborted before their post-Vim/post-fault assignments and cleared cleanup.

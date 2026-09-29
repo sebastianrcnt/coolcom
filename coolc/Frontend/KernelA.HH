@@ -6611,7 +6611,6 @@ class CSpritePtMeshU8s: CSpriteBase
 #define SPG_TYPE_MASK		0x7F
 
 extern I64 sprite_elem_base_sizes[SPT_TYPES_NUM];
-#include "Headers.HH";
 
 #define IC_END			0x00
 #define IC_NOP1			0x01

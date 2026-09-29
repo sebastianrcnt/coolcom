@@ -66,7 +66,7 @@ U0 PrsVarInit(CCmpCtrl *cc, U8 **_dst, CHashClass *tmpc, CArrayDim *tmpad,
                     if (cc->token == ',') //DUMB FIX by nroot
                         Lex(cc);
                     if (!PrsExpression(cc, NULL, PEF_NO_COMMA)) //Changed by nroot
-                        throw('Compiler');
+                        LexExcept(cc, "Expected an expression at ");
                     if (to) {RPNAddNew(cc, IC_ASSIGN,, tmpc, FALSE);
                         RPNAddNew(cc, IC_RET, 0, tmpc, FALSE);
                         while (cc->aotc->rip & 3)
@@ -93,7 +93,7 @@ U0 PrsVarInit(CCmpCtrl *cc, U8 **_dst, CHashClass *tmpc, CArrayDim *tmpad,
             } else {
                 LexPopNoRestore(cc);
                 if (!machine_code)
-                    throw('Compiler');
+                    LexExcept(cc, "Expected an expression at ");
                 r = (*machine_code)();
                 if (!(cc->flags & CCF_HAS_MISC_DATA) || pass == 1)
                     if (!is_str)
@@ -637,7 +637,7 @@ pvl_restart3:
                         LexPopRestore(cc);
                         Lex(cc);
                         if (!PrsExpression(cc, NULL, PEF_NO_COMMA))
-                            throw('Compiler');
+                            LexExcept(cc, "Expected an expression at ");
                         tmpm->use_cnt = 0;
                         cc->flags |= CCF_DONT_MAKE_RES;
                     } else
@@ -667,7 +667,7 @@ pvl_restart3:
                             cc->flags &= ~CCF_HAS_MISC_DATA;
                             machine_code = LexExpression2Bin(cc, &type);
                             if (!machine_code)
-                                throw('Compiler');
+                                LexExcept(cc, "Expected an expression at ");
                             tmpm->dft_val = (*machine_code)();
                             tmpc2 = OptClassFwd(tmpc2);
                             if (tmpc2->raw_type == RT_F64) {
