@@ -185,8 +185,21 @@ I64 LexInStr(CCmpCtrl *cc, U8 *buf, I64 size, Bool *done)
             return i;
         } else if (ch == '\\') {
             switch (ch = LexGetChar(cc)) {
-                case '0':
-                    buf[i++] = 0;
+                case '0'...'7':  // octal, up to 3 digits (C); \0 is NUL
+                    j = ch - '0';
+                    for (k = 1; k < 3; k++) {
+                        ch = LexGetChar(cc);
+                        if ('0' <= ch <= '7')
+                            j = j << 3 + ch - '0';
+                        else {
+                            cc->flags |= CCF_USE_LAST_U16;
+                            break;
+                        }
+                    }
+                    buf[i++] = j;
+                    break;
+                case 'e':  // ESC (C extension, for ANSI sequences)
+                    buf[i++] = 0x1B;
                     break;
                 case '\'':
                     buf[i++] = '\'';
@@ -474,7 +487,20 @@ lex_float_start:
                         break;
                     if (ch == '\\') {
                         switch (ch = LexGetChar(cc)) {
-                            case '0': k.u8[j] = 0; break;
+                            case '0'...'7':  // octal, up to 3 digits (C); '\0' is NUL
+                                i = ch - '0';
+                                for (l = 1; l < 3; l++) {
+                                    ch = LexGetChar(cc);
+                                    if ('0' <= ch <= '7')
+                                        i = i << 3 + ch - '0';
+                                    else {
+                                        cc->flags |= CCF_USE_LAST_U16;
+                                        break;
+                                    }
+                                }
+                                k.u8[j] = i;
+                                break;
+                            case 'e': k.u8[j] = 0x1B; break;
                             case '\'': k.u8[j] = '\''; break;
                             case '\`': k.u8[j] = '\`'; break;
                             case '"': k.u8[j] = '"'; break;
