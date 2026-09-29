@@ -14,3 +14,5 @@ I64i union I64 {I8i i8[8]; U8i u8[8]; I16 i16[4]; U16 u16[4]; I32 i32[2]; U32 u3
 #define TRUE  1
 #define FALSE 0
 #define NULL  0
+#define I64_MIN (-0x7FFFFFFFFFFFFFFF-1)
+#define I64_MAX 0x7FFFFFFFFFFFFFFF
