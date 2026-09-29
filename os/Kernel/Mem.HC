@@ -11,6 +11,8 @@
 // ends the range. State lives in a CHeapCtrl so tasks can get their own later.
 
 #define HEAP_MAGIC 0xB10C5AFE
+#define HEAP_USER  64
+#define HEAP_CANARY 0xC0DEC0DE5AFECAFE
 #define HEAP_HDR   16
 #define HEAP_MIN   32     // smallest block: header + list links
 #define HEAP_NBINS 64
@@ -20,6 +22,7 @@ class CMemBlk
     I64 sz;
     I64 pm;
     CMemBlk *next, *prev;   // valid only while free
+    I64 requested, caller, front[2];
 };
 
 class CHeapCtrl
@@ -116,16 +119,49 @@ U0 HeapInit(CHeapCtrl *hc, U8 *start, U8 *end)
     HeapPutFree(hc, s(CMemBlk *), hc->total, 0);
 }
 
+// Byte-wise tail access also works for odd requested sizes.
+U0 HeapSeal(CMemBlk *b, I64 size, I64 caller)
+{
+    I64 i;
+    U8 *tail = b(U8 *) + HEAP_USER + size;
+    b->requested = size;
+    b->caller = caller;
+    b->front[0] = b->front[1] = HEAP_CANARY;
+    for (i = 0; i < 8; i++)
+        tail[i] = (HEAP_CANARY >> (i * 8)) & 255;
+}
+
+Bool HeapCanary(CMemBlk *b, U8 *who)
+{
+    I64 i;
+    U8 *tail;
+    Bool ok = b->front[0] == HEAP_CANARY && b->front[1] == HEAP_CANARY;
+    if (b->requested < 0 || b->requested > BlkSize(b) - HEAP_USER - 8)
+        ok = FALSE;
+    else {
+        tail = b(U8 *) + HEAP_USER + b->requested;
+        for (i = 0; i < 8; i++)
+            if (tail[i] != ((HEAP_CANARY >> (i * 8)) & 255))
+                ok = FALSE;
+    }
+    if (!ok) {
+        RawPrint("%s: heap overflow block=%p size=%d allocated at %p\n",
+                 who, b(U8 *) + HEAP_USER, b->requested, b->caller);
+        heap_errs++;
+    }
+    return ok;
+}
+
 // Round a payload size up to a block size.
 I64 HeapBlkSize(I64 size)
 {
-    size = (size + HEAP_HDR + 15) & ~15;
+    size = (size + HEAP_USER + 8 + 15) & ~15;
     if (size < HEAP_MIN)
         size = HEAP_MIN;
     return size;
 }
 
-U8 *HeapAlloc(CHeapCtrl *hc, I64 size)
+U8 *HeapAlloc(CHeapCtrl *hc, I64 size, I64 caller = 0)
 {
     CMemBlk *b, *r;
     I64 tot, i, rem;
@@ -152,29 +188,34 @@ found:
         BlkSet(b, tot, 1, BlkPrev(b));
     } else
         b->sz |= 1;
+    if (!caller)
+        caller = ArchFp(U8 **)[1];
+    HeapSeal(b, size, caller);
     hc->used += BlkSize(b);
     HeapUnlock(hc);
-    return b(U8 *) + HEAP_HDR;
+    return b(U8 *) + HEAP_USER;
 }
 
 // Validate p and return its block, or NULL (and count an error) if bad.
 CMemBlk *HeapChk(CHeapCtrl *hc, U8 *p, U8 *who)
 {
-    CMemBlk *b = p - HEAP_HDR;
-    if (p(I64) & 15 || p < hc->start + HEAP_HDR || p >= hc->end ||
+    CMemBlk *b = p - HEAP_USER;
+    if (p(I64) & 15 || p < hc->start + HEAP_USER || p >= hc->end ||
             !BlkMagicOk(b) || !BlkUsed(b)) {
         RawPrint("%s: bad pointer %p (invalid or double free)\n", who, p);  // (heap locked)
         heap_errs++;
         return NULL;
     }
+    if (!HeapCanary(b, who))
+        return NULL;
     return b;
 }
 
 // Is p a live block of hc? Like HeapChk, but silent.
 Bool HeapOwns(CHeapCtrl *hc, U8 *p)
 {
-    CMemBlk *b = p - HEAP_HDR;
-    if (p(I64) & 15 || p < hc->start + HEAP_HDR || p >= hc->end)
+    CMemBlk *b = p - HEAP_USER;
+    if (p(I64) & 15 || p < hc->start + HEAP_USER || p >= hc->end)
         return FALSE;
     return BlkMagicOk(b) && BlkUsed(b);
 }
@@ -231,7 +272,7 @@ U0 HeapTrim(CHeapCtrl *hc, CMemBlk *b, I64 tot)
 U8 *HeapReAlloc(CHeapCtrl *hc, U8 *p, I64 size)
 {
     CMemBlk *b, *n;
-    I64 tot, cur, ncur;
+    I64 tot, cur, ncur, old_size, caller;
     U8 *q;
     if (!p)
         return HeapAlloc(hc, size);
@@ -243,6 +284,8 @@ U8 *HeapReAlloc(CHeapCtrl *hc, U8 *p, I64 size)
         HeapUnlock(hc);
         return NULL;
     }
+    old_size = b->requested;
+    caller = b->caller;
     tot = HeapBlkSize(size);
     cur = BlkSize(b);
     if (tot > cur) {   // try to grow into a free right neighbour
@@ -258,14 +301,15 @@ U8 *HeapReAlloc(CHeapCtrl *hc, U8 *p, I64 size)
     }
     if (tot <= cur) {
         HeapTrim(hc, b, tot);
+        HeapSeal(b, size, caller);
         HeapUnlock(hc);
         return p;
     }
     HeapUnlock(hc);
-    q = HeapAlloc(hc, size);
+    q = HeapAlloc(hc, size, caller);
     if (!q)
         return NULL;   // original block is untouched
-    MemCpy(q, p, cur - HEAP_HDR);
+    MemCpy(q, p, old_size);
     HeapFree(hc, p);
     return q;
 }
@@ -279,7 +323,7 @@ I64 HeapMSize(CHeapCtrl *hc, U8 *p)
     b = HeapChk(hc, p, "MSize");
     if (!b)
         return 0;
-    return BlkSize(b) - HEAP_HDR;
+    return b->requested;
 }
 
 // Walk the whole block chain. Returns TRUE if consistent; optionally reports
@@ -295,8 +339,11 @@ Bool HeapCheck(CHeapCtrl *hc, I64 *nused = NULL, I64 *nfree = NULL, I64 *largest
             ok = FALSE;
             break;
         }
-        if (BlkUsed(b))
+        if (BlkUsed(b)) {
             u++;
+            if (!HeapCanary(b, "HeapCheck"))
+                ok = FALSE;
+        }
         else {
             f++;
             fbytes += BlkSize(b);
@@ -341,12 +388,12 @@ U0 MemInit(U8 *start, U8 *end) {HeapInit(&sys_heap, start, end);}
 U8 *MAlloc(I64 cnt, CTask *task = NULL)
 {
     no_warn task;
-    return HeapAlloc(&sys_heap, cnt);
+    return HeapAlloc(&sys_heap, cnt, ArchFp(U8 **)[1]);
 }
 
 U8 *CAlloc(I64 cnt, CTask *task = NULL)
 {
-    U8 *p = HeapAlloc(&sys_heap, cnt);
+    U8 *p = HeapAlloc(&sys_heap, cnt, ArchFp(U8 **)[1]);
     no_warn task;
     if (p)
         MemSet(p, 0, cnt);
