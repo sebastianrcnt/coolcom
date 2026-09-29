@@ -915,7 +915,7 @@ U0 PrintErr(U8 *fmt, ...)
     U8 *buf = StrPrintJoin(NULL, fmt, argc, argv), *s = ST_ERR_ST;
     if (IsRaw) s = "ERROR: ";
     GetOutOfDollar;
-    "%,p %,p %,p %,p %s%s", Caller, Caller(2), Caller(3), Caller(4), s, buf;
+    "%s%s", s, buf;
     Free(buf);
 }
 
@@ -924,7 +924,7 @@ U0 PrintWarn(U8 *fmt, ...)
     U8 *buf = StrPrintJoin(NULL, fmt, argc, argv), *s = ST_WARN_ST;
     if (IsRaw) s = "WARNING: ";
     GetOutOfDollar;
-    "%,p %,p %,p %,p %s%s", Caller, Caller(2), Caller(3), Caller(4), s, buf;
+    "%s%s", s, buf;
     Free(buf);
 }
 

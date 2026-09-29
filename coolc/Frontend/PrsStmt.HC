@@ -1358,10 +1358,11 @@ try_label:
                             LexExcept(cc, "Duplicate goto label at ");
                         g_lb->flags |= CMF_DEFINED;
                         RPNAddNew(cc, IC_LABEL, g_lb, 0, FALSE);
+                        lex_caret_at = cc->cur_buf_ptr - StrLen(g_lb->str) - 1;
                         if (Lex(cc) == ':') //skip cur_str
                             Lex(cc); //skip colon
                         else {
-                            LexExcept(cc, "Undefined identifier at ");
+                            LexExcept(cc, MStrPrint("Undefined identifier '%s' at ", g_lb->str));
                         }
                         if (!cc->htc.fun)
                             LexExcept(cc, "No global labels at ");

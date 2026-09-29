@@ -48,25 +48,64 @@ U8 *LexPutLine(CCmpCtrl *cc, U8 *start)
     return NULL;
 }
 
+U8 *lex_caret_at;  // set just before LexExcept to point the caret somewhere else
+
 U0 LexPutPos(CCmpCtrl *cc)
-{//Print token, line link and, then, $LK,"LexPutLine",A="MN:LexPutLine"$().
-    LexPutToken(cc);
-    //FixSet(cc->lex_include_stk->full_name,cc->lex_include_stk->line_num); TODO RESTORE
-    if (IsRaw)
-        "%s,%d ", cc->lex_include_stk->full_name, cc->lex_include_stk->line_num;
-    else {
-        PutFileLink(cc->lex_include_stk->full_name,, cc->lex_include_stk->line_num);
-        "%s,%d\n",
-                cc->lex_include_stk->full_name, cc->lex_include_stk->line_num;
+{//Print where the error is: file and line (unless it is typed input), the line and a caret.
+    CLexFile *f = cc->lex_include_stk;
+    I64 col;
+    if (!IsRaw) {
+        LexPutToken(cc);
+        PutFileLink(f->full_name,, f->line_num);
+        "%s,%d\n", f->full_name, f->line_num;
         '' CH_SPACE;
+        LexPutLine(cc, f->line_start);
+        return;
     }
-    LexPutLine(cc, cc->lex_include_stk->line_start);
+    col = StrLen(f->full_name) - 12;  // typed input is compiled as NativeTmp.HC
+    if (col < 0 || StrCmp(f->full_name + col, "NativeTmp.HC"))
+        "  %s,%d\n", f->full_name, f->line_num;
+    if (!f->line_start)
+        return;
+    "  ";
+    LexPutLine(cc, f->line_start);
+    if (lex_caret_at && lex_caret_at >= f->line_start && lex_caret_at <= cc->cur_buf_ptr)
+        col = lex_caret_at - f->line_start;
+    else
+        col = cc->cur_buf_ptr - f->line_start - 1;  // the end of the current token
+    lex_caret_at = NULL;
+    if (col < 0)
+        col = 0;
+    "  ";
+    while (col-- > 0)
+        '' CH_SPACE;
+    "^\n";
+}
+
+U0 LexPutMsg(U8 *str, Bool err)
+{//Print str without the trailing " at " the messages carry for the old format.
+    U8 *m = StrNew(str);
+    I64 n = StrLen(m);
+    while (n > 0 && m[n - 1] == CH_SPACE)
+        m[--n] = 0;
+    if (n >= 3 && !StrCmp(m + n - 3, " at"))
+        m[n - 3] = 0;
+    if (err)
+        PrintErr("%s\n", m);
+    else
+        PrintWarn("%s\n", m);
+    Free(m);
 }
 
 U0 LexWarn(CCmpCtrl *cc, U8 *str = NULL)
 {//Print warn msg, then, $LK,"LexPutPos",A="MN:LexPutPos"$().
     U8 *s, *ptr;
-    if (str) PrintWarn(str);
+    if (str) {
+        if (IsRaw)
+            LexPutMsg(str, FALSE);
+        else
+            PrintWarn(str);
+    }
     if (cc->htc.fun) {
         "in fun '%s' at ", cc->htc.fun->str;
         if (IsRaw) {
@@ -86,7 +125,12 @@ U0 LexWarn(CCmpCtrl *cc, U8 *str = NULL)
 
 U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL)
 {//Print err msg, $LK,"LexPutPos",A="MN:LexPutPos"$() and throw exception.
-    if (str) PrintErr(str);
+    if (str) {
+        if (IsRaw)
+            LexPutMsg(str, TRUE);
+        else
+            PrintErr(str);
+    }
     //if (!IsRaw) TODO RESTORE
     //  AdamErr("Task:%08X %s\n",Fs,str);
     LexPutPos(cc);

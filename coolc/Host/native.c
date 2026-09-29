@@ -198,6 +198,7 @@ static uintptr_t host_caller(int64_t depth) {
     return frame ? ((uintptr_t *)frame)[1] : 0;
 }
 static int64_t host_true(void) { return 1; }
+static int64_t host_zero(void) { return 0; }
 static void host_str_print_fun_seg(char *out, uintptr_t address,
                                    int64_t field_len, int64_t flags) {
     (void)field_len;
@@ -329,6 +330,7 @@ static void register_host_symbols(Module *m) {
     HOST("FileNameAbs", host_file_name_abs);
     HOST("FileRead", host_file_read);
     HOST("FileWrite", host_file_write);
+    HOST("FlushMsgs", host_zero);  // compiler errors are printed as they happen
 #undef HOST
 }
 

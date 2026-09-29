@@ -167,11 +167,8 @@ CAOT *CmpJoin(CCmpCtrl *cc, I64 cmp_flags, U8 *map_name = NULL, U8 mapfile_drv_l
             PrsStmt(cc,,, cmp_flags);
         AOTGlblsResolve(cc, res);
     } catch {
-        if (Fs->except_ch == 'Compiler' && !(cmp_flags & CMPF_ASM_BLK)) {
-            PutExcept; //Added by nroot
-            LexPutPos(cc);
-            Fs->catch_except = TRUE;
-        }
+        if (Fs->except_ch == 'Compiler' && !(cmp_flags & CMPF_ASM_BLK))
+            Fs->catch_except = TRUE;  // LexExcept already printed the message and position
         okay = FALSE;
     }
     if (!okay) {

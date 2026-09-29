@@ -25,7 +25,9 @@ U0 PrsPush3(CPrsStk *ps, I64 val)
 }
 
 I64 PrsPop3(CPrsStk *ps)
-{
+{//NULL when empty: callers report "Unexpected end of expression" (stk3[0] is never pushed).
+    if (ps->ptr3 <= 0)
+        return NULL;
     return ps->stk3[ps->ptr3--];
 }
 
