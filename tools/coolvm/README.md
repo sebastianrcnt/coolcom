@@ -9,13 +9,18 @@ that proposal, with the findings below).
 ```
 make coolvm-test                 # build (ad-hoc codesigned) + run the assembly test guest, under a timeout
 tools/coolvm/build.sh            # -> build/coolvm
-build/coolvm [--cpus N] [--mem MB] [--timeout S] [--trace-mmio] kernel.Image [kernel.dtb]
+build/coolvm [--cpus N] [--mem MB] [--headless] [--disk image] [--timeout S] kernel.Image [kernel.dtb]
 ```
 
 Options: `--cpus N` (1..8, default 2; order = 4 e-cores then 4 p-cores), `--mem MB` (default 256),
 `--timeout S` (exit status 124), `--trace-mmio` (log every emulated MMIO and IMP-DEF sysreg access),
 `--load-offset BYTES` (kernel load offset from the DRAM base, 2 MiB-aligned, >= 0x200000, default 0x200000; to test kernel self-relocation like m1n1 choosing another base), `--bootargs STR`, `--dump-dtb FILE` (inspect with `dtc -I dtb -O dts`), `--lenient` (unknown MMIO reads
 0 / writes ignored), `--strict` (unknown sysreg is fatal), `--verbose`, `--el2` (experimental, see below).
+Display/device options: `--headless` (no Cocoa window), `--width N` and `--height N` (default 1024×768),
+`--screenshot FILE` (PNG at exit), `--input-script FILE` (preload input records), `--disk FILE` (writable raw
+image, repeat up to four times). Framebuffer size is limited to 256 MiB; RAM is limited to 4 GiB so it
+cannot overlap the framebuffer carve-out. A supplied DTB replaces the generated FDT verbatim and must
+describe any VM devices the guest intends to use.
 stdout is the guest UART, stderr is coolvm's diagnostics. Exit status: 0 guest powered off,
 124 timeout, 1 fatal guest fault (state dump on stderr), 2 usage. Needs Xcode command line tools,
 an Apple silicon Mac, and the ad-hoc `com.apple.security.hypervisor` entitlement that `build.sh` applies.
@@ -49,6 +54,9 @@ EL2/VHE or drop to EL1) and `CurrentEL == 4` (this VM).
 | `serial0` (apple,s5l-uart) | `0x2_3520_0000` | 0x1000 | `t8103.dtsi` `serial@235200000` |
 | `aic` (apple,t8103-aic) | `0x2_3b10_0000` | 0x8000 | `t8103.dtsi` `interrupt-controller@23b100000` |
 | VM-only "finisher" | `0x1_ff00_0000` | 0x1000 | coolvm invention, see Power off |
+| VM-only input FIFO | `0x1_ff00_1000` | 0x1000 | `coolcom,coolvm-input`, AIC IRQ 700 |
+| VM-only virtio-blk | `0x1_ff01_0000` + `0x1000` per disk | 0x1000 each | `virtio,mmio` v2, AIC IRQ 704–707 |
+| VM-only framebuffer | `0x9_0000_0000` | width × height × 4, 16 KiB rounded | `simple-framebuffer`, outside `/memory` |
 
 Everything else in `0x2_0000_0000..0x2_ffff_ffff` is unmapped: an access is a **fatal** guest fault
 (`coolvm: FATAL cpuN: unhandled MMIO read of 4 bytes at 0x...`, register dump, exit 1) unless
@@ -65,8 +73,12 @@ entry lets a kernel detect the VM), `aliases/serial0`, `cpus` (`cpu@0..3` icesto
 (`arm,armv8-timer`, the four AIC FIQs 2,3,0,1 as in the DTS), `clock-ref` (24 MHz `fixed-clock`), `soc`
 (`simple-bus`, `nonposted-mmio`) with `serial@235200000` (`apple,s5l-uart`, `reg-io-width = 4`,
 `<AIC_IRQ 605 LEVEL_HIGH>`, `clocks`) and `interrupt-controller@23b100000`, `finisher@1ff000000`,
-`/chosen` (`stdout-path = "serial0"`, `bootargs`), `/reserved-memory`, `/memory@800000000`.
-Not present: `simple-framebuffer` (no display), PMGR, DARTs, WDT, NVMe, USB, PCIe.
+`/chosen` (`stdout-path = "serial0"`, `bootargs`, `framebuffer@900000000`), `/reserved-memory`, `/memory@800000000`.
+The framebuffer node has `compatible = "apple,simple-framebuffer", "simple-framebuffer"`,
+`reg`, `width`, `height`, `stride = width × 4`, and `format = "x8r8g8b8"`. Its range also has a
+`no-map` `/reserved-memory` child and a `/memreserve/` entry. The input and attached disks appear
+under `/soc` with their VM-only addresses and level-high AIC interrupts. Not present: PMGR, DARTs,
+WDT, NVMe, USB, PCIe.
 A user-supplied `kernel.dtb` replaces the generated one verbatim (no fix-ups: you must supply
 `cpu-release-addr`, memory, etc. yourself). Note that DT property data is only 4-byte aligned; with the MMU
 off an unaligned 8-byte load is an alignment fault (the test guest reads `cpu-release-addr` as two words).
@@ -81,6 +93,42 @@ Apple interrupt bits follow m1n1's `hv_vuart.c`: with UCON mode field (`[1:0]` R
 Apple enable bit (RXTO 9, RXTO_LEGACY 11, RXTHRESH 12, TXTHRESH 13) set, UTRSTAT bits 9/3/4/5 read as set
 and **AIC hwirq 605** is asserted (level). Writing 1 to those UTRSTAT bits is accepted but the status is
 derived, so it stays asserted until the driver clears the enable.
+
+### Framebuffer and input (VM-only)
+
+The framebuffer is guest-writable memory mapped at `0x9_0000_0000`. Pixels are little-endian
+`x8r8g8b8`: a 32-bit word `0x00RRGGBB` appears as B, G, R, X bytes. The Cocoa view refreshes about
+20 times per second on the main thread; all vCPUs run on worker threads. Closing the window stops the VM.
+`--headless` skips Cocoa window creation; `--screenshot` works in either mode. The fixed framebuffer
+address stays outside guest `/memory`, matching m1n1's usable-RAM carve-out layout.
+
+Input uses a **small VM-only MMIO FIFO** rather than virtio-input. This keeps the input path simple for
+the current assembly guest and avoids implementing virtio-input's event and status queues before a
+kernel driver exists. The records use Linux input event numbers (`EV_KEY=1`, `EV_REL=2`, `EV_SYN=0`,
+`KEY_A=30`, `REL_X=0`, etc.). At `INPUT_BASE+0`, a 32-bit read returns the number of complete records.
+Three successive 32-bit reads of `INPUT_BASE+4` return `type`, `code`, and signed `value`, then pop the
+record. IRQ 700 stays asserted while records remain, and AIC EVENT auto-masks it like other AIC sources.
+The window sends key press/release, mouse button, relative movement, and wheel events. `--input-script`
+loads up to 255 records before the guest starts, one `type code value` decimal triple per line; blank
+lines and `#` comments are allowed. Example:
+
+```
+1 30 1    # KEY_A down
+2 0 7     # mouse X +7
+```
+
+### virtio-blk (VM-only)
+
+`--disk image` attaches a writable raw file whose size is a positive multiple of 512 bytes. Up to four
+images appear at `0x1_ff01_0000 + i*0x1000`, IRQ `704+i`. This is virtio-mmio **version 2**
+(`compatible = "virtio,mmio"`, device ID 2), with one split virtqueue (max 256 entries),
+`VIRTIO_F_VERSION_1` and `VIRTIO_BLK_F_FLUSH`. It handles `VIRTIO_BLK_T_IN` (read), `OUT` (write),
+and `FLUSH`; the capacity config is the image size in 512-byte sectors. The guest supplies an ordinary
+descriptor chain with a 16-byte request header, data descriptors for read/write, and a writable status
+byte. Indirect descriptors are not advertised. Queue notification processes available requests
+synchronously; used-ring completion raises a level-high AIC IRQ until interrupt acknowledgment.
+The guest and host should use the normal virtio barriers around split-ring indices. Images are modified
+in place; the test runner recreates them for each iteration.
 
 ### AIC v1 (`src/aic.c`)
 
@@ -149,7 +197,7 @@ Real M1 poweroff is an SMC (RTKit) call, far out of scope. coolvm offers two VM-
 
 * EL1 instead of EL2/VHE; MPIDR/MIDR/ID registers are the host's (MPIDR is overridden; `MIDR_EL1`, `ID_AA64*`
   are the host chip's, e.g. `ID_AA64MMFR1_EL1.VH = 0`).
-* Only one die, one UART, one AIC; no PMGR/DART/WDT/NVMe/USB/PCIe/framebuffer. No AIC `0x8020` CNTPCT mirror.
+* Only one die, one UART, one AIC; no PMGR/DART/WDT/NVMe/USB/PCIe. The VM-only framebuffer/input/block devices do not model M1 DCP, USB HID, or ANS storage. No AIC `0x8020` CNTPCT mirror.
 * AIC interrupt arbitration is simplified (line up while any unmasked pending IRQ targets the CPU); fast IPI
   "deferred" is immediate; IPI to a parked CPU is remembered and seen when it starts.
 * UART: no FIFO timing, RXTHRESH fires for any byte (UFCON trigger level ignored), TX never busy, no CR/LF handling.
@@ -180,9 +228,14 @@ virtual timer FIQ x5 with measured period, `cpu-release-addr` spin-table start o
 taken as FIQ, power off), `--lenient`/default behaviour for unmapped MMIO, `--strict` for an unknown sysreg.
 `test/guest.S` doubles as a compact reference for the entry path, FDT walking with the MMU off, an AIC IRQ/FIQ
 handler skeleton (`EVENT` read, `IPI_SR` first in the FIQ vector, `MASK_CLR` EOI) and spin-table secondary start.
+It also assembles `test/devices.S` and runs it headlessly three times with fresh disk images and
+scripted key/mouse events. The runner checks UART output, PNG pixel colors, raw disk bytes after
+read/write/flush, and FDT framebuffer/input/disk nodes and interrupts. Every VM invocation is wrapped
+in `gtimeout -k` and processes exit before the next iteration.
 
 ## Source layout
 
 `src/main.c` CLI, image/FDT loading, VM + memory setup, watchdog/timeout. `src/vcpu.c` vCPU threads, exit
-handling (MMIO, sysregs, HVC, WFI/WFE, vtimer), spin-table polling, poker thread. `src/aic.c`, `src/uart.c` device
-models (all under `g.lock`). `src/board.c` device tree. `src/fdt.c` FDT builder. `test/` guests and runner.
+handling (MMIO, sysregs, HVC, WFI/WFE, vtimer), spin-table polling, poker thread. `src/aic.c`, `src/uart.c`,
+`src/devices.c` device models (all under `g.lock`). `src/display.m` Cocoa window and PNG output on the main
+thread. `src/board.c` device tree. `src/fdt.c` FDT builder. `test/` guests and runner.

@@ -41,6 +41,12 @@ static void usage(void)
             "  --strict        unknown system registers are fatal (default: log + inject UNDEF)\n"
             "  --verbose       log boot and CPU lifecycle events\n"
             "  --el2           EXPERIMENTAL: enter the guest at EL2h with HCR_EL2 like m1n1 (needs macOS 15+ on M3 or later)\n"
+            "  --headless      run without a Cocoa window\n"
+            "  --width N       framebuffer width (default 1024)\n"
+            "  --height N      framebuffer height (default 768)\n"
+            "  --screenshot F  save framebuffer to PNG on exit\n"
+            "  --input-script F  preload input events (type code value, one per line)\n"
+            "  --disk F        attach writable raw image; repeat up to four times\n"
             "The optional kernel.dtb replaces the generated device tree verbatim (no fix-ups are applied).\n"
             "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n",
             MAX_CPUS, (unsigned long long)DRAM_BASE);
@@ -113,6 +119,10 @@ int main(int argc, char **argv)
     const char *bootargs = "";
     uint64_t load_off = KERNEL_BASE_OFF;
     const char *dump_dtb = NULL;
+    const char *input_script = NULL;
+    const char *disk_paths[MAX_DISKS];
+    int ndisks = 0;
+    g.fb_width = 1024; g.fb_height = 768;
     bool verbose = false;
 
     static const struct option opts[] = {
@@ -122,6 +132,9 @@ int main(int argc, char **argv)
         {"lenient", no_argument, 0, 'l'},        {"strict", no_argument, 0, 's'},
         {"verbose", no_argument, 0, 'v'},        {"help", no_argument, 0, 'h'},
         {"el2", no_argument, 0, 'E'},          {"load-offset", required_argument, 0, 'L'},
+        {"headless", no_argument, 0, 'H'}, {"screenshot", required_argument, 0, 'S'},
+        {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
+        {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
         {0, 0, 0, 0}};
     int o;
     while ((o = getopt_long(argc, argv, "h", opts, NULL)) != -1) {
@@ -137,11 +150,19 @@ int main(int argc, char **argv)
         case 'E': g.el2 = true; break;
         case 'L': load_off = strtoull(optarg, NULL, 0); break;
         case 'v': verbose = true; break;
+        case 'H': g.headless = true; break;
+        case 'S': g.screenshot = optarg; break;
+        case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
+        case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
+        case 'I': input_script = optarg; break;
+        case 'D': if (ndisks == MAX_DISKS) { usage(); return 2; } disk_paths[ndisks++] = optarg; break;
         default: usage(); return 2;
         }
     }
     if (optind >= argc || argc - optind > 2 || ncpus < 1 || ncpus > MAX_CPUS || mem_mb < 8 ||
-        (load_off & (KERNEL_ALIGN - 1)) || load_off < KERNEL_BASE_OFF) {
+        (load_off & (KERNEL_ALIGN - 1)) || load_off < KERNEL_BASE_OFF ||
+        !g.fb_width || !g.fb_height || g.fb_width > 8192 || g.fb_height > 8192 ||
+        (uint64_t)g.fb_width * g.fb_height * 4 > (256ULL << 20) || mem_mb > 4096) {
         usage();
         return 2;
     }
@@ -151,6 +172,8 @@ int main(int argc, char **argv)
 
     g.ncpus = ncpus;
     g.ram_size = mem_mb << 20;
+    g.fb_size = align_up((uint64_t)g.fb_width * g.fb_height * 4, 0x4000);
+    g.ndisks = ndisks;
     g.cntfrq = cntfrq_now();
     g.cntvoff = cntpct_now(); /* guest virtual count starts at 0 */
     pthread_mutex_init(&g.lock, NULL);
@@ -158,6 +181,15 @@ int main(int argc, char **argv)
     pthread_cond_init(&g.stop_cv, NULL);
     uart_init();
     aic_init();
+    for (int i = 0; i < ndisks; i++) {
+        struct stat st;
+        g.disk_fd[i] = open(disk_paths[i], O_RDWR);
+        if (g.disk_fd[i] < 0 || fstat(g.disk_fd[i], &st) || !S_ISREG(st.st_mode) || st.st_size < 512 || st.st_size % 512) {
+            LOGE("disk must be a writable, 512-byte-aligned regular file: %s\n", disk_paths[i]);
+            return 2;
+        }
+        g.disk_size[i] = st.st_size;
+    }
 
     /* ---- load payload ---- */
     size_t klen;
@@ -244,6 +276,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "coolvm: hv_vm_map failed: 0x%x\n", r);
         return 1;
     }
+    g.fb = mmap(NULL, g.fb_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    if (g.fb == MAP_FAILED || hv_vm_map(g.fb, FB_BASE, g.fb_size, HV_MEMORY_READ | HV_MEMORY_WRITE) != HV_SUCCESS) {
+        LOGE("framebuffer allocation/map failed\n"); return 1;
+    }
 
     memcpy(g.ram + kernel_off, kimg, klen);
     memcpy(g.ram + fdt_off, fdt, fdt_size);
@@ -273,6 +309,7 @@ int main(int argc, char **argv)
     }
     g.cpus[0].boot_entry = DRAM_BASE + kernel_off;
     g.cpus[0].boot_x0 = DRAM_BASE + fdt_off;
+    if (input_script && !input_load_script(input_script)) return 2;
 
     if (verbose) {
         LOGE("RAM 0x%llx..0x%llx, kernel @0x%llx (text_offset 0x%llx, image_size 0x%llx, hdr=%d), dtb @0x%llx (%u bytes), %d cpus, cntfrq %llu\n",
@@ -293,6 +330,7 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &sa, NULL);
 
     uart_start_stdin();
+    display_init();
     cpu_timer_poker_start();
     for (int i = 0; i < ncpus; i++)
         pthread_create(&g.cpus[i].thread, NULL, cpu_thread_main, &g.cpus[i]);
@@ -313,6 +351,7 @@ int main(int argc, char **argv)
             pthread_cond_timedwait(&g.stop_cv, &g.stop_lock, &ts);
         }
         pthread_mutex_unlock(&g.stop_lock);
+        display_pump();
         if (atomic_load(&g.stop))
             break;
         if (got_signal) {
@@ -332,6 +371,11 @@ int main(int argc, char **argv)
         pthread_join(g.cpus[i].thread, NULL);
     cpu_timer_poker_stop();
     uart_stop_stdin();
+    if (g.screenshot && !display_screenshot(g.screenshot)) {
+        LOGE("cannot save screenshot %s\n", g.screenshot);
+        if (atomic_load(&g.exit_code) == 0) atomic_store(&g.exit_code, 1);
+    }
+    for (int i = 0; i < g.ndisks; i++) close(g.disk_fd[i]);
     hv_vm_destroy();
     fflush(stdout);
     return atomic_load(&g.exit_code);
