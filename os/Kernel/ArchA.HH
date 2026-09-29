@@ -45,6 +45,7 @@ class CExceptFrame
     I64 x[31];
     I64 elr, spsr, esr, far, vec;
     U8 q[32 * 16];
+    I64 sp, reserved;
 };
 
 #define EXC_CUR_SPX_SYNC 4
@@ -68,3 +69,5 @@ import F64 Sqrt(F64 d);
 import F64 Floor(F64 d);
 import F64 Ceil(F64 d);
 import F64 Round(F64 d);                       // to nearest, ties away from zero
+
+import U8 *ArchBootGuard(I64 cpu);

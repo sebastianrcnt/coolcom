@@ -12,7 +12,8 @@
 #define FR_FAR    (34 * 8)
 #define FR_VEC    (35 * 8)
 #define FR_Q      (36 * 8) // q0..q31
-#define FR_SIZE   (FR_Q + 32 * 16)
+#define FR_SP     (FR_Q + 32 * 16)
+#define FR_SIZE   (FR_SP + 16)
 // The Aiwnios code generator saves callee-saved registers below sp (stp x19, x20, [sp, #-16], then
 // sub sp) and restores them the same way, so an interrupt between those two instructions would
 // overwrite them with the exception frame. Leave a red zone under the interrupted sp untouched.
@@ -23,8 +24,24 @@
 // Every vector saves x0/x1, records its index and joins except_common.
 .macro VEC n
   .balign 0x80
+  .if \n == 4
+  // Synchronous faults must work even when the task SP is in its guard.
+  msr sp_el0, x0
+  mrs x0, tpidrro_el0
+  str x1, [x0, #-8]
+  mov x1, sp
+  mov sp, x0
+  sub sp, sp, #(FR_SIZE + REDZONE)
+  str x1, [sp, #FR_SP]
+  ldr x1, [x0, #-8]
+  mrs x0, sp_el0
+  stp x0, x1, [sp, #FR_X]
+  .else
   sub sp, sp, #(FR_SIZE + REDZONE)
   stp x0, x1, [sp, #FR_X]
+  add x1, sp, #(FR_SIZE + REDZONE)
+  str x1, [sp, #FR_SP]
+  .endif
   mov x0, #\n
   b except_common
 .endm
@@ -130,8 +147,10 @@ except_common:
   ldp x26, x27, [sp, #FR_X + 26 * 8]
   ldp x28, x29, [sp, #FR_X + 28 * 8]
   ldr x30, [sp, #FR_X + 30 * 8]
-  ldp x0, x1, [sp, #FR_X]
-  add sp, sp, #(FR_SIZE + REDZONE)
+  mov x1, sp
+  ldr x0, [x1, #FR_SP]
+  mov sp, x0
+  ldp x0, x1, [x1, #FR_X]
   eret
 
 // System register accessors. Each is a plain AAPCS64 function.
@@ -346,7 +365,7 @@ ArchDsb:
 .global ArchTlbFlush
 ArchTlbFlush:
   dsb sy
-  tlbi vmalle1
+  tlbi vmalle1is
   dsb sy
   isb
   ret

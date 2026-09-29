@@ -115,7 +115,7 @@ def site(off, what):
         die(f'image offset {off:#x} is patched twice ({sites[off]} and {what})')
     sites[off] = what
 
-image = code + bytes(align(len(code)) - len(code))
+image = code + bytes(align(len(code), 16384) - len(code))
 main_table = ORG + len(image)
 for k, m in enumerate(mains):
     site(len(image), 'main table')
@@ -217,6 +217,7 @@ open(args[2], 'w').write(
     ''.join(f'HC_{k} = {addr(k, "export"):#x};\n' for k in sorted(syms)
             if k.isidentifier() and k not in arch_names) +
     f'KMAIN = {addr("KMain", "boot"):#x};\n'
+    f'KTEXT_END = {main_table:#x};\n'
     f'MAIN_TABLE = {main_table:#x};\n'
     f'RELOC_TABLE = {reloc_table:#x};\n'
     f'KSYM_TABLE = {ksym_table:#x};\n'

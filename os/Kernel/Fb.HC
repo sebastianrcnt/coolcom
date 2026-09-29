@@ -2,8 +2,8 @@
 // 0x00RRGGBB), drawn with GNU Unifont (Font.HC): 8x16 cells, wide glyphs take two.
 //
 // The framebuffer is outside /memory, but on real hardware it lies inside the
-// DRAM aperture the boot tables map as Normal write-back. FbMapNC() splits the
-// affected 32 MiB blocks into 16 KiB pages and remaps just the framebuffer
+// DRAM aperture the boot tables map as Normal write-back. FbMapNC()
+// uses the existing 16 KiB page tables and remaps just the framebuffer
 // pages as Normal non-cacheable, so the display controller sees every store.
 class CFb
 {
@@ -25,20 +25,12 @@ CFb fb;
 
 U0 FbMapNC(I64 start, I64 size)
 {
-    I64 *l2 = ArchL2Table, *l3;
-    I64 blk, i, addr, desc;
-    for (blk = start >> FB_BLK_SHIFT; blk <= (start + size - 1) >> FB_BLK_SHIFT; blk++) {
-        l3 = (MAlloc(2 * 16384)(I64) + 16383) & ~16383;
-        for (i = 0; i < FB_PAGES; i++) {
-            addr = (blk << FB_BLK_SHIFT) + (i << FB_PAGE_SHIFT);
-            // page descriptor: valid, AttrIndx 1 (Normal WB), inner shareable, AF
-            desc = addr | 3 | (1 << 2) | (3 << 8) | (1 << 10);
-            if (addr + 16384 > start && addr < start + size)
-                desc = addr | 3 | (2 << 2) | (3 << 8) | (1 << 10);  // AttrIndx 2: Normal NC
-            l3[i] = desc;
-        }
-        ArchDsb;
-        l2[blk] = l3(I64) | 3;  // table descriptor
+    I64 addr, *l3, *l2 = ArchL2Table;
+    for (addr = start & ~16383; addr < start + size; addr += 16384) {
+        l3 = l2[addr >> 25] & ~16383;
+        l3[(addr >> 14) & 2047] = 0;
+        ArchTlbFlush;
+        l3[(addr >> 14) & 2047] = addr | 3 | (2 << 2) | (3 << 8) | (1 << 10);
     }
     ArchTlbFlush;
 }
