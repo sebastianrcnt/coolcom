@@ -1296,3 +1296,24 @@ extern I64 TYPECAST_ASSIGN_BEGIN(CBCmpCtrl *cctrl,CBRPN **dst,CBRPN *src,
 	CBICArg *_orig,I64 *pop,I64 *pop2,U8 *bin,I64 code_off);
 extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl,I64 pop,CBICArg *_orig,
 	U8 *bin,I64 code_off);
+
+// ---- Kernel heap/string/print functions used by the port (INTEGRATION: provided by the CoolC kernel) ----
+extern U8 *MAlloc(I64 size);
+extern U8 *CAlloc(I64 size);
+extern U0 Free(U8 *ptr);
+extern U8 *StrNew(U8 *s);
+extern U8 *MemCpy(U8 *dst, U8 *src, I64 cnt);
+extern U8 *MemSet(U8 *dst, I64 val, I64 cnt);
+extern I64 StrLen(U8 *s);
+extern I64 StrCmp(U8 *a, U8 *b);
+extern U0 Print(U8 *fmt, ...);
+
+// ---- Frontend diagnostics used by AssignRawTypeToNode (INTEGRATION: the HolyC frontend's error reporting) ----
+extern I64 ParseErr(CBCmpCtrl *ctrl, U8 *fmt, ...);
+extern I64 ParseWarn(CBCmpCtrl *ctrl, U8 *fmt, ...);
+
+// ---- Defined in IRBind.HC ----
+extern U0 abort();                              // print and halt (C abort())
+extern I64 BETWEEN(I64 a, I64 min, I64 max);    // C macro: a>=min && a<=max
+
+extern U0 throw(I64 code); //INTEGRATION: kernel exception throw (keyword in full HolyC)
