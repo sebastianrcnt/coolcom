@@ -92,7 +92,7 @@ Current deliberate limits:
 - `@embed` supports the builtin arithmetic, numeric casts, memory/span and
   printing patterns; arbitrary C syntax is rejected with a backend diagnostic.
 - Foreign imports call their HolyC symbol verbatim. Scalar integers, booleans,
-  Float64, pointers, references and span inputs are supported. The symbol must
+  Float64, Unit/U0, pointers, references and span inputs are supported. The symbol must
   already be declared by an included HolyC header or adapter. Span arguments
   decay to pointers; pass their length explicitly. Aggregate/span returns need
   an explicit adapter; arbitrary C libraries are not automatically available.

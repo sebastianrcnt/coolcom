@@ -19,7 +19,7 @@ def run(*args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="")
+    parser.add_argument("--filter", default="", choices=("", "Files", "Screen", "Key", "Errors"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:

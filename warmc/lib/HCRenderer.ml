@@ -205,7 +205,10 @@ let render units entry =
   and call n t args =
     let args = List.map (fun e ->
       let v = expr e in if aggregate (typeof e) then "&" ^ par v else v) args in
-    if aggregate t then begin
+    if t = CNamedType "au_unit_t" && Hashtbl.mem foreign n then begin
+      (* HolyC U0 has no value. Warm Unit is represented by a dummy byte. *)
+      emit (n ^ "(" ^ join args ^ ");"); "0"
+    end else if aggregate t then begin
       let v = temp t in emit (n ^ "(" ^ join (("&" ^ v)::args) ^ ");"); v
     end else begin
       let v = temp t in emit (v ^ " = " ^ n ^ "(" ^ join args ^ ");"); v

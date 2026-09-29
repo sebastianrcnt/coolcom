@@ -38,8 +38,21 @@ let rejects_foreign_span_result _ =
     assert_failure "pointer return cannot manufacture a span length"
   with Error.Austral_error _ -> ()
 
+let foreign_unit_test _ =
+  let unit_ty = CNamedType "au_unit_t" in
+  let unit = CUnit ("Test", [CFunctionDefinition
+    (Desc "void foreign", "test", [], unit_ty, CBlock [
+      CLocalFunctionDeclaration ("KernelVoid", [], unit_ty, LinkageExternal);
+      CReturn (CFuncall ("KernelVoid", []))])]) in
+  let source = HCRenderer.render [unit] None in
+  assert_bool "call U0 without inventing a return value"
+    (contains source "KernelVoid();");
+  assert_bool "never assign HolyC void"
+    (not (contains source " = KernelVoid("))
+
 let suite = "HolyC embed boundary" >::: [
   "general foreign call" >:: foreign_test;
+  "void foreign call" >:: foreign_unit_test;
   "reject foreign span result" >:: rejects_foreign_span_result;
   "reject mixed operators in printf" >:: (fun _ ->
     rejects (CEmbed (CNamedType "au_unit_t", "au_printf(\"%i\", $1 + $2)",
