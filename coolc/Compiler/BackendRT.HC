@@ -1,7 +1,7 @@
 // What the backend needs from its host (the C runtime, in Aiwnios), kept
 // private to the backend. The port calls these B-prefixed names instead of
 // the host's Fs/HashFind/..., so it behaves the same inside the Aiwnios
-// runtime (for differential testing) and inside the CoolC kernel.
+// runtime (for differential testing) and inside the coolcom kernel.
 
 #define BHASH_SIZE 64
 

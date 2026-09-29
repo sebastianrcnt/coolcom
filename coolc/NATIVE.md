@@ -1,4 +1,6 @@
-# Native CoolC build
+# Native coolc build
+
+Cool is our HolyC dialect; `coolc` is its compiler (as Warm and `warmc`).
 
 On Apple Silicon, `make` builds `build/coolc` from `coolc/Host`, then uses the
 checked-in `coolc/seed/Compiler.BIN` to compile `os/Kernel/Kernel.HC`. The

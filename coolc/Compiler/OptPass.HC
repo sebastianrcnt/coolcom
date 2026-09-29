@@ -20,7 +20,7 @@
 // not start with `IC_`, so RENAMES.txt does not cover them).
 //
 // PORT-NOTE: C's pointer arithmetic `ic_class[-1]` steps back by
-// sizeof(CBHashClass), which is packed in CoolC; IRBind.HC must allocate
+// sizeof(CBHashClass), which is packed in Cool; IRBind.HC must allocate
 // class chains with that same stride.
 //
 // INTEGRATION: BQSort is a host runtime call (see OptPassRegAlloc), BFs is the

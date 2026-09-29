@@ -1,4 +1,4 @@
-# Rename table for the C -> CoolC backend port (old<TAB>new).
+# Rename table for the C -> Cool backend port (old<TAB>new).
 # Generated; see PORTING.md. Constant families are listed as prefixes ending in '_'.
 ## types
 CArrayDim	CBArrayDim

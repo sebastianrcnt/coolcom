@@ -3,7 +3,7 @@
 // Purpose: the Aiwnios C backend calls libc qsort() with comparators that
 // return 0 on ties, so the order of equal elements (and hence the generated
 // machine code) depends on the precise qsort algorithm. This file reproduces
-// Apple's implementation so CoolC output matches byte-for-byte.
+// Apple's implementation so coolc output matches byte-for-byte.
 //
 // Based on Apple Libc stdlib/FreeBSD/qsort.c (apple-oss-distributions/Libc,
 // FreeBSD-derived Bentley & McIlroy quicksort with pseudomedian-of-9,

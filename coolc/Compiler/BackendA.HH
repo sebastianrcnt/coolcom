@@ -1,7 +1,7 @@
 // Translated from Aiwnios c/aiwn_lexparser.h, aiwn_arm.h, aiwn_hash.h, aiwn_mem.h, aiwn_que.h,
 // aiwn_asm.h and the local types of arm64_asm.c / optpass.c (nrootconauto, BSD-3), commit e155e87.
 //
-// Shared types, constants and prototypes of the CoolC AArch64 backend port
+// Shared types, constants and prototypes of the Cool AArch64 backend port
 // (IRBind.HC, Arm64Enc.HC, OptPass.HC, ArmBackendA.HC, ArmBackendB.HC).
 // See PORTING.md and RENAMES.txt.  Include this header (after KernelA.HH) before any of them.
 //
@@ -1277,7 +1277,7 @@ extern I64 __builtin_ctzl(I64 x);       // count of trailing zero bits, x!=0
 extern U0 __builtin___clear_cache(U8 *begin, U8 *end); //INTEGRATION: I-cache flush, stubbed
 extern U0 sys_icache_invalidate(U8 *begin, I64 len);   //INTEGRATION: I-cache flush, stubbed
 
-// ---- Host runtime used by the port (INTEGRATION: provided by the CoolC kernel, wired up later) ----
+// ---- Host runtime used by the port (INTEGRATION: provided by the coolcom kernel, wired up later) ----
 extern CBTask *BFs;                                                    //INTEGRATION: current task
 extern CBHash *BHashFind(U8 *str, CBHashTable *table, I64 type, I64 inst); //INTEGRATION
 extern U0 BHashAdd(CBHash *h, CBHashTable *table);                     //INTEGRATION
@@ -1308,7 +1308,7 @@ extern I64 TYPECAST_ASSIGN_BEGIN(CBCmpCtrl *cctrl, CBRPN **dst, CBRPN *src,
 extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl, I64 pop, CBICArg *_orig,
                                U8 *bin, I64 code_off);
 
-// ---- Kernel heap/string/print functions used by the port (INTEGRATION: provided by the CoolC kernel) ----
+// ---- Kernel heap/string/print functions used by the port (INTEGRATION: provided by the coolcom kernel) ----
 // These are only declared for standalone syntax checks (#define BACKEND_STANDALONE): the backend is
 // included after the kernel/runtime that defines them, and an extern here would hide those definitions.
 #ifdef BACKEND_STANDALONE // kernel provides these

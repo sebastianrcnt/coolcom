@@ -1,9 +1,9 @@
-# Porting the Aiwnios AArch64 backend from C to CoolC
+# Porting the Aiwnios AArch64 backend from C to Cool
 
 The owned HolyC frontend (`coolc/Frontend/*.HC`) builds IR
 through `__HC_*` functions implemented in C, and the C code optimizes the IR
-and emits AArch64 machine code. To make the whole compiler CoolC (and so
-editable inside the OS) we translate that C code to CoolC here.
+and emits AArch64 machine code. To make the whole compiler Cool (and so
+editable inside the OS) we translate that C code to Cool here.
 
 Upstream provenance is Aiwnios commit `e155e87`. The code is
 BSD-3; keep a credit line at the top of every translated file:
@@ -11,7 +11,7 @@ BSD-3; keep a credit line at the top of every translated file:
 
 ## Files
 
-| CoolC file | Translated from |
+| Cool file | Translated from |
 |---|---|
 | `BackendA.HH` | `c/aiwn_lexparser.h`, `c/aiwn_arm.h` (types, enums, macros needed by the files below) |
 | `IRBind.HC` | `c/parser.c`: the `__HC_*` binding functions (~lines 4581-5109) and the helpers the backend calls (`AssignRawTypeToNode`, `CodeMiscNew`, `CodeMiscAddRef`, `ICArgN`, `ICFree`, `ICFwd`, `__HC_SetAOTRelocBeforeRIP`, `CodeCtrlPush/Pop`, `CmpCtrlNew/Del`, ...) |
