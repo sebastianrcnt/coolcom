@@ -9,7 +9,7 @@ that proposal, with the findings below).
 ```
 make coolvm-test                 # build (ad-hoc codesigned) + run the assembly test guest, under a timeout
 tools/coolvm/build.sh            # -> build/coolvm
-build/coolvm [--cpus N] [--mem MB] [--headless] [--disk image] [--timeout S] kernel.Image [kernel.dtb]
+build/coolvm [--cpus N] [--mem MB] [--headless] [--disk image] [--net] [--timeout S] kernel.Image [kernel.dtb]
 ```
 
 Options: `--cpus N` (1..8, default 2; order = 4 e-cores then 4 p-cores), `--mem MB` (default 256),
@@ -18,7 +18,7 @@ Options: `--cpus N` (1..8, default 2; order = 4 e-cores then 4 p-cores), `--mem 
 0 / writes ignored), `--strict` (unknown sysreg is fatal), `--verbose`, `--el2` (experimental, see below).
 Display/device options: `--headless` (no Cocoa window), `--width N` and `--height N` (default 1024×768),
 `--screenshot FILE` (PNG at exit), `--input-script FILE` (preload input records), `--disk FILE` (writable raw
-image, repeat up to four times). Framebuffer size is limited to 256 MiB; RAM is limited to 4 GiB so it
+image, repeat up to four times), `--net` (virtio-net NIC behind a user-mode NAT, below). Framebuffer size is limited to 256 MiB; RAM is limited to 4 GiB so it
 cannot overlap the framebuffer carve-out. A supplied DTB replaces the generated FDT verbatim and must
 describe any VM devices the guest intends to use.
 stdout is the guest UART, stderr is coolvm's diagnostics. Exit status: 0 guest powered off,
@@ -56,6 +56,7 @@ EL2/VHE or drop to EL1) and `CurrentEL == 4` (this VM).
 | VM-only "finisher" | `0x1_ff00_0000` | 0x1000 | coolvm invention, see Power off |
 | VM-only input FIFO | `0x1_ff00_1000` | 0x1000 | `coolcom,coolvm-input`, AIC IRQ 700 |
 | VM-only virtio-blk | `0x1_ff01_0000` + `0x1000` per disk | 0x1000 each | `virtio,mmio` v2, AIC IRQ 704–707 |
+| VM-only virtio-net (`--net`) | `0x1_ff02_0000` | 0x1000 | `virtio,mmio` v2 device ID 1, AIC IRQ 712 |
 | VM-only framebuffer | `0x9_0000_0000` | width × height × 4, 16 KiB rounded | `simple-framebuffer`, outside `/memory` |
 
 Everything else in `0x2_0000_0000..0x2_ffff_ffff` is unmapped: an access is a **fatal** guest fault
@@ -132,6 +133,43 @@ synchronously; used-ring completion raises a level-high AIC IRQ until interrupt 
 The guest and host should use the normal virtio barriers around split-ring indices. Images are modified
 in place; the test runner recreates them for each iteration.
 
+### virtio-net and user-mode NAT (VM-only, `--net`, `src/net.c`)
+
+`--net` adds a `virtio,mmio` node at `0x1_ff02_0000` (IRQ 712, after the disks): virtio-mmio version 2,
+device ID 1, features `VIRTIO_F_VERSION_1`, `VIRTIO_NET_F_MAC` (config bytes 0..5 = `52:54:00:12:34:56`)
+and `VIRTIO_NET_F_STATUS` (link always up). Queue 0 receives, queue 1 transmits; every buffer starts
+with the 12-byte `virtio_net_hdr` (all zero, `num_buffers = 1` on receive); no offloads, no mergeable
+buffers, no control queue. A transmit notification processes the chains synchronously; received frames
+wait in a 512-frame host queue until the guest posts receive buffers (a queue-0 notify, or the poll
+thread every 50 ms, flushes it). The used ring is updated with release ordering; the ISR bit and level
+IRQ are raised unless the guest set `VRING_AVAIL_F_NO_INTERRUPT`.
+
+There is no host network device: the frames go to a small slirp-style NAT inside coolvm, so neither
+root nor vmnet is needed. The guest network is QEMU's: guest `10.0.2.15/24`, gateway `10.0.2.2`
+(MAC `52:55:0a:00:02:02`), DNS `10.0.2.3`.
+- **ARP** requests for the gateway or DNS address are answered; the guest's MAC is learned from them.
+- **DHCP**: DISCOVER gets an OFFER and REQUEST an ACK for `10.0.2.15` (mask, router, DNS, 1-day lease).
+- **ICMP echo** to `10.0.2.2`/`10.0.2.3` is answered locally; to other addresses it goes out through an
+  unprivileged `SOCK_DGRAM`/`IPPROTO_ICMP` socket (macOS allows these without root) and the reply is
+  returned with the guest's identifier and sequence.
+- **DNS** to `10.0.2.3:53`: an `A` query is answered from the host's `getaddrinfo()` on a helper thread
+  (so the host's resolver configuration, `/etc/hosts`, VPN resolvers etc. apply; up to 8 answers, TTL 60,
+  NXDOMAIN/SERVFAIL from the error). Other query types get an empty NOERROR answer.
+- **UDP**: one non-blocking host socket per guest source port (closed after 60 s idle).
+- **TCP**: a guest SYN makes coolvm `connect()` a non-blocking host socket; when that succeeds the guest
+  gets the SYN-ACK (MSS 1460, window 65535, no options otherwise), or an RST if it fails. Guest data is
+  accepted in order only and acknowledged as far as the host socket took it (the guest retransmits the
+  rest); host data is buffered (256 KiB) and sent within the guest's window, with go-back-N
+  retransmission after 300 ms and zero-window probes. FINs map to `shutdown(SHUT_WR)` and host EOF.
+  Connections idle for 5 minutes are reset.
+- TCP and UDP to `10.0.2.2` go to the host's `127.0.0.1`. IP fragments are dropped. There is no inbound
+  port forwarding.
+
+`COOLVM_NET_DEBUG=1` logs DNS lookups, TCP connects, every guest TCP segment and bad guest checksums,
+and prints frame counts at exit. `test/nat-test.c` (part of `make coolvm-test`) drives the NAT from a
+host program acting as the guest driver: ARP, ICMP, DHCP, DNS and an HTTP GET of example.com (skipped
+with status 77 when the host is offline).
+
 ### AIC v1 (`src/aic.c`)
 
 Register map per `irq-apple-aic.c` (v1 offsets) and m1n1 `aic_regs.h`: `INFO` (0x4, reads `0x000a0380` like a
@@ -199,7 +237,7 @@ Real M1 poweroff is an SMC (RTKit) call, far out of scope. coolvm offers two VM-
 
 * EL1 instead of EL2/VHE; MPIDR/MIDR/ID registers are the host's (MPIDR is overridden; `MIDR_EL1`, `ID_AA64*`
   are the host chip's, e.g. `ID_AA64MMFR1_EL1.VH = 0`).
-* Only one die, one UART, one AIC; no PMGR/DART/WDT/NVMe/USB/PCIe. The VM-only framebuffer/input/block devices do not model M1 DCP, USB HID, or ANS storage. No AIC `0x8020` CNTPCT mirror.
+* Only one die, one UART, one AIC; no PMGR/DART/WDT/NVMe/USB/PCIe. The VM-only framebuffer/input/block/net devices do not model M1 DCP, USB HID, or ANS storage. No AIC `0x8020` CNTPCT mirror.
 * AIC interrupt arbitration is simplified (line up while any unmasked pending IRQ targets the CPU); fast IPI
   "deferred" is immediate; IPI to a parked CPU is remembered and seen when it starts.
 * UART: no FIFO timing, RXTHRESH fires for any byte (UFCON trigger level ignored), TX never busy, no CR/LF handling.
@@ -239,5 +277,5 @@ in `gtimeout -k` and processes exit before the next iteration.
 
 `src/main.c` CLI, image/FDT loading, VM + memory setup, watchdog/timeout. `src/vcpu.c` vCPU threads, exit
 handling (MMIO, sysregs, HVC, WFI/WFE, vtimer), spin-table polling, poker thread. `src/aic.c`, `src/uart.c`,
-`src/devices.c` device models (all under `g.lock`). `src/display.m` Cocoa window and PNG output on the main
+`src/devices.c` device models (all under `g.lock`). `src/net.c` virtio-net and the user-mode NAT (poll thread + DNS threads, also under `g.lock`). `src/display.m` Cocoa window and PNG output on the main
 thread. `src/board.c` device tree. `src/fdt.c` FDT builder. `test/` guests and runner.

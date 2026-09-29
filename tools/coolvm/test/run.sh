@@ -122,5 +122,14 @@ PY
     python3 "$HERE/verify_devices.py" "$OUT"
 done
 
+# ---- 6. user-mode NAT (src/net.c) driven by a host-side fake guest; 77 = host offline ----
+clang -O1 -g -std=gnu11 -I "$HERE/../src" -o "$OUT/nat-test" "$HERE/nat-test.c" "$HERE/../src/net.c" -lpthread
+set +e
+gtimeout -k 2 30 "$OUT/nat-test" >"$OUT/out_nat.txt" 2>&1
+RC=$?
+set -e
+cat "$OUT/out_nat.txt"
+if [ "$RC" -eq 77 ]; then echo "nat-test: host offline, external part skipped"; else expect_rc "$RC" 0 "nat-test"; fi
+
 if [ "$FAIL" -eq 0 ]; then echo "coolvm-test: OK"; else echo "coolvm-test: FAILED"; fi
 exit $FAIL
