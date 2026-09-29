@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test text-test ime-test top-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test text-test ime-test top-test cmdline-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -140,7 +140,11 @@ ime-test: build/kernel.Image coolvm
 top-test: build/kernel.Image coolvm
 	python3 tools/top-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test text-test ime-test top-test warm-kernel-test
+# Unix-style command lines (vim a.HC, find foo) and Tab completion in the shell (os/Kernel/ShellCmd.HC).
+cmdline-test: build/kernel.Image coolvm
+	python3 tools/cmdline-test.py $<
+
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test text-test ime-test top-test cmdline-test warm-kernel-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 
