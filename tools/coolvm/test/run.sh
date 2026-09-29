@@ -13,13 +13,14 @@ OBJCOPY=${OBJCOPY:-aarch64-elf-objcopy}
 TIMEOUT=${TIMEOUT:-20}
 
 mkdir -p "$OUT"
-for g in guest fault; do
+for g in guest fault devices; do
     "$AS" -o "$OUT/$g.o" "$HERE/$g.S"
     "$LD" --no-warn-rwx-segments -T "$HERE/guest.ld" -o "$OUT/$g.elf" "$OUT/$g.o"
     "$OBJCOPY" -O binary "$OUT/$g.elf" "$OUT/$g.Image"
 done
 
 [ -x "$COOLVM" ] || "$HERE/../build.sh"
+command -v gtimeout >/dev/null || { echo "gtimeout is required" >&2; exit 2; }
 
 FAIL=0
 expect() { # file pattern
@@ -37,7 +38,7 @@ expect_rc() { # actual expected what
 
 # ---- 1. positive test: everything the emulated M1 subset offers ----
 set +e
-"$COOLVM" --cpus 2 --timeout "$TIMEOUT" "$@" "$OUT/guest.Image" </dev/null >"$OUT/out.txt" 2>"$OUT/err.txt"
+gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --headless --cpus 2 --timeout "$TIMEOUT" "$@" "$OUT/guest.Image" </dev/null >"$OUT/out.txt" 2>"$OUT/err.txt"
 RC=$?
 set -e
 cat "$OUT/out.txt"
@@ -62,18 +63,18 @@ for p in \
 done
 
 # ---- 2. UART RX from host stdin ----
-printf 'Q' | "$COOLVM" --cpus 2 --timeout "$TIMEOUT" "$OUT/guest.Image" >"$OUT/out_rx.txt" 2>/dev/null || true
+printf 'Q' | gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --headless --cpus 2 --timeout "$TIMEOUT" "$OUT/guest.Image" >"$OUT/out_rx.txt" 2>/dev/null || true
 expect "$OUT/out_rx.txt" "^uart rx: Q"
 
 # ---- 3. negative: unknown MMIO is fatal, --lenient makes it RAZ ----
 set +e
-"$COOLVM" --timeout 10 "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_fault.txt"
+gtimeout -k 2 15 "$COOLVM" --headless --timeout 10 "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_fault.txt"
 RC=$?
 set -e
 expect_rc $RC 1 "fault.Image (default)"
 expect "$OUT/err_fault.txt" "unhandled MMIO read of 4 bytes at 0x235300000"
 set +e
-"$COOLVM" --timeout 10 --lenient "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_lenient.txt"
+gtimeout -k 2 15 "$COOLVM" --headless --timeout 10 --lenient "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_lenient.txt"
 RC=$?
 set -e
 expect_rc $RC 0 "fault.Image --lenient"
@@ -81,11 +82,36 @@ expect "$OUT/err_lenient.txt" "unknown MMIO read32 at 0x235300000"
 
 # ---- 4. negative: --strict turns an unknown sysreg into a fatal error ----
 set +e
-"$COOLVM" --timeout 10 --strict "$OUT/guest.Image" </dev/null >/dev/null 2>"$OUT/err_strict.txt"
+gtimeout -k 2 15 "$COOLVM" --headless --timeout 10 --strict "$OUT/guest.Image" </dev/null >/dev/null 2>"$OUT/err_strict.txt"
 RC=$?
 set -e
 expect_rc $RC 1 "guest.Image --strict"
 expect "$OUT/err_strict.txt" "unknown sysreg access S3_5_C15_C9_6"
+
+# ---- 5. framebuffer, scripted input and virtio-blk (repeat from clean images) ----
+printf '1 30 1\n2 0 7\n' >"$OUT/input.txt"
+for iteration in 1 2 3; do
+    python3 - "$OUT" <<'PY'
+from pathlib import Path
+import sys
+out = Path(sys.argv[1])
+(out / "device-disk.img").write_bytes(b"ABCD" + bytes(4092))
+(out / "second-disk.img").write_bytes(b"WXYZ" + bytes(4092))
+PY
+    set +e
+    gtimeout -k 2 15 "$COOLVM" --headless --cpus 1 --timeout 10 --width 64 --height 32 \
+        --input-script "$OUT/input.txt" --disk "$OUT/device-disk.img" --disk "$OUT/second-disk.img" \
+        --dump-dtb "$OUT/devices.dtb" --screenshot "$OUT/screen.png" \
+        "$OUT/devices.Image" </dev/null >"$OUT/out_devices.txt" 2>"$OUT/err_devices.txt"
+    RC=$?
+    set -e
+    expect_rc "$RC" 0 "devices.Image iteration $iteration"
+    for p in "input key and mouse ok" "disk read ok" "disk write ok" "disk flush ok" "devices PASS"; do
+        expect "$OUT/out_devices.txt" "$p"
+    done
+    dtc -I dtb -O dts -o "$OUT/devices.dts" "$OUT/devices.dtb"
+    python3 "$HERE/verify_devices.py" "$OUT"
+done
 
 if [ "$FAIL" -eq 0 ]; then echo "coolvm-test: OK"; else echo "coolvm-test: FAILED"; fi
 exit $FAIL
