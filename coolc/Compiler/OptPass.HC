@@ -7,9 +7,9 @@
 // path (`#include "aiwn_bytecode.h"` and CompileBC, which is a copy of
 // Compile() ending in OptPassFinalBC).
 //
-// PORT-NOTE: math.h use (constant folding): `pow` and `fmod` stay libc-named
+// PORT-NOTE: math.h use (constant folding): `BPow` and `BFMod` stay libc-named
 // calls (declared //INTEGRATION in BackendA.HH).  The kernel must provide
-// `F64 pow(F64,F64)` and `F64 fmod(F64,F64)` (HolyC Pow / a fmod) with results
+// `F64 BPow(F64,F64)` and `F64 BFMod(F64,F64)` (HolyC Pow / a BFMod) with results
 // identical to the C library, so constant folding is bit-identical.
 //
 // PORT-NOTE: `continue` was turned into `break` (when directly inside the
@@ -23,7 +23,7 @@
 // sizeof(CBHashClass), which is packed in CoolC; IRBind.HC must allocate
 // class chains with that same stride.
 //
-// INTEGRATION: qsort is a host runtime call (see OptPassRegAlloc), Fs is the
+// INTEGRATION: BQSort is a host runtime call (see OptPassRegAlloc), BFs is the
 // host task (see OptPassExpandPtrs).
 
 I64 BIsConst(CBRPN *rpn)
@@ -58,7 +58,7 @@ U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
   CBMemberLst *arg, *args_lst_rev;
   for (cnt = 0; cnt != rpn->length; cnt++)
     rpn2 = ICFwd(rpn2);
-  AssignRawTypeToNode(cctrl, rpn2);
+  BAssignRawTypeToNode(cctrl, rpn2);
   ic_fun = rpn2->ic_fun;
   rpn2 = rpn->base.next;
   arg = ic_fun->base.members_lst;
@@ -73,26 +73,26 @@ U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
       if (arg->member_class->raw_type == BRT_F64) {
         rpn2->type = BIC_F64;
         rpn2->flt = *(&arg->dft_val)(F64 *);
-        AssignRawTypeToNode(cctrl, rpn2);
+        BAssignRawTypeToNode(cctrl, rpn2);
       } else {
         rpn2->type = BIC_I64;
         rpn2->integer = arg->dft_val;
-        AssignRawTypeToNode(cctrl, rpn2);
+        BAssignRawTypeToNode(cctrl, rpn2);
       }
     } else {
       // If we are passing an F64 to an I64 argument,be sure to convert the F64
       // to a I64
       if (((arg->member_class->raw_type == BRT_F64) != 0) ^ // Check for difference
-          ((AssignRawTypeToNode(cctrl, rpn2) == BRT_F64) != 0)) {
+          ((BAssignRawTypeToNode(cctrl, rpn2) == BRT_F64) != 0)) {
         if (arg->member_class->raw_type == BRT_F64) {
           ic = CAlloc(sizeof(CBRPN));
           ic->type = BIC_TO_F64;
           QueIns(ic, rpn2->base.last);
-          AssignRawTypeToNode(cctrl, ic);
+          BAssignRawTypeToNode(cctrl, ic);
         } else {
           ic = CAlloc(sizeof(CBRPN));
           ic->type = BIC_TO_I64;
-          AssignRawTypeToNode(cctrl, ic);
+          BAssignRawTypeToNode(cctrl, ic);
           QueIns(ic, rpn2->base.last);
         }
       }
@@ -105,11 +105,11 @@ U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
     if (arg->member_class->raw_type == BRT_F64) {
       ic->type = BIC_F64;
       ic->flt = *(&arg->dft_val)(F64 *);
-      AssignRawTypeToNode(cctrl, ic);
+      BAssignRawTypeToNode(cctrl, ic);
     } else {
       ic->type = BIC_I64;
       ic->integer = arg->dft_val;
-      AssignRawTypeToNode(cctrl, ic);
+      BAssignRawTypeToNode(cctrl, ic);
     }
     QueIns(ic, rpn);
     arg = arg->next;
@@ -128,7 +128,7 @@ U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
     ic = CAlloc(sizeof(CBRPN));
     ic->type = BIC_I64;
     ic->integer = vargc;
-    AssignRawTypeToNode(cctrl, ic);
+    BAssignRawTypeToNode(cctrl, ic);
     QueIns(ic, ICFwd(last->base.next)->base.last);
     rpn->length = cnt2 + 2;
   }
@@ -218,7 +218,7 @@ U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
             lit->type = BIC_I64;
             lit->integer = PtrWidthOfRPN(a);
             QueIns(lit, new);
-            AssignRawTypeToNode(cctrl, new);
+            BAssignRawTypeToNode(cctrl, new);
           } else {
             new = CAlloc(sizeof(CBRPN));
             new->type = BIC_MUL;
@@ -227,7 +227,7 @@ U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
             lit->type = BIC_I64;
             lit->integer = PtrWidthOfRPN(a);
             QueIns(lit, new);
-            AssignRawTypeToNode(cctrl, new);
+            BAssignRawTypeToNode(cctrl, new);
           }
         }
         break;
@@ -243,7 +243,7 @@ U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
           lit->type = BIC_I64;
           lit->integer = PtrWidthOfRPN(a);
           QueIns(lit, new);
-          AssignRawTypeToNode(cctrl, new);
+          BAssignRawTypeToNode(cctrl, new);
         } else if ((b->ic_class->ptr_star_cnt || b->ic_dim) &&
                    rpn->type != BIC_ADD_EQ) {
           new = CAlloc(sizeof(CBRPN));
@@ -253,7 +253,7 @@ U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
           lit->type = BIC_I64;
           lit->integer = PtrWidthOfRPN(b);
           QueIns(lit, new);
-          AssignRawTypeToNode(cctrl, new);
+          BAssignRawTypeToNode(cctrl, new);
         }
         break;
       case BIC_ARRAY_ACC:
@@ -266,8 +266,8 @@ U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
           new = CAlloc(sizeof(CBRPN));
           new->type = BIC_MUL;
           new->raw_type = BRT_I64i;
-          //INTEGRATION: Fs is the host (Aiwnios) task here, not the kernel CTask
-          new->ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+          //INTEGRATION: BFs is the host (Aiwnios) task here, not the kernel CTask
+          new->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
           QueIns(new, rpn);
           lit = CAlloc(sizeof(CBRPN));
           lit->type = BIC_I64;
@@ -275,7 +275,7 @@ U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
           lit->ic_class = new->ic_class;
           lit->integer = PtrWidthOfRPN(a);
           QueIns(lit, new);
-          AssignRawTypeToNode(cctrl, new);
+          BAssignRawTypeToNode(cctrl, new);
           dim = dim->next;
           rpn->type = BIC_ADD;
         } else {
@@ -291,7 +291,7 @@ aderef:
           lit->integer = PtrWidthOfRPN(a);
           QueIns(lit, new);
           rpn->type = BIC_DEREF;
-          AssignRawTypeToNode(cctrl, new2);
+          BAssignRawTypeToNode(cctrl, new2);
         }
         break;
       case BIC_ARROW:
@@ -307,7 +307,7 @@ addrof_arr:
           new = CAlloc(sizeof(CBRPN));
           new->type = BIC_ADDR_OF;
           QueIns(new, rpn->base.last);
-          AssignRawTypeToNode(cctrl, new);
+          BAssignRawTypeToNode(cctrl, new);
         }
         break;
       case BIC_DOT:
@@ -330,7 +330,7 @@ addrof_arr:
               new = CAlloc(sizeof(CBRPN));
               new->type = BIC_ADDR_OF;
               QueIns(new, rpn->base.last);
-              AssignRawTypeToNode(cctrl, new);
+              BAssignRawTypeToNode(cctrl, new);
             }
           }
         break;
@@ -920,7 +920,7 @@ next1:
         if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
           SET_AB(&next, &a, &b);
           rpn->type = BIC_F64;
-          rpn->flt = pow(a, b);
+          rpn->flt = BPow(a, b);
         } else
           goto next1;
 binop_next:
@@ -1032,7 +1032,7 @@ binop_next:
             if (b == 0.0)
               goto next1;
             rpn->type = BIC_F64;
-            rpn->flt = fmod(a, b);
+            rpn->flt = BFMod(a, b);
           } else {
             SET_A2B2(&next, &a2, &b2);
             if (!b2)
@@ -1293,16 +1293,16 @@ binop_next:
     goto loop;
 }
 
-//COptMemberVar is declared in BackendA.HH.
+//CBOptMemberVar is declared in BackendA.HH.
 
-//PORT-NOTE: qsort comparators return C `int`; the I64 difference is what
+//PORT-NOTE: BQSort comparators return C `int`; the I64 difference is what
 //the C code returned (truncated to int by the caller in C).
-I64 OptMemberVarSort(COptMemberVar *a, COptMemberVar *b)
+I64 OptMemberVarSort(CBOptMemberVar *a, CBOptMemberVar *b)
 {
   return a->score - b->score;
 }
 
-I64 OptMemberVarSortSz(COptMemberVar *a, COptMemberVar *b)
+I64 OptMemberVarSortSz(CBOptMemberVar *a, CBOptMemberVar *b)
 {
   I64 asz = a->m->member_class->sz * a->m->dim.total_cnt;
   I64 bsz = b->m->member_class->sz * b->m->dim.total_cnt;
@@ -1318,13 +1318,13 @@ U0 OptPassRegAlloc(CBCmpCtrl *cctrl)
    * If we dereference a variable with IC_ADDR,it will be turned into
    * REG_NONE(can't get pointer of register)
    */
-  COptMemberVar *mv;
+  CBOptMemberVar *mv;
   CBMemberLst *tmpm;
   CBRPN *rpn, *next;
   I64 i, cnt, ireg, freg, off, align, sz;
   if (!cctrl->cur_fun)
     return;
-  mv = CAlloc(sizeof(COptMemberVar) * cctrl->cur_fun->base.member_cnt);
+  mv = CAlloc(sizeof(CBOptMemberVar) * cctrl->cur_fun->base.member_cnt);
   i = 0;
   for (tmpm = cctrl->cur_fun->base.members_lst; tmpm; tmpm = tmpm->next) {
     mv[i].m = tmpm;
@@ -1368,10 +1368,10 @@ U0 OptPassRegAlloc(CBCmpCtrl *cctrl)
         break;
     }
   }
-  //INTEGRATION: qsort(base, nmemb, size, cmp) is a host runtime call.
+  //INTEGRATION: BQSort(base, nmemb, size, cmp) is a host runtime call.
   //PORT-NOTE: sort stability matters for byte-identical output (equal scores);
-  //the C build used the platform qsort.
-  qsort(mv, cnt = cctrl->cur_fun->base.member_cnt, sizeof(COptMemberVar),
+  //the C build used the platform BQSort.
+  BQSort(mv, cnt = cctrl->cur_fun->base.member_cnt, sizeof(CBOptMemberVar),
         &OptMemberVarSort);
   ireg = AIWNIOS_IREG_START;
   freg = AIWNIOS_FREG_START;
@@ -1398,7 +1398,7 @@ U0 OptPassRegAlloc(CBCmpCtrl *cctrl)
     }
   }
   // Time to assign the rest of the function members to the base pointer
-  qsort(mv, cnt, sizeof(COptMemberVar), &OptMemberVarSortSz);
+  BQSort(mv, cnt, sizeof(CBOptMemberVar), &OptMemberVarSortSz);
   off = 0;
   for (i = 0; i != cnt; i++) {
     if (mv[i].m->reg == BREG_NONE && !(mv[i].m->flags & BMLF_STATIC)) {
@@ -1642,7 +1642,7 @@ U8 *Compile(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
   I64 old_flags = cctrl->flags;
   for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
        r = r->base.next) {
-    AssignRawTypeToNode(cctrl, r);
+    BAssignRawTypeToNode(cctrl, r);
   }
   OptPassFixFunArgs(cctrl);
   OptPassExpandPtrs(cctrl);

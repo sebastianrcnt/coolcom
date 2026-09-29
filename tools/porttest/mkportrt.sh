@@ -14,6 +14,8 @@ rsync -a --delete --exclude .git --exclude build --exclude aiwnios.app --exclude
   --exclude 'HCRT2.*' "$AIW/" "$RT/"
 mkdir -p "$RT/Src/Port"
 cp "$ROOT"/coolc/Compiler/*.HC "$ROOT"/coolc/Compiler/*.HH "$RT/Src/Port/"
+python3 "$ROOT/tools/porttest/hostrename.py" "$RT"/Src/Port/*.HC "$RT"/Src/Port/*.HH > /dev/null
+[ -n "$PORT_STUBS" ] && cp "$PORT_STUBS"/* "$RT/Src/Port/"  # testing only: stand-ins for unfinished files
 # Use the extern (not import) declarations of the __HC_* functions and pull
 # the port in right after them.
 python3 - "$RT/Src/AIWNIOS_CodeGen.HC" <<'PY'
@@ -25,7 +27,7 @@ i = s.index(b'#endif', s.index(b'#ifdef PORT_BACKEND_NEVER'))
 s = s[:i + 6] + b'\n#include "Port/Backend.HC"\n' + s[i + 6:]
 open(p, 'wb').write(s)
 PY
-(cd "$RT" && "$BIN" -b -t . > "$ROOT/build/portrt-boot.log" 2>&1) || true
+(cd "$RT" && gtimeout 120 "$BIN" -b -t . < /dev/null > "$ROOT/build/portrt-boot.log" 2>&1) || echo "bootstrap exited with $? (124 = timed out)"
 grep -a "Errs:" "$ROOT/build/portrt-boot.log" | tail -1
 grep -a -q "Errs:0" "$ROOT/build/portrt-boot.log" || {
   grep -a -E "ERROR|Error" "$ROOT/build/portrt-boot.log" | head -20; exit 1; }

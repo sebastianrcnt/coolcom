@@ -67,7 +67,7 @@ I64 __builtin_ctzl(I64 x)
   return 64; // undefined in C
 }
 //INTEGRATION: instruction-cache maintenance after writing code (no-op until the kernel provides it)
-U0 __builtin___clear_cache(U8 *begin, U8 *end)
+U0 __builtin___clear_cache(U8 *begin, U8 *_end)
 {
 }
 U0 sys_icache_invalidate(U8 *begin, I64 len)
@@ -137,14 +137,14 @@ U0 CodeCtrlPop(CBCmpCtrl *ccmp)
 }
 
 //PORT-NOTE: the C function is declared to return CCmpCtrl* but has no return statement.
-CBCmpCtrl *CmpCtrlDel(CBCmpCtrl *d)
+CBCmpCtrl *BCmpCtrlDel(CBCmpCtrl *d)
 {
-  HeapCtrlDel(d->hc);
+  BHeapCtrlDel(d->hc);
   Free(d);
   return NULL;
 }
 
-// Helper type for the `static raw_types[]` table of CmpCtrlNew (HolyC has no static locals
+// Helper type for the `static raw_types[]` table of BCmpCtrlNew (HolyC has no static locals
 // or initialised anonymous struct arrays; the table is filled on each call instead).
 class CBCmpCtrlNewRawType
 {
@@ -153,15 +153,15 @@ class CBCmpCtrlNewRawType
   I64 sz;
 };
 
-CBCmpCtrl *CmpCtrlNew(CBLexer *lex)
+CBCmpCtrl *BCmpCtrlNew(CBLexer *lex)
 {
   I64 idx, idx2;
   CBHashClass *cls;
   CBCmpCtrl *ccmp;
   ccmp = CAlloc(sizeof(CBCmpCtrl));
   ccmp->lex = lex;
-  ccmp->hc = HeapCtrlInit(NULL, Fs, 0);
-  ccmp->final_hc = Fs->code_heap;
+  ccmp->hc = BHeapCtrlInit(NULL, BFs, 0);
+  ccmp->final_hc = BFs->code_heap;
   CBCmpCtrlNewRawType raw_types[10];
   raw_types[0].name = "U0";   raw_types[0].rt = BRT_U0;   raw_types[0].sz = 0;
   raw_types[1].name = "U8i";  raw_types[1].rt = BRT_U8i;  raw_types[1].sz = 1;
@@ -173,8 +173,8 @@ CBCmpCtrl *CmpCtrlNew(CBLexer *lex)
   raw_types[7].name = "U64i"; raw_types[7].rt = BRT_U64i; raw_types[7].sz = 8;
   raw_types[8].name = "I64i"; raw_types[8].rt = BRT_I64i; raw_types[8].sz = 8;
   raw_types[9].name = "F64";  raw_types[9].rt = BRT_F64;  raw_types[9].sz = 8;
-  for (idx = 0; idx != sizeof(raw_types) / sizeof(CBCmpCtrlNewRawType); idx++) {
-    if (!HashFind(raw_types[idx].name, Fs->hash_table, BHTT_CLASS, 1)) {
+  for (idx = 0; idx != 10 /* entries in raw_types; the C bootstrap compiler only takes sizeof(type) */; idx++) {
+    if (!BHashFind(raw_types[idx].name, BFs->hash_table, BHTT_CLASS, 1)) {
       cls = CAlloc(sizeof(CBHashClass) * STAR_CNT);
       cls->base.type = BHTT_CLASS;
       cls->sz = raw_types[idx].sz;
@@ -190,7 +190,7 @@ CBCmpCtrl *CmpCtrlNew(CBLexer *lex)
         cls[idx2].ptr_star_cnt = idx2;
         cls[idx2].use_cnt++;
       }
-      HashAdd(cls, Fs->hash_table);
+      BHashAdd(cls, BFs->hash_table);
       cls = CAlloc(sizeof(CBHashClass) * STAR_CNT);
       cls->base.type = BHTT_CLASS;
       cls->sz = raw_types[idx].sz;
@@ -206,7 +206,7 @@ CBCmpCtrl *CmpCtrlNew(CBLexer *lex)
         cls[idx2].ptr_star_cnt = idx2;
         cls[idx2].use_cnt++;
       }
-      HashAdd(cls, Fs->hash_table);
+      BHashAdd(cls, BFs->hash_table);
     }
   }
   return ccmp;
@@ -501,7 +501,7 @@ CBRPN *ICArgN(CBRPN *rpn, I64 n)
   return rpn;
 }
 
-I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
+I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
 {
   I64 a, b, arg;
   CBMemberLst *mlst;
@@ -512,44 +512,44 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
     return rpn->raw_type;
   switch (rpn->type) {
     case BIC_SQRT:
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
-      rpn->ic_class = HashFind("F64", Fs->hash_table, BHTT_CLASS, 1);
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
+      rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_F64;
       return rpn->raw_type;
       break;
     case BIC_MAX_I64:
     case BIC_MIN_I64:
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
-      rpn->ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
+      rpn->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_I64i;
       return rpn->raw_type;
       break;
     case BIC_MIN_U64:
     case BIC_MAX_U64:
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
-      rpn->ic_class = HashFind("U64i", Fs->hash_table, BHTT_CLASS, 1);
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
+      rpn->ic_class = BHashFind("U64i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_U64i;
       return rpn->raw_type;
       break;
     case BIC_MIN_F64:
     case BIC_MAX_F64:
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
-      rpn->ic_class = HashFind("F64", Fs->hash_table, BHTT_CLASS, 1);
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
+      rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_F64;
       return rpn->raw_type;
       break;
     case BIC_FS:
     case BIC_GS:
-      rpn->ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      rpn->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_I64i;
       return rpn->raw_type;
       break;
     case BIC_LOCK: // Lock means "lock *ptr++;",it operates on expressions as a
                    // whole
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
       rpn->raw_type = BRT_U0; // dummy
       return rpn->raw_type;
       break;
@@ -560,34 +560,34 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
     case BIC_LBTR:
     case BIC_LBTS:
     case BIC_LBTC:
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
-      AssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
-      rpn->ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 1));
+      BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
+      rpn->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_I64i;
       return rpn->raw_type;
       break;
     case BIC_SHORT_ADDR:
     case BIC_RELOC:
-      rpn->ic_class = HashFind("U8i", Fs->hash_table, BHTT_CLASS, 1);
+      rpn->ic_class = BHashFind("U8i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->ic_class++;
       rpn->raw_type = BRT_PTR;
       return rpn->raw_type;
       break;
     case __IC_VARGS:
-      rpn->ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      rpn->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_I64i;
       return rpn->raw_type;
       break;
     case BIC_TO_BOOL:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
       // Falls through to IC_TO_I64
     case BIC_TO_I64:
-      rpn->ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      rpn->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_I64i;
       return rpn->raw_type;
       break;
     case BIC_TO_F64:
-      rpn->ic_class = HashFind("F64", Fs->hash_table, BHTT_CLASS, 1);
+      rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = BRT_F64;
       return rpn->raw_type;
       break;
@@ -599,7 +599,7 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       rpn = orig_rpn->base.next;
       for (arg = 0; arg != orig_rpn->length + 1; arg++) {
         if (rpn->type != BIC_NOP)
-          AssignRawTypeToNode(ccmp, rpn);
+          BAssignRawTypeToNode(ccmp, rpn);
         rpn = ICFwd(rpn);
       }
       //PORT-NOTE: C stores the ic_class *pointer* into the 16 bit raw_type of the node that
@@ -610,10 +610,10 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       rpn = orig_rpn->base.next;
       for (arg = 0; arg != orig_rpn->length; arg++) {
         if (rpn->type != BIC_NOP)
-          AssignRawTypeToNode(ccmp, rpn);
+          BAssignRawTypeToNode(ccmp, rpn);
         rpn = ICFwd(rpn);
       }
-      if (BRT_PTR == AssignRawTypeToNode(ccmp, rpn)) {
+      if (BRT_PTR == BAssignRawTypeToNode(ccmp, rpn)) {
         if (rpn->ic_class->ptr_star_cnt > 1)
           ParseErr(ccmp, "Can't call this pointer."); // TODO add type name
       }
@@ -649,8 +649,8 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       orig_rpn->raw_type = orig_rpn->ic_class->raw_type;
       break;
     case BIC_COMMA:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
-      AssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
       rpn->ic_class = rpn->base.next(CBRPN *)->ic_class;
       rpn->ic_dim = rpn->base.next(CBRPN *)->ic_dim;
       rpn->ic_fun = rpn->base.next(CBRPN *)->ic_fun;
@@ -682,7 +682,7 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       break;
     case BIC_NEG:
     unop:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (BETWEEN(rpn->base.next(CBRPN *)->raw_type, BRT_I8i, BRT_U32i)) {
         // Promote to 64bit
         rpn->raw_type = BRT_I64i;
@@ -713,8 +713,8 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto ret;
       break;
     case BIC_ADD:
-      a = AssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
-      b = AssignRawTypeToNode(ccmp, rpn->base.next);
+      a = BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
+      b = BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (a == BRT_PTR || b == BRT_PTR) {
         if (a == BRT_PTR) {
           rpn->raw_type = BRT_PTR;
@@ -742,8 +742,8 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto abinop;
       break;
     case BIC_SUB:
-      a = AssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
-      b = AssignRawTypeToNode(ccmp, rpn->base.next);
+      a = BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
+      b = BAssignRawTypeToNode(ccmp, rpn->base.next);
       // PTR-idx
       if (a == BRT_PTR) {
         rpn->raw_type = BRT_PTR;
@@ -763,8 +763,8 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       break;
     case BIC_DIV:
     binop:
-      a = AssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
-      b = AssignRawTypeToNode(ccmp, rpn->base.next);
+      a = BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
+      b = BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (BETWEEN(a, BRT_I8i, BRT_U32i) && BETWEEN(b, BRT_I8i, BRT_U32i)) {
         // Promote to I64i
         a = BRT_I64i;
@@ -779,7 +779,7 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto binop;
       break;
     case BIC_DEREF:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (!rpn->base.next(CBRPN *)->ic_class->ptr_star_cnt) {
         ParseErr(ccmp, "Can't derefernce a non-pointer/array.");
         return 0;
@@ -801,13 +801,13 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto binop;
       break;
     case BIC_SQR:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
-      rpn->ic_class = HashFind("F64", Fs->hash_table, BHTT_CLASS, 1);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
+      rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
       rpn->raw_type = rpn->ic_class->raw_type;
       return rpn->raw_type;
       break;
     case BIC_DOT:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (rpn->base.next(CBRPN *)->ic_class->ptr_star_cnt ||
           rpn->base.next(CBRPN *)->ic_dim) {
         ParseErr(ccmp, "Must not be a pointer to use a '.' operator.");
@@ -820,7 +820,7 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       return rpn->raw_type;
       break;
     case BIC_ADDR_OF:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
       if (rpn->base.next(CBRPN *)->ic_class->ptr_star_cnt >= STAR_CNT) {
         ParseErr(ccmp, "Too many pointer stars.");
         return 0;
@@ -831,7 +831,7 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       } else {
         rpn->ic_class = rpn->base.next(CBRPN *)->ic_class;
         if (rpn->ic_class->raw_type == BRT_FUNC)
-          rpn->ic_class = HashFind("U8i", Fs->hash_table, BHTT_CLASS, 1);
+          rpn->ic_class = BHashFind("U8i", BFs->hash_table, BHTT_CLASS, 1);
         rpn->ic_class++;
       }
       rpn->ic_fun = rpn->base.next(CBRPN *)->ic_fun;
@@ -875,27 +875,27 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto unop;
       break;
     case BIC_AND_AND:
-    cmp:
+    cmp_rt:  // "cmp" trips the C bootstrap compiler
       rpn->raw_type = BRT_I64i;
       goto ret;
       break;
     case BIC_OR_OR:
-      goto cmp;
+      goto cmp_rt;
       break;
     case BIC_XOR_XOR:
-      goto cmp;
+      goto cmp_rt;
       break;
     case BIC_EQ_EQ:
-      goto cmp;
+      goto cmp_rt;
       break;
     case BIC_NE:
-      goto cmp;
+      goto cmp_rt;
       break;
     case BIC_LE:
-      goto cmp;
+      goto cmp_rt;
       break;
     case BIC_GE:
-      goto cmp;
+      goto cmp_rt;
       break;
     case BIC_LSH:
       goto binop;
@@ -905,8 +905,8 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       break;
     case BIC_ADD_EQ:
     abinop:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
-      AssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
       rpn->ic_class = ICFwd(rpn->base.next)->ic_class;
       rpn->ic_fun = ICFwd(rpn->base.next)->ic_fun;
       rpn->ic_dim = ICFwd(rpn->base.next)->ic_dim;
@@ -938,7 +938,7 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto abinop;
       break;
     case BIC_ARROW:
-      AssignRawTypeToNode(ccmp, rpn->base.next);
+      BAssignRawTypeToNode(ccmp, rpn->base.next);
       rpn->ic_class = rpn->local_mem->member_class;
       rpn->ic_fun = rpn->local_mem->fun_ptr;
       rpn->ic_dim = rpn->local_mem->dim.next;
@@ -957,8 +957,8 @@ I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
       goto ret;
       break;
     case BIC_ARRAY_ACC:
-      b = AssignRawTypeToNode(ccmp, rpn->base.next);
-      a = AssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
+      b = BAssignRawTypeToNode(ccmp, rpn->base.next);
+      a = BAssignRawTypeToNode(ccmp, ICFwd(rpn->base.next));
       if (ICFwd(rpn->base.next)->ic_class->ptr_star_cnt == 0 &&
           !ICFwd(rpn->base.next)->ic_dim) {
         ParseErr(ccmp, "Expected a pointer or array type for array access.");
@@ -1014,7 +1014,7 @@ ret:
     default:
       return 0;
   }
-  rpn->ic_class = HashFind(name, Fs->hash_table, BHTT_CLASS, 1);
+  rpn->ic_class = BHashFind(name, BFs->hash_table, BHTT_CLASS, 1);
   if (rpn->raw_type == BRT_PTR)
     rpn->ic_class++;
   return rpn->raw_type;
@@ -1538,7 +1538,7 @@ CBRPN *__HC_ICAdd_SubCall(CBCodeCtrl *cc, CBCodeMisc *cm)
   QueIns(rpn, cc->ir_code);
   return rpn;
 }
-//INTEGRATION: rt2cls relies on HashFind() returning the first of STAR_CNT consecutive
+//INTEGRATION: rt2cls relies on BHashFind() returning the first of STAR_CNT consecutive
 // CBHashClass entries (one per pointer depth), so `ic_class + ptr_cnt` is the pointer class.
 // This needs the kernel's class table to use the CBHashClass layout.
 CBHashClass *rt2cls(I64 rt, I64 ptr_cnt)
@@ -1546,37 +1546,37 @@ CBHashClass *rt2cls(I64 rt, I64 ptr_cnt)
   CBHashClass *ic_class;
   switch (rt) {
     case 3:
-      ic_class = HashFind("U0", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("U0", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 5:
-      ic_class = HashFind("U8i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("U8i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 4:
-      ic_class = HashFind("I8i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("I8i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 7:
-      ic_class = HashFind("U16i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("U16i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 6:
-      ic_class = HashFind("I16i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("I16i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 9:
-      ic_class = HashFind("U32i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("U32i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 8:
-      ic_class = HashFind("I32i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("I32i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 11:
-      ic_class = HashFind("U64i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("U64i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 10:
-      ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
       break;
     case 14:
-      ic_class = HashFind("F64", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
       break;
     default:
-      ic_class = HashFind("I64i", Fs->hash_table, BHTT_CLASS, 1);
+      ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
   }
   return ic_class + ptr_cnt;
 }
@@ -1587,7 +1587,7 @@ CBRPN *__HC_ICAdd_ShortAddr(CBCmpCtrl *acc, CBCodeCtrl *cc, U8 *name, CBCodeMisc
   rpn->type = BIC_SHORT_ADDR;
   rpn->code_misc = ptr;
   ptr->type = BCMT_SHORT_ADDR;
-  rpn->ic_class = HashFind("U8i", Fs->hash_table, BHTT_CLASS, 1);
+  rpn->ic_class = BHashFind("U8i", BFs->hash_table, BHTT_CLASS, 1);
   rpn->ic_class++;
   rpn->raw_type = BRT_PTR;
   QueIns(rpn, cc->ir_code);
@@ -1621,7 +1621,7 @@ CBRPN *__HC_ICAdd_FReg(CBCodeCtrl *cc, I64 r)
   rpn = CAlloc(sizeof(CBRPN));
   rpn->type = BIC_FREG;
   rpn->integer = r;
-  rpn->ic_class = HashFind("F64", Fs->hash_table, BHTT_CLASS, 1);
+  rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);
   rpn->raw_type = BRT_F64;
   QueIns(rpn, cc->ir_code);
   return rpn;
@@ -1668,12 +1668,12 @@ CBRPN *__HC_ICAdd_Typecast(CBCodeCtrl *cc, I64 rt, I64 ptr_cnt)
 
 CBCmpCtrl *__HC_CmpCtrlNew()
 {
-  return CmpCtrlNew(NULL);
+  return BCmpCtrlNew(NULL);
 }
-// Imported by the frontend as __HC_CmpCtrlDel (main.c: STK_CmpCtrlDel -> CmpCtrlDel).
+// Imported by the frontend as __HC_CmpCtrlDel (main.c: STK_CmpCtrlDel -> BCmpCtrlDel).
 CBCmpCtrl *__HC_CmpCtrlDel(CBCmpCtrl *d)
 {
-  return CmpCtrlDel(d);
+  return BCmpCtrlDel(d);
 }
 // Imported by the frontend but has no C implementation.
 U0 __HC_CmpCtrlSetRip(CBCmpCtrl *cc, I64 rip)
@@ -1688,11 +1688,11 @@ U0 __HC_CodeCtrlPop(CBCmpCtrl *ccmp)
 {
   CodeCtrlPop(ccmp);
 }
-U8 *__HC_Compile(CBCmpCtrl *ccmp, I64 *sz, U8 **dbg_info, CBHeapCtrl *h)
+U8 *__HC_Compile(CBCmpCtrl *ccmp, I64 *sz=NULL, U8 **dbg_info=NULL, CBHeapCtrl *h)
 {
   return Compile(ccmp, sz, dbg_info, h);
 }
-CBCodeMisc *__HC_CodeMiscLabelNew(CBCmpCtrl *ccmp, U8 **patch_addr)
+CBCodeMisc *__HC_CodeMiscLabelNew(CBCmpCtrl *ccmp, U8 **patch_addr=NULL)
 {
   CBCodeMisc *misc;
   misc = CodeMiscNew(ccmp, BCMT_LABEL);
@@ -1997,13 +1997,13 @@ CBRPN *__HC_ICAdd_GetVargsPtr(CBCodeCtrl *cc)
 U0 __HC_CodeMiscInterateThroughRefs(CBCodeMisc *cm, U0 (*fptr)(U8 *addr, U8 *user_data), U8 *user_data)
 {
   CBCodeMiscRef *refs = cm->refs;
-  I64 old = SetWriteNP(1);
+  I64 old = BSetWriteNP(1);
   while (refs) {
-    // C: FFI_CALL_TOS_2(fptr, MemGetExecPtr(refs->add_to), user_data);
+    // C: BFFICall2(fptr, MemGetExecPtr(refs->add_to), user_data);
     fptr(MemGetExecPtr(refs->add_to), user_data);
     refs = refs->next;
   }
-  SetWriteNP(old);
+  BSetWriteNP(old);
 }
 
 U0 CacheRPNArgs(CBCmpCtrl *cctrl)

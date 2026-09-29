@@ -371,29 +371,29 @@ class CBRPN
 };
 
 // Local types of arm64_asm.c (https://github.com/fujitsu/xbyak_aarch64)
-class CARMAdrRegReg
+class CBARMAdrRegReg
 {
   I64 n, m;
   I64 type;
   I64 shift;
   I64 init_sh;
 };
-class CARMAdrRegImm
+class CBARMAdrRegImm
 {
   I64 n;
   I64 off;
 };
-class CARMAdrPostImm
+class CBARMAdrPostImm
 {
   I64 n;
   I64 off;
 };
-class CARMAdrPreImm
+class CBARMAdrPreImm
 {
   I64 n;
   I64 off;
 };
-class CARMAdrScImm
+class CBARMAdrScImm
 {
   I64 n;
   I64 off;
@@ -401,7 +401,7 @@ class CARMAdrScImm
 };
 
 // Local type of optpass.c
-class COptMemberVar
+class CBOptMemberVar
 {
   I64 score;
   CBMemberLst *m;
@@ -852,17 +852,17 @@ extern I64 BMvWideImmX(U32 opc, I64 d, I64 imm, I64 shift);
 extern I64 BDataProc2Src(U32 opcode, I64 rd, I64 rn, I64 rm);
 extern I64 BFpComp(U32 M, U32 S, U32 type, U32 op, U32 opcode2, I64 vn, I64 vm);
 extern I64 BFpDataProc1Reg(U32 M, U32 S, U32 type, U32 opcode, I64 vd, I64 vn);
-extern I64 LdStRegPairPostImm(I64 opc, I64 l, I64 r, I64 r2, CARMAdrPostImm *pre);
-extern I64 LdStRegPairPre(I64 opc, I64 L, I64 rt1, I64 rt2, CARMAdrPreImm *adr);
+extern I64 LdStRegPairPostImm(I64 opc, I64 l, I64 r, I64 r2, CBARMAdrPostImm *pre);
+extern I64 LdStRegPairPre(I64 opc, I64 L, I64 rt1, I64 rt2, CBARMAdrPreImm *adr);
 extern I64 LdStSimdFpUnImm(I32 opc, I64 vt, I64 n, I64 imm);
 extern I64 LdRegSimdFpLiteralEnc(I64 vt, I64 imm);
-extern I64 LdStRegPre(I64 sz, I64 opc, I64 r, CARMAdrPreImm *adr);
-extern I64 LdStRegPostImm(I64 sz, I64 opc, I64 r, CARMAdrPostImm *adr);
+extern I64 LdStRegPre(I64 sz, I64 opc, I64 r, CBARMAdrPreImm *adr);
+extern I64 LdStRegPostImm(I64 sz, I64 opc, I64 r, CBARMAdrPostImm *adr);
 extern I64 BFpDataProc2Reg(I64 M, I64 s, I64 type, I64 opcode, I64 d, I64 n, I64 m);
 extern I64 BLdRegLiteralEnc(I64 opc, I64 v, I64 r, I64 label);
 extern I64 ConversionFpIntIF(I64 sf, I64 s, I64 type, I64 rmode, I64 opcode, I64 d, I64 n);
 extern I64 ConversionFpIntFI(U32 sf, U32 S, U32 type, U32 rmode, U32 opcode, I32 vd, I32 rn);
-extern I64 BLdStRegUnImm(I64 sz, I64 opc, I64 r, CARMAdrRegImm *adr);
+extern I64 BLdStRegUnImm(I64 sz, I64 opc, I64 r, CBARMAdrRegImm *adr);
 extern I64 BLdStRegReg(I64 size, I64 opc, I64 rt, I64 m, I64 n, I64 shift);
 extern I64 CompareBr(I64 op, I64 r, I64 imm);
 extern I64 CompareBrX(I64 op, I64 r, I64 imm);
@@ -1077,8 +1077,8 @@ extern U0 OptPassFixFunArgs(CBCmpCtrl *cctrl);
 extern U0 OptPassExpandPtrs(CBCmpCtrl *cctrl);
 extern U0 OptPassMergeCommunitives(CBCmpCtrl *cctrl);
 extern U0 BOptPassConstFold(CBCmpCtrl *cctrl);
-extern I64 OptMemberVarSort(COptMemberVar *a, COptMemberVar *b);
-extern I64 OptMemberVarSortSz(COptMemberVar *a, COptMemberVar *b);
+extern I64 OptMemberVarSort(CBOptMemberVar *a, CBOptMemberVar *b);
+extern I64 OptMemberVarSortSz(CBOptMemberVar *a, CBOptMemberVar *b);
 extern U0 OptPassRegAlloc(CBCmpCtrl *cctrl);
 extern I64 AlwaysPasses(CBRPN *rpn);
 extern U0 OptPassRemoveUselessArith(CBCmpCtrl *cctrl);
@@ -1218,8 +1218,8 @@ extern CBCmpCtrl *__HC_CmpCtrlNew();
 extern CBCmpCtrl *__HC_CmpCtrlDel(CBCmpCtrl *d);
 extern CBCodeCtrl *__HC_CodeCtrlPush(CBCmpCtrl *ccmp);
 extern U0 __HC_CodeCtrlPop(CBCmpCtrl *ccmp);
-extern U8 *__HC_Compile(CBCmpCtrl *ccmp, I64 *sz, U8 **dbg_info, CBHeapCtrl *h);
-extern CBCodeMisc *__HC_CodeMiscLabelNew(CBCmpCtrl *ccmp, U8 **patch_addr);
+extern U8 *__HC_Compile(CBCmpCtrl *ccmp, I64 *sz=NULL, U8 **dbg_info=NULL, CBHeapCtrl *h);
+extern CBCodeMisc *__HC_CodeMiscLabelNew(CBCmpCtrl *ccmp, U8 **patch_addr=NULL);
 extern CBCodeMisc *__HC_CodeMiscStrNew(CBCmpCtrl *ccmp, U8 *str, I64 sz);
 extern CBCodeMisc *__HC_CodeMiscJmpTableNew(CBCmpCtrl *ccmp, CBCodeMisc *labels, U8 **table_address, I64 hi);
 extern CBRPN *__HC_ICAdd_Label(CBCodeCtrl *cc, CBCodeMisc *misc);
@@ -1252,11 +1252,11 @@ extern CBCodeCtrl *CodeCtrlPush(CBCmpCtrl *ccmp);
 extern U0 CodeCtrlDel(CBCodeCtrl *ctrl);
 extern CBCodeMisc *CodeMiscNew(CBCmpCtrl *ccmp, I64 type);
 extern U0 CodeCtrlPop(CBCmpCtrl *ccmp);
-extern CBCmpCtrl *CmpCtrlDel(CBCmpCtrl *d);
-extern CBCmpCtrl *CmpCtrlNew(CBLexer *lex);
+extern CBCmpCtrl *BCmpCtrlDel(CBCmpCtrl *d);
+extern CBCmpCtrl *BCmpCtrlNew(CBLexer *lex);
 extern CBRPN *ICFwd(CBRPN *rpn);
 extern CBRPN *ICArgN(CBRPN *rpn, I64 n);
-extern I64 AssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn);
+extern I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn);
 extern U0 ICFree(CBRPN *ic);
 
 // Function-like macros of the C headers / files, as functions (bodies in IRBind.HC)
@@ -1271,16 +1271,16 @@ extern U0 __builtin___clear_cache(U8 *begin, U8 *end); //INTEGRATION: I-cache fl
 extern U0 sys_icache_invalidate(U8 *begin, I64 len);   //INTEGRATION: I-cache flush, stubbed
 
 // ---- Host runtime used by the port (INTEGRATION: provided by the CoolC kernel, wired up later) ----
-extern CBTask *Fs;                                                    //INTEGRATION: current task
-extern CBHash *HashFind(U8 *str, CBHashTable *table, I64 type, I64 inst); //INTEGRATION
-extern U0 HashAdd(CBHash *h, CBHashTable *table);                     //INTEGRATION
-extern CBHeapCtrl *HeapCtrlInit(CBHeapCtrl *ct, CBTask *task, I64 is_code_heap); //INTEGRATION
-extern U0 HeapCtrlDel(CBHeapCtrl *ct);                                //INTEGRATION
+extern CBTask *BFs;                                                    //INTEGRATION: current task
+extern CBHash *BHashFind(U8 *str, CBHashTable *table, I64 type, I64 inst); //INTEGRATION
+extern U0 BHashAdd(CBHash *h, CBHashTable *table);                     //INTEGRATION
+extern CBHeapCtrl *BHeapCtrlInit(CBHeapCtrl *ct, CBTask *task, I64 is_code_heap); //INTEGRATION
+extern U0 BHeapCtrlDel(CBHeapCtrl *ct);                                //INTEGRATION
 #ifdef BACKEND_STANDALONE // MSize: kernel provides it
 extern I64 MSize(U8 *ptr);
 #endif
-extern I64 SetWriteNP(I64 n);                                         //INTEGRATION: W^X toggle (Apple), identity elsewhere
-extern I64 DoNothing();                                               //INTEGRATION
+extern I64 BSetWriteNP(I64 n);                                         //INTEGRATION: W^X toggle (Apple), identity elsewhere
+extern I64 BDoNothing();                                               //INTEGRATION
 #ifdef BACKEND_STANDALONE // Que*: kernel provides them
 extern U0 QueIns(CBQue *a, CBQue *to);
 extern U0 QueRem(CBQue *a);
@@ -1288,10 +1288,10 @@ extern U0 QueInit(CBQue *i);
 extern U0 QueDel(CBQue *f);
 extern I64 QueCnt(CBQue *head);
 #endif
-extern I64 FFI_CALL_TOS_2(U8 *fptr, I64 a, I64 b);                    //INTEGRATION
-extern U0 qsort(U8 *base, I64 cnt, I64 sz, U8 *cmp);                  //INTEGRATION: libc qsort (cmp takes two element pointers)
-extern F64 fmod(F64 a, F64 b);                                        //INTEGRATION: libc
-extern F64 pow(F64 a, F64 b);                                         //INTEGRATION: libc
+extern I64 BFFICall2(U8 *fptr, I64 a, I64 b);                    //INTEGRATION
+extern U0 BQSort(U8 *base, I64 cnt, I64 sz, U8 *cmp);                  //INTEGRATION: libc BQSort (cmp takes two element pointers)
+extern F64 BFMod(F64 a, F64 b);                                        //INTEGRATION: libc
+extern F64 BPow(F64 a, F64 b);                                         //INTEGRATION: libc
 
 // Replacements for arm_backend.c macros, defined in ArmBackendA.HC and used by
 // both halves. Each returns the new code_off.
@@ -1316,7 +1316,7 @@ extern I64 StrCmp(U8 *a, U8 *b);
 extern U0 Print(U8 *fmt, ...);
 #endif
 
-// ---- Frontend diagnostics used by AssignRawTypeToNode (INTEGRATION: the HolyC frontend's error reporting) ----
+// ---- Frontend diagnostics used by BAssignRawTypeToNode (INTEGRATION: the HolyC frontend's error reporting) ----
 extern I64 ParseErr(CBCmpCtrl *ctrl, U8 *fmt, ...);
 extern I64 ParseWarn(CBCmpCtrl *ctrl, U8 *fmt, ...);
 

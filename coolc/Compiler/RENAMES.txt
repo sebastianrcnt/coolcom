@@ -28,6 +28,12 @@ CQue	CBQue
 CRPN	CBRPN
 CTask	CBTask
 LexTok	CBLexTok
+COptMemberVar	CBOptMemberVar
+CARMAdrPostImm	CBARMAdrPostImm
+CARMAdrPreImm	CBARMAdrPreImm
+CARMAdrRegImm	CBARMAdrRegImm
+CARMAdrRegReg	CBARMAdrRegReg
+CARMAdrScImm	CBARMAdrScImm
 ## functions
 AddSubExtRegX	BAddSubExtRegX
 AddSubImmX	BAddSubImmX

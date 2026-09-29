@@ -1988,7 +1988,7 @@ I64 __OptPassFinal(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
       } else
         abort();
       // Undefined?
-      if (!enter_addr || enter_addr == &DoNothing) { //INTEGRATION: DoNothing marks an undefined symbol
+      if (!enter_addr || enter_addr == &BDoNothing) { //INTEGRATION: DoNothing marks an undefined symbol
         if (next->global_var->base.type & BHTT_GLBL_VAR) {
           enter_addr = &next->global_var->data_addr;
         } else if (next->global_var->base.type & BHTT_FUN) {
@@ -3617,12 +3617,12 @@ U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
   U8 *bin = NULL, *obin;
   U8 *ptr;
   CBCodeMisc *misc;
-  CBHashImport *import;
+  CBHashImport *imp;
   CBCodeMiscRef *cm_ref, *cm_ref_tmp;
   CBRPN *r;
   cctrl->epilog_label = CodeMiscNew(cctrl, BCMT_LABEL);
   cctrl->statics_label = CodeMiscNew(cctrl, BCMT_LABEL);
-  I64 old_wnp = SetWriteNP(0); //INTEGRATION: W^X toggle
+  I64 old_wnp = BSetWriteNP(0); //INTEGRATION: W^X toggle
   for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
        r = r->base.next) {
     if (r->ic_line) {
@@ -3771,17 +3771,17 @@ U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
           code_off += 8 - code_off % 8;
         misc->addr = bin + code_off;
         if (bin)
-          *((bin + code_off)(I64 *)) = &DoNothing; //INTEGRATION: DoNothing
+          *((bin + code_off)(I64 *)) = &BDoNothing; //INTEGRATION: DoNothing
         code_off += 8;
         //
         // 1 is the final run,we add the relocation to the hash table
         //
         if (run) {
-          import = CAlloc(sizeof(CBHashImport));
-          import->base.type = BHTT_IMPORT_SYS_SYM;
-          import->base.str = StrNew(misc->str);
-          import->address = misc->addr;
-          HashAdd(import, Fs->hash_table); //INTEGRATION: Fs->hash_table
+          imp = CAlloc(sizeof(CBHashImport));
+          imp->base.type = BHTT_IMPORT_SYS_SYM;
+          imp->base.str = StrNew(misc->str);
+          imp->address = misc->addr;
+          BHashAdd(imp, BFs->hash_table); //INTEGRATION: Fs->hash_table
         }
         if (run && misc->patch_addr) {
           *misc->patch_addr = MemGetExecPtr(misc->addr);
@@ -3837,7 +3837,7 @@ U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
                            // statics_sz in the count!!
       code_off += statics_sz + 8;
   }
-  SetWriteNP(old_wnp); //INTEGRATION: W^X toggle
+  BSetWriteNP(old_wnp); //INTEGRATION: W^X toggle
 #ifndef BACKEND_LINUX_ABI //C: #if defined(__APPLE__)
   if (old_wnp)
     sys_icache_invalidate(obin, MSize(obin)); //INTEGRATION: I-cache flush

@@ -926,8 +926,8 @@ I64 __ICFCallTOS(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
   if (rpn2->type == BIC_GLOBAL) {
     if (rpn2->global_var->base.type & BHTT_FUN) {
       fptr = rpn2->global_var(CBHashFun *)->fun_ptr;
-      //INTEGRATION: DoNothing is the host runtime's no-op function.
-      if (cctrl->code_ctrl->final_pass && fptr != &DoNothing && fptr) {
+      //INTEGRATION: BDoNothing is the host runtime's no-op function.
+      if (cctrl->code_ctrl->final_pass && fptr != &BDoNothing && fptr) {
         if (ARM_ERR_INV_OFF != ARM_bl(fptr(I64) - (bin + code_off)(I64))) {
           code_off = BEFORE_CALL(cctrl, rpn, &tmp, &tmp2, bin, code_off);
           code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_bl(fptr(I64) - (bin + code_off)(I64)));
@@ -1584,7 +1584,7 @@ I64 SpillsTmpRegs(CBRPN *rpn) {
     goto unop;
     break;
   case BIC_POW:
-    return 1; // calls pow
+    return 1; // calls BPow
   binop:
     if (SpillsTmpRegs(rpn->base.next(CBRPN *)))
       return 1;

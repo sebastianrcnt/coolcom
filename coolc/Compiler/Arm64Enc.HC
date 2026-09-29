@@ -16,10 +16,10 @@
 // named `rreg`.
 //
 // PORT-NOTE: binary literals (0b11) were rewritten as hex; the C macros
-// MASKn, ARM_FORCE_ALIGN and ARM_FORCE_REG became functions (the latter two
+// BMASKn, ARM_FORCE_ALIGN and ARM_FORCE_REG became functions (the latter two
 // return TRUE on failure: `if (ArmForceAlignBad(..)) return ARM_ERR_INV_OFF;`).
 
-I64 MASKn(I64 v, I64 bits, I64 off)
+I64 BMASKn(I64 v, I64 bits, I64 off)
 {
   return (v & ((1 << bits) - 1)) << off;
 }
@@ -106,26 +106,26 @@ I64 BFpDataProc1Reg(U32 M, U32 S, U32 type,
 }
 
 I64 LdStRegPairPostImm(I64 opc, I64 l, I64 r, I64 r2,
-                                  CARMAdrPostImm *pre) {
+                                  CBARMAdrPostImm *pre) {
   I64 imm = pre->off;
   I64 times = 1;
   if (opc == 2)
     times = 2;
   if (ArmForceAlignBad(imm, 7, times + 1))
     return ARM_ERR_INV_OFF;
-  I64 imm7 = MASKn(imm >> (times + 1), 7, 15);
+  I64 imm7 = BMASKn(imm >> (times + 1), 7, 15);
   return (opc << 30) | (0x5 << 27) | (1 << 23) | (l << 22) | imm7 | (r2 << 10) |
          (pre->n << 5) | r;
 }
 I64 LdStRegPairPre(I64 opc, I64 L, I64 rt1, I64 rt2,
-                              CARMAdrPreImm *adr) {
+                              CBARMAdrPreImm *adr) {
   I64 imm = adr->off;
   I64 times = 1;
   if (opc == 2)
     times = 2;
   if (ArmForceAlignBad(imm, 7, times + 1))
     return ARM_ERR_INV_OFF;
-  U32 imm7 = MASKn(imm >> (times + 1), 7, 15);
+  U32 imm7 = BMASKn(imm >> (times + 1), 7, 15);
   return (opc << 30) | (0x5 << 27) | (3 << 23) | (L << 22) | imm7 |
          (rt2 << 10) | (adr->n << 5) | rt1;
 }
@@ -133,7 +133,7 @@ I64 LdStRegPairPre(I64 opc, I64 L, I64 rt1, I64 rt2,
 // For 64bit
 I64 LdStSimdFpUnImm(I32 opc, I64 vt, I64 n,
                                I64 imm) {
-  U32 imm12 = MASKn(imm >> 3, 12, 10);
+  U32 imm12 = BMASKn(imm >> 3, 12, 10);
   if (ArmForceAlignBad(imm, 12, 3))
     return ARM_ERR_INV_OFF;
   if (imm < 0)
@@ -143,26 +143,26 @@ I64 LdStSimdFpUnImm(I32 opc, I64 vt, I64 n,
 }
 
 I64 LdRegSimdFpLiteralEnc(I64 vt, I64 imm) {
-  U32 imm19 = MASKn(imm >> 2, 19, 5);
+  U32 imm19 = BMASKn(imm >> 2, 19, 5);
   if (ArmForceAlignBad(imm, 19, 2))
     return ARM_ERR_INV_OFF;
   return (1 << 30) | (0x3 << 27) | (1 << 26) | imm19 | vt;
 }
 
 I64 LdStRegPre(I64 sz, I64 opc, I64 r,
-                          CARMAdrPreImm *adr) {
+                          CBARMAdrPreImm *adr) {
   if (ArmForceAlignBad(adr->off, 9, 0))
     return ARM_ERR_INV_OFF;
   return (sz << 30) | (0x7 << 27) | (0xf << 27) | (opc << 22) |
-         MASKn(adr->off, 9, 12) | (3 << 10) | (adr->n << 5) | r;
+         BMASKn(adr->off, 9, 12) | (3 << 10) | (adr->n << 5) | r;
 }
 
 I64 LdStRegPostImm(I64 sz, I64 opc, I64 r,
-                              CARMAdrPostImm *adr) {
+                              CBARMAdrPostImm *adr) {
   if (ArmForceAlignBad(adr->off, 9, 0))
     return ARM_ERR_INV_OFF;
   return (sz << 30) | (0xf << 27) | (0xf << 27) | (opc << 22) |
-         MASKn(adr->off, 9, 12) | (1 << 10) | (adr->n << 5) | r;
+         BMASKn(adr->off, 9, 12) | (1 << 10) | (adr->n << 5) | r;
 }
 
 I64 BFpDataProc2Reg(I64 M, I64 s, I64 type,
@@ -175,7 +175,7 @@ I64 BLdRegLiteralEnc(I64 opc, I64 v, I64 r,
                                I64 label) {
   if (ArmForceAlignBad(label, 19, 2))
     return ARM_ERR_INV_OFF;
-  return (opc << 30) | (0x3 << 27) | (v << 26) | MASKn(label >> 2, 19, 5) | r;
+  return (opc << 30) | (0x3 << 27) | (v << 26) | BMASKn(label >> 2, 19, 5) | r;
 }
 I64 ConversionFpIntIF(I64 sf, I64 s, I64 type,
                                  I64 rmode, I64 opcode, I64 d,
@@ -190,10 +190,10 @@ I64 ConversionFpIntFI(U32 sf, U32 S, U32 type,
          (rmode << 19) | (opcode << 16) | (rn << 5) | (vd);
 }
 I64 BLdStRegUnImm(I64 sz, I64 opc, I64 r,
-                            CARMAdrRegImm *adr) {
+                            CBARMAdrRegImm *adr) {
   if (ArmForceAlignBad(adr->off, 12, sz))
     return ARM_ERR_INV_OFF;
-  return MASKn(adr->off >> sz, 12, 10) | (sz << 30) | (0x7 << 27) | (1 << 24) |
+  return BMASKn(adr->off >> sz, 12, 10) | (sz << 30) | (0x7 << 27) | (1 << 24) |
          (opc << 22) | (adr->n << 5) | (r);
 }
 
@@ -208,13 +208,13 @@ I64 BLdStRegReg(I64 size, I64 opc, I64 rt, I64 m,
 I64 CompareBr(I64 op, I64 r, I64 imm) {
   if (ArmForceAlignBad(imm, 19, 2))
     return ARM_ERR_INV_OFF;
-  return (0x1a << 25) | (op << 24) | MASKn(imm >> 2, 19, 5) | r;
+  return (0x1a << 25) | (op << 24) | BMASKn(imm >> 2, 19, 5) | r;
 }
 
 I64 CompareBrX(I64 op, I64 r, I64 imm) {
   if (ArmForceAlignBad(imm, 19, 2))
     return ARM_ERR_INV_OFF;
-  return (1 << 31) | (0x1a << 25) | (op << 24) | MASKn(imm >> 2, 19, 5) | r;
+  return (1 << 31) | (0x1a << 25) | (op << 24) | BMASKn(imm >> 2, 19, 5) | r;
 }
 
 I64 BUncondBrNoReg(I64 opc, I64 op2, I64 op3, I64 rn,
@@ -226,7 +226,7 @@ I64 BUncondBrNoReg(I64 opc, I64 op2, I64 op3, I64 rn,
 I64 UncondBrImm(I64 op, I64 label) {
   if (ArmForceAlignBad(label, 26, 2))
     return ARM_ERR_INV_OFF;
-  return (op << 31) | (5 << 26) | MASKn(label >> 2, 26, 0);
+  return (op << 31) | (5 << 26) | BMASKn(label >> 2, 26, 0);
 }
 
 I64 UncondBr1Reg(I64 opc, I64 op2, I64 op3, I64 rreg,
@@ -238,22 +238,22 @@ I64 UncondBr1Reg(I64 opc, I64 op2, I64 op3, I64 rreg,
 I64 CondBrImm(I64 cond, I64 imm) {
   if (ArmForceAlignBad(imm, 19, 2))
     return ARM_ERR_INV_OFF;
-  return (0x2a << 25) | MASKn(imm >> 2, 19, 5) | cond;
+  return (0x2a << 25) | BMASKn(imm >> 2, 19, 5) | cond;
 }
 I64 AddSubImm(I64 op, I64 s, I64 d, I64 n,
                          I64 imm, I64 sh) {
   if (ArmForceAlignBad(imm, 12, 0))
     return ARM_ERR_INV_OFF;
-  I32 imm12 = MASKn(imm, 12, 10);
-  I32 shift = MASKn(sh, 1, 22);
-  return imm12 | shift | MASKn(d, 6, 0) | MASKn(n, 6, 5) | (0x11 << 24) |
+  I32 imm12 = BMASKn(imm, 12, 10);
+  I32 shift = BMASKn(sh, 1, 22);
+  return imm12 | shift | BMASKn(d, 6, 0) | BMASKn(n, 6, 5) | (0x11 << 24) |
          (s << 29) | (op << 30);
 }
 
 I64 TestBr(I64 op, I64 rt, I64 imm, I64 off) {
   I64 d5 = (imm >> 5) & 1;
-  I64 d40 = MASKn(imm, 5, 0);
-  I64 imm14 = MASKn(off >> 2, 14, 5);
+  I64 d40 = BMASKn(imm, 5, 0);
+  I64 imm14 = BMASKn(off >> 2, 14, 5);
   if (ArmForceAlignBad(off, 14, 2))
     return ARM_ERR_INV_OFF;
   return (d5 << 31) | (0x1b << 25) | (op << 24) | (d40 << 19) | imm14 | rt;
@@ -261,14 +261,14 @@ I64 TestBr(I64 op, I64 rt, I64 imm, I64 off) {
 
 I64 Bitfield(I64 op, I64 d, I64 n, U64 immr,
                         U64 imms) {
-  return (op << 29) | (0x26 << 23) | (0 << 22) | MASKn(immr, 6, 16) |
-         MASKn(imms, 6, 10) | (n << 5) | d;
+  return (op << 29) | (0x26 << 23) | (0 << 22) | BMASKn(immr, 6, 16) |
+         BMASKn(imms, 6, 10) | (n << 5) | d;
 }
 
 I64 BBitfieldX(I64 op, I64 d, I64 n, U64 immr,
                          U64 imms) {
   return (1 << 31) | (op << 29) | (0x26 << 23) | (1 << 22) |
-         MASKn(immr, 6, 16) | MASKn(imms, 6, 10) | (n << 5) | d;
+         BMASKn(immr, 6, 16) | BMASKn(imms, 6, 10) | (n << 5) | d;
 }
 
 I64 BAddSubImmX(I64 op, I64 s, I64 d, I64 n,
@@ -277,16 +277,16 @@ I64 BAddSubImmX(I64 op, I64 s, I64 d, I64 n,
     return ARM_ERR_INV_OFF;
   if (ArmForceAlignBad(imm, 12, 0))
     return ARM_ERR_INV_OFF;
-  I32 imm12 = MASKn(imm, 12, 10);
-  I32 shift = MASKn(sh, 1, 22);
-  return (1 << 31) | imm12 | shift | MASKn(d, 6, 0) | MASKn(n, 6, 5) |
+  I32 imm12 = BMASKn(imm, 12, 10);
+  I32 shift = BMASKn(sh, 1, 22);
+  return (1 << 31) | imm12 | shift | BMASKn(d, 6, 0) | BMASKn(n, 6, 5) |
          (0x11 << 24) | (s << 29) | (op << 30);
 }
 
 I64 AddSubExtReg(I64 opc, I64 s, I64 d, I64 n,
                             I64 m, I64 emod, I64 sh) {
   return (opc << 30) | (s << 29) | (0xb << 24) | (1 << 21) | (m << 16) |
-         (emod << 13) | MASKn(sh, 3, 10) | (n << 5) | d;
+         (emod << 13) | BMASKn(sh, 3, 10) | (n << 5) | d;
 }
 
 I64 BAddSubExtRegX(I64 opc, I64 s, I64 d, I64 n,
@@ -295,7 +295,7 @@ I64 BAddSubExtRegX(I64 opc, I64 s, I64 d, I64 n,
   if (emod == 12)
     option = 3;
   return (1 << 31) | (opc << 30) | (s << 29) | (0xb << 24) | (1 << 21) |
-         (m << 16) | (option << 13) | MASKn(sh, 3, 10) | (n << 5) | d;
+         (m << 16) | (option << 13) | BMASKn(sh, 3, 10) | (n << 5) | d;
 }
 
 I64 AddSubShiftReg(I64 opc, I64 s, I64 d, I64 n,
@@ -307,14 +307,14 @@ I64 AddSubShiftReg(I64 opc, I64 s, I64 d, I64 n,
     return AddSubExtReg(opc, s, d, n, m, 12, sh);
   }
   return (opc << 30) | (s << 29) | (0xb << 24) | (shmod << 22) | (m << 16) |
-         MASKn(sh, 6, 10) | (n << 5) | d;
+         BMASKn(sh, 6, 10) | (n << 5) | d;
 }
 
 I64 LdStSimdFpRegPostImm(I64 opc, I64 d, I64 p,
                                     I64 off) {
   if (ArmForceAlignBad(off, 9, 0))
     return ARM_ERR_INV_OFF;
-  return (3 << 30) | (0x7 << 27) | (1 << 26) | (opc << 22) | MASKn(off, 9, 12) |
+  return (3 << 30) | (0x7 << 27) | (1 << 26) | (opc << 22) | BMASKn(off, 9, 12) |
          (1 << 10) | (p << 5) | d;
 }
 
@@ -322,7 +322,7 @@ I64 LdStSimdFpRegPreImm(I64 opc, I64 d, I64 p,
                                    I64 off) {
   if (ArmForceAlignBad(off, 9, 0))
     return ARM_ERR_INV_OFF;
-  return (3 << 30) | (0x7 << 27) | (1 << 26) | (opc << 22) | MASKn(off, 9, 12) |
+  return (3 << 30) | (0x7 << 27) | (1 << 26) | (opc << 22) | BMASKn(off, 9, 12) |
          (3 << 10) | (p << 5) | d;
 }
 
@@ -335,7 +335,7 @@ I64 BAddSubShiftRegX(I64 opc, I64 s, I64 d, I64 n,
     return BAddSubExtRegX(opc, s, d, n, m, 12, sh);
   }
   return (1 << 31) | (opc << 30) | (s << 29) | (0xb << 24) | (shmod << 22) |
-         (m << 16) | MASKn(sh, 6, 10) | (n << 5) | d;
+         (m << 16) | BMASKn(sh, 6, 10) | (n << 5) | d;
 }
 
 I64 DataProc3RegX(I64 op54, I64 op31, I64 o0, I64 d,
@@ -347,16 +347,16 @@ I64 DataProc3RegX(I64 op54, I64 op31, I64 o0, I64 d,
 I64 LogicalShiftReg(I64 opc, I64 N, I64 rd, I64 rn,
                                I64 rm, I64 shmod, U32 sh) {
   return (opc << 29) | (0xa << 24) | (shmod << 22) | (N << 21) | (rm << 16) |
-         MASKn(sh, 6, 10) | MASKn(rn, 6, 5) | rd;
+         BMASKn(sh, 6, 10) | BMASKn(rn, 6, 5) | rd;
 }
 
 I64 BLogicalShiftRegX(I64 opc, I64 N, I64 rd, I64 rn,
                                 I64 rm, I64 shmod, U32 sh) {
   return (1 << 31) | (opc << 29) | (0xa << 24) | (shmod << 22) | (N << 21) |
-         (rm << 16) | MASKn(sh, 6, 10) | MASKn(rn, 6, 5) | rd;
+         (rm << 16) | BMASKn(sh, 6, 10) | BMASKn(rn, 6, 5) | rd;
 }
 
-I64 CondSel(I64 op, I64 s, I64 op2, I64 d, I64 n,
+I64 BCondSel(I64 op, I64 s, I64 op2, I64 d, I64 n,
                        I64 m, I64 cond) {
   return (op << 30) | (s << 29) | (m << 16) | (cond << 12) | (op2 << 10) |
          (n << 5) | (d);
@@ -397,9 +397,9 @@ I64 ARM_adrX(I64 d, I64 pc_off) {
   I32 inst = 0x10 << 24;
   if (ArmForceAlignBad(pc_off, 21, 0))
     return ARM_ERR_INV_OFF;
-  inst |= MASKn(d, 6, 0);
-  inst |= MASKn(pc_off >> 2, 19, 5);
-  inst |= MASKn(pc_off, 2, 29);
+  inst |= BMASKn(d, 6, 0);
+  inst |= BMASKn(pc_off >> 2, 19, 5);
+  inst |= BMASKn(pc_off, 2, 29);
   return inst;
 }
 
@@ -512,7 +512,7 @@ I64 ARM_cmpRegX(I64 n, I64 m) {
 }
 
 I64 ARM_csel(I64 d, I64 n, I64 m, I64 cond) {
-  return CondSel(0, 0, 0, d, n, m, cond);
+  return BCondSel(0, 0, 0, d, n, m, cond);
 }
 
 I64 ARM_cselX(I64 d, I64 n, I64 m, I64 cond) {
@@ -520,7 +520,7 @@ I64 ARM_cselX(I64 d, I64 n, I64 m, I64 cond) {
 }
 
 I64 ARM_cset(I64 d, I64 cond) {
-  return CondSel(0, 0, 1, d, 31, 31, cond ^ 1);
+  return BCondSel(0, 0, 1, d, 31, 31, cond ^ 1);
 }
 
 I64 ARM_csetX(I64 d, I64 cond) {
@@ -584,11 +584,11 @@ I64 ARM_asrImmX(I64 d, I64 n, I64 imm) {
 }
 
 I64 ARM_lslImm(I64 d, I64 n, I64 imm) {
-  return Bitfield(2, d, n, MASKn(-imm % 32, 6, 0), 31 - imm);
+  return Bitfield(2, d, n, BMASKn(-imm % 32, 6, 0), 31 - imm);
 }
 
 I64 ARM_lslImmX(I64 d, I64 n, I64 imm) {
-  return BBitfieldX(2, d, n, MASKn(-imm % 64, 6, 0), 63 - imm);
+  return BBitfieldX(2, d, n, BMASKn(-imm % 64, 6, 0), 63 - imm);
 }
 
 I64 ARM_lsrImm(I64 d, I64 n, I64 imm) {
@@ -663,14 +663,14 @@ I64 ARM_strbRegReg(I64 r, I64 a, I64 b) {
 }
 
 I64 ARM_strbRegImm(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(0, 0, r, &adr);
 }
 
 I64 ARM_ldrbRegImm(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(0, 1, r, &adr);
@@ -685,7 +685,7 @@ I64 ARM_strhRegReg(I64 r, I64 a, I64 b) {
 }
 
 I64 ARM_strhRegImm(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(1, 0, r, &adr);
@@ -696,14 +696,14 @@ I64 ARM_ldrhRegReg(I64 r, I64 a, I64 b) {
 }
 
 I64 ARM_ldrhRegImm(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(1, 1, r, &adr);
 }
 
 I64 ARM_strRegImm(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(2, 0, r, &adr);
@@ -718,21 +718,21 @@ I64 ARM_ldrRegReg(I64 r, I64 a, I64 b) {
 }
 
 I64 ARM_ldrRegImm(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(2, 1, r, &adr);
 }
 
 I64 ARM_strRegImmX(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(3, 0, r, &adr);
 }
 
 I64 ARM_ldrRegImmX(I64 r, I64 n, I64 off) {
-  CARMAdrRegImm adr;
+  CBARMAdrRegImm adr;
   adr.n = n;
   adr.off = off;
   return BLdStRegUnImm(3, 1, r, &adr);
@@ -786,56 +786,56 @@ I64 ARM_ldrLabelF64(I64 d, I64 label) {
 }
 
 I64 ARM_strPostImm(I64 r, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPostImm(2, 0, r, &adr);
 }
 
 I64 ARM_ldrPostImm(I64 r, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPostImm(2, 1, r, &adr);
 }
 
 I64 ARM_strPreImm(I64 r, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPre(2, 0, r, &adr);
 }
 
 I64 ARM_ldrPreImm(I64 r, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPre(2, 1, r, &adr);
 }
 
 I64 ARM_strPostImmX(I64 r, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPostImm(3, 0, r, &adr);
 }
 
 I64 ARM_ldrPostImmX(I64 r, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPostImm(3, 1, r, &adr);
 }
 
 I64 ARM_strPreImmX(I64 r, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPre(3, 0, r, &adr);
 }
 
 I64 ARM_ldrPreImmX(I64 r, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPre(3, 1, r, &adr);
@@ -847,56 +847,56 @@ I64 ARM_ldrPreImmX(I64 r, I64 b, I64 off) {
 //
 
 I64 ARM_stpPreImm(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPre(0, 0, r, r2, &adr);
 }
 
 I64 ARM_stpPreImmX(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPre(2, 0, r, r2, &adr);
 }
 
 I64 ARM_ldpPreImm(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPre(0, 1, r, r2, &adr);
 }
 
 I64 ARM_ldpPreImmX(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPreImm adr;
+  CBARMAdrPreImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPre(2, 1, r, r2, &adr);
 }
 
 I64 ARM_stpPostImm(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPostImm(0, 0, r, r2, &adr);
 }
 
 I64 ARM_stpPostImmX(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPostImm(2, 0, r, r2, &adr);
 }
 
 I64 ARM_ldpPostImm(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPostImm(0, 1, r, r2, &adr);
 }
 
 I64 ARM_ldpPostImmX(I64 r, I64 r2, I64 b, I64 off) {
-  CARMAdrPostImm adr;
+  CBARMAdrPostImm adr;
   adr.n = b;
   adr.off = off;
   return LdStRegPairPostImm(2, 1, r, r2, &adr);
@@ -1092,16 +1092,16 @@ I64 LogicalImm(I64 opc, I64 d, I64 s, I64 i) {
   I64 poodle = GenNImmSImmR(i);
   if (i == ARM_ERR_INV_OFF)
     return i;
-  return MASKn(opc, 8, 29) | MASKn(0x24, 8, 23) | MASKn(s, 14, 10) |
-         MASKn(s, 6, 5) | MASKn(d, 6, 0);
+  return BMASKn(opc, 8, 29) | BMASKn(0x24, 8, 23) | BMASKn(s, 14, 10) |
+         BMASKn(s, 6, 5) | BMASKn(d, 6, 0);
 }
 
 I64 LogicalImmX(I64 opc, I64 d, I64 s, I64 i) {
   I64 poodle = GenNImmSImmR(i);
   if (poodle == ARM_ERR_INV_OFF)
     return poodle;
-  return (1 << 31) | MASKn(opc, 8, 29) | MASKn(0x24, 8, 23) |
-         MASKn(poodle, 14, 10) | MASKn(s, 6, 5) | MASKn(d, 6, 0);
+  return (1 << 31) | BMASKn(opc, 8, 29) | BMASKn(0x24, 8, 23) |
+         BMASKn(poodle, 14, 10) | BMASKn(s, 6, 5) | BMASKn(d, 6, 0);
 }
 
 I64 ARM_andImmX(I64 d, I64 s, I64 i) {
@@ -1125,9 +1125,9 @@ I64 LdStRegPairImm(I64 opc, I64 L, I64 r1, I64 r2,
     return ARM_ERR_INV_OFF;
   if (off < times * -256)
     return ARM_ERR_INV_OFF;
-  return MASKn(opc, 32, 30) | MASKn(0x5, 32, 27) | MASKn(2, 32, 23) |
-         MASKn(L, 32, 22) | MASKn(off / 8, 7, 15) | MASKn(r2, 5, 10) |
-         MASKn(ra, 5, 5) | MASKn(r1, 5, 0);
+  return BMASKn(opc, 32, 30) | BMASKn(0x5, 32, 27) | BMASKn(2, 32, 23) |
+         BMASKn(L, 32, 22) | BMASKn(off / 8, 7, 15) | BMASKn(r2, 5, 10) |
+         BMASKn(ra, 5, 5) | BMASKn(r1, 5, 0);
 }
 
 I64 ARM_stpImmX(I64 r1, I64 r2, I64 ra, I64 off) {
@@ -1146,9 +1146,9 @@ I64 LdStSimdFpPairImm(I64 opc, I64 L, I64 r1, I64 r2,
     return ARM_ERR_INV_OFF;
   if (off < times * -256)
     return ARM_ERR_INV_OFF;
-  return MASKn(opc, 32, 30) | MASKn(0x5, 32, 27) | (1 << 26) |
-         MASKn(2, 32, 23) | MASKn(L, 32, 22) | MASKn(off / 8, 7, 15) |
-         MASKn(r2, 5, 10) | MASKn(ra, 5, 5) | MASKn(r1, 5, 0);
+  return BMASKn(opc, 32, 30) | BMASKn(0x5, 32, 27) | (1 << 26) |
+         BMASKn(2, 32, 23) | BMASKn(L, 32, 22) | BMASKn(off / 8, 7, 15) |
+         BMASKn(r2, 5, 10) | BMASKn(ra, 5, 5) | BMASKn(r1, 5, 0);
 }
 
 I64 ARM_stpImmF64(I64 r1, I64 r2, I64 ra, I64 off) {
@@ -1174,7 +1174,7 @@ I64 LdStRegUnsImm(I64 size, I64 opc, I64 rt,
     return ARM_ERR_INV_OFF;
   if (255 < off)
     return ARM_ERR_INV_OFF;
-  return (size << 30) | (7 << 27) | (opc << 22) | MASKn(off, 9, 12) |
+  return (size << 30) | (7 << 27) | (opc << 22) | BMASKn(off, 9, 12) |
          (adr_reg << 5) | rt;
 }
 
@@ -1208,19 +1208,19 @@ I64 ARM_ldur(I64 r, I64 a, I64 off) {
 }
 
 I64 ARM_ldrsbX(I64 r, I64 a, I64 off) {
-  CARMAdrRegImm addr;
+  CBARMAdrRegImm addr;
   addr.n = a;
   addr.off = off;
   return BLdStRegUnImm(0, 2, r, &addr);
 }
 I64 ARM_ldrshX(I64 r, I64 a, I64 off) {
-  CARMAdrRegImm addr;
+  CBARMAdrRegImm addr;
   addr.n = a;
   addr.off = off;
   return BLdStRegUnImm(1, 2, r, &addr);
 }
 I64 ARM_ldrswX(I64 r, I64 a, I64 off) {
-  CARMAdrRegImm addr;
+  CBARMAdrRegImm addr;
   addr.n = a;
   addr.off = off;
   return BLdStRegUnImm(2, 2, r, &addr);
