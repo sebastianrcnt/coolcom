@@ -61,6 +61,8 @@
 #include "KPower.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"
+#include "../../coolc/Fmt/HCTok.HC"
+#include "Syntax.HC"
 #include "UAsmARM64.HC"
 #include "KDbg.HC"
 #include "TermTest.HC"
