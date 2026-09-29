@@ -54,7 +54,7 @@ def main():
         subprocess.run(['newfs_msdos', '-F', '32', '-S', '512', '-c', '1', '-s', '81920',
                         '-h', '16', '-u', '63', '-v', 'VIMTEST', str(disk)], check=True,
                        capture_output=True)
-        for name in ('Init.HC', 'Vim.HC', 'Tmux.HC'):
+        for name in ('Init.HC', 'Vim.HC', 'Tmux.HC', 'Nyan.HC'):
             subprocess.run(['mcopy', '-i', str(disk), 'os/Disk/' + name, '::' + name],
                            check=True, capture_output=True)
         source = d / 'sample.txt'
