@@ -540,6 +540,34 @@ Bool VimNormal(I64 c)
     return FALSE;
 }
 
+I64 VimPageRows()
+{//Text rows on screen: all rows minus the status line.
+    I64 rows = 24;
+    if (fb.base)
+        rows = fb.rows;
+    return rows - 1;
+}
+
+U0 VimPage(I64 dir, I64 n)
+{//Scroll the view and the cursor n lines (PageUp/PageDown, Ctrl+F/B/D/U).
+    I64 i;
+    for (i = 0; i < n; i++) {
+        if (dir > 0) {
+            if (VimNextLine(vim_top) >= vim_len)
+                break;
+            vim_top = VimNextLine(vim_top);
+        } else {
+            if (!vim_top)
+                break;
+            vim_top = VimLine(vim_top - 1);
+        }
+    }
+    if (dir > 0)
+        VimMotion('j', n, FALSE);
+    else
+        VimMotion('k', n, FALSE);
+}
+
 Bool VimKey(I64 ev)
 {
     I64 c = ev & KEY_CODE, k, i, n;
@@ -552,7 +580,26 @@ Bool VimKey(I64 ev)
     }
     vim_msg = "";
     if (ev & KF_ALT) goto done;
+    if (vim_mode != 2 && (c == KEY_PGDN || c == KEY_PGUP)) {
+        n = VimPageRows();
+        if (c == KEY_PGDN)
+            VimPage(1, n);
+        else
+            VimPage(-1, n);
+        vim_count = 0;
+        goto done;
+    }
     if (ev & KF_CTRL) {
+        if (vim_mode == 0 && (c == 'f' || c == 'b' || c == 'd' || c == 'u')) {
+            n = VimPageRows();
+            if (c == 'd' || c == 'u')
+                n = n / 2;
+            if (c == 'f' || c == 'd')
+                VimPage(1, n);
+            else
+                VimPage(-1, n);
+            vim_count = 0;
+        }
         if (c == 'r' && vim_mode == 0) {
             n = vim_count;
             if (!n) n = 1;
