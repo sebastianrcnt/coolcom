@@ -3,8 +3,12 @@
 #include "Uart.HC"
 #include "StrPrint.HC"
 
-U0 KMain()
+U8 *mem_heap_start,*mem_heap_end;
+
+U0 KMain(U8 *heap_start,U8 *heap_end)
 {
+  mem_heap_start=heap_start;
+  mem_heap_end=heap_end;
   U8 sb[64];
   UartPutS("hi from HolyC\n");
   "Hello %d %s %X\n", 42, "abc", 0xBEEF;
@@ -21,5 +25,6 @@ U0 KMain()
   "plain string no args\n";
   StrPrint(sb, "%s-%d", "buf", 99);
   "sp: %s\n", sb;
+  "heap: %p..%p (%d MB)\n", mem_heap_start, mem_heap_end, (mem_heap_end-mem_heap_start)>>20;
   while (TRUE) {}
 }

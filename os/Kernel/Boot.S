@@ -5,6 +5,7 @@
 //  - identity-map RAM + devices and turn on the MMU and caches
 
 #define UART_BASE 0x09000000
+#define RAM_END   0x80000000 // QEMU virt, 1GB at 0x40000000
 
 // MAIR attribute indices
 #define MT_DEVICE 0 // Device-nGnRE
@@ -66,8 +67,28 @@ _start:
 3:
   bl mmu_on
 
-  ldr x1, =KMAIN
+  // Zero the kernel module's zero-initialized globals.
+  ldr x0, =KBSS_START
+  ldr x1, =KBSS_END
+4:
+  cmp x0, x1
+  b.hs 5f
+  str xzr, [x0], #8
+  b 4b
+5:
+  // Run the module's top-level code (global initializers) in order.
+  ldr x20, =MAIN_TABLE
+6:
+  ldr x1, [x20], #8
+  cbz x1, 7f
   blr x1
+  b 6b
+7:
+  // KMain(heap_start, heap_end): all RAM above the boot stack is free.
+  ldr x0, =stack_top
+  ldr x1, =RAM_END
+  ldr x2, =KMAIN
+  blr x2
 
 park:
   wfe
