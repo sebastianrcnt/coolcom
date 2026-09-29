@@ -132,6 +132,12 @@ U0 FatCheckDir(CFatCheck *ck, I64 first, I64 parent, I64 depth)
         if (!DrvBlkRead(ck->dv, &buf[i], Clus2Blk(ck->dv, c), ck->dv->spc)) {
             ck->io_error = TRUE; goto check_dir_done;
         }
+    if (first != ck->dv->root_clus &&
+            (count < 2 || MemCmp(buf[0].name, ".          ", 11) || MemCmp(buf[1].name, "..         ", 11))) {
+        FatCheckError(ck, "missing dot entries; manual recovery required", first);
+        ck->io_error = TRUE;
+        goto check_dir_done;
+    }
     MemSet(&lfn, 0, sizeof(CDirEntry));
     for (i = 0; i < count; i++) {
         if (!buf[i].name[0]) break;
@@ -147,6 +153,14 @@ U0 FatCheckDir(CFatCheck *ck, I64 first, I64 parent, I64 depth)
             changed = TRUE;
         }
         begin = -1;
+        for (j = 0; j < i; j++)
+            if (buf[j].name[0] != 0xE5 && buf[j].attr != RS_ATTR_LONG_NAME && !MemCmp(buf[j].name, buf[i].name, 11)) {
+                FatCheckError(ck, "duplicate short alias", first);
+                buf[i].name[0] = 0xE5;
+                for (j = i - 1; j >= 0 && buf[j].attr == RS_ATTR_LONG_NAME; j--) buf[j].name[0] = 0xE5;
+                changed = TRUE;
+                goto check_reset;
+            }
         child = buf[i].clus_lo + (buf[i].clus_hi << 16);
         if (buf[i].name[0] == '.' && (buf[i].name[1] == ' ' || buf[i].name[1] == '.')) {
             expected = first;
@@ -219,6 +233,10 @@ I64 Fsck(U8 drv_let = 0, Bool repair = FALSE)
         if (MemCmp(mirror, ck.fat + i * 128, 512)) FatCheckError(&ck, "FAT copies differ", i * 128);
     }
     for (i = 0; i < ck.limit; i++) ck.fat[i] &= 0x0FFFFFFF;
+    if (ck.fat[0] != (0x0FFFFF00 | br.media_desc) || ck.fat[1] != 0x0FFFFFFF) {
+        FatCheckError(&ck, "reserved FAT entries or dirty volume", 0);
+        ck.fat[0] = 0x0FFFFF00 | br.media_desc; ck.fat[1] = 0x0FFFFFFF;
+    }
     if (FatCheckChain(&ck, ck.dv->root_clus)) FatCheckDir(&ck, ck.dv->root_clus, 0, 0);
     else ck.io_error = TRUE;
     if (ck.io_error) goto fsck_done;

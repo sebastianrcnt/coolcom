@@ -41,7 +41,7 @@ I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0)
             default:
                 PrintErr("File System Not Supported\n");
         }
-        BlkFlush(dirc->dv->bd->unit);
+        if (BlkFlush(dirc->dv->bd->unit)) c = INVALID_CLUS;
         DirContextDel(dirc);
     }
     return c;
