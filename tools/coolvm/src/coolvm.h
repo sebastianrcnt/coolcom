@@ -55,6 +55,10 @@
 #define BLK_STRIDE 0x1000ULL
 #define BLK_IRQ_BASE 704
 #define MAX_DISKS 4
+/* VM-only virtio-net with a user-mode NAT (net.c), present with --net. */
+#define NET_BASE 0x1ff020000ULL
+#define NET_SIZE 0x1000ULL
+#define NET_IRQ 712
 #define FB_BASE 0x900000000ULL
 
 #define MAX_CPUS 8
@@ -110,6 +114,7 @@ struct vm {
     int disk_fd[MAX_DISKS];
     uint64_t disk_size[MAX_DISKS];
     int ndisks;
+    bool net; /* --net: virtio-net + NAT */
     pthread_mutex_t lock; /* protects all device state (uart, aic) */
     _Atomic bool stop;
     _Atomic int exit_code;
@@ -162,6 +167,10 @@ void input_push(uint32_t type, uint32_t code, int32_t value);
 bool input_load_script(const char *path);
 bool blk_mmio(int disk, uint64_t off, int size, bool wr, uint64_t *val);
 bool blk_irq_level(int disk);
+bool net_mmio(uint64_t off, int size, bool wr, uint64_t *val);
+bool net_irq_level(void);
+void net_start(void);
+void net_report(void);
 void display_init(void);
 void display_pump(void);
 bool display_screenshot(const char *path);

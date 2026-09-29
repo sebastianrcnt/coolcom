@@ -149,6 +149,18 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
         fdt_end(f);
     }
 
+    if (g.net) {
+        snprintf(name, sizeof name, "virtio_mmio@%llx", (unsigned long long)NET_BASE);
+        fdt_begin(f, name);
+        fdt_prop_str(f, "compatible", "virtio,mmio");
+        uint32_t reg[4] = {(uint32_t)(NET_BASE >> 32), (uint32_t)NET_BASE, 0, NET_SIZE};
+        fdt_prop_cells(f, "reg", reg, 4);
+        fdt_prop_u32(f, "interrupt-parent", PH_AIC);
+        uint32_t ints[3] = {AIC_IRQ, NET_IRQ, IRQ_TYPE_LEVEL_HIGH};
+        fdt_prop_cells(f, "interrupts", ints, 3);
+        fdt_end(f);
+    }
+
     fdt_begin(f, "interrupt-controller@23b100000");
     {
         const char *compat[] = {"apple,t8103-aic", "apple,aic"};

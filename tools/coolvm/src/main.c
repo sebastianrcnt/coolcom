@@ -47,6 +47,7 @@ static void usage(void)
             "  --screenshot F  save framebuffer to PNG on exit\n"
             "  --input-script F  preload input events (type code value, one per line)\n"
             "  --disk F        attach writable raw image; repeat up to four times\n"
+            "  --net           attach a virtio-net NIC behind a user-mode NAT (guest 10.0.2.15, gateway 10.0.2.2)\n"
             "The optional kernel.dtb replaces the generated device tree verbatim (no fix-ups are applied).\n"
             "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n"
             "A guest reset (finisher 0x7777) starts coolvm again with the same options, without --input-script.\n",
@@ -136,6 +137,7 @@ int main(int argc, char **argv)
         {"headless", no_argument, 0, 'H'}, {"screenshot", required_argument, 0, 'S'},
         {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
+        {"net", no_argument, 0, 'N'},
         {0, 0, 0, 0}};
     int o;
     while ((o = getopt_long(argc, argv, "h", opts, NULL)) != -1) {
@@ -152,6 +154,7 @@ int main(int argc, char **argv)
         case 'L': load_off = strtoull(optarg, NULL, 0); break;
         case 'v': verbose = true; break;
         case 'H': g.headless = true; break;
+        case 'N': g.net = true; break;
         case 'S': g.screenshot = optarg; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
@@ -333,6 +336,7 @@ int main(int argc, char **argv)
     uart_start_stdin();
     display_init();
     cpu_timer_poker_start();
+    net_start();
     for (int i = 0; i < ncpus; i++)
         pthread_create(&g.cpus[i].thread, NULL, cpu_thread_main, &g.cpus[i]);
 
@@ -371,6 +375,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < ncpus; i++)
         pthread_join(g.cpus[i].thread, NULL);
     cpu_timer_poker_stop();
+    net_report();
     uart_stop_stdin();
     if (g.screenshot && !display_screenshot(g.screenshot)) {
         LOGE("cannot save screenshot %s\n", g.screenshot);

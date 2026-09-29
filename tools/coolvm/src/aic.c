@@ -78,6 +78,7 @@ static bool hw_level(int irq)
     if (irq == UART0_IRQ) return uart_irq_level();
     if (irq == INPUT_IRQ) return input_irq_level();
     if (irq >= BLK_IRQ_BASE && irq < BLK_IRQ_BASE + g.ndisks) return blk_irq_level(irq - BLK_IRQ_BASE);
+    if (irq == NET_IRQ) return net_irq_level();
     return false;
 }
 
