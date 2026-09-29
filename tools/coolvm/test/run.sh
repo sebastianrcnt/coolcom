@@ -13,7 +13,7 @@ OBJCOPY=${OBJCOPY:-aarch64-elf-objcopy}
 TIMEOUT=${TIMEOUT:-20}
 
 mkdir -p "$OUT"
-for g in guest fault devices; do
+for g in guest fault devices timer-rearm; do
     "$AS" -o "$OUT/$g.o" "$HERE/$g.S"
     "$LD" --no-warn-rwx-segments -T "$HERE/guest.ld" -o "$OUT/$g.elf" "$OUT/$g.o"
     "$OBJCOPY" -O binary "$OUT/$g.elf" "$OUT/$g.Image"
@@ -61,6 +61,14 @@ for p in \
     "^coolvm-test PASS"; do
     expect "$OUT/out.txt" "$p"
 done
+
+# A missed quiescent interval must not permanently mask the virtual timer.
+set +e
+gtimeout -k 2 8 "$COOLVM" --headless --cpus 1 --timeout 5 "$OUT/timer-rearm.Image" >"$OUT/out_timer_rearm.txt" 2>"$OUT/err_timer_rearm.txt"
+RC=$?
+set -e
+expect_rc "$RC" 0 "timer-rearm.Image"
+expect "$OUT/out_timer_rearm.txt" "^timer rearm PASS"
 
 # ---- 2. UART RX from host stdin ----
 printf 'Q' | gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --headless --cpus 2 --timeout "$TIMEOUT" "$OUT/guest.Image" >"$OUT/out_rx.txt" 2>/dev/null || true

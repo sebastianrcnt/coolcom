@@ -104,3 +104,8 @@ and the two restored shell screens with cleared
 cleanup hooks. These artifacts remain in `build/tmux-vim-test/`. Vim takes
 its viewport dimensions from the bound terminal rather than the physical
 framebuffer.
+
+`make coolvm-test` also checks a timer deadline reprogrammed to an already
+expired value. The VMM tracks changes to CVAL as well as ISTATUS, so missing
+a short deasserted interval cannot permanently suppress timer FIQs and leave
+a CPU-bound pane monopolizing the core.
