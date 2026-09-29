@@ -91,25 +91,50 @@ I64 FileAttr(U8 *name, I64 attr = 0)
     return attr;
 }
 
-Bool FileNameChk(U8 *filename)
-{//Return check for valid filename, not checking existence.
-    U8 *ptr = filename;
-    if (!filename)
-        return FALSE;
-    if (!*ptr)
-        return FALSE;
-    if (*ptr == '.') {
-        if (!ptr[1])
-            return TRUE;
-        if (ptr[1] == '.' && !ptr[2])
-            return TRUE;
+I64 FATNameUtf16(U16 *out, U8 *s)
+{//Strict UTF-8, measured in UTF-16 code units; -1 means invalid.
+    I64 n = 0, cp, k, j, min;
+    if (!s || !*s)
+        return -1;
+    while (*s) {
+        cp = *s++;
+        k = 0;
+        min = 0;
+        if (cp >= 0x80) {
+            if (0xC2 <= cp <= 0xDF) {k = 1; min = 0x80; cp &= 31;}
+            else if (0xE0 <= cp <= 0xEF) {k = 2; min = 0x800; cp &= 15;}
+            else if (0xF0 <= cp <= 0xF4) {k = 3; min = 0x10000; cp &= 7;}
+            else return -1;
+            for (j = 0; j < k; j++) {
+                if ((*s & 0xC0) != 0x80) return -1;
+                cp = (cp << 6) | (*s++ & 63);
+            }
+        }
+        if (cp < min || cp > 0x10FFFF || 0xD800 <= cp <= 0xDFFF || cp < 32 ||
+                cp == '"' || cp == '*' || cp == '/' || cp == ':' || cp == '<' ||
+                cp == '>' || cp == '?' || cp == 92 || cp == '|')
+            return -1;
+        if (n + 1 + (cp >= 0x10000) > 255) return -1;
+        if (cp >= 0x10000) {
+            cp -= 0x10000;
+            if (out) out[n] = 0xD800 + (cp >> 10);
+            n++;
+            cp = 0xDC00 + (cp & 1023);
+        }
+        if (out) out[n] = cp;
+        n++;
     }
-    if (StrLen(filename) >= CDIR_FILENAME_LEN)
-        return FALSE;
-    while (*ptr)
-        if (!Bt(char_bmp_filename, *ptr++))
-            return FALSE;
-    return TRUE;
+    if (out) out[n] = 0;
+    return n;
+}
+
+Bool FileNameChk(U8 *filename)
+{
+    I64 n;
+    if (!filename || !*filename) return FALSE;
+    if (!StrCmp(filename, ".") || !StrCmp(filename, "..")) return TRUE;
+    n = StrLen(filename);
+    return filename[n - 1] != '.' && filename[n - 1] != ' ' && FATNameUtf16(NULL, filename) > 0;
 }
 
 // ---- DskStrB.HC ----

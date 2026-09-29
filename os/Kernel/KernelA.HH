@@ -2513,7 +2513,7 @@ RS_ATTR_SYSTEM | RS_ATTR_VOL_ID)
 #define MT_DVD		2
 
         //CDirEntry flags (Used by $LK,"FileMgr",A="MN:FileMgr"$())
-#define CDIR_FILENAME_LEN	38 //Must include terminator zero
+#define CDIR_FILENAME_LEN 766 //255 UTF-16 units as UTF-8, plus terminator
         public class CDirEntry
 {
     CDirEntry *next, *parent, *sub;

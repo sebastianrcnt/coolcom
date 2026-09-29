@@ -60,6 +60,7 @@ def main():
         i += 1
     out = [ln.replace("I64 user_data, user_data2, is_single_step;",
                       "I64 user_data, user_data2, is_single_step;\n    U8 *stack_alloc, *stack_guard, *stack_end;") for ln in out]
+    out = [re.sub(r"(#define CDIR_FILENAME_LEN)\s+38.*", r"\1 766 //255 UTF-16 units as UTF-8, plus terminator", ln) for ln in out]
     text = re.sub(r"\n\n\n+", "\n\n", HEAD + "\n".join(out) + KERNEL_TAIL)  # (as hcfmt does)
     sys.stdout.buffer.write(text.encode("latin-1"))
 
