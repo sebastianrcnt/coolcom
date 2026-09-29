@@ -1328,6 +1328,40 @@ ARM_addShiftRegXshift:
         case BIC_EQ:
             next = ICArgN(rpn, 1);
             next2 = ICArgN(rpn, 0);
+            // FIX(5): Aggregate operands are addresses; copy their complete object.
+            if (rpn->integer > 8) {
+                CBICArg src_addr, dst_addr;
+                I64 copied = 0, step;
+                MemSet(&src_addr, 0, sizeof(CBICArg));
+                MemSet(&dst_addr, 0, sizeof(CBICArg));
+                src_addr.mode = MD_REG;
+                src_addr.raw_type = BRT_PTR;
+                src_addr.reg = BAIWNIOS_TMP_IREG_POOP;
+                dst_addr.mode = MD_REG;
+                dst_addr.raw_type = BRT_PTR;
+                dst_addr.reg = BAIWNIOS_TMP_IREG_POOP2;
+                code_off = __OptPassFinal(cctrl, next2, bin, code_off);
+                code_off = __OptPassFinal(cctrl, next, bin, code_off);
+                code_off = ICMov(cctrl, &src_addr, &next2->res, bin, code_off);
+                code_off = ICMov(cctrl, &dst_addr, &next->res, bin, code_off);
+                while (copied < rpn->integer) {
+                    if (rpn->integer - copied >= 8) {
+                        step = 8;
+                        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_ldrRegImmX(0, src_addr.reg, 0));
+                        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_strRegImmX(0, dst_addr.reg, 0));
+                    } else {
+                        step = 1;
+                        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_ldrbRegImm(0, src_addr.reg, 0));
+                        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_strbRegImm(0, dst_addr.reg, 0));
+                    }
+                    copied += step;
+                    if (copied < rpn->integer) {
+                        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_addImmX(src_addr.reg, src_addr.reg, step));
+                        code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_addImmX(dst_addr.reg, dst_addr.reg, step));
+                    }
+                }
+                break;
+            }
             code_off = __OptPassFinal(cctrl, next2, bin, code_off);
             code_off = ICMov(cctrl, &rpn->res, &next2->res, bin, code_off);
             if (next->type == BIC_TYPECAST) {
