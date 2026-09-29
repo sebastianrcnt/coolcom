@@ -48,7 +48,8 @@ static void usage(void)
             "  --input-script F  preload input events (type code value, one per line)\n"
             "  --disk F        attach writable raw image; repeat up to four times\n"
             "The optional kernel.dtb replaces the generated device tree verbatim (no fix-ups are applied).\n"
-            "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n",
+            "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n"
+            "A guest reset (finisher 0x7777) starts coolvm again with the same options, without --input-script.\n",
             MAX_CPUS, (unsigned long long)DRAM_BASE);
 }
 
@@ -378,5 +379,23 @@ int main(int argc, char **argv)
     for (int i = 0; i < g.ndisks; i++) close(g.disk_fd[i]);
     hv_vm_destroy();
     fflush(stdout);
+    if (atomic_load(&g.reset)) {
+        /* Reboot: run again from scratch, without the scripted input (already typed). */
+        char **nargv = calloc(argc + 1, sizeof(char *));
+        int n = 0;
+        for (int i = 0; i < argc; i++) {
+            if (!strcmp(argv[i], "--input-script") && i + 1 < argc) {
+                i++;
+                continue;
+            }
+            if (!strncmp(argv[i], "--input-script=", 15))
+                continue;
+            nargv[n++] = argv[i];
+        }
+        fprintf(stderr, "coolvm: guest reset, starting again\n");
+        execv(argv[0], nargv);
+        perror("coolvm: execv");
+        return 1;
+    }
     return atomic_load(&g.exit_code);
 }
