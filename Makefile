@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test all run test vim-test key-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -157,3 +157,6 @@ coolvm-test: coolvm
 # Small AST-based C to Cool differential tests.
 c2hc-test: build/coolc
 	python3 tools/c2hc/test.py
+
+stbtt-test: build/coolc build/hcfmt.BIN
+	python3 tools/c2hc/stbtt_test.py
