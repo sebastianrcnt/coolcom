@@ -56,7 +56,7 @@ U0 KbdMapRow(I64 code, U8 *lo, U8 *up)
 
 U0 KbdMapInit()
 {//US layout for Linux key codes 1..57.
-    KbdMapRow(2, "1234567890-=", "!@#!^&*()_+");
+    KbdMapRow(2, "1234567890-=", "!@#!%^&*()_+");
     KbdMapRow(16, "qwertyuiop[]", "QWERTYUIOP{}");
     KbdMapRow(30, "asdfghjkl;'", "ASDFGHJKL:'");
     KbdMapRow(44, "zxcvbnm,./", "ZXCVBNM<>?");
