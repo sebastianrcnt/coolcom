@@ -399,6 +399,27 @@ start:
 2:      add     x24, x24, #1
         cmp     x24, #5
         b.lt    1b
+        // Rearm to a different deadline that is already expired. This models a
+        // host missing the entire quiet interval between rapid guest ticks.
+        // The timer condition never deasserts: CVAL progress must rearm HVF.
+        msr     daifset, #1
+        adr     x1, tick_count
+        str     wzr, [x1]
+        adr     x1, tick_reload
+        mov     x2, #-1
+        str     x2, [x1]
+        msr     cntv_tval_el0, x2
+        mov     x1, #1
+        msr     cntv_ctl_el0, x1
+        isb
+        msr     daifclr, #1
+1:      adr     x1, tick_count
+        ldr     w0, [x1]
+        cmp     w0, #5
+        b.ge    2f
+        wfi
+        b       1b
+2:      PUTS    s_tick_rearm
         // ---- SMP: start cpu@1 through its spin-table release address ----
         mov     x0, x19
         adr     x1, s_n_cpu1
@@ -711,6 +732,7 @@ s_freq:         .asciz "timer: cntfrq="
 s_tick:         .asciz "tick "
 s_tickdt:       .asciz "  period "
 s_us:           .asciz " us\n"
+s_tick_rearm:   .asciz "expired timer rearm ok\n"
 s_tick_bad:     .asciz "timer FIQ NOT taken\n"
 s_reladdr:      .asciz "smp: cpu1 cpu-release-addr=0x"
 s_norel:        .asciz "smp: cpu@1 cpu-release-addr NOT FOUND\n"

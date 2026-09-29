@@ -86,6 +86,7 @@ typedef struct cpu {
 
     /* vCPU-thread-only state. */
     _Atomic bool vt_host_masked; /* HVF vtimer mask is set (poker thread watches it) */
+    uint64_t vt_fired_cval;       /* deadline that caused the masked activation */
     bool vt_await_clear;         /* FIQ was acked; don't re-inject until the source deasserts */
     bool timer_fiq;              /* virtual-timer FIQ line asserted */
 
