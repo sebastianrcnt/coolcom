@@ -44,7 +44,8 @@ scratch storage is per task, so another shell cannot replace a pending line.
 
 Tmux is an ordinary disk HolyC program. It reads its own terminal, recognizes
 the prefix, queues other events only to the selected pane, and composites
-pane cell snapshots as ANSI output. Hidden panes continue updating their
+pane cell snapshots as ANSI output, batching dirty screen updates at 30 Hz
+so fast typing does not trigger a full redraw for every key. Hidden panes continue updating their
 buffers. Terminal locks protect worker output and input on other cores; the
 renderer releases those locks before acquiring the console print lock.
 Terminal references survive task exit, and closing a pane kills its terminal
@@ -98,7 +99,8 @@ The input script, UART log and screenshot remain in `build/tmux-test/`.
 
 The Tmux test also runs two Vim editors concurrently, saves separate files,
 and breaks/faults the left editor while the right editor remains open. It
-checks both saved files and the two restored shell screens with cleared
+checks both saved files, PageDown/Ctrl+U movement using the pane height,
+and the two restored shell screens with cleared
 cleanup hooks. These artifacts remain in `build/tmux-vim-test/`. Vim takes
 its viewport dimensions from the bound terminal rather than the physical
 framebuffer.

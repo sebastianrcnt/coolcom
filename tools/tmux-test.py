@@ -48,7 +48,7 @@ def vim_panes(kernel):
     subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'TMUXVIM', '::'], check=True)
     for p in (ROOT / 'os/Disk').glob('*.HC'):
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + p.name], check=True)
-    for name, contents in [('Left.txt', b'abc\n'), ('Right.txt', b'xyz\n')]:
+    for name, contents in [('Left.txt', b'abc\n'), ('Right.txt', b'xyz\n'), ('Page.txt', b'x\n' * 60)]:
         p = d / name
         p.write_bytes(contents)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
@@ -61,18 +61,24 @@ def vim_panes(kernel):
     script += prefix('o') + text('A!\x1b:wq\n') + 'delay 200\n'
     # Break and fault the left editor while right Vim still owns its cleanup hook.
     script += line('I64 BreakReturned=0,FaultReturned=0;')
-    script += line('{Vim("C:/Left.txt"); BreakReturned=1;}') + 'delay 300\n'
+    script += line('U0 BreakEditor(){Vim("C:/Left.txt"); BreakReturned=1;}')
+    script += line('U0 FaultEditor(){VimOpen("C:/Left.txt"); I64 *bad=0; *bad=1; FaultReturned=1;}')
+    script += 'delay 500\n' + line('BreakEditor;') + 'delay 1000\n'
     script += '1 29 1\n1 56 1\n' + vim.keys_of(46) + '1 56 0\n1 29 0\n' + 'delay 300\n'
     script += line('I64 Broken=vim_active || shell_stmt_cleanup || BreakReturned;')
-    script += line('{VimOpen("C:/Left.txt"); I64 *bad=0; *bad=1; FaultReturned=1;}') + 'delay 300\n'
+    script += line('FaultEditor;') + 'delay 300\n'
     script += line('Broken+=vim_active || shell_stmt_cleanup || FaultReturned;')
     script += line('Print("\\x1b[2J\\x1b[HLEFT-CLEAN-%d\\n",Broken);')
     script += prefix('o') + text('A!\x1b:wq\n') + 'delay 200\n'
+    script += line('Vim("C:/Page.txt");') + 'delay 300\n'
+    script += vim.keys_of(109) + 'delay 100\n'  # PageDown: 28 text rows in a 29-row pane
+    script += '1 29 1\n' + vim.keys_of(22) + '1 29 0\n'  # Ctrl+U: back 14 rows
+    script += text('iPAGE\x1b:wq\n') + 'delay 200\n'
     script += line('Print("\\x1b[2J\\x1b[HRIGHT-CLEAN-%d\\n",vim_active || shell_stmt_cleanup);')
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         proc = subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--cpus', '2',
-                               '--mem', '1024', '--timeout', '22', '--width', '640', '--height', '480',
+                               '--mem', '1024', '--timeout', '25', '--width', '640', '--height', '480',
                                '--input-script', str(d / 'input.txt'), '--disk', str(disk),
                                '--screenshot', str(d / 'screen.png'), kernel], stdout=out, stderr=subprocess.STDOUT)
     assert proc.returncode in (0, 124), f'Vim pane VM exited {proc.returncode}; see {d}/vm.log'
@@ -83,11 +89,12 @@ def vim_panes(kernel):
     # Recovery restores the primary screen before a compositor tick can copy
     # alternate-screen diagnostics. Broken instead checks that both statements
     # aborted before their post-Vim/post-fault assignments and cleared cleanup.
-    for name, expected in [('Left.txt', b'LEFTabc!\n'), ('Right.txt', b'RIGHTxyz!\n')]:
+    for name, expected in [('Left.txt', b'LEFTabc!\n'), ('Right.txt', b'RIGHTxyz!\n'),
+                           ('Page.txt', b'x\n' * 14 + b'PAGEx\n' + b'x\n' * 45)]:
         got = subprocess.run(['mcopy', '-i', str(disk), '::' + name, '-'], check=True, capture_output=True).stdout
         assert got == expected, f'{name}: {got!r}, expected {expected!r}; see {d}/vm.log'
     check_pixels(d, [('LEFT-CLEAN-0', 0), ('RIGHT-CLEAN-0', 40)])
-    print('Tmux Vim: concurrent editors, per-pane save, normal/break/fault cleanup isolation and shell restoration PASS')
+    print('Tmux Vim: concurrent editors, per-pane save/page scrolling, normal/break/fault cleanup isolation and shell restoration PASS')
 
 
 def main():

@@ -543,7 +543,9 @@ Bool VimNormal(I64 c)
 I64 VimPageRows()
 {//Text rows on screen: all rows minus the status line.
     I64 rows = 24;
-    if (fb.base)
+    if (VtCurrent)
+        rows = VtCurrent->rows;
+    else if (fb.base)
         rows = fb.rows;
     return rows - 1;
 }

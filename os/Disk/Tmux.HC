@@ -204,7 +204,7 @@ U0 TmRender()
 
 U0 Tmux()
 {
-    I64 key, prefix = FALSE;
+    I64 key, prefix = FALSE, paint_at = 0;
     CVTerm *old_focus = vt_focus;
     if (!tm_session) {
         tm_session = CAlloc(sizeof(CTmSession));
@@ -216,7 +216,12 @@ U0 Tmux()
     ConsPutS("\x1b[?1049h");
     TmFocus;
     while (tm_session->panes) {
-        TmRender;
+        // Batch bursts of input/output instead of repainting the entire
+        // screen for every byte typed into an editor or shell command.
+        if (tm_session->redraw || jiffies >= paint_at) {
+            TmRender;
+            paint_at = jiffies + JIFFY_FREQ / 30;
+        }
         key = KeyPop;
         if (!key) {Sleep(10); goto tm_again;}
         if (prefix) {
