@@ -60,6 +60,8 @@ import U0 ArchLongJmp(I64 *ctx);
 import U8 *ArchCompilerBin(I64 *size);         // embedded coolc/seed/Compiler.BIN (Blob.S)
 import U8 *ArchShellPrelude();                 // embedded shell prelude text
 import U8 *ArchKSyms();                        // kernel symbol table (KSym.HC)
+import U8 *ArchArm64Ops();                     // opcode table text (UAsmARM64.HC)
+import U8 **ArchFp();                          // x29: the caller's frame
 import I64 AIWNIOS_SetJmp(I64 *ctx);           // = ArchSetJmp (try/catch)
 import U0 AIWNIOS_LongJmp(I64 *ctx);
 import F64 Sqrt(F64 d);

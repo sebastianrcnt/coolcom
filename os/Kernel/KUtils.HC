@@ -269,9 +269,3 @@ Bool IsValidPtr(U8 *p)
 {//DRAM only (the kernel has no page faults to try an access with).
     return 0x800000000 <= p(I64) < 0xC00000000;
 }
-
-U8 *Caller(I64 num = 0)
-{//No frame walk yet.
-    no_warn num;
-    return NULL;
-}
