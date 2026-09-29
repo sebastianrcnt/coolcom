@@ -6,6 +6,8 @@ int main(void) {
         sum += choose(n, 2);
         n--;
     }
-    printf("ternary %d\n", sum);
+    int result = 0;
+    result = sum > 0 ? sum : -sum;
+    printf("ternary %d\n", result);
     return 0;
 }
