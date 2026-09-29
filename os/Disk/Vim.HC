@@ -817,9 +817,23 @@ Bool VimOpen(U8 *name)
     return TRUE;
 }
 
-U0 Vim(U8 *name)
-{
+U0 Vim(U8 *name, I64 line = 0)
+{//line > 1: start on that line.
+    I64 rows, cols, p, q, i;
     if (!VimOpen(name)) return;
+    if (line > 1) {
+        p = 0;
+        for (i = 1; i < line; i++) {
+            q = VimNextLine(p);
+            if (q >= vim_len) break;
+            p = q;
+        }
+        AnsiTermSize(&rows, &cols);
+        for (q = p, i = 0; i < (rows - 1) / 3 && q > 0; i++) q = VimLine(q - 1);
+        vim_pos = p;
+        vim_top = q;
+        VimClamp();
+    }
     VimDraw();
     while (TRUE) {
         if (VimKey(GetKey())) break;
