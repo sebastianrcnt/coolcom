@@ -1319,11 +1319,11 @@ ARM_addShiftRegXshift:
     case BIC_COMMA:
       next = ICArgN(rpn, 1);
       next2 = ICArgN(rpn, 0);
-      MemCpy(&orig_dst, &next->res, sizeof(CBICArg));
-      code_off = __OptPassFinal(cctrl, next2, bin, code_off);
+      // FIX(2): Argument 1 is discarded by PushTmpDepthFirst; argument 0 is the value.
+      // Evaluate the left side first, then move the right side into the result.
       code_off = __OptPassFinal(cctrl, next, bin, code_off);
-      // TODO WHICH ONE
-      code_off = ICMov(cctrl, &rpn->res, &next->res, bin, code_off);
+      code_off = __OptPassFinal(cctrl, next2, bin, code_off);
+      code_off = ICMov(cctrl, &rpn->res, &next2->res, bin, code_off);
       break;
     case BIC_EQ:
       next = ICArgN(rpn, 1);
