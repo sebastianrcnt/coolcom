@@ -181,7 +181,11 @@ text-test: build/kernel.Image coolvm
 ime-test: build/kernel.Image coolvm
 	python3 tools/ime-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test
+# coolvm --net-forward into ShellServe (remote shells) and HttpServe, and Wget to C: (os/Kernel/NetShell.HC, NetHttp.HC).
+net-forward-test: build/kernel.Image coolvm
+	python3 tools/net-forward-test.py $<
+
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test net-forward-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

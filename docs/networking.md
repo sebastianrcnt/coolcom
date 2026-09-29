@@ -33,6 +33,7 @@ lwIP was the other option: `tools/c2hc` could transpile it. It was not used beca
 | `os/Kernel/NetApp.HC` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
 | `os/Kernel/NetTools.HC` | Shell tools: `Dns`, `Ping`, `HttpGet`/`HttpFetch`, `NetRep` |
 | `os/Kernel/NetShell.HC` | `ShellServe`: independent shells over TCP (remote shell) |
+| `os/Kernel/NetHttp.HC` | `Wget` (a URL to a file) and `HttpServe`, a small HTTP file server |
 | `os/Kernel/NetTest.HC` | `DevTestNet`, run by `DevTest` when there is a NIC |
 
 `KMain` calls `NetInit` after the secondary cores start. `NetInit` probes the FDT's `virtio,mmio`
@@ -120,6 +121,14 @@ example.com has address 104.20.23.154
 > NetRep;                             // MAC, address, netmask, gateway, DNS, lease, counters, ARP cache, sockets
 ```
 
+`Wget(url, file)` saves the body of a `200` response to `file` (default: the URL's last path part, or
+`index.html`, in the current directory) and returns its length, or -1:
+
+```
+> Wget("http://10.0.2.2:8000/notes.txt", "C:/Notes.txt");   // from a server on the Mac
+Wget: 1234 bytes saved to C:/Notes.txt
+```
+
 `HttpGet` speaks plain HTTP/1.0 (`Connection: close`, so no chunked bodies) to `http://host[:port]/path`;
 `HttpFetch(url, &len, &status)` returns the whole response instead of printing it. There is no TLS, so
 `https://` URLs are refused. Under coolvm, ICMP echo to hosts other than the gateway goes out through
@@ -158,7 +167,29 @@ $ telnet localhost 2323                                      # or telnet, if ins
   it started on that terminal. **`Exit;`** in the remote shell ends it and closes the connection.
 - `ShellServe` returns the listening task; `Kill` it to stop accepting.
 
+## HTTP file server
+
+`HttpServe(port = 80, dir = "C:")` serves the files under `dir` in a background task. Each connection
+gets its own task on core 0, like the shells, so its file system calls never run concurrently with
+theirs. It answers one HTTP/1.0 `GET` or `HEAD` per connection (`Connection: close`, `Content-Length`,
+a content type from the extension). A directory is listed as HTML (a path without the final `/` is
+redirected to it); `%XX` escapes are decoded, and paths containing `..`, `\` or `:` get `400`.
+Missing files get `404`, other methods `501`. There is no `index.html` lookup, range, keep-alive or
+upload support.
+
+```
+> HttpServe(80, "C:/");                          // in the OS, under make run-net
+$ curl localhost:8080/Init.HC                    # on the Mac
+```
+
 ## Tests
+
+`make net-forward-test` (`tools/net-forward-test.py`, part of `make test`, no Internet needed) boots with
+two forwarded ports and runs `ShellServe(23); HttpServe(80, "C:/");`. From the host it opens two remote
+shells and checks that they are independent, that line editing works, that Ctrl+C breaks a busy loop,
+that `Wget` stores a binary file from a host HTTP server (as `10.0.2.2`) on C:, that the server returns
+that file and another one byte-exact, lists directories, redirects, and returns `404`, that disconnecting
+kills only that shell, and that `Exit;` closes the connection.
 
 `tools/kernel-test.sh` boots the kernel test with `--net`, and `DevTestNet` then checks the
 following:

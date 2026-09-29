@@ -70,6 +70,7 @@
 #include "Shell.HC"
 #include "ShellCmp.HC"
 #include "NetShell.HC"
+#include "NetHttp.HC"
 #include "KLink.HC"
 #include "MakeKernel.HC"
 #include "../../coolc/Fmt/HCTok.HC"
