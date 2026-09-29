@@ -187,24 +187,31 @@ U0 WResolveTree(CWUnit *u, CWNode *n, CWNode *scope)
 }
 U0 WResolveDecl(CWUnit *u, CWNode *d, CWNode *outer)
 {
-    CWNode *s = WScope(u, outer), *c, *p, *b;
+    CWNode *s = WScope(u, outer), *sig = s, *c, *p, *b;
     d->scope = s;
     for (c = d->first; c && !u->error_kind; c = c->next) if (WEq(c->role, "type-parameter")) {
             if (WLookup(s, c->name)) WFail(u, c->token, "Generic Error", "Duplicate type parameter");
             else WBind(u, s, c->name, c, "Generic Error");
             c->owner = d;
         }
+    // Public signatures are qualified by interface imports; executable bodies
+    // and type-parameter constraints retain implementation imports.
+    if (d->pair && d->pair->owner && WEq(d->pair->owner->tag, "interface") &&
+            (WEq(d->tag, "function") || WEq(d->tag, "constant") || WEq(d->tag, "instance"))) {
+        sig = WScope(u, d->pair->owner->scope);
+        for (c = d->first; c; c = c->next) if (WEq(c->role, "type-parameter")) WBind(u, sig, c->name, c, "Generic Error");
+    }
     for (c = d->first; c && !u->error_kind; c = c->next) if (WEq(c->role, "parameter")) {
-            WResolveType(u, WChild(c, "type"), s);
+            WResolveType(u, WChild(c, "type"), sig);
             if (WLookup(s, c->name)) WFail(u, c->token, "Generic Error", "Parameter shadows an existing name");
             else WBind(u, s, c->name, c, "Generic Error"); c->owner = d;
         }
     if (WEq(d->tag, "instance")) {
-        d->resolved = WLookup(outer, d->name);
+        d->resolved = WLookup(sig, d->name);
         if (!d->resolved || !WEq(d->resolved->tag, "typeclass")) WFail(u, d->token, "Declaration Error", "Instance target is not a typeclass");
     }
     for (c = d->first; c && !u->error_kind; c = c->next) {
-        if (WEq(c->role, "type") || WEq(c->role, "result") || WEq(c->role, "argument")) WResolveType(u, c, s);
+        if (WEq(c->role, "type") || WEq(c->role, "result") || WEq(c->role, "argument")) WResolveType(u, c, sig);
         else if (WEq(c->role, "slot")) WResolveType(u, WChild(c, "type"), s);
         else if (WEq(c->role, "constructor")) {
             for (p = c->first; p; p = p->next) if (WEq(p->role, "slot")) WResolveType(u, WChild(p, "type"), s);

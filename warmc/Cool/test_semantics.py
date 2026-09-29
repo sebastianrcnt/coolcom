@@ -21,6 +21,14 @@ def program(decls='', body='return ExitSuccess();'):
 
 
 cases = {
+    'borrow-mode-from-operator': (True, program('generic [S: Region] function read(r: &![Int32,S]): Int32 is return !r; end;', 'var x: Int32 := 9; borrow r: &[Bool,R] := &!x do printLn(read(r)); end borrow; return ExitSuccess();')),
+    'public-signature-interface-import': (True, {
+        'A.aui': 'module A is record R: Free is x: Int32; end; end module.',
+        'A.aum': 'module body A is end module body.',
+        'B.aui': 'import A(R); module B is function value(r: R): Int32; end module.',
+        'B.aum': 'module body B is function value(r: R): Int32 is return r.x; end; end module body.',
+        'Test.aum': 'import A(R); import B(value); ' + program(body='printLn(value(R(x => 42))); return ExitSuccess();'),
+    }),
     'anonymous-region-escape': (False, program('function bad(): &[Int32, Static] is let x: Int32 := 10; return &x; end;')),
     'missing-record-payload': (False, program('record R: Linear is value: Int32; end;', 'let r: R := R(value => 7); let {} := r; return ExitSuccess();')),
     'missing-case-payload': (False, program('union U: Linear is case A is value: Int32; end;', 'let u: U := A(value => 7); case u of when A do skip; end case; return ExitSuccess();')),
@@ -47,12 +55,28 @@ cases = {
     'non-exhaustive-case': (False, program('union U: Free is case A; case B; end;', 'let u: U := A(); case u of when A do skip; end case; return ExitSuccess();')),
     'duplicate-case': (False, program('union U: Free is case A; end;', 'let u: U := A(); case u of when A do skip; when A do skip; end case; return ExitSuccess();')),
 }
+for operation, body in {
+    'field': 'let r: R := make(); printLn(r.x);',
+    'destructure': 'let {x: Int32} := make(); printLn(x);',
+}.items():
+    cases['opaque-' + operation] = (False, {
+        'A.aui': 'module A is type R: Free; function make(): R; end module.',
+        'A.aum': 'module body A is record R: Free is x: Int32; end; function make(): R is return R(x => 42); end; end module body.',
+        'Test.aum': 'import A(R,make); ' + program(body=body + ' return ExitSuccess();'),
+    })
 results = []
 for name, (success, source) in cases.items():
     dest = OUT / name
     dest.mkdir(exist_ok=True)
-    path = dest / 'Test.aum'
-    path.write_text(source)
+    paths = []
+    sources = source if isinstance(source, dict) else {'Test.aum': source}
+    for filename, contents in sources.items():
+        (dest / filename).write_text(contents)
+    for filename in sources:
+        if filename.endswith('.aui'):
+            paths.append(str(dest / filename) + ',' + str(dest / filename.replace('.aui', '.aum')))
+        elif filename.replace('.aum', '.aui') not in sources:
+            paths.append(str(dest / filename))
 
     def run(cmd, label):
         p = subprocess.run(list(map(str, cmd)), cwd=dest, env=env, capture_output=True, timeout=20)
@@ -60,7 +84,7 @@ for name, (success, source) in cases.items():
         (dest / (label + '.stderr')).write_bytes(p.stderr)
         return p
 
-    opts = ['compile', path, '--entrypoint=Test:main', '--error-format=json']
+    opts = ['compile', *paths, '--entrypoint=Test:main', '--error-format=json']
     ref = run([ROOT / 'warmc/warmc', *opts, '--target-type=c', '--output=' + str(dest / 'ref.c')], 'ocaml')
     actual = run([ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN', *opts,
                   '--target-type=hc', '--output=' + str(dest / 'out.HC')], 'cool')

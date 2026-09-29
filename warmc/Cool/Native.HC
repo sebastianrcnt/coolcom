@@ -34,35 +34,38 @@ I64 WNativeMain()
     CWUnit *u = WNew();
     U8 *arg, *source, *part, *output = NULL, *entry = "Test:main", *generated;
     I64 i, j, start, size, n, code = 0;
-    Bool dump = FALSE, parse = FALSE, json = FALSE;
-    CWNode *m;
+    Bool dump = FALSE, parse = FALSE, check = FALSE, json = FALSE;
+    CWNode *m, *files = WNode(u, "inputs", NULL), *file;
     for (i = 1; i < NativeArgCount(); i++) {
         arg = NativeArg(i);
         if (WEq(arg, "--dump-ast")) dump = TRUE;
         else if (WEq(arg, "--parse")) parse = TRUE;
+        else if (WEq(arg, "--check")) check = TRUE;
         else if (WEq(arg, "compile")) {}
         else if (WPrefix(arg, "--output=")) output = arg + 9;
         else if (WPrefix(arg, "--entrypoint=")) entry = arg + 13;
         else if (WEq(arg, "--no-entrypoint")) entry = NULL;
         else if (WEq(arg, "--error-format=json")) json = TRUE;
         else if (WEq(arg, "--target-type=hc") || WEq(arg, "--error-format=plain")) {}
-        else if (WPrefix(arg, "--")) {WFail(u, NULL, "Command Line Arguments Error", "Unsupported compiler option"); break;}
-        else {
-            start = 0; n = StrLen(arg);
-            for (j = 0; j <= n; j++) if (arg[j] == ',' || !arg[j]) {
-                    part = WText(u, arg + start, j - start); start = j + 1;
-                    source = FileRead(part, &size);
-                    if (!source) {WFail(u, NULL, "Command Line Arguments Error", "Cannot read input file"); break;}
-                    size = StrLen(part); WParse(u, part, source, !(size >= 4 && WEq(part + size - 4, ".aui"))); Free(source);
-                    if (u->error_kind) break;
-                }
-            if (u->error_kind) break;
-        }
+        else if (WPrefix(arg, "--")) {WFail(u, NULL, "Command Line Arguments Error", "Unsupported compiler option");}
+        else {file = WNode(u, "input", NULL); file->name = arg; WAdd(files, file, "input");}
+    }
+    for (file = files->first; file && !u->error_kind; file = file->next) {
+        arg = file->name;
+        start = 0; n = StrLen(arg);
+        for (j = 0; j <= n; j++) if (arg[j] == ',' || !arg[j]) {
+                part = WText(u, arg + start, j - start); start = j + 1;
+                source = FileRead(part, &size);
+                if (!source) {WFail(u, NULL, "Command Line Arguments Error", "Cannot read input file"); break;}
+                size = StrLen(part); WParse(u, part, source, !(size >= 4 && WEq(part + size - 4, ".aui"))); Free(source);
+                if (u->error_kind) break;
+            }
+        if (u->error_kind) break;
     }
     if (!u->modules && !u->error_kind) WFail(u, NULL, "Command Line Arguments Error", "No input files");
     if (!u->error_kind && dump) for (m = u->modules; m; m = m->next) WDump(m, 0);
     if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u); if (!u->error_kind) WTypeCheck(u); if (!u->error_kind) WLinearity(u);}
-    if (!u->error_kind && !parse && !dump) {
+    if (!u->error_kind && !parse && !dump && !check) {
         generated = WEmit(u, entry, WRuntime(u), TRUE);
         if (!u->error_kind) {
             if (!output) WFail(u, NULL, "Command Line Arguments Error", "--output is required");

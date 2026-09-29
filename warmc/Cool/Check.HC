@@ -22,6 +22,13 @@ CWNode *WDeclModule(CWNode *d)
     while (d && !WEq(d->tag, "module") && !WEq(d->tag, "interface")) d = d->owner;
     return d;
 }
+Bool WVisiblePayload(CWNode *from, CWNode *decl)
+{
+    CWNode *home, *caller;
+    if (!decl || !decl->pair || !WEq(decl->pair->tag, "type")) return TRUE;
+    home = WDeclModule(decl); caller = WDeclModule(from);
+    return home && caller && WEq(home->name, caller->name);
+}
 Bool WVisibleInstance(CWNode *from, CWNode *inst)
 {
     CWNode *im = WDeclModule(inst), *c;
@@ -180,6 +187,7 @@ CWNode *WPathType(CWUnit *u, CWNode *n, CWNode *ty, CWNode *fun)
                 } else if (refpath) {WFail(u, n->token, "Type Error", "Reference transform field requires an arrow"); break;}
                 d = NULL; if (ty) d = WCanon(ty->resolved);
                 if (!d || !WEq(d->tag, "record")) {WFail(u, n->token, "Type Error", "Field access requires a record"); break;}
+                if (!WVisiblePayload(fun, d)) {WFail(u, n->token, "Type Error", "Opaque record fields are private"); break;}
                 for (slot = d->first; slot; slot = slot->next) if (WEq(slot->role, "slot") && WEq(slot->name, part->name)) break;
                 if (!slot) {WFail(u, part->token, "Generic Error", "Unknown record field"); break;}
                 env = WTypeParameters(u, ty); ty = WSubst(u, WChild(slot, "type"), env); part->resolved = slot;
@@ -296,6 +304,7 @@ U0 WCheckStmt(CWUnit *u, CWNode *n, CWNode *fun)
     } else if (WEq(tag, "destructure")) {
         ty = WInfer(u, WChild(n, "value"), NULL, fun); d = NULL; if (ty) d = WCanon(ty->resolved);
         if (!d || !WEq(d->tag, "record")) {WFail(u, n->token, "Type Error", "Destructure requires a record"); return;}
+        if (!WVisiblePayload(fun, d)) {WFail(u, n->token, "Type Error", "Opaque record cannot be destructured"); return;}
         env = WTypeParameters(u, ty); WCompleteBindings(u, n, d);
         for (b = n->first; b && !u->error_kind; b = b->next) if (WEq(b->role, "binding")) {
                 for (slot = d->first; slot; slot = slot->next) if (WEq(slot->role, "slot") && WEq(slot->name, b->name)) break;
@@ -328,12 +337,14 @@ U0 WCheckStmt(CWUnit *u, CWNode *n, CWNode *fun)
             else ty = ty->first;
         }
         if (ty) {a->first->name = ty->name; a->first->resolved = ty->resolved; a->first->first = ty->first; a->first->last = ty->last;}
+        a->name = "&!"; if (WEq(b->name, "&")) a->name = "&";
         n->resolved->ty = a; WCheckBlock(u, WChild(n, "body"), fun);
     } else if (WEq(tag, "case")) {
         ty = WInfer(u, WChild(n, "value"), NULL, fun);
         if (ty && (WEq(ty->name, "&") || WEq(ty->name, "&!"))) {case_ref = ty; ty = ty->first;}
         d = NULL; if (ty) d = WCanon(ty->resolved);
         if (!d || !WEq(d->tag, "union")) {WFail(u, n->token, "Type Error", "Case requires a union"); return;}
+        if (!WVisiblePayload(fun, d)) {WFail(u, n->token, "Type Error", "Opaque union cannot be inspected"); return;}
         env = WTypeParameters(u, ty);
         for (c = n->first; c && !u->error_kind; c = c->next) if (WEq(c->role, "when")) {
                 for (cons = d->first; cons; cons = cons->next) if (WEq(cons->role, "constructor") && WEq(cons->name, c->name)) break;
