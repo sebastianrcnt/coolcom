@@ -69,6 +69,7 @@
 #include "BinLoad.HC"
 #include "Shell.HC"
 #include "ShellCmp.HC"
+#include "NetShell.HC"
 #include "KLink.HC"
 #include "MakeKernel.HC"
 #include "../../coolc/Fmt/HCTok.HC"

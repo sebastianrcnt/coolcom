@@ -32,6 +32,7 @@ lwIP was the other option: `tools/c2hc` could transpile it. It was not used beca
 | `os/Kernel/NetTcp.HC` | TCP and the TCP socket calls |
 | `os/Kernel/NetApp.HC` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
 | `os/Kernel/NetTools.HC` | Shell tools: `Dns`, `Ping`, `HttpGet`/`HttpFetch`, `NetRep` |
+| `os/Kernel/NetShell.HC` | `ShellServe`: independent shells over TCP (remote shell) |
 | `os/Kernel/NetTest.HC` | `DevTestNet`, run by `DevTest` when there is a NIC |
 
 `KMain` calls `NetInit` after the secondary cores start. `NetInit` probes the FDT's `virtio,mmio`
@@ -124,6 +125,38 @@ example.com has address 104.20.23.154
 `https://` URLs are refused. Under coolvm, ICMP echo to hosts other than the gateway goes out through
 the host's unprivileged ICMP socket, so `Ping` works for outside addresses too (the TTL shown is the
 NAT's).
+
+## Remote shell
+
+`ShellServe(port = 23)` listens on `port` in a background task and gives every connection its own
+shell task: its own compiler, symbol table and terminal (a `CVTerm`, as for a Tmux pane), so several
+clients work at once, independently of the console (at most 8). Under coolvm, forward a host port to it:
+
+```
+build/coolvm --net-forward 2323:23 ... build/kernel.Image    # (make run-net does this)
+> ShellServe(23);                                            // in the OS
+$ tools/rsh.sh 2323                                          # on the Mac: nc with the tty in raw mode
+$ telnet localhost 2323                                      # or telnet, if installed
+```
+
+- **Output** is streamed as it is printed: the terminal has a sink (`CVTerm.sink`, `Term.HC`) that
+  queues every byte in a 64 KiB ring (`\n` as `\r\n`, bytes beyond a full ring are dropped), and the
+  connection's task sends the ring. The terminal's cells are kept too, 80x24 unless the client reports
+  its size.
+- **Input** bytes are decoded into key events like the UART's (`ESC [` / `ESC O` sequences, Ctrl+letter,
+  Backspace as 0x7F or 0x08, CR, CR LF or LF as Enter, UTF-8), so the shell's own line editing and
+  history, Vim and Less work. A client should therefore not echo or edit lines itself: `tools/rsh.sh`
+  puts the Mac's tty in raw mode around `nc`. A plain `nc` in cooked mode works too but shows each line
+  twice (its own echo, then the shell's).
+- **Telnet:** the server starts with `IAC WILL ECHO`, `IAC WILL SGA` and `IAC DO NAWS`, which puts a
+  telnet client in character mode and makes it report its window size (the terminal is resized to it).
+  Telnet commands are removed from the input. For clients that are not telnet the negotiation bytes are
+  followed by `\r ESC [K`, which erases them from the line.
+- **Ctrl+C** (0x03) breaks the statement the shell is running, like Ctrl+Alt+C on the console
+  (`Kill(shell, FALSE, TRUE)`); at the prompt it is an ordinary key. **Disconnecting** (end of stream,
+  reset or retransmission timeout) stops the terminal (`VtStop`), which kills the shell and every task
+  it started on that terminal. **`Exit;`** in the remote shell ends it and closes the connection.
+- `ShellServe` returns the listening task; `Kill` it to stop accepting.
 
 ## Tests
 

@@ -141,6 +141,11 @@ disk-seed: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
 run: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
 
+# make run with the Mac's ports 2323 and 8080 forwarded to the guest's 23 and 80:
+# ShellServe(23); then tools/rsh.sh; HttpServe(80); then curl localhost:8080/ (docs/networking.md).
+run-net: build/kernel.Image coolvm disk-seed
+	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img --net-forward 2323:23 --net-forward 8080:80 $<
+
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
 vim-test: build/kernel.Image coolvm
 	python3 tools/vim-test.py $<
