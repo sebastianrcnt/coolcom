@@ -5,7 +5,7 @@
 set -e
 SRC=$(cd "$1" && pwd); ENTRY=$2; OUT=$3
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-AIW=$ROOT/coolc/third_party/aiwnios
+AIW=${AIWNIOS_DIR:-$ROOT/coolc/third_party/aiwnios}
 TMP=CoolTmp.$$
 trap 'rm -rf "$AIW/$TMP"' EXIT
 mkdir -p "$AIW/$TMP"

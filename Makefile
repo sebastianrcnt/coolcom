@@ -1,4 +1,5 @@
-AIWNIOS := coolc/third_party/aiwnios
+AIWNIOS ?= coolc/third_party/aiwnios
+export AIWNIOS_DIR := $(abspath $(AIWNIOS))
 AIWBIN  := $(AIWNIOS)/aiwnios.app/Contents/MacOS/aiwnios
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
 QEMU    := qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 1G -smp 2 -nographic
