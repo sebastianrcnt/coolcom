@@ -30,6 +30,14 @@ COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
 `tools/native/prepare.sh` stages the owned compiler source under
 `build/native-src`; frontend fixes are enabled by default.
 
+The OS reaches the same fixed point: `make selfhost-test` (part of `make test`)
+puts the staged sources on a FAT32 disk as `C:/Compiler`, the shell runs
+`Cmp("C:/Compiler/Native.HC", "C:/Self.BIN")` with the compiler loaded from the
+seed, and the host requires `Self.BIN` to equal `coolc/seed/Compiler.BIN`. This
+found that `Cmp` left 15 bytes past the patch table's end uninitialized (zero
+from macOS's fresh pages, the heap's poison in the kernel); they are zeroed now.
+`make run` puts the sources on `build/disk.img` too.
+
 Standalone programs can be executed with `build/coolc --run program.BIN [args...]`.
 `NativeArgCount()` and `NativeArg(index)` expose the BIN path as argument zero
 and the remaining arguments; an out-of-range index returns NULL.

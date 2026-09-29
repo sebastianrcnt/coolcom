@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test selfhost-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -99,14 +99,24 @@ build/disk.img: | build
 
 # make run only adds os/Disk files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
+# C:/Kernel.HH (the shell prelude) declares the kernel for programs compiled
+# with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
+# Cmp("C:/Compiler/Native.HC") in the OS rebuilds coolc/seed/Compiler.BIN.
 DISK_FILES := os/Disk/Init.HC os/Disk/Vim.HC os/Disk/Tmux.HC os/Disk/Nyan.HC
-disk-install: build/disk.img
+disk-install: build/disk.img build/ShellPrelude.HH
 	mcopy -o -i build/disk.img $(DISK_FILES) ::
+	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
+	tools/native/prepare.sh
+	mmd -i build/disk.img ::Compiler 2>/dev/null || true
+	mcopy -o -i build/disk.img build/native-src/* ::Compiler/
 
-disk-seed: build/disk.img
+disk-seed: build/disk.img build/ShellPrelude.HH
 	@for f in $(DISK_FILES); do \
 	  mdir -i build/disk.img ::$$(basename $$f) >/dev/null 2>&1 || mcopy -i build/disk.img $$f :: || exit 1; \
 	done
+	@mdir -i build/disk.img ::Kernel.HH >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
+	@mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
+	  mmd -i build/disk.img ::Compiler && mcopy -i build/disk.img build/native-src/* ::Compiler/; }
 
 run: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
@@ -122,7 +132,11 @@ key-test: build/kernel.Image coolvm
 tmux-test: build/kernel.Image coolvm
 	python3 tools/tmux-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test warm-kernel-test
+# The OS compiles its own compiler: Cmp in the shell must reproduce the seed.
+selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH
+	tools/selfhost-test.sh $<
+
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test selfhost-test warm-kernel-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 
