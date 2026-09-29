@@ -34,11 +34,11 @@ set `AIWNIOS_DIR` and `AIWNIOS_BIN` to the built stage-zero Aiwnios checkout.
 The backend's colliding helper names are resolved in `coolc/Compiler` itself;
 the script only copies the tracked sources into `build/native-src`.
 
-The default build leaves frontend fixes 6 and 7 disabled for baseline parity.
-After native 24/24 codegen, compiler self-build, and kernel parity succeed, use
-`NATIVE_FIXES=1 tools/native/bootstrap.sh` to enable those changes and compare
-only the affected outputs. Aggregate value assignment (bug 5) is deferred until
-after the parity milestones.
+The default build leaves frontend fixes 5, 6, and 7 disabled for baseline
+parity. The 24/24 codegen, compiler self-build, and kernel checks passed before
+aggregate value assignment (bug 5) was enabled. Set `NATIVE_FIXES=1` in
+`tools/native/prepare.sh` to enable the frontend fixes. Bug 8 is always enabled;
+the baseline inputs do not use arrays of function pointers.
 
 `tools/native/check.sh` verifies the baseline: all 24 codegen modules match
 Aiwnios under `bincmp.py`, the complete second and third generation compiler
@@ -49,10 +49,13 @@ The compiler's own BIN clears those slots when it writes them, giving the
 required full-file fixed point. `make AIWNIOS=/path/to/aiwnios native-kernel`
 builds the optional `build/Kernel.native.BIN` through the self-built compiler.
 
-`tools/native/behavior.sh` prepares a compiler with fixes 6 and 7 enabled,
-compiles and executes the native 6, 7, and 8 behavior cases, and compares their
-printed probe results against expected output. Bug 5 remains deferred until
-after the parity and fixed point milestones.
+`tools/native/behavior.sh` prepares a compiler with fixes 5, 6, and 7 enabled,
+compiles and executes the native 5, 6, 7, and 8 behavior cases, and compares
+their printed probe results against expected output. Bug 5 now forwards the
+class width and operand addresses to an aggregate copy in the backend. Large
+class locals remain on the stack so their full address is available. The fixed
+output differs from Aiwnios for aggregate assignment, large decimal floats,
+and string default arguments; those are the intended bug corrections.
 
 ## Current integration risks
 
@@ -62,5 +65,6 @@ after the parity and fixed point milestones.
 - The small host still contains diagnostic traps for imports that the current
   compiler and validation paths never call. A future larger runtime workload
   can expose a missing service through a named trap.
-- Class value assignment (bug 5) still needs aggregate IR lowering. Fixes 6
-  and 7 are guarded by `COOLC_FRONTEND_FIXES` so baseline parity stays testable.
+- Frontend fixes 5, 6, and 7 are guarded by `COOLC_FRONTEND_FIXES` so baseline
+  parity stays testable. Aggregate assignment results used as values beyond
+  the tested statement form still need a dedicated value representation.

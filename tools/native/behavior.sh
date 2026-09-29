@@ -11,8 +11,9 @@ mkdir -p "$OUT"
 NATIVE_FIXES=1 tools/native/prepare.sh
 COOLC_COMPILER_BIN=$BASE gtimeout 90 build/coolc build/native-src/Native.HC "$FIXED" \
     > "$OUT/fixed-compiler.log"
-for name in B06LargeFloat B07StringDefault B08FunctionPointerArray; do
+for name in B05ClassCopy B06LargeFloat B07StringDefault B08FunctionPointerArray; do
     case "$name" in
+        B05ClassCopy) symbol=ClassCopyCheck ;;
         B06LargeFloat) symbol=LargeFloatBits ;;
         B07StringDefault) symbol=DefaultByte ;;
         B08FunctionPointerArray) symbol=FunctionPointerArrayBytes ;;

@@ -1053,6 +1053,13 @@ CBRPN *__HC_ICAdd_Eq(CBCodeCtrl *cc)
     BQueIns(rpn, cc->ir_code);
     return rpn;
 }
+// FIX(5): Carry the aggregate width to the native emitter; scalar EQ stays unchanged.
+CBRPN *__HC_ICAdd_ClassEq(CBCodeCtrl *cc, I64 size)
+{
+    CBRPN *rpn = __HC_ICAdd_Eq(cc);
+    rpn->integer = size;
+    return rpn;
+}
 CBRPN *__HC_ICAdd_Div(CBCodeCtrl *cc)
 {
     CBRPN *rpn;

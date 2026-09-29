@@ -10,6 +10,11 @@ extern U8 *__HC_ICAdd_Lock(U8 *);
 extern U0 __HC_ICSetLock(U8 *);
 extern U8 *__HC_ICAdd_ToBool(U8 *);
 extern U8 *__HC_ICAdd_Vargs(U8 *, I64);
+#ifdef COOLC_FRONTEND_FIXES
+extern U8 *__HC_ICAdd_ClassEq(U8 *, I64);
+// FIX(5): Reserve an IR flag for aggregate address operands.
+#define ICF_NATIVE_CLASS_ADDR 0x200000000
+#endif
 //
 // Binds the silly sauce from parser.c to HolyC. AIWNIOS is built so when
 //  you write a backend,HolyC will use it too,that way you dont have to re-port
@@ -874,6 +879,11 @@ CGraphColoring *GraphColor(CCmpCtrl *cc, Bool ireg = TRUE) {
     mv = CAlloc(sizeof(COptMemberVar) * mcnt);
     lst = cc->htc.fun->member_lst_and_root;
     for (tmp = 0; tmp != mcnt; tmp++) {
+#ifdef COOLC_FRONTEND_FIXES
+        // FIX(5): A register holds one word, so aggregates must keep stack storage.
+        if (lst->member_class->size > 8 && !lst->member_class->ptr_stars_cnt)
+            lst->reg = REG_NONE;
+#endif
         mv[tmp].m = lst;
         lst = lst->next;
     }
@@ -1684,6 +1694,19 @@ found_offset:;;
     //
     // Step 4,OptClassFwd the ic_class'es to reduce to I64 to I64i's etc
     //
+#ifdef COOLC_FRONTEND_FIXES
+    // FIX(5): Preserve aggregate width before type forwarding erases the class.
+    for (cur = head->last; cur != head; cur = cur->last) {
+        if (cur->type == IC_ASSIGN && cur->t.arg1_class &&
+                !cur->t.arg1_class->ptr_stars_cnt &&
+                cur->t.arg1_class->type & HTT_CLASS &&
+                cur->t.arg1_class->size > 8) {
+            cur->length = cur->t.arg1_class->size;
+            cur->t.arg1_tree->ic_flags |= ICF_NATIVE_CLASS_ADDR;
+            cur->t.arg2_tree->ic_flags |= ICF_NATIVE_CLASS_ADDR;
+        }
+    }
+#endif
     // Classes with base type's need to be OptClassFwd'ed to reduce down to thier base type,otherwise
     //   it is probably an RT_I64
     for (cur = head->last; cur != head; cur = cur->last) {
@@ -2034,7 +2057,12 @@ found_offset:;;
                 break; case IC_XOR_XOR:
                 new = __HC_ICAdd_XorXor(cc2);
                 break; case IC_ASSIGN:
-                new = __HC_ICAdd_Eq(cc2);
+#ifdef COOLC_FRONTEND_FIXES
+                if (cur->length > 8)
+                    new = __HC_ICAdd_ClassEq(cc2, cur->length);
+                else
+#endif
+                    new = __HC_ICAdd_Eq(cc2);
                 //break;case IC_ASSIGN_PP //NOT USED BY AIWNIOS
                 //break;case IC_ASSIGN_MM //DITTO
                 break; case IC_SHL_EQU:
@@ -2104,6 +2132,11 @@ found_offset:;;
                     __HC_ICAdd_Deref(cc2, cur->ic_class->raw_type, 0);
                 }
         }
+#ifdef COOLC_FRONTEND_FIXES
+        // FIX(5): BQueIns prepends, so emit the address node after its operand.
+        if (cur->ic_flags & ICF_NATIVE_CLASS_ADDR)
+            __HC_ICAdd_Addr(cc2);
+#endif
         if (cur->ic_line && cur->ic_line >= cc->min_line) { //check for oddities(maybe includes accross a file boundary)
             reported_max_ln = MaxI64(reported_max_ln, cur->ic_line);
             reported_min_ln = MinI64(reported_min_ln, cur->ic_line);
