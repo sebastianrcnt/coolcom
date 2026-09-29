@@ -1,0 +1,52 @@
+// header comment
+#define FOO   (1+2)
+#include "x.HC"
+class CFoo
+{
+  I64 a,b;
+  U8 *name;
+};
+
+U0 Foo(I64 x)
+{//Doc comment stays
+  I64 i;
+  if (x)
+    return;
+  if (x==1)
+    y=2;
+  else if (x==2)
+    y=3;
+  else
+    y=4;
+  for (i=0;i<3;i++)
+    if (i)
+      while (x)
+        x--;
+    else
+      z++;
+  if (a) {
+    b=1;
+  }
+  else {
+    b=2;
+  }
+  if (a) { b=1; } else { b=2; }
+  while (TRUE) {}
+  // trailing comment line
+  Bar(a,
+      b,
+      c);
+  x=aaa+
+      bbb;
+}
+
+U0 Bar()
+{
+  if (a)
+    if (b)
+      x;
+    else
+      y;
+  else
+    z;
+}
