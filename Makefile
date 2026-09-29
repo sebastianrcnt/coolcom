@@ -81,7 +81,7 @@ reloc-check: build/kernel.Image
 	python3 tools/reloc-check.py --compare build/cool.elf build/kernel.Image build/alt/cool.elf build/alt/kernel.Image
 
 run: build/kernel.Image coolvm
-	gtimeout 60 build/coolvm --cpus 2 --mem 1024 --timeout 55 $<
+	build/coolvm --cpus 2 --mem 1024 $<
 
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
 test: build/kernel.Image reloc-check coolvm

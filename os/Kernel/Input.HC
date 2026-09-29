@@ -232,6 +232,13 @@ I64 GetKey(I64 *sc = NULL, Bool echo = TRUE)
 {//Wait for a key press; returns its ASCII (0 for keys without one) and, if sc, the scan code with SCF_ flags.
     I64 a, s;
     while (!KbdPop(&a, &s)) {
+        a = UartGet;  // the host terminal types into the UART
+        if (a >= 0) {
+            if (a == '\r')
+                a = '\n';
+            s = 0;
+            break;
+        }
         Yield;
         ArchWfi;
     }
