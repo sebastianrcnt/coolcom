@@ -68,6 +68,8 @@
 #include "BinLoad.HC"
 #include "Shell.HC"
 #include "ShellCmp.HC"
+#include "KLink.HC"
+#include "MakeKernel.HC"
 #include "../../coolc/Fmt/HCTok.HC"
 #include "Syntax.HC"
 #include "UAsmARM64.HC"
