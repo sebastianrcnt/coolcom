@@ -10,8 +10,21 @@ all: build/cool.elf
 # Native macOS BIN loader. The compiler image is bootstrapped separately.
 .PHONY: native-host
 native-host: build/coolc
-build/coolc: coolc/Host/native.c | build
-	clang -std=c11 -Wall -Wextra -Werror -O2 $< -o $@
+build/coolc: coolc/Host/native.c coolc/Host/except.S | build
+	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $^ -o $@
+
+NATIVE_SRC := $(wildcard coolc/Frontend/*.HC coolc/Frontend/*.HH coolc/Runtime/*.HC coolc/Compiler/*.HC coolc/Compiler/*.HH)
+build/coolc-compiler.BIN: $(NATIVE_SRC) tools/native/bootstrap.sh $(AIWBIN) | build
+	AIWNIOS_BIN=$(abspath $(AIWBIN)) tools/native/bootstrap.sh $@
+
+build/coolc-selfhost.BIN: build/coolc-compiler.BIN build/coolc
+	COOLC_COMPILER_BIN=$(abspath build/coolc-compiler.BIN) gtimeout 90 build/coolc build/native-src/Native.HC $@ > build/coolc-selfhost.log 2>&1
+	tail -1 build/coolc-selfhost.log
+
+.PHONY: native-kernel
+native-kernel: build/Kernel.native.BIN
+build/Kernel.native.BIN: $(KSRC) build/coolc-selfhost.BIN
+	COOLC_COMPILER_BIN=$(abspath build/coolc-selfhost.BIN) gtimeout 45 build/coolc os/Kernel/Kernel.HC $@
 
 aiwnios: $(AIWBIN)
 $(AIWBIN):

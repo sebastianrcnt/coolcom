@@ -1,0 +1,54 @@
+// Single-task exception stack for the native compiler process.
+extern U0 NativeExit(I64 status);
+U8 *SysTry()
+{
+    CExcept *entry = MAlloc(sizeof(CExcept));
+    QueIns(entry, Fs->last_except);
+    return &entry->AARCH64_except_pad;
+}
+
+U0 SysUntry()
+{
+    CExcept *entry = Fs->last_except;
+    QueRem(entry);
+    Free(entry);
+}
+
+U0 throw(I64 ch = 0, Bool no_log = FALSE)
+{
+    CExcept *entry = Fs->last_except;
+    I64 saved[2048];
+    if (entry == &Fs->next_except) {
+        Print("Unhandled compiler exception %X\n", ch);
+        NativeExit(1);
+    }
+    MemCpy(saved, entry->AARCH64_except_pad, sizeof(saved));
+    SysUntry;
+    Fs->except_ch = ch;
+    Fs->catch_except = FALSE;
+    AIWNIOS_LongJmp(saved);
+}
+
+U0 EndCatch()
+{
+    if (!Fs->catch_except)
+        throw(Fs->except_ch);
+}
+
+U0 PutExcept(Bool catch_it = TRUE)
+{
+    Print("Exception %X\n", Fs->except_ch);
+    Fs->catch_except = catch_it;
+}
+
+Bool BreakLock(CTask *task = NULL)
+{
+    if (!task) task = Fs;
+    return !LBts(&task->task_flags, TASKf_BREAK_LOCKED);
+}
+
+Bool BreakUnlock(CTask *task = NULL)
+{
+    if (!task) task = Fs;
+    return LBtr(&task->task_flags, TASKf_BREAK_LOCKED);
+}

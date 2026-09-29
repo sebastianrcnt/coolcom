@@ -132,6 +132,11 @@ I64 BFFICall2(U8 *fptr, I64 a, I64 b)
 U8 *b_code_ex, *b_code_wr;
 I64 b_code_sz;
 
+#ifdef BACKEND_NATIVE
+extern U8 *NativeJitAlloc(I64 size);
+extern U0 NativeJitCommit(U8 *dst, U8 *src, I64 size);
+#endif
+
 U8 *MemGetWritePtr(U8 *ptr)
 {
     if (b_code_wr && b_code_ex <= ptr < b_code_ex + b_code_sz)
@@ -148,6 +153,13 @@ U8 *MemGetExecPtr(U8 *ptr)
 
 U8 *BCodeAlloc(I64 size, CBHeapCtrl *heap)
 {
+#ifdef BACKEND_NATIVE
+    // FIX(native): macOS JIT pages execute only after the host commits RW scratch bytes.
+    b_code_ex = NativeJitAlloc(size);
+    b_code_wr = CAlloc(size);
+    b_code_sz = size;
+    return b_code_ex;
+#else
 #ifdef BACKEND_HOSTED
     // __MAlloc, not MAlloc: MAlloc writes caller info into the block header,
     // which faults in write-protected code memory.
@@ -161,16 +173,26 @@ U8 *BCodeAlloc(I64 size, CBHeapCtrl *heap)
 #else
     return MAlloc(size);
 #endif
+#endif
 }
 
 U0 BCodeCommit(U8 *obin)
 {
+#ifdef BACKEND_NATIVE
+    // FIX(native): write through the host's MAP_JIT protection transition.
+    if (b_code_wr && obin == b_code_ex) {
+        NativeJitCommit(b_code_ex, b_code_wr, b_code_sz);
+        Free(b_code_wr);
+        b_code_wr = NULL;
+    }
+#else
 #ifdef BACKEND_HOSTED
     if (b_code_wr && obin == b_code_ex) {
         WriteProtectMemCpy(b_code_ex, b_code_wr, b_code_sz);
         Free(b_code_wr);
         b_code_wr = NULL;
     }
+#endif
 #endif
 }
 

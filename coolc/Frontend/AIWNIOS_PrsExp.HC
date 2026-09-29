@@ -772,6 +772,7 @@ I64 ImplicitFunCall(CCmpCtrl *cc, CHashFun *fun, I64 start_idx = 0) {
                       last_c = cmp.internal_types[RT_U8] + 1
                       );
             // FIX(7): Lower a default string to a relocatable constant in AOT output.
+#ifdef COOLC_FRONTEND_FIXES
         } else if (lst->flags & MLF_STR_DFT_AVAILABLE) {
             cm = COCMiscNew(cc, CMT_STR_CONST);
             cc->flags |= CCF_HAS_MISC_DATA;
@@ -779,6 +780,9 @@ I64 ImplicitFunCall(CCmpCtrl *cc, CHashFun *fun, I64 start_idx = 0) {
             cm->st_len = StrLen(lst->dft_val) + 1;
             RPNAddNew(cc, IC_STR_CONST, cm, last_c = cmp.internal_types[RT_U8] + 1);
         } else if (lst->flags & MLF_DFT_AVAILABLE) {
+#else
+        } else if (lst->flags & (MLF_DFT_AVAILABLE | MLF_STR_DFT_AVAILABLE)) {
+#endif
             last_c = lst->member_class;
             if (lst->member_class->raw_type == RT_F64) {
                 RPNAddNew(
@@ -1266,6 +1270,7 @@ typecast:
                                           );
                                 arity++;
                                 // FIX(7): Emit the string through the AOT constant pool.
+#ifdef COOLC_FRONTEND_FIXES
                             } else if (mlst->flags & MLF_STR_DFT_AVAILABLE) {
                                 misc = COCMiscNew(cc, CMT_STR_CONST);
                                 cc->flags |= CCF_HAS_MISC_DATA;
@@ -1275,6 +1280,9 @@ typecast:
                                           last_c = cmp.internal_types[RT_U8] + 1);
                                 arity++;
                             } else if (mlst->flags & MLF_DFT_AVAILABLE) {
+#else
+                            } else if (mlst->flags & (MLF_DFT_AVAILABLE | MLF_STR_DFT_AVAILABLE)) {
+#endif
                                 last_c = mlst->member_class;
                                 if (mlst->member_class->raw_type == RT_F64) {
                                     RPNAddNew(
@@ -1807,11 +1815,12 @@ U8 *LexExpression2Bin(CCmpCtrl *cc, I64 *_type = NULL)
     COCInit(cc);
     if (PrsExpression(cc, NULL, PEF_NO_COMMA)) {
         RPNAddNew(cc, IC_RET, 0, AssignRawTypeToNode(cc->coc.coc_head.next), FALSE);
+        // FIX(native): Code generation rewrites the RPN head; retain the expression type first.
+        if (_type) *_type = AssignRawTypeToNode(cc->coc.coc_head.next)->raw_type;
         old_fun = cc->htc.fun; //Changed by nroot
         cc->htc.fun = NULL;
         res = AiwniosCompile(cc);
         cc->htc.fun = old_fun;
-        if (_type) *_type = AssignRawTypeToNode(cc->coc.coc_head.next)->raw_type;
     } else
         res = NULL;
     COCPop(cc);

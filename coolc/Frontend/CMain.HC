@@ -324,6 +324,10 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
                 tmphgr = tmphg->references;
                 while (tmphgr) {
                     tmphgr1 = tmphgr->next;
+#ifdef NATIVE_CANONICAL_AOT
+                    // FIX(native): The loader replaces this address; keep BIN bytes stable.
+                    MemSet(tmpaot->buf + tmphgr->rip, 0, 8);
+#endif
                     *ptr(U32 *)++ = tmphgr->rip;
                     *ptr(U32 *)++ = tmphgr->offset; //Added by nroot
                     Free(tmphgr);
@@ -363,6 +367,11 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
             *ptr++ = tmpie->type;
             if (tmpie->aot)
                 tmpie->rip += tmpie->aot->rip2;
+#ifdef NATIVE_CANONICAL_AOT
+            // FIX(native): An absolute import slot contains an ASLR dependent host pointer.
+            if (tmpie->type == IET_IMM_I64)
+                MemSet(tmpaot->buf + tmpie->rip, 0, 8);
+#endif
             *ptr(U32 *)++ = tmpie->rip;
             switch (tmpie->type) {
                 case IET_REL_I0...IET_REL_RISCV:

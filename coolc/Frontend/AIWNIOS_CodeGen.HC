@@ -1321,6 +1321,10 @@ next_ic:
 //
 // Turns my CRPN from the parser into the IC for the C side
 //
+#ifdef NATIVE_CANONICAL_AOT
+// FIX(native): A process-local static counter acquired a stage-zero JIT address.
+I64 native_static_cnt;
+#endif
 U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info, Bool byte_code = FALSE) {
     CRPN *head = &cc->coc.coc_head, *cur, *new;
     CCodeMisc *misc, **table;
@@ -1343,8 +1347,12 @@ U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info, Bool byte_
     U8 *name_ptr = name, *name2_ptr = name2;
     Bool force_segment = FALSE;
     I64 statics_sz = 0;
+#ifdef NATIVE_CANONICAL_AOT
+    stat_nam = MStrPrint(".STATIC_%d", native_static_cnt++);
+#else
     static I64 static_cnt = 0;
     stat_nam = MStrPrint(".STATIC_%d", static_cnt++);
+#endif
     //Turn all IC_IMM_I64s that are used as F64's to IC_IMM_I64
     for (cur = head->next; cur != head; cur = cur->next) {
         if (cur->ic_class && cur->type != IC_HOLYC_TYPECAST) {
