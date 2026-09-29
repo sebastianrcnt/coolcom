@@ -368,6 +368,8 @@ pt_start:
     }
 
     if (ptr_stars_cnt >= 0) { //fun_ptr
+        // FIX(8): Array dimensions belong inside the function-pointer declarator.
+        PrsArrayDims(cc, mode, tmpad);
         if (cc->token != ')')
             LexExcept(cc, "Missing ')' at ");
         if (Lex(cc) != '(')
@@ -375,7 +377,8 @@ pt_start:
         fun_ptr = PrsFunJoin(cc, tmpc1, NULL, fsp_flags) + ptr_stars_cnt;
         tmpc1 = cmp.internal_types[RT_PTR] + ptr_stars_cnt;
     }
-    PrsArrayDims(cc, mode, tmpad);
+    else
+        PrsArrayDims(cc, mode, tmpad);
 
     tmpc2 = OptClassFwd(tmpc1);
     if (tmpc2->ptr_stars_cnt) {
