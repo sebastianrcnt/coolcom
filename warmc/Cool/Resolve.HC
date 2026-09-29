@@ -86,6 +86,13 @@ U0 WIndex(CWUnit *u)
                     }
             } else if (!WPrefix(m->name, "Austral.")) WFail(u, m->token, "Declaration Error", "Interface has no implementation");
         }
+    // The reference combining pass selects the first body for each public
+    // instance declaration, then excludes matching definitions from private defs.
+    for (m = u->modules; m; m = m->next) if (WEq(m->tag, "module") && m->pair) {
+            for (d = m->first; d; d = d->next) if (WEq(d->tag, "instance") && !d->pair) {
+                    for (c = m->pair->first; c; c = c->next) if (WEq(c->tag, "instance") && WEq(c->name, d->name) && WSameSyntax(WChild(c, "argument"), WChild(d, "argument"))) d->flags |= 1024;
+                }
+        }
     builtin = WModule(u, "Austral.Pervasive", "interface");
     for (m = u->modules; m && !u->error_kind; m = m->next) {
         if (builtin && !WEq(m->name, "Austral.Pervasive")) {

@@ -77,3 +77,31 @@ U0 WDestroy(CWUnit *u)
     while (a) {next = a->next; Free(a); a = next;}
     Free(u);
 }
+U8 *WTriple(CWUnit *u, U8 *s)
+{
+    I64 len = StrLen(s), i = 0, start = 0, count = 0, j, k, min = 0x7fffffffffffffff, n = 0, lead;
+    I64 *starts = WAlloc(u, (len + 2) * 8), *sizes = WAlloc(u, (len + 2) * 8);
+    U8 *joined = WAlloc(u, len + 1), *out = WAlloc(u, len + 1);
+    for (i = 0; i <= len; i++) if (s[i] == '\n' || !s[i]) {starts[count] = start; sizes[count++] = i - start; start = i + 1;}
+    for (i = 0; i < count; i++) {
+        j = starts[i]; k = sizes[i];
+        if (i == 0 || i == count - 1) {
+            lead = 0; while (lead < k && (s[j + lead] == ' ' || s[j + lead] == '\t' || s[j + lead] == '\r')) lead++;
+            if (lead == k) k = 0;
+        }
+        if (i > 1 && i < count - 1) joined[n++] = '\n';
+        MemCpy(joined + n, s + j, k); n += k;
+    }
+    if (count == 1) return joined;
+    start = 0;
+    for (i = 0; i <= n; i++) if (joined[i] == '\n' || !joined[i]) {
+            lead = 0; while (start + lead < i && joined[start + lead] == ' ') lead++;
+            if (lead < min) min = lead; start = i + 1;
+        }
+    start = 0; k = 0;
+    for (i = 0; i <= n; i++) if (joined[i] == '\n' || !joined[i]) {
+            j = start + min; while (j < i) out[k++] = joined[j++];
+            if (joined[i]) out[k++] = '\n'; start = i + 1;
+        }
+    return out;
+}

@@ -19,6 +19,7 @@ import U8 *NativeArg(I64 index);
 import U0 NativeExit(I64 code);
 #include "Warm.HC"
 #include "../../build/warmcool/Builtins.HC"
+#include "../../build/warmcool/RuntimeText.HC"
 U0 WDiagnostic(CWUnit *u)
 {
     CWToken *t = u->error_token;
@@ -43,7 +44,7 @@ U0 WDump(CWNode *n, I64 indent)
 I64 WNativeMain()
 {
     CWUnit *u = WNew();
-    U8 *arg, *source, *part;
+    U8 *arg, *source, *part, *output = NULL, *entry = "Test:main", *generated;
     I64 i, j, start, size, n, code = 0;
     Bool dump = FALSE, parse = FALSE;
     CWNode *m;
@@ -52,6 +53,8 @@ I64 WNativeMain()
         if (WEq(arg, "--dump-ast")) dump = TRUE;
         else if (WEq(arg, "--parse")) parse = TRUE;
         else if (WEq(arg, "compile")) {}
+        else if (WPrefix(arg, "--output=")) output = arg + 9;
+        else if (WPrefix(arg, "--entrypoint=")) entry = arg + 13;
         else if (WPrefix(arg, "--")) {}
         else {
             start = 0; n = StrLen(arg);
@@ -68,7 +71,13 @@ I64 WNativeMain()
     if (!u->modules && !u->error_kind) WFail(u, NULL, "Command Line Arguments Error", "No input files");
     if (!u->error_kind && dump) for (m = u->modules; m; m = m->next) WDump(m, 0);
     if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u); if (!u->error_kind) WTypeCheck(u); if (!u->error_kind) WLinearity(u);}
-    if (!u->error_kind && !parse && !dump) WFail(u, u->modules->token, "Unsupported Feature", "Semantic compilation is not implemented yet");
+    if (!u->error_kind && !parse && !dump) {
+        generated = WEmit(u, entry, WRuntime(u), TRUE);
+        if (!u->error_kind) {
+            if (!output) WFail(u, NULL, "Command Line Arguments Error", "--output is required");
+            else if (!FileWrite(output, generated, StrLen(generated))) WFail(u, NULL, "Command Line Arguments Error", "Cannot write output");
+        }
+    }
     if (u->error_kind) {WDiagnostic(u); code = 1;}
     WDestroy(u); return code;
 }

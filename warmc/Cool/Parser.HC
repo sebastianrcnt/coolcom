@@ -136,6 +136,7 @@ CWNode *WAtom(CWUnit *u)
     I64 k = t->kind;
     if (!WEnter(u)) return n;
     n->name = t->text;
+    if (k == 6) n->name = WTriple(u, n->name);
     if (k == 3 || k == 4 || k == 5 || k == 6 || WAt(u, "nil") || WAt(u, "true") || WAt(u, "false")) {
         WTake(u);
     } else if (WAccept(u, "(")) {

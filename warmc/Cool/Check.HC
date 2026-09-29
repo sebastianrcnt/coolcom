@@ -339,7 +339,7 @@ U0 WSignature(CWUnit *u, CWNode *decl, CWNode *def, CWNode *env)
     for (p = decl->first; p; p = p->next) if (WEq(p->role, "parameter")) {
             if (!q) {WFail(u, def->token, "Declaration Error", "Parameter count differs from declaration"); return;}
             x = WSubst(u, WChild(p, "type"), env); y = WChild(q, "type");
-            if (!WEq(p->name, q->name) || !WTypeEq(x, y)) WFail(u, q->token, "Declaration Error", "Parameter signature differs from declaration");
+            if (!WTypeEq(x, y)) WFail(u, q->token, "Declaration Error", "Parameter signature differs from declaration");
             q = q->next; while (q && !WEq(q->role, "parameter")) q = q->next;
         }
     if (q) WFail(u, def->token, "Declaration Error", "Extra parameters");
@@ -398,12 +398,12 @@ U0 WInstanceContract(CWUnit *u, CWNode *d)
 U0 WDeclarationTypes(CWUnit *u, CWNode *n)
 {
     CWNode *c, *univ, *ty, *p;
-    if (u->error_kind) return;
+    if (u->error_kind || (n->flags & 1024)) return;
     if (WEq(n->tag, "type") && !WEq(n->role, "declaration")) {WValidateType(u, n); return;}
     univ = WChild(n, "universe");
     if (WEq(n->tag, "record") || WEq(n->tag, "union")) {
         if (univ && WEq(univ->name, "Region")) WFail(u, n->token, "Declaration Error", "Records and unions cannot inhabit Region");
-        if (univ && WEq(univ->name, "Free")) {
+        if (univ && WEq(univ->name, "Free") && !(WDeclModule(n) && WEq(WDeclModule(n)->name, "Austral.Memory") && (WEq(n->name, "Pointer") || WEq(n->name, "Address")))) {
             for (p = n->first; p; p = p->next) if (WEq(p->role, "type-parameter")) {
                     ty = WNode(u, "type", p->token); ty->resolved = p;
                     if (WUniverseOf(ty) == 1 || WUniverseOf(ty) == 2) WFail(u, n->token, "Linearity Error", "Free aggregate has a potentially linear type parameter");

@@ -5,3 +5,4 @@
 #include "Types.HC"
 #include "Check.HC"
 #include "Linear.HC"
+#include "Emit.HC"

@@ -52,3 +52,22 @@ and one integer-range mismatch. Subsequent focused integer tests confirm all
 8 expected range errors, including Nat64 overflow. This is test coverage, not
 proof of complete language conformance: signature constraints, region escape
 and arbitrary control-flow combinations need further adversarial validation.
+
+Fourth checkpoint: **296/296** differential tests pass on the native arm64 host:
+**210 expected errors** match the OCaml/fixture kind, and **86 runtime tests**
+match stdout, stderr and exit status exactly. Artifacts:
+`build/warmcool-comparison/results.json` (2026-09-30).
+
+The compiler now emits reachable monomorphic HolyC functions, packed records
+and overlapping union payloads, explicit aggregate argument/result pointers,
+function pointers, short-circuit branches and checked runtime helpers. Builtin
+interfaces AND implementations are packaged as source data and compiled by the
+same Cool pipeline. Runtime helpers follow HCRuntime.ml. Float32 uses IEEE
+binary32 bits in U32 with explicit conversion/rounding helpers, rather than
+silently using Float64 storage. This extends the OCaml HC backend's Float32
+limit while retaining a 4-byte representation.
+
+Current cautions: all suite cases passing is not proof that every invalid Warm
+program is rejected. Additional negative tests and kernel-shell validation are
+still required. Only the native host execution path has been validated at this
+checkpoint; direct coolc IR output is not implemented.

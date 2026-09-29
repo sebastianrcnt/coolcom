@@ -161,7 +161,7 @@ U0 WLinearity(CWUnit *u)
     CWNode *m, *d, *f, *p, *body;
     CWFlow *flow;
     for (m = u->modules; m && !u->error_kind; m = m->next)
-        for (d = m->first; d && !u->error_kind; d = d->next) if (WEq(d->role, "declaration")) {
+        for (d = m->first; d && !u->error_kind; d = d->next) if (WEq(d->role, "declaration") && !(d->flags & 1024)) {
                 f = d; if (WEq(d->tag, "instance")) f = WChild(d, "method");
                 while (f && !u->error_kind) {
                     body = WChild(f, "body");
