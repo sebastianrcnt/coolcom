@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Boot a scripted Vim session and verify its FAT32 write from the host."""
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,19 @@ def typed(line):
     return result + keys_of(28)
 
 
+def check_init_log(log):
+    marker = 'Running C:/Init.HC\n'
+    if marker not in log:
+        raise AssertionError('shell did not run C:/Init.HC')
+    after_init = log.split(marker, 1)[1]
+    prompt = re.search(r'(?m)^> ', after_init)
+    if not prompt:
+        raise AssertionError('shell did not reach a prompt after C:/Init.HC')
+    diagnostics = re.findall(r'^(?:ERROR|WARNING):.*$', after_init[:prompt.start()], re.MULTILINE)
+    if diagnostics:
+        raise AssertionError('C:/Init.HC diagnostics:\n' + '\n'.join(diagnostics))
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         d = pathlib.Path(td)
@@ -57,6 +71,7 @@ def main():
                             '--cpus', '2', '--mem', '1024', '--timeout', '17',
                             '--input-script', str(script), '--disk', str(disk),
                             sys.argv[1]], stdout=out, stderr=subprocess.STDOUT)
+        check_init_log(log.read_text(errors='replace'))
         got = subprocess.run(['mcopy', '-n', '-i', str(disk), '::Sample.txt', '-'],
                              check=True, capture_output=True).stdout
         if got != b'Xabc\n':
