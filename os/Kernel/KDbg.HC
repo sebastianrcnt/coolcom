@@ -13,7 +13,7 @@ Bool ChkOnStk(U8 *ptr, CTask *task = NULL)
         task = Fs;
     if (!task->stk)
         return IsValidPtr(ptr);
-    return task->stk <= ptr < task->stk + MSize(task->stk);
+    return task->stk <= ptr < task->stack_end;
 }
 
 U8 *Caller(I64 num = 0)

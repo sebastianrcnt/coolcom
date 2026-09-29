@@ -3304,6 +3304,7 @@ public class CTask //The Fs segment reg points to current CTask.
     CWinScroll horz_scroll, vert_scroll;
 
     I64 user_data, user_data2, is_single_step;
+    U8 *stack_alloc, *stack_guard, *stack_end;
 };
 
 class CTSS

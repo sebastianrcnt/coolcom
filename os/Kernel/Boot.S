@@ -62,8 +62,8 @@ ap_start:
   ubfx x0, x0, #16, #8
   add x19, x19, x0, lsl #2
   LA x0, ap_stacks
-  add x19, x0, x19, lsl #16
-  add x19, x19, #65536
+  add x19, x0, x19, lsl #17
+  add x19, x19, #131072
   adr x20, secondary
 
 cpu_setup:
@@ -83,6 +83,14 @@ cpu_setup:
   isb
   eret
 1:
+  LA x1, exception_stacks
+  mrs x0, mpidr_el1
+  and x2, x0, #0xff
+  ubfx x0, x0, #16, #8
+  add x0, x2, x0, lsl #2
+  add x0, x0, #1
+  add x1, x1, x0, lsl #14
+  msr tpidrro_el0, x1
   mov sp, x19
   mov x0, #(3 << 20)
   msr cpacr_el1, x0
@@ -138,7 +146,7 @@ park:
   b park
 
 // Identity-map SoC MMIO 0x2_0000_0000..0x2_ffff_ffff as nGnRnE,
-// and DRAM 0x8_0000_0000..0xc_0000_0000 as Normal WB, 32MB blocks.
+// and DRAM 0x8_0000_0000..0xc_0000_0000 as Normal WB, 16 KiB pages.
 mmu_tables:
   adr x0, l2_table
   mov x2, #255
@@ -151,13 +159,53 @@ mmu_tables:
   add x2, x2, #1
   cmp x2, x3
   b.lo 8b
+  // Page-map the DRAM aperture before enabling translation. No live block
+  // splitting (and no break-before-make window on the executing stack).
+  LA x6, l3_tables
+  LA x7, _start
+  LA x8, boot_text_end
+  LA x9, MODULE_BASE
+  LA x10, KTEXT_END
+  LA x12, boot_guard
+  LA x13, ap_stacks
+  LA x14, ap_stacks_end
   mov x2, #1024
   mov x3, #1536
 9:
-  lsl x4, x2, #25
-  ldr x5, =BLK_NORMAL
-  orr x4, x4, x5
+  orr x4, x6, #3
   str x4, [x0, x2, lsl #3]
+  lsl x4, x2, #25
+  mov x11, #2048
+10:
+  mov x5, #(BLK_NORMAL | 2)
+  cmp x4, x7
+  b.lo 11f
+  cmp x4, x8
+  b.lo 12f
+  cmp x4, x9
+  b.lo 11f
+  cmp x4, x10
+  b.hs 11f
+12:
+  orr x5, x5, #(1 << 7) // AP: EL1 read-only
+11:
+  orr x5, x5, x4
+  cmp x4, x12
+  b.eq 14f
+  cmp x4, x13
+  b.lo 15f
+  cmp x4, x14
+  b.hs 15f
+  sub x15, x4, x13
+  tst x15, #0x1c000
+  b.ne 15f
+14:
+  mov x5, #0
+15:
+  str x5, [x6], #8
+  add x4, x4, #16384
+  subs x11, x11, #1
+  b.ne 10b
   add x2, x2, #1
   cmp x2, x3
   b.lo 9b
@@ -188,7 +236,29 @@ mmu_enable:
 .balign 16384
 .global l2_table
 l2_table: .space 16384
-.balign 16
+.section .mmutables,"aw",@nobits
+.balign 16384
+l3_tables: .space 512 * 16384
+
+.balign 16384
+boot_guard: .space 16384
 boot_stack: .space 65536
 boot_stack_top:
-ap_stacks: .space 8 * 65536
+ .balign 16384
+ap_stacks: .space 8 * 131072
+ap_stacks_end:
+
+.balign 16384
+exception_stacks: .space 8 * 16384
+
+
+.text
+.global ArchBootGuard
+ArchBootGuard:
+  cbnz x0, 1f
+  LA x0, boot_guard
+  ret
+1:
+  LA x1, ap_stacks
+  add x0, x1, x0, lsl #17
+  ret

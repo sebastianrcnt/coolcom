@@ -1,7 +1,7 @@
 // Tasks and cooperative scheduling, TempleOS style: every core has its own
 // ring of tasks and switches only when the running task calls Yield.
 // Tasks are TempleOS CTasks (KernelA.HH): next_task/last_task link this core's
-// ring, gs is the core, stk the stack (NULL for a core's first task) and
+// ring, gs is the core, stk..stack_end the usable stack, and
 // context_save_area[0] the stack pointer saved while switched out.
 #define TASK_STACK_SIZE (128*1024)
 
@@ -39,6 +39,11 @@ U0 TaskInitCur()
         StrCpy(t->task_name, "Adam");
         adam_task = t;
     }
+    t->stack_guard = ArchBootGuard(c->num);
+    t->stk = t->stack_guard + 16384;
+    t->stack_end = t->stack_guard + 131072;
+    if (!c->num)
+        t->stack_end = t->stk + 65536;
     c->seth_task = c->cur_task = t;
 }
 
@@ -49,11 +54,33 @@ Bool TaskReady(CTask *t)
     return t->wake_jiffy <= jiffies;
 }
 
+// All DRAM L3 tables exist before the MMU and secondary cores start.
+U0 StackPage(U8 *page, Bool present)
+{
+    I64 *l2 = ArchL2Table, *l3 = l2[page(I64) >> 25] & ~16383;
+    I64 i = (page(I64) >> 14) & 2047;
+    l3[i] = 0;
+    ArchTlbFlush;
+    if (present) {
+        l3[i] = page(I64) | 3 | (1 << 2) | (3 << 8) | (1 << 10);
+        ArchTlbFlush;
+    }
+}
+
+Bool TaskStackFault(CTask *t, CExceptFrame *f)
+{
+    return t && t->stack_guard &&
+            (t->stack_guard <= f->far < t->stk ||
+             t->stack_guard <= f->sp < t->stk);
+}
+
 U0 TaskFree(CTask *t)
 {
     t->addr = NULL;
     t->task_signature = 0;
-    Free(t->stk);
+    if (t->stack_guard)
+        StackPage(t->stack_guard, TRUE);
+    Free(t->stack_alloc);
     Free(t->cur_dir);
     Free(t);
 }
@@ -161,6 +188,8 @@ CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NUL
     if (target_cpu < 0)
         target_cpu = ArchAdd(&spawn_next_cpu, 1) % mp_cnt;
     c = &cpu_structs[target_cpu];
+    if (!t)
+        return NULL;
     TaskNew(t, c);
     if (!parent)
         parent = Fs;
@@ -169,8 +198,23 @@ CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NUL
         t->cur_dv = parent->cur_dv;
         t->cur_dir = StrNew(parent->cur_dir);
     }
-    t->stk = MAlloc(stk_size);
-    f = t->stk + (stk_size & ~15) - sizeof(CCtxFrame);
+    if (stk_size < 16384)
+        stk_size = 16384;
+    if (stk_size > sys_heap.total - 49152) {
+        TaskFree(t);
+        return NULL;
+    }
+    stk_size = (stk_size + 16383) & ~16383;
+    t->stack_alloc = MAlloc(stk_size + 32768);
+    if (!t->stack_alloc) {
+        TaskFree(t);
+        return NULL;
+    }
+    t->stack_guard = (t->stack_alloc(I64) + 16383) & ~16383;
+    t->stk = t->stack_guard + 16384;
+    t->stack_end = t->stk + stk_size;
+    StackPage(t->stack_guard, FALSE);
+    f = t->stack_end - sizeof(CCtxFrame);
     MemSet(f, 0, sizeof(CCtxFrame));
     f->x19 = fp_start_addr;
     f->x20 = data;

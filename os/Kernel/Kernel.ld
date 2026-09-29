@@ -2,9 +2,12 @@
 ENTRY(_start)
 SECTIONS {
   . = IMAGE_BASE;
-  .text : { *(.text.boot) *(.text*) *(.rodata*) *(.data*) }
+  .text : { *(.text.boot) *(.text*) *(.rodata*) }
   . = ALIGN(16384);
-  __bss_start = .;
+  boot_text_end = .;
+  .data : { *(.data*) }
+  __bss_start = ALIGN(16384);
+  . = __bss_start;
   .bss (NOLOAD) : { *(.bss*) }
   . = ALIGN(16);
   __bss_end = .;
@@ -14,5 +17,6 @@ SECTIONS {
   . = KBSS_END;
   .fontdata : { *(.fontdata) }
   . = ALIGN(16384);
+  .mmutables (NOLOAD) : { *(.mmutables) }
   image_end = .;
 }

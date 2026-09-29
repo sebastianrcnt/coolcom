@@ -228,6 +228,19 @@ U0 KTestHeap()
     Free(NULL);         // ok
     if (heap_errs - errs0 != 2)
         KTFail("misuse not detected");
+    // Exact (including unaligned) boundaries, rejected free/realloc and walks.
+    p = MAlloc(13);
+    p[13] ^= 1;
+    Free(p);
+    if (ReAlloc(p, 30) || HeapCheck(&sys_heap) || heap_errs != errs0 + 5)
+        KTFail("tail canary detection");
+    p[13] ^= 1;
+    p[-1] ^= 1;
+    Free(p);
+    if (heap_errs != errs0 + 6)
+        KTFail("front canary detection");
+    p[-1] ^= 1;
+    Free(p);
     heap_errs = errs0;
     if (kt_fails == j)
         Print("  misuse detection: PASS\n");

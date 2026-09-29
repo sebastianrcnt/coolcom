@@ -239,8 +239,9 @@ U0 RtExit(I64 status)
 }
 
 I64 shell_fault_ctx[32];  // ArchSetJmp context around each typed statement
+I64 shell_fault_daif, shell_line_daif;
 I64 shell_line_ctx[32];   // ... and around each whole line (compiling included)
-Bool shell_in_stmt;
+Bool shell_in_stmt, shell_line_active;
 CTask *shell_task;
 
 U0 ShellTrap()
@@ -252,6 +253,11 @@ U0 ShellTrap()
         shell_in_stmt = FALSE;
         ArchLongJmp(shell_fault_ctx);
     }
+    ArchLongJmp(shell_line_ctx);
+}
+
+U0 ShellLineFaultResume()
+{
     ArchLongJmp(shell_line_ctx);
 }
 
@@ -277,7 +283,7 @@ U0 ShellBreak(CExceptFrame *f)
     U8 *stack = shell_task->stk;
     if (!shell_in_stmt)
         return;
-    if (Fs == shell_task && f >= stack && f < stack + SHELL_STACK)
+    if (Fs == shell_task && f->sp >= stack && f->sp <= shell_task->stack_end)
         f->elr = &ShellBreakNow;
     else {
         shell_task->wake_jiffy = 0;
@@ -291,10 +297,29 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
 {//except_hook: a typed statement faulted; report it and go back to the prompt.
     I64 ec = f->esr >> 26 & 0x3F;
     U8 *what = "exception", where[80];
-    if (vec != EXC_CUR_SPX_SYNC || !shell_in_stmt || Fs != shell_task)
+    if (vec != EXC_CUR_SPX_SYNC || Fs != shell_task)
+        return FALSE;
+    if (TaskStackFault(Fs, f) && (shell_in_stmt || shell_line_active)) {
+        RawPrint("\nERROR: stack overflow, task %s\n", Fs->task_name);
+        // Return on the saved statement stack, never on the exhausted SP.
+        if (shell_in_stmt) {
+            f->spsr = (f->spsr & ~0x3C0) | shell_fault_daif;
+            f->sp = shell_fault_ctx[21];
+            f->elr = &ShellFaultResume;
+        } else {
+            f->spsr = (f->spsr & ~0x3C0) | shell_line_daif;
+            f->sp = shell_line_ctx[21];
+            f->elr = &ShellLineFaultResume;
+        }
+        shell_in_stmt = FALSE;
+        return TRUE;
+    }
+    if (!shell_in_stmt)
         return FALSE;
     shell_in_stmt = FALSE;
-    if (ec == 0x25)
+    if (ec == 0x25 && (f->esr & 0x7F) == 0x4F)
+        what = "kernel text write";
+    else if (ec == 0x25)
         what = "bad memory access";
     else if (ec == 0x21)
         what = "bad jump";
@@ -345,6 +370,7 @@ I64 ShellExeCmdLine(U8 *cc)
         code = (*stmt2bin)(cc, &type, CMPF_PRS_SEMICOLON);
         if (code && code != INVALID_PTR) {
             fp = code;
+            shell_fault_daif = ArchDaif & 0x3C0;
             if (!ArchSetJmp(shell_fault_ctx)) {
                 LBtr(&shell_task->task_flags, TASKf_PENDING_BREAK);
                 shell_in_stmt = TRUE;
@@ -489,14 +515,20 @@ U0 ShellTask(U8 *data)
     Print("Cool shell: %d KB compiler loaded\n", shell_cmp->file_size >> 10);
     if (DrvCur && FileFind("C:/Init.HC")) {
         Print("Running C:/Init.HC\n");
+        shell_line_daif = ArchDaif & 0x3C0;
+        shell_line_active = TRUE;
         if (!ArchSetJmp(shell_line_ctx))
             ShellExe("#include \"C:/Init.HC\"");
     }
+    shell_line_active = FALSE;
     while (n) {
         Print("> ");
         GetLine(shell_line, SHELL_LINE_LEN);
+        shell_line_daif = ArchDaif & 0x3C0;
+        shell_line_active = TRUE;
         if (!ArchSetJmp(shell_line_ctx))
             ShellExe(shell_line);
+        shell_line_active = FALSE;
         if (n > 0)
             n--;
     }

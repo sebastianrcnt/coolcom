@@ -58,6 +58,8 @@ def main():
             continue
         out.append(ln)
         i += 1
+    out = [ln.replace("I64 user_data, user_data2, is_single_step;",
+                      "I64 user_data, user_data2, is_single_step;\n    U8 *stack_alloc, *stack_guard, *stack_end;") for ln in out]
     text = re.sub(r"\n\n\n+", "\n\n", HEAD + "\n".join(out) + KERNEL_TAIL)  # (as hcfmt does)
     sys.stdout.buffer.write(text.encode("latin-1"))
 
