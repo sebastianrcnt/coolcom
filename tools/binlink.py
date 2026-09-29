@@ -1,5 +1,5 @@
 import struct, sys
-ORG = 0x40081000  # where the BIN module lands
+ORG = 0x40100000  # where the BIN module lands; must match os/Kernel/Kernel.ld
 data = open(sys.argv[1], 'rb').read()
 hdr = 0x20
 patch_off = struct.unpack_from('<Q', data, 0x10)[0]

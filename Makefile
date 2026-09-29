@@ -19,7 +19,7 @@ build/kernel.raw build/syms.ld: build/Kernel.BIN tools/binlink.py
 	python3 tools/binlink.py $< build/kernel.raw build/syms.ld
 
 build/cool.elf: build/kernel.raw os/Kernel/Boot.S os/Kernel/Kernel.ld tools/Kernel.S
-	aarch64-elf-as os/Kernel/Boot.S -o build/Boot.o
+	aarch64-elf-gcc -c os/Kernel/Boot.S -o build/Boot.o
 	aarch64-elf-as tools/Kernel.S -o build/Kernel.o
 	aarch64-elf-ld --no-warn-rwx-segments -T os/Kernel/Kernel.ld build/Boot.o build/Kernel.o -o $@
 

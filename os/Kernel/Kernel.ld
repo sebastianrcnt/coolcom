@@ -3,7 +3,14 @@ INCLUDE build/syms.ld
 SECTIONS {
   . = 0x40080000;
   .text : { *(.text.boot) *(.text*) *(.rodata*) *(.data*) }
-  . = 0x40081000;
+  . = ALIGN(4096);
+  __bss_start = .;
+  .bss (NOLOAD) : { *(.bss*) }
+  . = ALIGN(8);
+  __bss_end = .;
+  /* The relocated HolyC kernel module; must match ORG in tools/binlink.py. */
+  . = 0x40100000;
+  ASSERT(__bss_end <= 0x40100000, "boot stub overlaps the kernel module")
   .kernel : { *(.kernel) }
   . = ALIGN(16); . += 0x10000; stack_top = .;
 }
