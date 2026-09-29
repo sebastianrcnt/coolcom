@@ -986,6 +986,124 @@ U0 PrsMembers(CCmpCtrl *cc) {
     }
 }
 
+#define FMT_ARGS_MAX 32
+#define FMT_NONE   0
+#define FMT_STR    1   // a string literal
+#define FMT_BAD    2   // clearly not a format string: a number
+
+I64 PrsFmtKind(CRPN *rpn, U8 **_str)
+{//What kind of format-string argument is rpn? For FMT_STR, *_str is the literal.
+    CCodeMisc *fm;
+    if (rpn->type == IC_STR_CONST) {
+        fm = rpn->ic_data;
+        *_str = fm->str;
+        return FMT_STR;
+    }
+    if (rpn->type == IC_IMM_I64 || rpn->type == IC_IMM_F64)
+        return FMT_BAD;
+    if (rpn->ic_class && rpn->ic_class->raw_type == RT_F64 && !rpn->ic_class->ptr_stars_cnt)
+        return FMT_BAD;
+    return FMT_NONE;
+}
+
+U0 PrsFmtCheck(CCmpCtrl *cc, U8 *name, I64 kind, U8 *fmt, U8 *vk, I64 nvk)
+{//Warn when a literal Print-style format string and its arguments disagree.
+    //vk[i] is 1 for an F64 argument, else 0. Syntax as StrPrintJoin() reads it.
+    U8 want[FMT_ARGS_MAX];
+    I64 n = 0, i, bad = 0, ch;
+    U8 *p = fmt;
+    if (!name)
+        name = "Print";
+    if (kind == FMT_BAD) {
+        LexWarn(cc, MStrPrint("%s: the format is not a string at ", name));
+        return;
+    }
+    if (nvk > FMT_ARGS_MAX)
+        return;
+    while (ch = *p++) {
+        if (ch != '%')
+            goto fmt_next;
+        if (*p == '-')
+            p++;
+        if (*p == '0')
+            p++;
+        while (*p >= '0' && *p <= '9')
+            p++;
+        if (*p == '*') {
+            p++;
+            if (n < FMT_ARGS_MAX) want[n] = 0;
+            n++;
+        }
+        if (*p == '.') {
+            p++;
+            while (*p >= '0' && *p <= '9')
+                p++;
+            if (*p == '*') {
+                p++;
+                if (n < FMT_ARGS_MAX) want[n] = 0;
+                n++;
+            }
+        }
+        while (TRUE) {
+            if (*p == '\d' || *p == '/' || *p == ',' || *p == 't' || *p == 'l')
+                p++;
+            else if (*p == 'h') {
+                p++;
+                if (*p == '?')
+                    p++;
+                else if (*p == '*') {
+                    p++;
+                    if (n < FMT_ARGS_MAX) want[n] = 0;
+                    n++;
+                } else {
+                    if (*p == '-')
+                        p++;
+                    while (*p >= '0' && *p <= '9')
+                        p++;
+                }
+            } else
+                break;
+        }
+        switch (ch = *p++) {
+            case 'F': case 'Q': case 'q': case 'D': case 'T': case 's': case 'S':
+            case 'c': case 'C': case 'p': case 'P': case 'd': case 'u': case 'x':
+            case 'X': case 'b': case 'B':
+                if (n < FMT_ARGS_MAX) want[n] = 0;
+                n++;
+                break;
+            case 'z': case 'Z':
+                if (n + 1 < FMT_ARGS_MAX) {
+                    want[n] = 0;
+                    want[n + 1] = 0;
+                }
+                n += 2;
+                break;
+            case 'f': case 'e': case 'g': case 'n':
+                if (n < FMT_ARGS_MAX) want[n] = 1;
+                n++;
+                break;
+            case 0:
+                p--;
+                break;
+        }
+fmt_next:;
+    }
+    if (n > FMT_ARGS_MAX)
+        return;
+    if (n != nvk) {
+        LexWarn(cc, MStrPrint("%s: the format takes %d argument(s) but %d given at ", name, n, nvk));
+        return;
+    }
+    for (i = 0; i < n; i++)
+        if (want[i] != vk[i]) {
+            if (want[i])
+                LexWarn(cc, MStrPrint("%s: argument %d is an integer but the format wants an F64 at ", name, i + 1));
+            else
+                LexWarn(cc, MStrPrint("%s: argument %d is an F64 but the format wants an integer or string at ", name, i + 1));
+            return;
+        }
+}
+
 Bool PrsExpression(CCmpCtrl *cc, U8 **ul = NULL, I64 flags = 0, CPrsStk *_ps = NULL) { //TODO REMOVE Ul
     I64 cur_prec, stk_ptr, tok = cc->token, idx, arity, v, mode, str_len;
     CRPN *orig_next = cc->coc.coc_head.next, *argc, *argv, *next;
@@ -1008,6 +1126,8 @@ Bool PrsExpression(CCmpCtrl *cc, U8 **ul = NULL, I64 flags = 0, CPrsStk *_ps = N
     CHashClass *tmpc;
     CMemberLst *mlst;
     CAsmUndefHash *tmpauh;
+    U8 fmt_vk[FMT_ARGS_MAX], *fmt_str = NULL;
+    I64 fmt_kind = FMT_NONE;
     //u32[0] is type
     //u32[1] is prec
     CRPN *rpn, *rpn2;
@@ -1252,6 +1372,7 @@ typecast:
                     }
                     mlst = ic_fun->member_lst_and_root;
                     arity = 0;
+                    fmt_kind = FMT_NONE;
                     for (idx = 0; idx != ic_fun->arg_cnt; idx++) {
                         if (mlst->flags & MLF_DOT_DOT_DOT) goto vargs;
                         if (cc->token == ',') {
@@ -1311,6 +1432,8 @@ typecast:
                             arity++;
                             rpn = cc->coc.coc_head.next;
                             last_c = rpn->ic_class;
+                            if (mlst->str && !StrCmp(mlst->str, "fmt") && Bt(&ic_fun->flags, Ff_DOT_DOT_DOT))
+                                fmt_kind = PrsFmtKind(rpn, &fmt_str);
                             if (rpn->ic_class->raw_type == RT_F64 && mlst->member_class->raw_type != RT_F64) {
                                 RPNAddNew(cc, IC_TO_I64,, cmp.internal_types[RT_I64], TRUE);
                             } else if (rpn->ic_class->raw_type != RT_F64 && mlst->member_class->raw_type == RT_F64) {
@@ -1338,6 +1461,9 @@ vargs:
                         while (cc->token != ')') {
                             if (PrsExpression(cc, NULL, PEF_NO_COMMA)) {
                                 PrsPush3(cc->ps, cc->coc.coc_head.next);
+                                rpn = cc->coc.coc_head.next;
+                                if (idx < FMT_ARGS_MAX)
+                                    fmt_vk[idx] = rpn->ic_class && rpn->ic_class->raw_type == RT_F64 && !rpn->ic_class->ptr_stars_cnt;
                                 idx++;
                             }
                             if (cc->token == ',')
@@ -1349,6 +1475,8 @@ vargs:
                         }
                         argv = RPNAddNew(cc, IC_VARGS, idx);
                         argc->ic_data = idx;
+                        if (fmt_kind)
+                            PrsFmtCheck(cc, ic_fun->str, fmt_kind, fmt_str, fmt_vk, idx);
                     }
                     if (cc->token != ')')
                         LexExcept(cc, "Expected a ')'.");

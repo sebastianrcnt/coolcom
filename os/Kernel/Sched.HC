@@ -5,6 +5,7 @@
 
 #define TASKf_KILL      1
 #define TASKf_SUSPENDED 2
+#define TASKf_BREAK     4  // Ctrl+Alt+C while switched out: task_break_hook runs when it next runs
 
 extern class CDrv;
 
@@ -58,6 +59,19 @@ U0 TaskReap(CCPU *c)
     }
 }
 
+U8 *task_break_hook;  // U0 (*)(): runs on a task that returns from Yield with TASKf_BREAK set (the shell)
+
+U0 TaskBreakCheck(CTask *t)
+{
+    U0 (*hook)();
+    if (t->flags & TASKf_BREAK) {
+        t->flags &= ~TASKf_BREAK;
+        hook = task_break_hook;
+        if (hook)
+            (*hook)();
+    }
+}
+
 U0 Yield()
 {//Run the next ready task on this core; returns when we are picked again.
     CCPU *c = Gs;
@@ -76,6 +90,7 @@ U0 Yield()
     }
     if (t == cur) {
         SpinUnlockIrq(&c->lock, daif);
+        TaskBreakCheck(cur);
         return;
     }
     if (cur->flags & TASKf_KILL) {
@@ -88,6 +103,7 @@ U0 Yield()
     SpinUnlockIrq(&c->lock, daif);
     ArchCtxSwitch(&cur->sp, t->sp);
     TaskReap(Gs);
+    TaskBreakCheck(cur);
 }
 
 U0 Exit()
