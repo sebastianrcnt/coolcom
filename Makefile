@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel
+.PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel seed
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -10,6 +10,18 @@ build/coolc: coolc/Host/native.c coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $^ -o $@
 
 native-kernel: build/Kernel.BIN
+
+# Rebuild the seed from the current compiler sources: the old seed compiles
+# gen1, gen1 compiles gen2, gen2 compiles gen3; gen2 must equal gen3.
+SEEDC = COOLC_COMPILER_BIN=$(abspath $(1)) gtimeout 90 build/coolc build/native-src/Native.HC $(2) > $(2).log 2>&1 || { tail -5 $(2).log; exit 1; }
+seed: build/coolc
+	tools/native/prepare.sh
+	$(call SEEDC,$(COOLC_SEED),build/seed1.BIN)
+	$(call SEEDC,build/seed1.BIN,build/seed2.BIN)
+	$(call SEEDC,build/seed2.BIN,build/seed3.BIN)
+	cmp build/seed2.BIN build/seed3.BIN
+	cp build/seed2.BIN coolc/seed/Compiler.BIN
+	@echo "seed updated (commit coolc/seed/Compiler.BIN)"
 
 # B is the build directory, IMAGE_BASE the link address (module = +2 MiB). Only
 # `make reloc-check` changes them, to build a second Image at another base.
