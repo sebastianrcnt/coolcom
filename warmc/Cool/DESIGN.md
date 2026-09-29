@@ -1,62 +1,119 @@
 # Warm in Cool
 
-This is an independent implementation of the language in `../lib/Parser.mly`,
-`Lexer.mll`, `Cst.ml`, and the subsequent OCaml passes. Reference code is from
-Austral (Apache-2.0 WITH LLVM-exception; see ../LICENSE). No OCaml process,
-C compiler, generated answer table, or test fixture is used by the compiler.
+This independent implementation follows `../lib/Parser.mly`, `Lexer.mll`, the
+OCaml semantic passes, `HCRenderer.ml`/`HCRuntime.ml`, and the language specification
+under `docs`. Reference Austral code is Apache-2.0 WITH LLVM-exception; see
+`../LICENSE`. No OCaml process, generated answer table or test fixture is used
+by the compiler. The builtins remain original Warm source compiled by the same
+pipeline as user modules.
 
 ## Lifetime and representation
 
-One `CWUnit` owns a compilation arena. Chained zero-filled blocks use bump
-allocation aligned to eight bytes. Source text, tokens, AST nodes, symbols,
-types, and emitted text belong to the unit. `WDestroy` frees all blocks after
-the caller consumes the output/diagnostic. No tracing collector or reference
-counting is required. Independent units have no shared mutable compiler state.
-Allocation failure is a fatal host/runtime condition (as in coolc).
+One `CWUnit` owns a compilation arena. Chained zero-filled blocks (64 KiB minimum)
+use bump allocation aligned to eight bytes. Sources, tokens, AST nodes, symbols,
+types, substitutions and emitted text belong to that unit. `WDestroy` frees all
+blocks after the caller consumes the output or diagnostic. No garbage collector
+or reference counting is needed. Independent core units have no shared mutable
+state. Allocation failure is a fatal host/runtime condition, as in coolc.
 
-Tokens retain byte offsets and source ownership; line/column are calculated
-from source on diagnostic rendering. AST nodes are tagged, ordered trees with
-first-child/next-sibling links, named roles, and original token spans. Declaration
-children distinguish type parameters, parameters, result types, pragmas, docs,
-and executable blocks. This deliberately preserves interface declarations and
-implementation definitions separately. Semantic passes must not identify nodes
-by position in a list or mutate syntax into strings.
+Tokens retain source ownership and byte offsets. Diagnostics derive line/column
+and the source excerpt from those offsets. Tagged AST nodes use first-child/
+next-sibling links and named child roles. Interfaces and bodies remain separate,
+paired by declaration identity. Resolved declarations are pointers, not bare
+names. Linked scope tables favor simple ownership over hash-table optimization.
+Cloned/substituted types have independent sibling links.
 
-## Pass boundaries
+The source files follow `coolc/Compiler/PORTING.md`: packed layout, function-wide
+local names, no ternary/continue, parenthesized expressions, and assignment for
+numeric conversion. Postfix casts are used intentionally for bit reinterpretation.
 
-1. Lex each source, parse module interfaces and bodies using the Warm grammar.
-   Expressions preserve Warm's explicitly parenthesized binary expressions;
-   HolyC precedence is never used to parse Warm.
-2. Index modules/declarations, combine interfaces with bodies, resolve explicit
-   imports (including aliases), then lexical scopes. Declaration identities
-   are pointers, not unqualified string names.
-3. Resolve types/universes, instantiate type parameters, check typeclass method
-   contracts and instances, then expressions/statements and exhaustive cases.
-4. Track linear resources and read/write loans per control-flow branch; merge
-   branch states and check loop invariance and scope exits.
-5. Discover reachable concrete instantiations, lower to explicitly typed code,
-   and render HolyC using the OCaml HC backend's packed aggregate/pointer ABI,
-   integer narrowing, and ordered evaluation rules.
-6. Render structured diagnostics with file, line, column, source and caret.
-7. A future IR sink may replace text rendering using coolc's `__HC_*` bindings.
+## Implemented passes
 
-These are design targets, not a declaration that every pass is implemented.
-The README records measured implementation status and limitations.
+1. `Lexer.HC`, `Parser.HC`: all grammar forms, interfaces/bodies, docstrings,
+   literals, pragmas, generic/typeclass declarations, aggregates, paths, cases,
+   borrowing and expressions. Warm's explicit binary grouping is preserved.
+2. `Resolve.HC`: module/declaration indexing, interface/body pairing, imports
+   and aliases, implicit Pervasive, lexical scopes and nominal identities.
+   Public function/constant/instance signatures use interface imports; bodies
+   use implementation imports. Opaque representations stay private.
+3. `Types.HC`, `Fold.HC`, `Check.HC`: universes, substitution and inference,
+   generic constraints, visible/coherent instances and contracts, interface
+   signatures, complete aggregate/case payloads, return paths and expressions.
+   Integer constant expressions use signed decimal bignums before range checks;
+   intermediate overflow cannot silently change a constant. Decimal float
+   literals are rounded exactly to binary64, bypassing the HolyC lexer.
+4. `Linear.HC`: per-declaration live/consumed/read-loan/write-loan states,
+   temporary loans, branch snapshots/merges, loop invariants, scope exits,
+   consumption assignment and reborrowing. Fresh nominal region identities
+   prevent anonymous borrow escape. Borrow statement mode follows its operator,
+   as in the reference parser (the displayed type annotation is not authoritative).
+5. `Emit.HC`: discover reachable concrete instantiations, specialize typeclass
+   methods, lower checked operators to Pervasive implementations, emit packed
+   records and overlapping union payloads. Aggregates use pointer arguments and
+   out-pointer returns, including function-pointer calls. Temporary assignments
+   preserve evaluation order, copies and short-circuit behavior. Integer widths
+   are normalized explicitly. `Foreign_Export` roots are retained; no-entrypoint
+   mode emits concrete library functions without a main invocation.
+6. `Diagnostic.HC`: a first-error record, plain filename/line/column/excerpt/caret
+   rendering, and escaped structured JSON. Native option parsing precedes input
+   parsing so trailing diagnostic-format flags also apply to parser errors.
 
-## Host and kernel
+The runtime follows the OCaml HC target's allocation headers, copies, span
+bounds, argument and abort conventions. `Runtime.HC` additionally represents
+Float32 as four-byte U32 IEEE bits, converting and rounding at expression
+boundaries. Float64-to-Nat64 conversion splits around 2^63 because the native
+Cool scalar conversion instruction is signed. Numeric tests compare exact bits,
+not decimal printouts alone.
 
-`Warm.HC` is the reusable core: no Native imports, process exit, file access,
-or CLI parsing. Kernel callers supply source strings and inspect the returned
-unit. `Native.HC` supplies file/argument/output adapters for `coolc --run`.
-Keeping process services out of the core permits shell inclusion without
-binding NativeExit/NativeArg in the kernel. Kernel execution still needs an
-integration test; host compilation alone is not evidence of kernel execution.
+C embeds are a deliberately recognized translation vocabulary, matching the
+HC backend approach; unknown C syntax fails explicitly. The current foreign
+binding set is `puts`/`putchar`. Parser depth (256), instance recursion (64) and
+monomorphization count (100,000) are bounded with diagnostics.
+
+## Host and kernel boundaries
+
+`Warm.HC` includes the reusable core. It has no process exit, CLI or filesystem
+operations. A caller uses `WNew`, `WParse` for its sources, `WBuiltins`, `WResolve`,
+`WTypeCheck`, `WLinearity`, `WEmit`, inspects `error_kind`, then calls `WDestroy`.
+Allocation/string primitives are supplied by the host or kernel.
+
+`Native.HC` adapts native file, argument and output APIs. `embed_builtins.py`
+packages the original builtin interfaces/bodies and the HC runtime as source
+strings; it does not translate the compiler logic. `build.sh` invokes native
+coolc and checks both the binary and `Errs:0`, since compiler status alone is
+not sufficient to detect an HC error.
+
+`package_kernel.py` flattens includes and appends `Kernel.HC` to make one file
+loadable by the TempleOS frontend. The kernel adapter loads FAT sources and
+calls the same passes. For `WarmRun`, generated HolyC is sent to `ShellExe` on
+the compiler/shell task. Runtime services replace native imports; Print format
+strings are mapped to TempleOS conventions. Each unit reserves a distinct
+symbol range so subsequent compilations coexist.
+
+Runtime initialization and generated execution have separate completion markers.
+An abort in the first user program does not cause runtime redefinition on the
+next compilation. Shell exceptions are caught and reported as failure; the
+arena is released. JIT functions remain in the kernel symbol table, following
+normal ShellExe lifetime, rather than being freed with the arena. This adapter
+is serialized on the shell task and is not a concurrent compile service.
+
+Direct `__HC_*` IR emission is optional and not implemented. The current route
+already compiles and executes Warm inside the OS without host assistance, via
+the established HolyC frontend and JIT.
 
 ## Validation
 
-`compare.py` discovers every test directory, honours `cli.txt`, and compares
-independent Cool and OCaml results. Expected errors compare error kinds, not
-merely nonzero exits. Runtime cases compare exit status and both output streams.
-Unimplemented features, crashes, and timeouts are failures, never passes.
-Syntax-only coverage is reported separately and never counted as compilation.
-All build and test artifacts stay under this checkout's `build/`.
+`compare.py` covers every directory in `test-programs/suites`, including silent
+success cases and expected errors. It honours `cli.txt`; runtime outputs and
+status must match both the OCaml C backend and recorded fixtures. Error kinds
+must agree with both. Crashes, timeouts and unsupported output never count as
+passes. Parser coverage is reported separately. Extra probes test semantic
+boundaries, opaque privacy and reference quirks; standard-library checking
+covers imports used only by interface signatures.
+
+`test_kernel.py` boots the real kernel in coolvm, includes the whole Cool
+compiler, handles a Warm abort and parse error, and verifies two identical
+program outputs from independent compilations in one shell. This is executable
+kernel evidence, not an inference from a native host build. README records
+counts and remaining output restrictions. All generated build/test artifacts
+stay inside this checkout's `build/` directory.

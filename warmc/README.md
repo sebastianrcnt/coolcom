@@ -143,3 +143,13 @@ TMPDIR="$PWD/build/tmp" WARM_TEST_TMPDIR="$PWD/build/tmp" \
   opam exec --switch=austral -- sh -c 'cd warmc && ./run-tests.sh'
 TMPDIR="$PWD/build/tmp" make test
 ```
+
+## Independent compiler written in Cool
+
+[`Cool/`](Cool/README.md) now contains an independent Warm compiler written in
+HolyC, including module resolution, generic/typeclass checking, linearity and
+borrowing, monomorphization, HC output and caret/JSON diagnostics. It runs under
+native coolc and in the OS kernel shell (`WarmRun` uses the existing HolyC JIT).
+Its full-suite differential result is **296/296**: 86 runtime cases and 210
+expected errors. These are separate from the OCaml HC renderer counts above.
+See [the design](Cool/DESIGN.md) and [build, kernel and validation commands](Cool/README.md).
