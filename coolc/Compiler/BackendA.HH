@@ -1288,3 +1288,11 @@ extern I64 FFI_CALL_TOS_2(U8 *fptr, I64 a, I64 b);                    //INTEGRAT
 extern U0 qsort(U8 *base, I64 cnt, I64 sz, U8 *cmp);                  //INTEGRATION: libc qsort (cmp takes two element pointers)
 extern F64 fmod(F64 a, F64 b);                                        //INTEGRATION: libc
 extern F64 pow(F64 a, F64 b);                                         //INTEGRATION: libc
+
+// Replacements for arm_backend.c macros, defined in ArmBackendA.HC and used by
+// both halves. Each returns the new code_off.
+extern I64 AIWNIOS_ADD_CODE(U8 *bin,I64 code_off,I64 val);
+extern I64 TYPECAST_ASSIGN_BEGIN(CBCmpCtrl *cctrl,CBRPN **dst,CBRPN *src,
+	CBICArg *_orig,I64 *pop,I64 *pop2,U8 *bin,I64 code_off);
+extern I64 TYPECAST_ASSIGN_END(CBCmpCtrl *cctrl,I64 pop,CBICArg *_orig,
+	U8 *bin,I64 code_off);
