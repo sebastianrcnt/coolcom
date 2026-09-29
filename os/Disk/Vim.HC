@@ -279,14 +279,20 @@ U0 VimOperate(I64 op, I64 a, I64 b, Bool line)
 {
     I64 end = b;
     VimYank(a, b, line);
+    if (op != 'y') VimBegin();
     vim_pos = a;
     if (op == 'y') {vim_mode = 0; return;}
-    VimBegin();
     if (op == 'c' && line && b > a && vim_buf[b - 1] == '\n') end--;
     if (op == 'd' && line && b == vim_len && a && vim_buf[b - 1] != '\n') a--;
     VimDelete(a, end);
     if (op == 'c') vim_mode = 1;
-    else vim_mode = 0;
+    else {
+        vim_mode = 0;
+        if (line) {
+            if (vim_pos >= vim_len) vim_pos = VimLastLine();
+            vim_pos = VimFirst(vim_pos);
+        }
+    }
 }
 
 U0 VimRange(I64 *a, I64 *b)
