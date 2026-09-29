@@ -459,6 +459,31 @@ I64 __ICMoveI64(CBCmpCtrl *cctrl, I64 dst_reg, U64 imm,
   return code_off;
 }
 
+// FIX(1): A negative displacement can exceed the encoder's immediate range.
+// Split the adjustment into encodable parts without clobbering a store source.
+I64 BAdjustNegOffset(CBCmpCtrl *cctrl, I64 base, I64 amount, Bool subtract,
+                     U8 *bin, I64 code_off) {
+  I64 part, sh;
+  while (amount) {
+    if (amount >= 4096) {
+      part = amount >> 12;
+      if (part > 2047)
+        part = 2047;
+      sh = 1;
+      amount -= part << 12;
+    } else {
+      part = amount;
+      if (part > 2047)
+        part = 2047;
+      sh = 0;
+      amount -= part;
+    }
+    code_off = AIWNIOS_ADD_CODE(bin, code_off,
+                                BAddSubImmX(subtract, 0, MIR(cctrl, base), base, part, sh));
+  }
+  return code_off;
+}
+
 I64 __ICMoveF64(CBCmpCtrl *cctrl, I64 dst_reg, F64 imm, U8 *bin,
                 I64 code_off) {
   //(For now),I ain't messing around with binary literals in ARM
@@ -1121,8 +1146,8 @@ store_r2:
       if (indir_off < 0) {
         indir_off2 = indir_off;
         indir_off = 0;
-        code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                    ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+        // FIX(1): Handle negative offsets beyond the immediate range.
+        code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, TRUE, bin, code_off);
       }
       switch (dst->raw_type) {
         case BRT_U0:
@@ -1229,8 +1254,8 @@ store_r2:
           abort();
       }
       if (indir_off2 < 0) {
-        code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                    ARM_addImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+        // FIX(1): Restore a base adjusted by a large negative offset.
+        code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, FALSE, bin, code_off);
       } else if (indir_off2 > 0) {
         code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, indir_off2));
       }
@@ -1371,8 +1396,8 @@ load_r2:
         if (indir_off < 0) {
           indir_off2 = indir_off;
           indir_off = 0;
-          code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                      ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+          // FIX(1): Handle negative offsets beyond the immediate range.
+          code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, TRUE, bin, code_off);
         }
         switch (src->raw_type) {
           case BRT_U0:
@@ -1508,8 +1533,8 @@ load_r2:
             abort();
         }
         if (indir_off2 < 0) {
-          code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                      ARM_addImmX(MIR(cctrl, use_reg2), use_reg2, -indir_off2));
+          // FIX(1): Restore a base adjusted by a large negative offset.
+          code_off = BAdjustNegOffset(cctrl, use_reg2, -indir_off2, FALSE, bin, code_off);
         } else if (indir_off2 > 0) {
           code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                       ARM_subImmX(MIR(cctrl, use_reg2), use_reg2, indir_off2));
