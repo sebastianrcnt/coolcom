@@ -65,6 +65,20 @@ static void host_unimplemented(uint64_t id) {
 }
 static void host_exit(int64_t status) { exit((int)status); }
 
+// Standalone program services. Compiler invocations do not expose their argv.
+static int native_argc;
+static char **native_argv;
+static int64_t host_arg_count(void) { return native_argc; }
+static const char *host_arg(int64_t index) {
+    if (index < 0 || index >= native_argc)
+        return NULL;
+    return native_argv[index];
+}
+static void host_err_puts(const char *text) {
+    fputs(text, stderr);
+    fflush(stderr);
+}
+
 static uintptr_t import_trap(size_t id) {
     if (id > UINT16_MAX)
         fail("too many native imports for diagnostic trap");
@@ -324,6 +338,9 @@ static void register_host_symbols(Module *m) {
     HOST("Pow10", host_pow10);
     HOST("WriteProtectMemCpy", host_write_protect_memcpy);
     HOST("NativeExit", host_exit);
+    HOST("NativeErrPutS", host_err_puts);
+    HOST("NativeArgCount", host_arg_count);
+    HOST("NativeArg", host_arg);
     HOST("AIWNIOS_SetJmp", AIWNIOS_SetJmp);
     HOST("AIWNIOS_LongJmp", AIWNIOS_LongJmp);
     HOST("ExtDft", host_ext_dft);
@@ -588,7 +605,9 @@ static void run_initializers(const Module *m) {
 
 int main(int argc, char **argv) {
     __asm__ volatile("mov x28, %0" : : "r"(native_tls));
-    if (argc == 3 && !strcmp(argv[1], "--run")) {
+    if (argc >= 3 && !strcmp(argv[1], "--run")) {
+        native_argc = argc - 2;
+        native_argv = argv + 2;
         Module module = load_bin(argv[2]);
         active_module = &module;
         run_initializers(&module);

@@ -104,12 +104,12 @@ and print_compile_usage _: unit =
   print_endline "";
   print_endline "Options:";
   print_endline "    --help          Print this text.";
-  print_endline "    --target-type   One of `exe`, `tc`, `c`, `hc`. Default is `bin`.";
+  print_endline "    --target-type   One of `exe`, `tc`, `c`, `hc`. Default is `exe`.";
   print_endline "    --output        Path to the output file.";
   print_endline "    --entrypoint    The name of the entrypoint function, in the";
   print_endline "                    format `<module name>:<function name>`.";
   print_endline "    --no-entrypoint  Don't compile an entrypoint. Incompatible with";
-  print_endline "                    `bin` target.";
+  print_endline "                    `exe` target.";
   print_endline "";
   print_endline "Positional arguments:";
   print_endline "    module    Of the form 'file.aui,file.aum' for modules with";

@@ -16,11 +16,16 @@ import U0 Free(U8 *ptr);
 import U8 *MemCpy(U8 *dst, U8 *src, I64 size);
 import U8 *MemSet(U8 *dst, I64 value, I64 size);
 import U0 NativeExit(I64 status);
+import U0 NativeErrPutS(U8 *text);
+import I64 NativeArgCount();
+import U8 *NativeArg(I64 index);
+import I64 StrLen(U8 *text);
 class au_span_t { U8 *wh_data; U64 wh_size; };
 I32 au_putchar(U8 c) { Print("%c", c); return c; }
 I32 au_puts(U8 *s) { Print("%s\n", s); return 0; }
 U0 wh_abort(U8 *message) {
-    Print("%s\n", message);
+    NativeErrPutS(message);
+    NativeErrPutS("\n");
     NativeExit(255);
 }
 U8 au_abort(au_span_t *message) { wh_abort(message->wh_data); return 0; }
@@ -29,6 +34,14 @@ U0 au_make_span(au_span_t *out, U8 *data, U64 size) {
 }
 U0 au_make_span_from_string(au_span_t *out, U8 *data, U64 size) {
     au_make_span(out, data, size);
+}
+U64 au_get_argc() { return NativeArgCount(); }
+U0 au_get_nth_arg(au_span_t *out, U64 n) {
+    U8 *arg = NativeArg(n);
+    if (!arg) wh_abort("Command line argument access out of bounds.");
+    U64 len = StrLen(arg);
+    if (len > 10240) wh_abort("Command line argument exceeds maximum length of 10 kibibytes.");
+    au_make_span(out, arg, len);
 }
 U8 *au_array_index(au_span_t *sp, U64 index, U64 size) {
     if (index >= sp->wh_size) wh_abort("Array index out of bounds.");

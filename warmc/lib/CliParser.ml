@@ -52,7 +52,7 @@ module Errors = struct
     austral_raise CliError [
       Code "--no-entrypoint";
       Text " requires ";
-      Code "--target-type=c";
+      Code "--target-type=c or --target-type=hc";
       Text ", because otherwise the compiler will try to build the generated C code, and will fail because there is no entrypoint function."
     ]
 

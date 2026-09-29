@@ -57,6 +57,7 @@ let render units entry =
     | None -> ident n, int_ty in
   let runtime = [
     "au_make_span", CNamedType "au_span_t"; "au_make_span_from_string", CNamedType "au_span_t";
+    "au_get_argc", CNamedType "size_t"; "au_get_nth_arg", CNamedType "au_span_t";
     "au_abort", bool_ty; "au_array_index", ptr_ty; "au_calloc", ptr_ty;
     "putchar", CNamedType "au_int32_t"; "puts", CNamedType "au_int32_t";
     "au_realloc", ptr_ty; "au_memcpy", ptr_ty; "au_memmove", ptr_ty; "au_free", bool_ty] in
@@ -164,7 +165,19 @@ let render units entry =
     if aggregate t then v
     else if typ t = "F64" || typ from = "F64" then
       let r = temp t in emit (r ^ " = " ^ v ^ ";"); r
-    else par (par v ^ "(" ^ typ t ^ ")")
+    else
+      let name = typ t in
+      match name with
+      | "U8" | "U16" | "U32" | "I8" | "I16" | "I32" ->
+          (* Cool casts on register values do not guarantee sub-word truncation.
+             Mask explicitly; signed narrowing uses two's-complement extension. *)
+          let bits = int_of_string (String.sub name 1 (String.length name - 1)) in
+          let sign = Z.shift_left Z.one (bits - 1) in
+          let mask = Z.pred (Z.shift_left Z.one bits) in
+          let low = par (par v ^ " & " ^ Z.to_string mask) in
+          if name.[0] = 'U' then low
+          else par (par (low ^ " ^ " ^ Z.to_string sign) ^ " - " ^ Z.to_string sign)
+      | _ -> par (par v ^ "(" ^ name ^ ")")
   and init t dst ss = List.iter (fun (n,e) ->
     let ft = field t n and d = dst ^ "." ^ ident n in
     match e with CStructInitializer ss -> init ft d ss
