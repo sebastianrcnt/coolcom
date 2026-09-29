@@ -75,7 +75,10 @@ void aic_init(void)
 
 static bool hw_level(int irq)
 {
-    return irq == UART0_IRQ && uart_irq_level();
+    if (irq == UART0_IRQ) return uart_irq_level();
+    if (irq == INPUT_IRQ) return input_irq_level();
+    if (irq >= BLK_IRQ_BASE && irq < BLK_IRQ_BASE + g.ndisks) return blk_irq_level(irq - BLK_IRQ_BASE);
+    return false;
 }
 
 static bool irq_asserted(int irq)

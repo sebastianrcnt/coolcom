@@ -294,6 +294,13 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
         } else {
             *val = 0;
         }
+    } else if (pa >= INPUT_BASE && pa < INPUT_BASE + INPUT_SIZE) {
+        *dev = "input"; *reg = "FIFO"; *offp = pa - INPUT_BASE;
+        ok = input_mmio(*offp, size, wr, val);
+    } else if (pa >= BLK_BASE && pa < BLK_BASE + BLK_STRIDE * (uint64_t)g.ndisks) {
+        int disk = (int)((pa - BLK_BASE) / BLK_STRIDE);
+        *dev = "virtio-blk"; *reg = "MMIO"; *offp = (pa - BLK_BASE) % BLK_STRIDE;
+        ok = blk_mmio(disk, *offp, size, wr, val);
     } else {
         *dev = NULL;
         return false;

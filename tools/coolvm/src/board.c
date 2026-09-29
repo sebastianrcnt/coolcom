@@ -36,6 +36,7 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
 {
     fdt_t *f = fdt_new();
     char name[64];
+    uint64_t fb_bytes = (uint64_t)g.fb_width * g.fb_height * 4;
 
     fdt_begin(f, "");
     {
@@ -127,6 +128,26 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
     }
     fdt_end(f);
 
+    fdt_begin(f, "input@1ff001000");
+    fdt_prop_str(f, "compatible", "coolcom,coolvm-input");
+    { uint32_t reg[4] = {1, 0xff001000, 0, INPUT_SIZE}; fdt_prop_cells(f, "reg", reg, 4); }
+    fdt_prop_u32(f, "interrupt-parent", PH_AIC);
+    { uint32_t ints[3] = {AIC_IRQ, INPUT_IRQ, IRQ_TYPE_LEVEL_HIGH}; fdt_prop_cells(f, "interrupts", ints, 3); }
+    fdt_end(f);
+
+    for (int i = 0; i < g.ndisks; i++) {
+        uint64_t base = BLK_BASE + i * BLK_STRIDE;
+        snprintf(name, sizeof name, "virtio_mmio@%llx", (unsigned long long)base);
+        fdt_begin(f, name);
+        fdt_prop_str(f, "compatible", "virtio,mmio");
+        uint32_t reg[4] = {(uint32_t)(base >> 32), (uint32_t)base, 0, BLK_STRIDE};
+        fdt_prop_cells(f, "reg", reg, 4);
+        fdt_prop_u32(f, "interrupt-parent", PH_AIC);
+        uint32_t ints[3] = {AIC_IRQ, BLK_IRQ_BASE + i, IRQ_TYPE_LEVEL_HIGH};
+        fdt_prop_cells(f, "interrupts", ints, 3);
+        fdt_end(f);
+    }
+
     fdt_begin(f, "interrupt-controller@23b100000");
     {
         const char *compat[] = {"apple,t8103-aic", "apple,aic"};
@@ -141,13 +162,22 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
     fdt_end(f); /* soc */
 
     /* t8103-jxxx.dtsi "chosen" (stdout-path = "serial0"); bootargs as m1n1 chosen.bootargs.
-     * No simple-framebuffer: coolvm has no display (see README). */
+     * The framebuffer is a guest-visible carve-out, as in m1n1. */
     fdt_begin(f, "chosen");
     fdt_prop_u32(f, "#address-cells", 2);
     fdt_prop_u32(f, "#size-cells", 2);
     fdt_prop_empty(f, "ranges");
     fdt_prop_str(f, "stdout-path", "serial0");
     fdt_prop_str(f, "bootargs", bootargs ? bootargs : "");
+    snprintf(name, sizeof name, "framebuffer@%llx", (unsigned long long)FB_BASE);
+    fdt_begin(f, name);
+    { const char *compat[] = {"apple,simple-framebuffer", "simple-framebuffer"}; fdt_prop_strs(f, "compatible", compat, 2); }
+    { uint32_t reg[4] = {(uint32_t)(FB_BASE >> 32), (uint32_t)FB_BASE, (uint32_t)(fb_bytes >> 32), (uint32_t)fb_bytes}; fdt_prop_cells(f, "reg", reg, 4); }
+    fdt_prop_u32(f, "width", g.fb_width);
+    fdt_prop_u32(f, "height", g.fb_height);
+    fdt_prop_u32(f, "stride", g.fb_width * 4);
+    fdt_prop_str(f, "format", "x8r8g8b8");
+    fdt_end(f);
     fdt_end(f);
 
     /* Spin-table area: in real life this lives in m1n1's own (reserved) memory. */
@@ -161,6 +191,11 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
         fdt_prop_cells(f, "reg", reg, 4);
         fdt_prop_empty(f, "no-map");
     }
+    fdt_end(f);
+    snprintf(name, sizeof name, "framebuffer@%llx", (unsigned long long)FB_BASE);
+    fdt_begin(f, name);
+    { uint32_t reg[4] = {(uint32_t)(FB_BASE >> 32), (uint32_t)FB_BASE, (uint32_t)(fb_bytes >> 32), (uint32_t)fb_bytes}; fdt_prop_cells(f, "reg", reg, 4); }
+    fdt_prop_empty(f, "no-map");
     fdt_end(f);
     fdt_end(f);
 
@@ -176,5 +211,6 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
 
     fdt_end(f); /* root */
     fdt_add_memrsv(f, DRAM_BASE + SPIN_AREA_OFF, SPIN_AREA_SIZE);
+    fdt_add_memrsv(f, FB_BASE, fb_bytes);
     return fdt_finish(f, size);
 }
