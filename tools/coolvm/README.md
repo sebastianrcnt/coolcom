@@ -192,7 +192,7 @@ Real M1 poweroff is an SMC (RTKit) call, far out of scope. coolvm offers two VM-
 1. **PSCI-compatible HVC** (EL1 guests only): `hvc #0` with `x0 = 0x84000008` (SYSTEM_OFF) or `0x84000009`
    (SYSTEM_RESET) -> exit 0. `hvc #0xC001` with `x0 = code` -> exit(code). Any other HVC returns `-1`.
 2. **Finisher MMIO** at `0x1_ff00_0000` (`/soc/finisher@1ff000000`, `coolcom,coolvm-finisher`, SiFive-test
-   protocol): 32-bit write `0x5555` = power off, `(code<<16)|0x3333` = exit(code), `0x7777` = reset (treated as power off).
+   protocol): 32-bit write `0x5555` = power off, `(code<<16)|0x3333` = exit(code), `0x7777` = reset: coolvm runs again from the start with the same options, minus `--input-script` (disk files keep what the guest wrote).
    Works at any EL. A kernel should use it only when the root `compatible` contains `coolcom,coolvm`.
 
 ## Deviations from real hardware

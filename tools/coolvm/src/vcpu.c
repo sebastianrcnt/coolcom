@@ -283,8 +283,12 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
         ok = true;
         if (wr && *offp == 0) {
             uint32_t v = (uint32_t)*val;
-            if ((v & 0xffff) == 0x5555 || (v & 0xffff) == 0x7777)
+            if ((v & 0xffff) == 0x5555)
                 vm_stop(0, "finisher: power off");
+            else if ((v & 0xffff) == 0x7777) {
+                atomic_store(&g.reset, true);
+                vm_stop(0, "finisher: reset");
+            }
             else if ((v & 0xffff) == 0x3333)
                 vm_stop((int)(v >> 16) & 0xff, "finisher: exit");
             else

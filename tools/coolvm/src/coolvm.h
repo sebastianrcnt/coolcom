@@ -40,7 +40,8 @@
 #define AIC_SIZE 0x8000ULL
 
 /* VM-only "test finisher" (SiFive-test style): a write of 0x5555 powers the VM off (exit 0),
- * (code << 16) | 0x3333 exits with `code`, 0x7777 = reset (treated as power off).
+ * (code << 16) | 0x3333 exits with `code`, 0x7777 resets: coolvm starts again (re-executes
+ * itself with the same arguments minus --input-script; disks keep what was written).
  * Advertised in the device tree as /soc/finisher@1ff000000; NOT present on real hardware.
  * Unlike the PSCI-style HVC it also works for guests running at EL2. */
 #define FINISHER_BASE 0x1ff000000ULL
@@ -111,6 +112,7 @@ struct vm {
     pthread_mutex_t lock; /* protects all device state (uart, aic) */
     _Atomic bool stop;
     _Atomic int exit_code;
+    _Atomic bool reset;  /* finisher 0x7777: boot again once stopped (main.c) */
     bool trace_mmio;
     bool lenient; /* unknown MMIO reads-as-zero / writes ignored instead of fatal */
     bool strict;  /* unknown sysregs are fatal instead of injecting UNDEF */

@@ -55,6 +55,7 @@
 #include "DskFile.HC"
 #include "DskCopy.HC"
 #include "DskMount.HC"
+#include "KPower.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"
 #include "UAsmARM64.HC"
