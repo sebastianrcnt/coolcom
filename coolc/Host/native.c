@@ -319,6 +319,7 @@ static void register_host_symbols(Module *m) {
     HOST("IsCmdLineMode", host_true);
     HOST("StrPrintFunSeg", host_str_print_fun_seg);
     HOST("PutS", host_puts);
+    HOST("Print", printf);  // Standalone native HolyC programs use C printf.
     HOST("SwapI64", host_swap_i64);
     HOST("Pow10", host_pow10);
     HOST("WriteProtectMemCpy", host_write_protect_memcpy);
@@ -587,6 +588,12 @@ static void run_initializers(const Module *m) {
 
 int main(int argc, char **argv) {
     __asm__ volatile("mov x28, %0" : : "r"(native_tls));
+    if (argc == 3 && !strcmp(argv[1], "--run")) {
+        Module module = load_bin(argv[2]);
+        active_module = &module;
+        run_initializers(&module);
+        return 0;
+    }
     if (argc == 5 && !strcmp(argv[1], "--format")) {
         Module module = load_bin(argv[2]);
         active_module = &module;
