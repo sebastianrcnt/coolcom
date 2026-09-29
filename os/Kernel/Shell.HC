@@ -285,6 +285,8 @@ U0 ShellBreak(CExceptFrame *f)
     }
 }
 
+extern U0 Backtrace(CExceptFrame *f, CTask *task = NULL);  // KDbg.HC
+
 I64 ShellFault(I64 vec, CExceptFrame *f)
 {//except_hook: a typed statement faulted; report it and go back to the prompt.
     I64 ec = f->esr >> 26 & 0x3F;
@@ -301,6 +303,7 @@ I64 ShellFault(I64 vec, CExceptFrame *f)
     else if (ec == 0)
         what = "invalid instruction";
     Print("\nERROR: %s at address %X (code at %s)\n", what, f->far, StrPrintFunSeg(where, f->elr));
+    Backtrace(f, shell_task);
     f->elr = &ShellFaultResume;
     return TRUE;
 }

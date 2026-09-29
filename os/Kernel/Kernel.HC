@@ -57,6 +57,8 @@
 #include "DskMount.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"
+#include "UAsmARM64.HC"
+#include "KDbg.HC"
 #include "DevTest.HC"
 
 U0 KMainAP(I64 num)

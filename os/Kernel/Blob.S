@@ -28,6 +28,18 @@ ArchKSyms:
   LA x0, KSYM_TABLE
   ret
 
+// ArchArm64Ops(): the disassembler's opcode table (Arm64Ops.csv, UAsmARM64.HC).
+.global ArchArm64Ops
+ArchArm64Ops:
+  LA x0, ARM64_OPS
+  ret
+
+// ArchFp(): the caller's frame pointer (x29), for backtraces (KDbg.HC).
+.global ArchFp
+ArchFp:
+  mov x0, x29
+  ret
+
 // ArchShellPrelude(): the prelude text.
 .global ArchShellPrelude
 ArchShellPrelude:

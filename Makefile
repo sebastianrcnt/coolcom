@@ -59,8 +59,9 @@ $(B)/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
 	$(LD) $(B)/pre/syms.ld $(ASM_OBJS) -o $(B)/pre/arch.elf
 	aarch64-elf-nm $(B)/pre/arch.elf | grep ' [Tt] ' > $@
 
-$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py build/ShellPrelude.HH
-	python3 tools/binlink.py --org $(MODULE_BASE) --prelude build/ShellPrelude.HH $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
+BLOBS := SHELL_PRELUDE=build/ShellPrelude.HH ARM64_OPS=os/Kernel/Arm64Ops.csv
+$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
+	python3 tools/binlink.py --org $(MODULE_BASE) $(addprefix --blob ,$(BLOBS)) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
 
 # Pass 2: the real link; check the assembly didn't move.
 $(B)/cool.elf: $(B)/kernel.raw $(B)/syms.ld $(ASM_OBJS) tools/Kernel.S

@@ -42,6 +42,14 @@ U0 NativeExit(I64 status)
 // ---- Library routines of subsystems the kernel doesn't have yet (DolDoc,
 // pop-up tasks, progress bars, compiler classes): harmless stand-ins. ----
 
+U0 DocPrint(CDoc *doc, U8 *fmt, ...)
+{//No DolDoc: to the console (the disassembler prints through this).
+    U8 *buf = StrPrintJoin(NULL, fmt, argc, argv);
+    no_warn doc;
+    PutS(buf);
+    Free(buf);
+}
+
 CDoc *DocPut(CTask *task = NULL)
 {//No DolDoc: output is plain text.
     no_warn task;
