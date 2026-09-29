@@ -58,3 +58,15 @@ CMT_	BCMT_
 MLF_	BMLF_
 PRSF_	BPRSF_
 REG_	BREG_
+## host runtime (applied at integration by tools/porttest/hostrename.py; implemented in BackendRT.HC / BQSort.HC)
+Fs	BFs
+HashFind	BHashFind
+HashAdd	BHashAdd
+HeapCtrlInit	BHeapCtrlInit
+HeapCtrlDel	BHeapCtrlDel
+SetWriteNP	BSetWriteNP
+DoNothing	BDoNothing
+FFI_CALL_TOS_2	BFFICall2
+qsort	BQSort
+fmod	BFMod
+pow	BPow
