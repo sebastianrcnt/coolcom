@@ -1,5 +1,5 @@
 // Owned frontend bootstrap unit. The native runtime and backend are included
-// here as they are brought up; Aiwnios only compiles the first BIN.
+// here as they are brought up. The checked-in native compiler BIN is the seed.
 #define TARGET_AARCH64 1
 #define TEXT_MODE 1
 #define NATIVE_CANONICAL_AOT 1

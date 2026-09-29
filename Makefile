@@ -1,35 +1,15 @@
-AIWNIOS ?= $(if $(wildcard coolc/third_party/aiwnios/CMakeLists.txt),coolc/third_party/aiwnios,$(shell git worktree list --porcelain | sed -n '1s/^worktree //p')/coolc/third_party/aiwnios)
-export AIWNIOS_DIR := $(abspath $(AIWNIOS))
-AIWBIN  := $(AIWNIOS)/aiwnios.app/Contents/MacOS/aiwnios
-export AIWNIOS_BIN ?= $(abspath $(AIWBIN))
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
+COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: all run test reloc-check aiwnios clean fmt fmt-check hooks
+.PHONY: all run test reloc-check clean fmt fmt-check hooks native-host native-kernel
 all: build/kernel.Image
 
-# Native macOS BIN loader. The compiler image is bootstrapped separately.
-.PHONY: native-host
+# Native macOS BIN loader and checked-in self-hosted compiler image.
 native-host: build/coolc
 build/coolc: coolc/Host/native.c coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $^ -o $@
 
-NATIVE_SRC := $(wildcard coolc/Frontend/*.HC coolc/Frontend/*.HH coolc/Runtime/*.HC coolc/Compiler/*.HC coolc/Compiler/*.HH)
-build/coolc-compiler.BIN: $(NATIVE_SRC) tools/native/bootstrap.sh $(AIWBIN) | build
-	AIWNIOS_BIN=$(abspath $(AIWBIN)) tools/native/bootstrap.sh $@
-
-build/coolc-selfhost.BIN: build/coolc-compiler.BIN build/coolc
-	COOLC_COMPILER_BIN=$(abspath build/coolc-compiler.BIN) gtimeout 90 build/coolc build/native-src/Native.HC $@ > build/coolc-selfhost.log 2>&1
-	tail -1 build/coolc-selfhost.log
-
-.PHONY: native-kernel
-native-kernel: build/Kernel.native.BIN
-build/Kernel.native.BIN: $(KSRC) build/coolc-selfhost.BIN
-	COOLC_COMPILER_BIN=$(abspath build/coolc-selfhost.BIN) gtimeout 45 build/coolc os/Kernel/Kernel.HC $@
-
-aiwnios: $(AIWBIN)
-$(AIWBIN):
-	cmake -S $(AIWNIOS) -B $(AIWNIOS)/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-	ninja -C $(AIWNIOS)/build
+native-kernel: build/Kernel.BIN
 
 # B is the build directory, IMAGE_BASE the link address (module = +2 MiB). Only
 # `make reloc-check` changes them, to build a second Image at another base.
@@ -37,8 +17,13 @@ B ?= build
 IMAGE_BASE ?= 0x800200000
 MODULE_BASE := $(shell printf '0x%x' $$(($(IMAGE_BASE) + 0x200000)))
 
-$(B)/Kernel.BIN: $(KSRC) $(AIWBIN) | $(B)
-	tools/aiwcc.sh os/Kernel Kernel.HC $@
+$(B)/Kernel.BIN: $(KSRC) coolc/seed/Compiler.BIN build/coolc | $(B)
+	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc os/Kernel/Kernel.HC $@ > $(B)/coolc-kernel.log 2>&1
+	tail -1 $(B)/coolc-kernel.log
+
+build/hcfmt.BIN: coolc/Fmt/Native.HC coolc/Fmt/HCFmt.HC coolc/seed/Compiler.BIN build/coolc | build
+	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc coolc/Fmt/Native.HC $@ > build/hcfmt-compile.log 2>&1
+	tail -1 build/hcfmt-compile.log
 
 # -q keeps relocations in the ELF for tools/reloc-check.py.
 LD := aarch64-elf-ld --no-warn-rwx-segments -q -T os/Kernel/Kernel.ld --defsym IMAGE_BASE=$(IMAGE_BASE) --defsym MODULE_BASE=$(MODULE_BASE)

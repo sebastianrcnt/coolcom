@@ -585,6 +585,28 @@ static void run_initializers(const Module *m) {
 
 int main(int argc, char **argv) {
     __asm__ volatile("mov x28, %0" : : "r"(native_tls));
+    if (argc == 5 && !strcmp(argv[1], "--format")) {
+        Module module = load_bin(argv[2]);
+        active_module = &module;
+        run_initializers(&module);
+        uintptr_t address = find_symbol(&module, "CoolCFmt");
+        if (!address)
+            fail("formatter BIN does not export CoolCFmt");
+        int64_t size = 0, error = 0, warning = 0;
+        char *source = host_file_read(argv[3], &size, NULL);
+        if (!source)
+            fail("formatter input could not be read");
+        char *(*format)(char *, int64_t *, int64_t *) =
+            (char *(*)(char *, int64_t *, int64_t *))address;
+        char *result = format(source, &error, &warning);
+        if (error)
+            return 2;
+        if (!host_file_write(argv[4], result, (int64_t)strlen(result)))
+            fail("formatter output could not be written");
+        if (warning)
+            fprintf(stderr, "hcfmt: unbalanced input %s\n", argv[3]);
+        return 0;
+    }
     if (argc == 4 && !strcmp(argv[1], "--probe")) {
         Module module = load_bin(argv[2]);
         active_module = &module;

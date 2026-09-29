@@ -1,4 +1,0 @@
-[submodule "coolc/third_party/aiwnios"]
-	path = coolc/third_party/aiwnios
-	url = https://github.com/nrootconauto/Aiwnios.git
-	ignore = dirty

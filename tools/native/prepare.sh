@@ -7,7 +7,7 @@ STAGE=$ROOT/build/native-src
 mkdir -p "$STAGE"
 cp coolc/Frontend/*.HC coolc/Frontend/*.HH coolc/Runtime/*.HC \
    coolc/Compiler/*.HC coolc/Compiler/*.HH "$STAGE/"
-python3 - "$STAGE/Native.HC" "${NATIVE_FIXES:-0}" <<'PY'
+python3 - "$STAGE/Native.HC" "${NATIVE_FIXES:-1}" <<'PY'
 import pathlib
 import sys
 p = pathlib.Path(sys.argv[1])

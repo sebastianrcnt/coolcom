@@ -1,11 +1,11 @@
 # Porting the Aiwnios AArch64 backend from C to CoolC
 
-The Aiwnios HolyC frontend (`coolc/third_party/aiwnios/Src/*.HC`) builds IR
+The owned HolyC frontend (`coolc/Frontend/*.HC`) builds IR
 through `__HC_*` functions implemented in C, and the C code optimizes the IR
 and emits AArch64 machine code. To make the whole compiler CoolC (and so
 editable inside the OS) we translate that C code to CoolC here.
 
-Upstream is pinned to Aiwnios commit `e155e87` (the submodule). The code is
+Upstream provenance is Aiwnios commit `e155e87`. The code is
 BSD-3; keep a credit line at the top of every translated file:
 `// Translated from Aiwnios <file> (nrootconauto, BSD-3), commit e155e87.`
 
@@ -62,7 +62,7 @@ mask or by assigning to a `U32`/`I32` variable.
   of the other type); for C's `(uint64_t)x` use `BF64ToU64`.
 - **Assigning a class by value copies only its first 8 bytes** (`a = b;`,
   `*p = *q;`). Write struct copies as `MemCpy(&a, &b, sizeof(CBFoo))` and
-  `CBFoo x = {0};` as a declaration plus `MemSet`. `tools/porttest/classassign.py`
+  `CBFoo x = {0};` as a declaration plus `MemSet`.
   flags suspicious lines.
 - `reg` is a keyword; rename such identifiers. A prototype without `extern`
   defines an empty function. Function addresses need `&`. Locals are
@@ -92,14 +92,13 @@ wired up later.
 
 ## Checking your work
 
-Syntax-check a file by compiling it with the stage-0 compiler. In a scratch
-directory (not in the repo) put: `os/Kernel/KernelA.HH`, `BackendA.HH`, your
-file, a stub header of `extern` prototypes for everything your file calls
-that is defined elsewhere (other port files, `MAlloc`, `Print`, `MemCpy`,
-`QueIns`, ...; HolyC rejects calls to undeclared functions), and an entry
-file that `#define BACKEND_STANDALONE` and then includes them in that order. Then run
-`AIWNIOS_DIR=/Volumes/t5/coolcom/coolc/third_party/aiwnios tools/aiwcc.sh <dir> <entry.HC> <out.BIN>`
-from the repo. It must report `Errs:0`. Don't commit the stubs.
+Compile a HolyC entry point with the native host and checked-in seed:
+
+```sh
+make build/coolc
+COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
+  build/coolc path/to/Entry.HC build/Output.BIN
+```
 
 Every translated function should keep the C function's name (after
 renames) so reviewers can diff function by function.

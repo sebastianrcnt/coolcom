@@ -1,7 +1,7 @@
 # Frontend reproducers
 
-These files document bugs in `coolc/third_party/aiwnios/Src`. They are kept
-separate from `behave.sh` because that runner checks successful behavior.
+These files document frontend bugs inherited from Aiwnios.
+`tools/native/behavior.sh` checks the corrected native behavior.
 
 | Bug | Reproducer | Expected | Observed with the port |
 | --- | --- | --- | --- |
@@ -24,8 +24,4 @@ The same results for bugs 5 and 6 occur with `b_use_port=FALSE` and `TRUE`.
 - **8:** `PrsVar.HC:PrsType` requires `)` immediately after the identifier in
   `(*name)`. It parses array dimensions only after the closing `)`.
 
-For bugs 5 and 6, include the reproducer in an Aiwnios `Run.HC` after
-`extern I64 b_use_port; b_use_port=TRUE;`, then run Aiwnios with `gtimeout`.
-For bug 7, compile the same file twice to AOT BIN files with the port and
-compare with `tools/porttest/bincmp.py`. For bug 8, compile with the port;
-the parser exits before code generation.
+Run `tools/native/behavior.sh` to compile and check the corrected cases.
