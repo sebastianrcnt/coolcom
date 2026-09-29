@@ -557,6 +557,8 @@ sp_out_num:
                     if (cur_arg >= argc)
                         throw('StrPrint');
                     d = argv[cur_arg++](F64);
+                    if (!(flags & PRTF_DECIMAL))
+                        dec_len = 6;  // C's default; TempleOS printed no decimals
                     if (d < 0) {
                         flags |= PRTF_NEG;
                         d = -d;
