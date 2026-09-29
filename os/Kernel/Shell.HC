@@ -391,6 +391,10 @@ U0 ShellSyms()
     ShellSym("BlkSectors", &BlkSectors);
     ShellSym("BlkRead", &BlkRead);
     ShellSym("BlkWrite", &BlkWrite);
+    ShellSym("FileRead", &FileRead);
+    ShellSym("FileWrite", &FileWrite);
+    ShellSym("Cd", &Cd);
+    ShellSym("Dir", &Dir);
 }
 
 I64 ShellExe(U8 *src)

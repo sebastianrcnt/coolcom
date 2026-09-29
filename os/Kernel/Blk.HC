@@ -50,33 +50,33 @@
 #define BLK_ERR_TIMEOUT  -3
 #define BLK_ERR_NODEV    -4
 
-class CBlkDev
+class CVirtBlk
 {
     I64 base, sectors, lock, last_used;
     U8 *qdesc, *qavail, *qused, *qreq;  // req: 16-byte request header, status byte at +16
     Bool flush_ok;
 };
 
-CBlkDev blk_devs[BLK_MAX];
+CVirtBlk blk_devs[BLK_MAX];
 I64 blk_cnt;
 
-I64 VioRd(CBlkDev *d, I64 off)
+I64 VioRd(CVirtBlk *d, I64 off)
 {
     return ArchMmioRead32(d->base + off);
 }
 
-U0 VioWr(CBlkDev *d, I64 off, I64 v)
+U0 VioWr(CVirtBlk *d, I64 off, I64 v)
 {
     ArchMmioWrite32(d->base + off, v);
 }
 
-U0 VioWr64(CBlkDev *d, I64 off, I64 v)
+U0 VioWr64(CVirtBlk *d, I64 off, I64 v)
 {
     VioWr(d, off, v & 0xFFFFFFFF);
     VioWr(d, off + 4, v >> 32);
 }
 
-Bool BlkProbe(CBlkDev *d, I64 base)
+Bool BlkProbe(CVirtBlk *d, I64 base)
 {//Bring up a virtio-blk device; FALSE if it is not one or refuses us.
     I64 f0, f1;
     d->base = base;
@@ -118,7 +118,7 @@ Bool BlkProbe(CBlkDev *d, I64 base)
     return TRUE;
 }
 
-U0 VioDesc(CBlkDev *d, I64 i, U8 *addr, I64 len, I64 flags, I64 next)
+U0 VioDesc(CVirtBlk *d, I64 i, U8 *addr, I64 len, I64 flags, I64 next)
 {
     U8 *p = d->qdesc + 16 * i;
     *p(I64 *) = addr;
@@ -127,7 +127,7 @@ U0 VioDesc(CBlkDev *d, I64 i, U8 *addr, I64 len, I64 flags, I64 next)
     *(p + 14)(U16i *) = next;
 }
 
-I64 BlkRequest(CBlkDev *d, I64 type, I64 lba, U8 *buf, I64 bytes)
+I64 BlkRequest(CVirtBlk *d, I64 type, I64 lba, U8 *buf, I64 bytes)
 {//One synchronous request. Returns 0, BLK_ERR_IO or BLK_ERR_TIMEOUT.
     I64 daif, idx, deadline, res;
     U8 *status = d->qreq + 16;

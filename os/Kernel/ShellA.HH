@@ -38,3 +38,7 @@ extern I64 BlkCount();
 extern I64 BlkSectors(I64 dev);
 extern I64 BlkRead(I64 dev, I64 lba, I64 cnt, U8 *buf);
 extern I64 BlkWrite(I64 dev, I64 lba, I64 cnt, U8 *buf);
+extern U8 *FileRead(U8 *filename, I64 *_size = NULL, I64 *_attr = NULL);
+extern I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, I64 cdt = 0, I64 attr = 0);
+extern Bool Cd(U8 *dirname = NULL, Bool make_dirs = FALSE);
+extern I64 Dir(U8 *files_find_mask = "*", Bool full = FALSE);

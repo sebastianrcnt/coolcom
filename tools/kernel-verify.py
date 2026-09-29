@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Host side of `make test` for the kernel's VM devices (see os/Kernel/DevTest.HC).
 
-  kernel-verify.py prepare DIR   write DIR/disk.img and DIR/input.txt for coolvm
-  kernel-verify.py verify DIR    check DIR/screen.png (640x480) and DIR/disk.img afterwards
+  kernel-verify.py prepare DIR   write DIR/disk.img, DIR/fat.img and DIR/input.txt for coolvm
+  kernel-verify.py verify DIR    check DIR/screen.png (640x480), DIR/disk.img and DIR/fat.img afterwards
 
 Disk: 128 sectors, sector s byte j = (s*31 + j*7) & 255. The kernel overwrites
 sectors 9 and 10 with byte j (0..1023) = (j*3 + 17) & 255.
+FAT: a 40 MiB FAT32 volume made by newfs_msdos (512-byte clusters) holding
+HostNote.txt, copied in with mtools. The kernel reads it and writes
+FromCoolcom.txt and Sub/Inner.TXT (os/Kernel/DevTest.HC DevTestFs); afterwards
+mtools must read them back and fsck_msdos must find the volume clean.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
 h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
 SHELL lines (the shell's output is checked by kernel-test.sh). A BREAK entry is
@@ -16,6 +20,7 @@ y=80, a gray ramp at y=128.
 import pathlib
 import re
 import struct
+import subprocess
 import sys
 import zlib
 
@@ -93,8 +98,44 @@ def sector(s):
     return bytes((s * 31 + j * 7) & 255 for j in range(512))
 
 
+FAT_SECTORS = 81920
+HOST_NOTE = b"Hello from the host\n"
+
+
+def fs_data(n, seed):
+    """DevTestFsData: printable test file contents."""
+    return bytes(10 if j % 64 == 63 else 65 + (j * 7 + seed) % 26 for j in range(n))
+
+
+def run(*cmd, **kw):
+    return subprocess.run(cmd, check=True, capture_output=True, **kw)
+
+
+def prepare_fat(d):
+    img = d / "fat.img"
+    with open(img, "wb") as f:
+        f.truncate(FAT_SECTORS * 512)
+    run("newfs_msdos", "-F", "32", "-S", "512", "-c", "1", "-s", str(FAT_SECTORS), "-h", "16", "-u", "63",
+        "-v", "COOLFAT", str(img))
+    (d / "note.txt").write_bytes(HOST_NOTE)
+    run("mcopy", "-i", str(img), str(d / "note.txt"), "::HostNote.txt")
+
+
+def verify_fat(d):
+    img = str(d / "fat.img")
+    fsck = subprocess.run(["fsck_msdos", "-n", img], capture_output=True, text=True)
+    assert fsck.returncode == 0 and "Fix?" not in fsck.stdout, "fsck_msdos:\n" + fsck.stdout + fsck.stderr
+    listing = run("mdir", "-i", img, "-/", "-b", "::", text=True).stdout.split()
+    for name, want in (("HostNote.txt", HOST_NOTE), ("FromCoolcom.txt", fs_data(3000, 0)),
+                       ("Sub/Inner.TXT", fs_data(700, 5))):
+        assert "::/" + name in listing, f"{name} not in the host's listing {listing}"
+        got = run("mcopy", "-n", "-i", img, "::" + name, "-").stdout
+        assert got == want, f"{name} on the FAT volume differs"
+
+
 def prepare(d):
     (d / "disk.img").write_bytes(b"".join(sector(s) for s in range(SECTORS)))
+    prepare_fat(d)
     text = INPUT
     for line in SHELL:
         if isinstance(line, tuple) and line[0] == "text":
@@ -200,7 +241,8 @@ def verify(d):
     for s in range(SECTORS):
         want = new[(s - 9) * 512:(s - 8) * 512] if s in (9, 10) else sector(s)
         assert disk[s * 512:(s + 1) * 512] == want, f"disk sector {s} differs"
-    print("kernel-verify: screen text/pixels and disk contents OK")
+    verify_fat(d)
+    print("kernel-verify: screen text/pixels, disk contents and FAT32 files OK")
 
 
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] in ("prepare", "verify"):

@@ -1,0 +1,86 @@
+// Mounting: every FAT32 volume on a virtio-blk disk becomes a drive, C: first.
+// A disk is either a bare FAT32 volume or has an MBR with FAT32 partitions.
+// (TempleOS mounts interactively, Mount.HC/DskAddDev.HC; this is ours.)
+
+Bool DskIsFAT32(CFAT32Boot *br)
+{
+    return br->signature == 0xAA55 && br->bytes_per_sect == BLK_SIZE && br->sects_per_clus &&
+            !MemCmp(br->fat_name, "FAT32", 5);
+}
+
+CDrv *DskDrvAdd(I64 unit, I64 offset, I64 size, I64 prt_num)
+{//Make a FAT32 drive of blocks offset..offset+size-1 of Blk.HC device unit.
+    U8 drv_let = 'C';
+    CBlkDev *bd;
+    CDrv *dv;
+    while (drv_let <= 'Z' && blkdev.let_to_drv[drv_let - 'A'])
+        drv_let++;
+    if (drv_let > 'Z' || !(bd = BlkDevNextFreeSlot(drv_let, BDT_VIRTIO)))
+        return NULL;
+    bd->unit = unit;
+    bd->max_blk = BlkSectors(unit) - 1;
+    bd->bd_signature = BD_SIGNATURE_VAL;
+    if (!(dv = DrvMakeFreeSlot(drv_let)))
+        return NULL;
+    dv->bd = bd;
+    dv->drv_offset = offset;
+    dv->size = size;
+    dv->prt_num = prt_num;
+    dv->dv_signature = DRV_SIGNATURE_VAL;
+    blkdev.let_to_drv[drv_let - 'A'] = dv;
+    if (!FAT32Init(dv)) {
+        blkdev.let_to_drv[drv_let - 'A'] = NULL;
+        DrvDel(dv);
+        MemSet(bd, 0, sizeof(CBlkDev));
+        return NULL;
+    }
+    if (!blkdev.boot_drv_let)
+        blkdev.boot_drv_let = drv_let;
+    return dv;
+}
+
+I64 DskInit()
+{//Mount the FAT32 volumes of all block devices; returns the number of drives.
+    I64 unit, i, res = 0;
+    CMasterBoot *mbr = MAlloc(BLK_SIZE);
+    CMBRPrt *p;
+    blkdev.blkdevs = CAlloc(BLKDEVS_NUM * sizeof(CBlkDev));
+    blkdev.drvs = CAlloc(DRVS_NUM * sizeof(CDrv));
+    blkdev.home_dir = StrNew("C:/");
+    DskCacheInit(1024 * 1024);
+    for (unit = 0; unit < BlkCount; unit++) {
+        if (BlkRead(unit, 0, 1, mbr))
+            MemSet(mbr, 0, BLK_SIZE);
+        if (DskIsFAT32(mbr)) {
+            if (DskDrvAdd(unit, 0, BlkSectors(unit), -1))
+                res++;
+        } else if (mbr->signature == 0xAA55)
+            for (i = 0; i < 4; i++) {
+                p = &mbr->p[i];
+                switch (p->type) {
+                    case MBR_PT_FAT32a:
+                    case MBR_PT_FAT32b:
+                    case MBR_PT_FAT32c:
+                    case MBR_PT_FAT32d:
+                    case MBR_PT_FAT32e:
+                    case MBR_PT_FAT32f:
+                        if (p->offset + p->size <= BlkSectors(unit) && DskDrvAdd(unit, p->offset, p->size, i))
+                            res++;
+                }
+            }
+    }
+    Free(mbr);
+    return res;
+}
+
+U0 DrvRep()
+{//Drive report.
+    I64 i;
+    CDrv *dv;
+    for (i = 0; i < DRVS_NUM; i++) {
+        dv = blkdev.let_to_drv[i];
+        if (dv && dv->dv_signature == DRV_SIGNATURE_VAL)
+            "%c: FAT32 blk%d %d..%d, %d-byte clusters\n", Drv2Let(dv), dv->bd->unit, dv->drv_offset,
+                    dv->drv_offset + dv->size - 1, dv->spc * BLK_SIZE;
+    }
+}

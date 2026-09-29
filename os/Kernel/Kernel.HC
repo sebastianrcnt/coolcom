@@ -18,6 +18,18 @@
 #include "Sched.HC"
 #include "Input.HC"
 #include "Blk.HC"
+#include "DskA.HH"
+#include "DskStrA.HC"
+#include "DskCache.HC"
+#include "DskDrv.HC"
+#include "DskBlk.HC"
+#include "DskClus.HC"
+#include "FileSysFAT.HC"
+#include "DskDirA.HC"
+#include "DskFind.HC"
+#include "DskDirB.HC"
+#include "DskFile.HC"
+#include "DskMount.HC"
 #include "BinLoad.HC"
 #include "Shell.HC"
 #include "DevTest.HC"
@@ -67,6 +79,7 @@ U0 KMain(U8 *image_end, U8 *dt)
     TaskInitCur;
     InputInit;
     "block devices: %d\n", BlkInit;
+    "drives: %d\n", DskInit;
     TimerInit;
     ArchIrqOn;
     "timer: %d Hz counter, %d Hz tick\n", cnt_freq, JIFFY_FREQ;
