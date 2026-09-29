@@ -1,3 +1,6 @@
+extern class CVTerm;
+extern U0 VtBind(CTask *t, CVTerm *v);
+extern U0 VtTaskGone(CTask *t);
 // Tasks and cooperative scheduling, TempleOS style: every core has its own
 // ring of tasks and switches only when the running task calls Yield.
 // Tasks are TempleOS CTasks (KernelA.HH): next_task/last_task link this core's
@@ -82,6 +85,9 @@ U0 TaskFree(CTask *t)
         StackPage(t->stack_guard, TRUE);
     Free(t->stack_alloc);
     Free(t->cur_dir);
+    VtTaskGone(t);
+    Free(t->key_history);
+    Free(t->shell_ctx);
     Free(t);
 }
 
@@ -194,6 +200,7 @@ CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NUL
     if (!parent)
         parent = Fs;
     t->parent_task = parent;
+    VtBind(t, parent->terminal);
     if (parent->cur_dir) {
         t->cur_dv = parent->cur_dv;
         t->cur_dir = StrNew(parent->cur_dir);

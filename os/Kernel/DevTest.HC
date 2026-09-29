@@ -181,6 +181,7 @@ U0 DevTest()
         DevTestInput;
         DevTestBlk;
         DevTestFs;
+        DevTestTerm;
         DevTestShell;
         DevTestScreen;
     }

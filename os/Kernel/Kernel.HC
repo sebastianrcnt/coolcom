@@ -41,6 +41,7 @@
 #include "MultiCore.HC"
 #include "Sched.HC"
 #include "KHost.HC"
+#include "Term.HC"
 #include "Key.HC"
 #include "Input.HC"
 #include "Blk.HC"
@@ -61,6 +62,7 @@
 #include "Shell.HC"
 #include "UAsmARM64.HC"
 #include "KDbg.HC"
+#include "TermTest.HC"
 #include "DevTest.HC"
 
 U0 KMainAP(I64 num)
