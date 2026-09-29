@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Check the entire standard library and its tests, including interface-only imports."""
+from pathlib import Path
+import json
+import os
+import re
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[2]
+OUT = ROOT / 'build/warmcool/standard'
+OUT.mkdir(parents=True, exist_ok=True)
+standard = ROOT / 'warmc/standard'
+modules = re.findall(r'(?:src|test)/[^\s]+\.aum', (standard / 'Makefile').read_text().split('TEST_BIN')[0])
+paths = [','.join(str(standard / name) for name in pair.split(',')) for pair in modules]
+env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
+           COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
+commands = {
+    'ocaml': [ROOT / 'warmc/warmc', 'compile', *paths, '--entrypoint=Standard.Test:Main',
+              '--target-type=c', '--output=' + str(OUT / 'ref.c')],
+    'cool': [ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN', '--check', *paths],
+}
+for label, cmd in commands.items():
+    p = subprocess.run(list(map(str, cmd)), cwd=OUT, env=env, capture_output=True, timeout=30)
+    (OUT / (label + '.stdout')).write_bytes(p.stdout)
+    (OUT / (label + '.stderr')).write_bytes(p.stderr)
+    assert p.returncode == 0, (label, p.stdout, p.stderr)
+report = dict(module_pairs=len(modules), sources=2 * len(modules), semantic_checks='PASS',
+              note='HolyC execution of the standard terminal library requires unsupported C stdio bindings.')
+(OUT / 'results.json').write_text(json.dumps(report, indent=2))
+print(json.dumps(report, indent=2))
