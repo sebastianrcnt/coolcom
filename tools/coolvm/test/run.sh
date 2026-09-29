@@ -55,6 +55,7 @@ for p in \
     "^uart tx-threshold irq taken" \
     "^tick 1$" \
     "^tick 5$" \
+    "^expired timer rearm ok$" \
     "^hello from cpu1 mpidr=0x0000000080000001" \
     "^cpu1: got fast IPI" \
     "^smp ok" \

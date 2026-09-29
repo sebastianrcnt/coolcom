@@ -168,24 +168,25 @@ static void inject_undef(cpu_t *c, uint64_t pc)
  *     and deassert the line (await_clear);
  *   - on every exit and every ~250us tick from the poker thread while the host
  *     mask is set (vtimer_sync), re-read CNTV_CTL: once the condition
- *     (ENABLE && ISTATUS && !IMASK) is gone, clear the host mask so the next
- *     expiry exits again. Also recognize a changed CVAL: the newly programmed
- *     deadline may already be expired if the host missed the deasserted interval.
- * Deviation: an unchanged, expired deadline is not re-interrupted after FIQ
- * entry (edge-like). Polling normally adds ~250us of re-arm latency.
+ *     (ENABLE && ISTATUS && !IMASK) is gone, or CVAL changed after FIQ entry,
+ *     clear the host mask so the next
+ *     expiry exits again.
+ * Deviation: a handler that never quiesces the timer is not re-interrupted
+ * (edge-like), and re-arm latency is up to ~250us.
  */
 static void vtimer_sync(cpu_t *c)
 {
     if (!c->vt_host_masked)
         return;
-    uint64_t ctl = 0;
+    uint64_t ctl = 0, cval = 0;
     hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_CNTV_CTL_EL0, &ctl);
+    hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_CNTV_CVAL_EL0, &cval);
     bool firing = (ctl & 7) == 5; /* ENABLE=1, IMASK=0, ISTATUS=1 */
-    uint64_t cval = c->vt_fired_cval;
-    if (c->vt_await_clear)
-        hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_CNTV_CVAL_EL0, &cval);
-    bool rearmed = c->vt_await_clear && cval != c->vt_fired_cval;
-    if (!firing || rearmed) {
+    /* A busy host may miss the entire quiet interval between 1 ms ticks.
+     * A different CVAL after FIQ entry proves the guest rearmed the timer,
+     * even when that new deadline has already passed. Unmask it so HVF can
+     * deliver that next expiration instead of leaving WFI asleep forever. */
+    if (!firing || (c->vt_await_clear && cval != c->vt_fired_cval)) {
         hv_vcpu_set_vtimer_mask(c->vcpu, false);
         atomic_store(&c->vt_host_masked, false);
         c->timer_fiq = false;

@@ -28,7 +28,7 @@ U8 *FileRead(U8 *filename, I64 *_size = NULL, I64 *_attr = NULL)
 
 I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0)
 {//Write whole file to disk. Returns its first cluster.
-    I64 c = 0;
+    I64 c = INVALID_CLUS;
     CDirContext *dirc;
     if (dirc = DirContextNew(filename, FALSE, TRUE)) {
         attr = FileAttr(dirc->mask, attr);
@@ -41,7 +41,7 @@ I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0)
             default:
                 PrintErr("File System Not Supported\n");
         }
-        BlkFlush(dirc->dv->bd->unit);
+        if (BlkFlush(dirc->dv->bd->unit)) c = INVALID_CLUS;
         DirContextDel(dirc);
     }
     return c;
