@@ -32,6 +32,7 @@ static void usage(void)
             "  --cpus N        number of CPUs, 1..%d (default 2). CPU order: 4 e-cores (icestorm, MPIDR 0..3)\n"
             "                  then p-cores (firestorm, MPIDR 0x10100..)\n"
             "  --mem MB        guest RAM at 0x%llx (default 256)\n"
+            "  --load-offset B kernel load offset from DRAM base, 2 MiB-aligned, >= 0x200000 (default 0x200000); tests relocation\n"
             "  --timeout S     kill the VM after S seconds, exit status 124 (default: none)\n"
             "  --trace-mmio    log every emulated MMIO and IMP-DEF sysreg access to stderr\n"
             "  --bootargs STR  /chosen/bootargs for the generated device tree\n"
@@ -110,6 +111,7 @@ int main(int argc, char **argv)
     uint64_t mem_mb = 256;
     double timeout = 0;
     const char *bootargs = "";
+    uint64_t load_off = KERNEL_BASE_OFF;
     const char *dump_dtb = NULL;
     bool verbose = false;
 
@@ -119,7 +121,7 @@ int main(int argc, char **argv)
         {"bootargs", required_argument, 0, 'b'}, {"dump-dtb", required_argument, 0, 'd'},
         {"lenient", no_argument, 0, 'l'},        {"strict", no_argument, 0, 's'},
         {"verbose", no_argument, 0, 'v'},        {"help", no_argument, 0, 'h'},
-        {"el2", no_argument, 0, 'E'},
+        {"el2", no_argument, 0, 'E'},          {"load-offset", required_argument, 0, 'L'},
         {0, 0, 0, 0}};
     int o;
     while ((o = getopt_long(argc, argv, "h", opts, NULL)) != -1) {
@@ -133,11 +135,13 @@ int main(int argc, char **argv)
         case 'l': g.lenient = true; break;
         case 's': g.strict = true; break;
         case 'E': g.el2 = true; break;
+        case 'L': load_off = strtoull(optarg, NULL, 0); break;
         case 'v': verbose = true; break;
         default: usage(); return 2;
         }
     }
-    if (optind >= argc || argc - optind > 2 || ncpus < 1 || ncpus > MAX_CPUS || mem_mb < 8) {
+    if (optind >= argc || argc - optind > 2 || ncpus < 1 || ncpus > MAX_CPUS || mem_mb < 8 ||
+        (load_off & (KERNEL_ALIGN - 1)) || load_off < KERNEL_BASE_OFF) {
         usage();
         return 2;
     }
@@ -175,7 +179,7 @@ int main(int argc, char **argv)
     }
     /* m1n1 (payload.c) ignores text_offset and places the kernel at a 2 MiB-aligned address; do the
      * same (Linux >= 5.8 sets text_offset to 0 anyway, flags bit 3 "placement anywhere"). */
-    uint64_t kernel_off = KERNEL_BASE_OFF;
+    uint64_t kernel_off = load_off;
     if (have_hdr && text_offset)
         fprintf(stderr, "coolvm: note: image header text_offset=0x%llx ignored (m1n1 loads at the 2 MiB-aligned base)\n",
                 (unsigned long long)text_offset);

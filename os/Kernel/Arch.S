@@ -1,3 +1,4 @@
+#include "Asm.h"
 // AArch64 glue that HolyC can't express: exception entry/exit and system
 // register access. HolyC calls the Arch* routines through `import`
 // declarations (see ArchA.HH); binlink.py resolves them from this object.
@@ -87,7 +88,7 @@ except_common:
 
   // KExcept(vec, frame); it may edit the frame (e.g. ELR) before we return.
   mov x1, sp
-  ldr x2, =HC_KExcept
+  LA x2, HC_KExcept
   blr x2
 
   add x1, sp, #FR_Q
@@ -279,7 +280,7 @@ ArchIpiSend:
 // ArchApEntry(): address for ArchSpinRelease to start secondary cores at.
 .global ArchApEntry
 ArchApEntry:
-  ldr x0, =ap_start
+  LA x0, ap_start
   ret
 
 // Task switching. A switched-out task's stack holds its callee-saved
@@ -322,12 +323,12 @@ ArchCtxSwitch:
 task_start:
   mov x0, x20
   blr x19
-  ldr x1, =HC_Exit
+  LA x1, HC_Exit
   blr x1
   b .
 
 // ArchTaskStartAddr(): the address new task frames return to.
 .global ArchTaskStartAddr
 ArchTaskStartAddr:
-  ldr x0, =task_start
+  LA x0, task_start
   ret

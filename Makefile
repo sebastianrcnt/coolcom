@@ -4,7 +4,7 @@ AIWBIN  := $(AIWNIOS)/aiwnios.app/Contents/MacOS/aiwnios
 export AIWNIOS_BIN ?= $(abspath $(AIWBIN))
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH)
 
-.PHONY: all run test aiwnios clean fmt fmt-check hooks
+.PHONY: all run test reloc-check aiwnios clean fmt fmt-check hooks
 all: build/kernel.Image
 
 aiwnios: $(AIWBIN)
@@ -12,44 +12,66 @@ $(AIWBIN):
 	cmake -S $(AIWNIOS) -B $(AIWNIOS)/build -G Ninja -DCMAKE_BUILD_TYPE=Release
 	ninja -C $(AIWNIOS)/build
 
-build/Kernel.BIN: $(KSRC) $(AIWBIN) | build
+# B is the build directory, IMAGE_BASE the link address (module = +2 MiB). Only
+# `make reloc-check` changes them, to build a second Image at another base.
+B ?= build
+IMAGE_BASE ?= 0x800200000
+MODULE_BASE := $(shell printf '0x%x' $$(($(IMAGE_BASE) + 0x200000)))
+
+$(B)/Kernel.BIN: $(KSRC) $(AIWBIN) | $(B)
 	tools/aiwcc.sh os/Kernel Kernel.HC $@
 
-LD := aarch64-elf-ld --no-warn-rwx-segments -T os/Kernel/Kernel.ld
-ASM_OBJS := build/Boot.o build/Arch.o
+# -q keeps relocations in the ELF for tools/reloc-check.py.
+LD := aarch64-elf-ld --no-warn-rwx-segments -q -T os/Kernel/Kernel.ld --defsym IMAGE_BASE=$(IMAGE_BASE) --defsym MODULE_BASE=$(MODULE_BASE)
+ASM_OBJS := $(B)/Boot.o $(B)/Arch.o
 
-build/%.o: os/Kernel/%.S | build
+$(B)/%.o: os/Kernel/%.S os/Kernel/Asm.h | $(B)
 	aarch64-elf-gcc -c $< -o $@
 
 # Pass 1: link the assembly alone (HolyC symbols unresolved) to learn where its
-# routines land; the addresses don't depend on the HolyC module.
-build/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
-	mkdir -p build/pre
-	echo 'KBSS_END = 0x800400000;' > build/pre/syms.ld
-	$(LD) --unresolved-symbols=ignore-all build/pre/syms.ld $(ASM_OBJS) -o build/pre/arch.elf
-	aarch64-elf-nm build/pre/arch.elf | grep ' [Tt] ' > $@
+# routines land; the addresses don't depend on the HolyC module. The unresolved
+# symbols get a nearby stand-in so pc-relative references stay in range.
+$(B)/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
+	mkdir -p $(B)/pre
+	aarch64-elf-ld -r $(ASM_OBJS) -o $(B)/pre/all.o
+	aarch64-elf-nm -u $(B)/pre/all.o | awk '{print $$2 " = $(MODULE_BASE);"}' > $(B)/pre/syms.ld
+	echo 'KBSS_END = $(MODULE_BASE);' >> $(B)/pre/syms.ld
+	$(LD) $(B)/pre/syms.ld $(ASM_OBJS) -o $(B)/pre/arch.elf
+	aarch64-elf-nm $(B)/pre/arch.elf | grep ' [Tt] ' > $@
 
-build/kernel.raw build/syms.ld: build/Kernel.BIN build/arch.syms tools/binlink.py
-	python3 tools/binlink.py $< build/kernel.raw build/syms.ld build/arch.syms
+$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py
+	python3 tools/binlink.py --org $(MODULE_BASE) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
 
 # Pass 2: the real link; check the assembly didn't move.
-build/cool.elf: build/kernel.raw build/syms.ld $(ASM_OBJS) tools/Kernel.S
-	aarch64-elf-as tools/Kernel.S -o build/Kernel.o
-	$(LD) build/syms.ld $(ASM_OBJS) build/Kernel.o -o $@
-	aarch64-elf-nm build/cool.elf | grep -F -f build/arch.syms | cmp -s - build/arch.syms \
+$(B)/cool.elf: $(B)/kernel.raw $(B)/syms.ld $(ASM_OBJS) tools/Kernel.S
+	aarch64-elf-as -I $(B) tools/Kernel.S -o $(B)/Kernel.o
+	$(LD) $(B)/syms.ld $(ASM_OBJS) $(B)/Kernel.o -o $@
+	aarch64-elf-nm $@ | grep -F -f $(B)/arch.syms | cmp -s - $(B)/arch.syms \
 	  || { echo "assembly symbols moved between link passes"; rm -f $@; exit 1; }
 
-build/kernel.Image: build/cool.elf
+$(B)/kernel.Image: $(B)/cool.elf
 	aarch64-elf-objcopy -O binary $< $@
+
+# Relocation completeness: no absolute relocations in the assembly, and a second
+# Image linked 4 MiB higher differs from the first exactly at the table's sites.
+reloc-check: build/kernel.Image
+	python3 tools/reloc-check.py --elf build/cool.elf
+	mkdir -p build/alt
+	cp build/Kernel.BIN build/alt/Kernel.BIN
+	$(MAKE) B=build/alt IMAGE_BASE=0x800600000 build/alt/kernel.Image
+	python3 tools/reloc-check.py --elf build/alt/cool.elf
+	python3 tools/reloc-check.py --compare build/cool.elf build/kernel.Image build/alt/cool.elf build/alt/kernel.Image
 
 run: build/kernel.Image coolvm
 	gtimeout 60 build/coolvm --cpus 2 --mem 1024 --timeout 55 $<
 
-test: build/kernel.Image coolvm
+# Boots at the link address and again 4 MiB higher, so Boot.S relocates.
+test: build/kernel.Image reloc-check coolvm
 	tools/kernel-test.sh $<
+	tools/kernel-test.sh $< --load-offset 0x600000
 
-build:
-	mkdir -p build
+$(B):
+	mkdir -p $(B)
 
 clean:
 	rm -rf build
