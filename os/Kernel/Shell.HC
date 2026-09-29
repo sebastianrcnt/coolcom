@@ -15,8 +15,6 @@
 
 #define SHELL_STACK    (2 * 1024 * 1024)
 #define SHELL_LINE_LEN 512
-#define SHELL_CMD_LEN  1200  // room for a command line rewritten as a call (ShellCmd.HC)
-#define SHELL_PROMPT   "> "
 
 // Layout facts of the compiler's CCmpCtrl (coolc/Frontend/KernelA.HH).
 #define CC_TOKEN      16   // I64 token
@@ -44,7 +42,6 @@ class CShell
     Bool in_stmt, line_active;
     I64 next_slice;
     U8 line[SHELL_LINE_LEN];
-    U8 cmd[SHELL_CMD_LEN];
 };
 CShell *ShellCur() {return Fs->shell_ctx;}
 #define shell_stmt_cleanup (ShellCur->stmt_cleanup)
@@ -524,8 +521,6 @@ U0 ShellTick(CExceptFrame *f)
     ArchIrqOff;
 }
 
-#include "ShellCmd.HC"
-
 U0 ShellTask(U8 *data)
 {//Read, compile and run lines: data of them, or forever if data < 0.
     I64 n = data, cols = 80, rows = 24;
@@ -546,8 +541,6 @@ U0 ShellTask(U8 *data)
     bin_trap_hook = &ShellTrap;
     throw_hook = &ShellTrap;  // an uncaught throw in a statement (NativeExcept.HC, KHost.HC)
     fun_seg_hook = &ShellFunSeg;
-    line_complete_hook = &ShellComplete;
-    line_prompt = SHELL_PROMPT;
     if (!ShellInit) {
         Print("shell: compiler failed to load\n");
         if (primary) shell_state = -1;
@@ -563,12 +556,12 @@ U0 ShellTask(U8 *data)
     }
     ShellCur->line_active = FALSE;
     while (n) {
-        Print(SHELL_PROMPT);
+        Print("> ");
         GetLine(ShellCur->line, SHELL_LINE_LEN);
         ShellCur->line_daif = ArchDaif & 0x3C0;
         ShellCur->line_active = TRUE;
         if (!ArchSetJmp(ShellCur->line_ctx))
-            ShellExe(ShellUnix(ShellCur->line));
+            ShellExe(ShellCur->line);
         ShellCur->line_active = FALSE;
         if (n > 0)
             n--;

@@ -414,15 +414,11 @@ U0 LineDelete(U8 *b, I64 *_n, I64 *_pos, I64 from, I64 to)
     *_pos = from;
 }
 
-U8 *line_complete_hook;  // U0 (*)(U8 *buf, I64 size, I64 *_n, I64 *_pos): Tab in GetLine (the shell's completion)
-U8 *line_prompt;         // what the program printed before GetLine, for the hook to print again
-
 U8 *GetLine(U8 *buf, I64 size)
 {//Read a line with editing (Left/Right/Home/End or Ctrl+A/E, Backspace and Delete at the
     //cursor, UTF-8), and Up/Down through the history of earlier lines.
     I64 n = 0, pos = 0, hi = 0, ev, c, e;
     U8 ubuf[4];
-    U0 (*hook)(U8 *b, I64 size, I64 *_n, I64 *_pos);
     if (size > HIST_LEN)
         size = HIST_LEN;
     buf[0] = 0;
@@ -470,10 +466,6 @@ U8 *GetLine(U8 *buf, I64 size)
                 else
                     LineSet(buf, size, &n, &pos, KeyHistory->edit);
             }
-        } else if (c == KEY_TAB && !(ev & (KF_CTRL | KF_ALT))) {
-            hook = line_complete_hook;
-            if (hook)
-                (*hook)(buf, size, &n, &pos);
         } else if (c >= 32 && c < KEY_SPECIAL && !(ev & (KF_CTRL | KF_ALT)))
             LineInsert(buf, size, &n, &pos, ubuf, Utf8Enc(ubuf, c));
     }
