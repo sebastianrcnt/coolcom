@@ -35,6 +35,7 @@ static const uint16_t keymap[128] = {
     [29]=13,[30]=27,[31]=24,[32]=22,[33]=26,[34]=23,[35]=25,[36]=28,
     [37]=38,[38]=36,[39]=40,[40]=37,[41]=39,[42]=43,[43]=51,[44]=53,
     [45]=49,[46]=50,[47]=52,[48]=15,[49]=57,[51]=14,[53]=1,
+    [54]=126,[55]=125,[56]=42,[57]=58,[58]=56,[59]=29,[60]=54,[61]=100,[62]=97,
     [123]=105,[124]=106,[125]=108,[126]=103
 };
 
@@ -57,6 +58,20 @@ static const uint16_t keymap[128] = {
 - (void)keyUp:(NSEvent *)event {
     unsigned code = event.keyCode < 128 ? keymap[event.keyCode] : 0;
     if (code) { input_push(1, code, 0); input_push(0, 0, 0); }
+}
+- (void)flagsChanged:(NSEvent *)event {
+    NSEventModifierFlags bit = 0;
+    switch (event.keyCode) {
+    case 54: case 55: bit = NSEventModifierFlagCommand; break;
+    case 56: case 60: bit = NSEventModifierFlagShift; break;
+    case 58: case 61: bit = NSEventModifierFlagOption; break;
+    case 59: case 62: bit = NSEventModifierFlagControl; break;
+    case 57: bit = NSEventModifierFlagCapsLock; break;
+    default: return;
+    }
+    unsigned code = keymap[event.keyCode];
+    input_push(1, code, (event.modifierFlags & bit) ? 1 : 0);
+    input_push(0, 0, 0);
 }
 - (void)mouseDown:(NSEvent *)event { (void)event; input_push(1,272,1); input_push(0,0,0); }
 - (void)mouseUp:(NSEvent *)event { (void)event; input_push(1,272,0); input_push(0,0,0); }
