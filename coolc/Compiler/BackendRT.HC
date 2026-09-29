@@ -73,7 +73,8 @@ I64 BDoNothing()
 
 I64 BFFICall2(U8 *fptr,I64 a,I64 b)
 {
-  I64 (*fp)(I64 a,I64 b)=fptr;
+  I64 (*fp)(I64 a,I64 b);
+  fp=fptr;  // declare and assign separately: an initializer here doesn't parse
   return (*fp)(a,b);
 }
 
@@ -82,9 +83,11 @@ F64 BFMod(F64 a,F64 b)
   return a%b;
 }
 
+extern F64 Pow(F64 base,F64 power);  //INTEGRATION: the kernel must provide Pow (libm pow-exact)
+
 F64 BPow(F64 a,F64 b)
 {
-  return a`b;
+  return Pow(a,b);
 }
 
 CBTask b_task;
