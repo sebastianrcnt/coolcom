@@ -220,7 +220,7 @@ open(args[2], 'w').write(
     f'KTEXT_END = {main_table:#x};\n'
     f'MAIN_TABLE = {main_table:#x};\n'
     f'RELOC_TABLE = {reloc_table:#x};\n'
-    f'KSYM_TABLE = {ksym_table:#x};\n'
+    f'KSYM_TABLE = {ksym_table:#x};\n' +
     ''.join(f'{sym} = {at:#x};\n' for sym, at in blob_syms) +
     f'KBSS_START = {kbss_start:#x};\n'
     f'KBSS_END = {kbss_end:#x};\n')

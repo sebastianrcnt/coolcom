@@ -8,6 +8,11 @@ extern U0 VtTaskGone(CTask *t);
 // context_save_area[0] the stack pointer saved while switched out.
 #define TASK_STACK_SIZE (128*1024)
 
+// CPU time: Yield adds the counter ticks a task ran between two switches to its
+// task_ticks (CTask.user_data, which nothing else uses). A core's first task (Adam, Seth)
+// is the idle task: it runs when the others sleep. Top reads these.
+#define task_ticks user_data
+
 I64 task_num;
 CHashTable *adam_hash;  // every task's hash_table (defines, frame pointers)
 
@@ -116,7 +121,7 @@ U0 Yield()
 {//Run the next ready task on this core; returns when we are picked again.
     CCPU *c = Gs;
     CTask *cur = c->cur_task, *t, *dead;
-    I64 daif;
+    I64 daif, now;
     TaskReap(c);
     while (TRUE) {
         daif = SpinLockIrq(&c->lock);
@@ -147,6 +152,9 @@ U0 Yield()
         cur->next_task->last_task = cur->last_task;
         c->dying = cur;
     }
+    now = ArchCntVct;
+    cur->task_ticks += now - c->acct_from;
+    c->acct_from = now;
     c->cur_task = t;
     t->swap_cnter++;
     SpinUnlockIrq(&c->lock, daif);
