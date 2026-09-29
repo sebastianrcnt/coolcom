@@ -21,7 +21,7 @@ Bool WTypeEq(CWNode *a, CWNode *b)
 }
 I64 WUniverseOf(CWNode *t)
 {
-    CWNode *d, *v, *p, *a;
+    CWNode *d, *v, *a;
     I64 result = 0;
     if (!t) return 0;
     if (WEq(t->name, "&") || WEq(t->name, "Span")) return 0;
@@ -98,31 +98,51 @@ I64 WIntBits(U8 *name)
 Bool WNumber(CWNode *t) {return t && (WIntBits(t->name) || WEq(t->name, "Float32") || WEq(t->name, "Float64"));}
 U0 WIntLiteral(CWUnit *u, CWNode *n, CWNode *ty)
 {
-    U8 *s = n->name;
-    I64 bits = WIntBits(ty->name), base = 10, d, i = 0;
+    U8 *s = n->name, *limit, *digits = WAlloc(u, 22);
+    I64 bits = WIntBits(ty->name), base = 10, d, i = 0, j, carry, len = 1, k;
     Bool negative = FALSE, sign = WPrefix(ty->name, "Int");
-    U64 max = 0xffffffffffffffff, value = 0;
     if (!bits) {WFail(u, n->token, "Type Error", "Integer literal requires an integer type"); return;}
     if (s[i] == '-' || s[i] == '+') {negative = s[i] == '-'; i++;}
     if (negative && !sign) {WFail(u, n->token, "Type Error", "Negative unsigned integer literal"); return;}
-    if (sign) {max = 0x7fffffffffffffff; if (bits < 64) max = (1 << (bits - 1)) - 1; if (negative) max++;}
-    else if (bits < 64) max = (1 << bits) - 1;
+    limit = "18446744073709551615";
+    if (bits == 8) limit = "255"; else if (bits == 16) limit = "65535"; else if (bits == 32) limit = "4294967295";
+    if (sign) {
+        limit = "9223372036854775807";
+        if (bits == 8) limit = "127"; else if (bits == 16) limit = "32767"; else if (bits == 32) limit = "2147483647";
+        if (negative) {
+            limit = "9223372036854775808";
+            if (bits == 8) limit = "128"; else if (bits == 16) limit = "32768"; else if (bits == 32) limit = "2147483648";
+        }
+    }
     if (s[i] == 39) {
-        value = s[i + 1]; if (value == 92) {value = s[i + 2]; if (value == 'n') value = 10; else if (value == 'r') value = 13; else if (value == 't') value = 9;}
-        if (value > max) WFail(u, n->token, "Type Error", "Character literal is out of range");
+        d = s[i + 1]; if (d == 92) {d = s[i + 2]; if (d == 'n') d = 10; else if (d == 'r') d = 13; else if (d == 't') d = 9;}
+        if (bits == 8 && sign && d > 127) WFail(u, n->token, "Type Error", "Character literal is out of range");
         return;
     }
     if (s[i] == '#') {if (s[i + 1] == 'x') base = 16; else if (s[i + 1] == 'o') base = 8; else base = 2; i += 2;}
+    // Decimal bignum limited to 21 digits. Avoid host signed/unsigned coercions
+    // and never overflow even for arbitrarily long source literals.
     while (s[i]) {
         d = s[i++];
         if (d != 39) {
             if (d >= 'a' && d <= 'f') d = (d - 'a') + 10;
             else if (d >= 'A' && d <= 'F') d = (d - 'A') + 10;
             else d -= '0';
-            if (value > (max - d) / base) {WFail(u, n->token, "Type Error", "Integer literal is out of range"); return;}
-            value = (value * base) + d;
+            carry = d;
+            for (j = 0; j < len; j++) {k = (digits[j] * base) + carry; digits[j] = k % 10; carry = k / 10;}
+            while (carry) {
+                if (len >= 21) {WFail(u, n->token, "Type Error", "Integer literal is out of range"); return;}
+                digits[len++] = carry % 10; carry /= 10;
+            }
         }
     }
+    k = StrLen(limit);
+    if (len > k) {WFail(u, n->token, "Type Error", "Integer literal is out of range"); return;}
+    if (len == k) for (j = 0; j < len; j++) {
+            d = digits[(len - j) - 1];
+            if (d > limit[j] - '0') {WFail(u, n->token, "Type Error", "Integer literal is out of range"); return;}
+            if (d < limit[j] - '0') return;
+        }
 }
 CWNode *WTypeParameters(CWUnit *u, CWNode *type)
 {
@@ -155,5 +175,5 @@ U0 WValidateType(CWUnit *u, CWNode *t)
         if (count == 2 && WUniverseOf(t->first->next) != 3) WFail(u, t->token, "Type Error", "Reference requires a region argument");
     } else if (WEq(t->name, "Pointer") || WEq(t->name, "Address")) arity = 1;
     else if (WEq(t->name, "Fn")) arity = count;
-    if (count != arity) WFail(u, t->token, "Type Error", "Wrong number of type arguments");
+    if (count != arity) WFail(u, t->token, "Generic Error", "Wrong number of type arguments");
 }

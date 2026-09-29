@@ -67,7 +67,7 @@ I64 WNativeMain()
     }
     if (!u->modules && !u->error_kind) WFail(u, NULL, "Command Line Arguments Error", "No input files");
     if (!u->error_kind && dump) for (m = u->modules; m; m = m->next) WDump(m, 0);
-    if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u);}
+    if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u); if (!u->error_kind) WTypeCheck(u); if (!u->error_kind) WLinearity(u);}
     if (!u->error_kind && !parse && !dump) WFail(u, u->modules->token, "Unsupported Feature", "Semantic compilation is not implemented yet");
     if (u->error_kind) {WDiagnostic(u); code = 1;}
     WDestroy(u); return code;

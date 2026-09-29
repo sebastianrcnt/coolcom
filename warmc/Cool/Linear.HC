@@ -1,0 +1,178 @@
+// Forward ownership analysis over declaration identities, with branch snapshots.
+class CWState {CWState *next; CWNode *var; I64 alive, reads, writes, temp_reads, temp_writes;};
+class CWFlow {CWState *states; Bool returned;};
+Bool WMustConsume(CWNode *ty)
+{
+    return ty && WUniverseOf(ty) != 0 && WUniverseOf(ty) != 3 && !WEq(ty->name, "&!") && !WEq(ty->name, "Span!");
+}
+CWState *WState(CWFlow *flow, CWNode *var)
+{
+    CWState *s;
+    for (s = flow->states; s; s = s->next) if (s->var == var) return s;
+    return NULL;
+}
+U0 WTrack(CWUnit *u, CWFlow *flow, CWNode *var)
+{
+    CWState *s = WAlloc(u, sizeof(CWState)); s->var = var; s->alive = 1; s->next = flow->states; flow->states = s;
+}
+CWFlow *WFork(CWUnit *u, CWFlow *flow)
+{
+    CWFlow *copy = WAlloc(u, sizeof(CWFlow));
+    CWState *s, *c;
+    copy->returned = flow->returned;
+    for (s = flow->states; s; s = s->next) {c = WAlloc(u, sizeof(CWState)); MemCpy(c, s, sizeof(CWState)); c->next = copy->states; copy->states = c;}
+    return copy;
+}
+U0 WJoin(CWUnit *u, CWNode *at, CWFlow *flow, CWFlow *a, CWFlow *b)
+{
+    CWState *s, *x, *y;
+    for (s = flow->states; s; s = s->next) {
+        x = WState(a, s->var); y = WState(b, s->var);
+        if (!a->returned && !b->returned && x->alive != y->alive) WFail(u, at->token, "Linearity Error", "Branches consume a linear value differently");
+        if (a->returned) s->alive = y->alive; else s->alive = x->alive;
+    }
+    flow->returned = a->returned && b->returned;
+}
+U0 WReleaseTemps(CWFlow *flow)
+{
+    CWState *s;
+    for (s = flow->states; s; s = s->next) {s->temp_reads = 0; s->temp_writes = 0;}
+}
+U0 WUse(CWUnit *u, CWFlow *flow, CWNode *at, CWNode *var, Bool consume)
+{
+    CWState *s = WState(flow, var);
+    if (!s) return;
+    if (!s->alive) WFail(u, at->token, "Linearity Error", "Value was already consumed");
+    if (s->writes || s->temp_writes || (consume && (s->reads || s->temp_reads))) WFail(u, at->token, "Linearity Error", "Value is borrowed and cannot be used here");
+    if (consume && WUniverseOf(WDeclType(var)) != 0) s->alive = 0;
+}
+U0 WLoan(CWUnit *u, CWFlow *flow, CWNode *at, CWNode *var, Bool write, Bool temporary)
+{
+    CWState *s = WState(flow, var);
+    if (!s) return;
+    if (!s->alive) WFail(u, at->token, "Linearity Error", "Cannot borrow a consumed value");
+    if (s->writes || s->temp_writes || (write && (s->reads || s->temp_reads))) WFail(u, at->token, "Linearity Error", "Conflicting borrow");
+    if (temporary) {if (write) s->temp_writes++; else s->temp_reads++;}
+    else {if (write) s->writes++; else s->reads++;}
+}
+U0 WLinearExpr(CWUnit *u, CWNode *n, CWFlow *flow)
+{
+    CWNode *c, *v;
+    CWFlow *a, *b;
+    if (!n || u->error_kind) return;
+    if (WEq(n->tag, "variable")) {WUse(u, flow, n, n->resolved, TRUE); return;}
+    if (WEq(n->tag, "borrow-expression")) {
+        v = WChild(n, "value"); WLoan(u, flow, n, v->resolved, !WEq(n->name, "&"), TRUE); return;
+    }
+    if (WEq(n->tag, "path") || WEq(n->tag, "ref-path")) {
+        WUse(u, flow, n, n->resolved, FALSE);
+        for (c = n->first; c; c = c->next) if (WEq(c->tag, "index")) WLinearExpr(u, WChild(c, "value"), flow);
+        return;
+    }
+    if (WEq(n->tag, "dereference")) {
+        v = WChild(n, "value");
+        if (WEq(v->tag, "variable")) WUse(u, flow, v, v->resolved, FALSE);
+        else WLinearExpr(u, v, flow);
+        return;
+    }
+    if (WEq(n->tag, "if-expression")) {
+        WLinearExpr(u, WChild(n, "condition"), flow);
+        a = WFork(u, flow); b = WFork(u, flow); WLinearExpr(u, WChild(n, "then"), a); WLinearExpr(u, WChild(n, "else"), b); WJoin(u, n, flow, a, b); return;
+    }
+    if (WEq(n->tag, "binary") && (WEq(n->name, "and") || WEq(n->name, "or"))) {
+        WLinearExpr(u, WChild(n, "left"), flow); a = WFork(u, flow); b = WFork(u, flow); WLinearExpr(u, WChild(n, "right"), a); WJoin(u, n, flow, a, b); return;
+    }
+    for (c = n->first; c; c = c->next) if (!WEq(c->role, "type")) WLinearExpr(u, c, flow);
+}
+U0 WCheckLive(CWUnit *u, CWNode *at, CWState *first, CWState *stop)
+{
+    CWState *s;
+    for (s = first; s != stop; s = s->next) if (s->alive && WMustConsume(WDeclType(s->var))) WFail(u, at->token, "Linearity Error", "Linear value is not consumed before leaving scope");
+}
+extern U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow);
+U0 WLinearBlock(CWUnit *u, CWNode *n, CWFlow *flow)
+{
+    CWNode *c;
+    CWState *saved = flow->states;
+    for (c = n->first; c && !u->error_kind; c = c->next) {
+        if (flow->returned) break;
+        WLinearStmt(u, c, flow);
+    }
+    if (!flow->returned) WCheckLive(u, n, flow->states, saved);
+    flow->states = saved;
+}
+U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow)
+{
+    CWNode *v, *c, *b;
+    CWState *s, *saved, *x;
+    CWFlow *a, *other, *merged = NULL;
+    Bool write;
+    if (u->error_kind) return;
+    if (WEq(n->tag, "block")) {WLinearBlock(u, n, flow); return;}
+    if (WEq(n->tag, "let") || WEq(n->tag, "destructure")) {
+        WLinearExpr(u, WChild(n, "value"), flow); WReleaseTemps(flow);
+        for (c = n->first; c; c = c->next) if (WEq(c->role, "binding")) WTrack(u, flow, c);
+    } else if (WEq(n->tag, "assign")) {
+        WLinearExpr(u, WChild(n, "value"), flow); WReleaseTemps(flow);
+        v = WChild(n, "target"); s = WState(flow, v->resolved);
+        if (s) {
+            if (s->reads || s->writes) WFail(u, n->token, "Linearity Error", "Cannot assign to a borrowed variable");
+            if (WEq(v->tag, "variable")) {
+                if (s->alive && WMustConsume(WDeclType(s->var))) WFail(u, n->token, "Linearity Error", "Assignment overwrites an unconsumed value");
+                s->alive = 1;
+            } else WUse(u, flow, v, v->resolved, FALSE);
+        }
+    } else if (WEq(n->tag, "return")) {
+        WLinearExpr(u, WChild(n, "value"), flow); WReleaseTemps(flow); WCheckLive(u, n, flow->states, NULL); flow->returned = TRUE;
+    } else if (WEq(n->tag, "discard")) {
+        v = WChild(n, "value"); WLinearExpr(u, v, flow); WReleaseTemps(flow);
+        if (WMustConsume(v->ty)) WFail(u, n->token, "Linearity Error", "Discarded expression has a linear type");
+    } else if (WEq(n->tag, "if")) {
+        WLinearExpr(u, WChild(n, "condition"), flow); WReleaseTemps(flow);
+        a = WFork(u, flow); other = WFork(u, flow); WLinearStmt(u, WChild(n, "then"), a);
+        c = WChild(n, "else"); if (c) WLinearStmt(u, c, other); WJoin(u, n, flow, a, other);
+    } else if (WEq(n->tag, "while") || WEq(n->tag, "for")) {
+        if (WEq(n->tag, "while")) {
+            a = WFork(u, flow); WLinearExpr(u, WChild(n, "condition"), flow);
+            for (s = flow->states; s; s = s->next) if (s->alive != WState(a, s->var)->alive) WFail(u, n->token, "Linearity Error", "Loop condition consumes an outer variable");
+        }
+        else {WLinearExpr(u, WChild(n, "from"), flow); WLinearExpr(u, WChild(n, "to"), flow);}
+        WReleaseTemps(flow); a = WFork(u, flow); WLinearBlock(u, WChild(n, "body"), a);
+        for (s = flow->states; s; s = s->next) {x = WState(a, s->var); if (s->alive != x->alive) WFail(u, n->token, "Linearity Error", "Loop changes ownership of an outer variable");}
+    } else if (WEq(n->tag, "borrow")) {
+        v = WChild(n, "original"); c = WChild(n, "mode"); write = !WEq(c->name, "&");
+        WLoan(u, flow, n, v->resolved, write, FALSE); s = WState(flow, v->resolved);
+        saved = flow->states; WTrack(u, flow, n->resolved); WLinearBlock(u, WChild(n, "body"), flow); flow->states = saved;
+        if (s) {if (write) s->writes--; else s->reads--;}
+    } else if (WEq(n->tag, "case")) {
+        WLinearExpr(u, WChild(n, "value"), flow); WReleaseTemps(flow);
+        for (c = n->first; c && !u->error_kind; c = c->next) if (WEq(c->role, "when")) {
+                a = WFork(u, flow); saved = a->states;
+                for (b = c->first; b; b = b->next) if (WEq(b->role, "binding")) WTrack(u, a, b);
+                WLinearBlock(u, WChild(c, "body"), a); if (!a->returned) WCheckLive(u, c, a->states, saved); a->states = saved;
+                if (!merged) merged = a;
+                else {other = WFork(u, flow); WJoin(u, n, other, merged, a); merged = other;}
+            }
+        if (merged) {for (s = flow->states; s; s = s->next) s->alive = WState(merged, s->var)->alive; flow->returned = merged->returned;}
+    }
+}
+U0 WLinearity(CWUnit *u)
+{
+    CWNode *m, *d, *f, *p, *body;
+    CWFlow *flow;
+    for (m = u->modules; m && !u->error_kind; m = m->next)
+        for (d = m->first; d && !u->error_kind; d = d->next) if (WEq(d->role, "declaration")) {
+                f = d; if (WEq(d->tag, "instance")) f = WChild(d, "method");
+                while (f && !u->error_kind) {
+                    body = WChild(f, "body");
+                    if (body && !WChild(f, "pragma")) {
+                        flow = WAlloc(u, sizeof(CWFlow));
+                        for (p = f->first; p; p = p->next) if (WEq(p->role, "parameter")) WTrack(u, flow, p);
+                        WLinearBlock(u, body, flow);
+                        if (!flow->returned) WCheckLive(u, f, flow->states, NULL);
+                    }
+                    if (!WEq(d->tag, "instance")) break;
+                    f = f->next; while (f && !WEq(f->role, "method")) f = f->next;
+                }
+            }
+}

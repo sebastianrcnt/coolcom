@@ -3,3 +3,5 @@
 #include "Parser.HC"
 #include "Resolve.HC"
 #include "Types.HC"
+#include "Check.HC"
+#include "Linear.HC"

@@ -42,3 +42,13 @@ imports and aliases, implicit Pervasive scope, lexical bindings, nominal type
 identity, substitutions and integer range helpers. The first name-resolution
 comparison reached **9/296** (all nine expected-error cases; no runtime passes).
 Type/linearity/code generation are not claimed by that count.
+
+Third checkpoint: expression/statement typing, type parameter substitution and
+universe checks, typeclass contracts/coherence/visibility, aggregate and case
+checking, integer bounds, and ownership/loan flow analysis. Full comparison
+reached **209/296** before the last Nat64 boundary fix: 209 expected-error
+matches, 86 successful fixtures blocked only at the unimplemented output stage,
+and one integer-range mismatch. Subsequent focused integer tests confirm all
+8 expected range errors, including Nat64 overflow. This is test coverage, not
+proof of complete language conformance: signature constraints, region escape
+and arbitrary control-flow combinations need further adversarial validation.
