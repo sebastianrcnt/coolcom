@@ -1,6 +1,6 @@
 // coolvm negative test: read an MMIO address nothing is mapped at.
 // Default: coolvm must stop with exit status 1 and a clear diagnostic.
-// With --lenient the read returns 0 and this guest exits with status 0.
+// With --lenient the read returns 0 and this guest powers off through the finisher device.
         .section .text
         .globl _start
 _start:
@@ -15,11 +15,13 @@ _start:
 start:
         ldr     x1, =0x235300000        // not a device coolvm knows
         ldr     w0, [x1]
+        ldr     x2, =0x1ff000000        // VM-only finisher device
         cbnz    w0, 1f
-        mov     x0, #0
-        hvc     #0xC001                 // coolvm exit(0)
-1:      mov     x0, #2
-        hvc     #0xC001
+        mov     w3, #0x5555             // power off (exit 0)
+        str     w3, [x2]
+        b       .
+1:      ldr     w3, =0x23333            // exit(2)
+        str     w3, [x2]
         b       .
         .ltorg
 image_end:

@@ -177,6 +177,29 @@ fdt_find:
 // ---------------------------------------------------------------------------
 start:
         mov     x19, x0                 // FDT pointer from the loader
+        mrs     x1, CurrentEL
+        cmp     x1, #8
+        b.ne    1f
+        // Entered at EL2 (real M1 through m1n1; coolvm --el2): drop to EL1h like the kernel will.
+        mov     x1, #(1 << 31)          // HCR_EL2.RW: EL1 is AArch64 (E2H/TGE clear, nVHE-style)
+        msr     hcr_el2, x1
+        mov     x1, #0x30d00000
+        movk    x1, #0x0800
+        msr     sctlr_el1, x1           // MMU off
+        mov     x1, #(3 << 20)
+        msr     cpacr_el1, x1
+        mrs     x1, mpidr_el1
+        msr     vmpidr_el2, x1
+        mov     x1, #3
+        msr     cnthctl_el2, x1         // EL1/EL0 may use the physical counter and timer
+        msr     cntvoff_el2, xzr
+        mov     x1, #0x3c5              // EL1h, DAIF masked
+        msr     spsr_el2, x1
+        adr     x1, 1f
+        msr     elr_el2, x1
+        isb
+        eret
+1:
         adr     x1, stack0_top
         mov     sp, x1
         adr     x1, vectors
@@ -266,7 +289,11 @@ start:
 2:      adr     x1, expect_undef
         str     wzr, [x1]
 
-        // unknown HVC: SMCCC-style "not supported" (-1), execution continues after the hvc
+        // unknown HVC: SMCCC-style "not supported" (-1), execution continues after the hvc.
+        // (At EL2 an HVC is taken by the guest itself, so this only applies to EL1 guests.)
+        mrs     x1, CurrentEL
+        cmp     x1, #8
+        b.eq    .Lskip_hvc
         mov     x0, #0x1234
         hvc     #0x77
         cmn     x0, #1
@@ -274,6 +301,7 @@ start:
         PUTS    s_hvc_bad
         b       fail
 1:      PUTS    s_hvc_ok
+.Lskip_hvc:
 
         // ---- AIC hardware-IRQ path: software-trigger hwirq 100 ----
         msr     daifclr, #2             // unmask IRQ
@@ -294,7 +322,7 @@ start:
         mov     w1, #(1 << (UART_IRQ % 32))
         str     w1, [x26, #(0x180 + (UART_IRQ / 32) * 4)]   // unmask 605
         ldr     x25, =UART_BASE
-        mov     w1, #(1 << 13)          // UCON.TXTHRESH_ENA
+        mov     w1, #((1 << 13) | (1 << 2))   // UCON: TXTHRESH_ENA + TX interrupt mode
         str     w1, [x25, #0x4]
         mov     x24, #0
 1:      adr     x1, uirq_seen
@@ -379,8 +407,11 @@ start:
         cbnz    x0, 1f
         PUTS    s_norel
         b       fail
-1:      ldr     x21, [x0]
-        rev     x21, x21                // cpu-release-addr (big-endian u64)
+1:      ldr     w1, [x0]                // cpu-release-addr = two big-endian cells; property data is only
+        rev     w1, w1                  // 4-byte aligned, and with the MMU off an 8-byte load would fault
+        ldr     w2, [x0, #4]
+        rev     w2, w2
+        orr     x21, x2, x1, lsl #32
         PUTS    s_reladdr
         mov     x0, x21
         bl      uart_hex64
@@ -415,14 +446,38 @@ start:
         b       fail
 2:      PUTS    s_smp_ok
         PUTS    s_pass
-        ldr     x0, =0x84000008         // PSCI SYSTEM_OFF (VM-only hypercall)
+        mrs     x1, CurrentEL
+        cmp     x1, #8
+        b.eq    .Lpoweroff_mmio
+        ldr     x0, =0x84000008         // EL1: PSCI SYSTEM_OFF (VM-only hypercall)
         hvc     #0
+        b       .
+.Lpoweroff_mmio:                        // EL2: VM-only finisher device, found through the DT
+        mov     x0, x19
+        adr     x1, s_n_finisher
+        adr     x2, s_p_reg
+        bl      fdt_find
+        cbz     x0, fail
+        ldr     w1, [x0]
+        rev     w1, w1
+        ldr     w2, [x0, #4]
+        rev     w2, w2
+        orr     x1, x2, x1, lsl #32
+        mov     w2, #0x5555
+        str     w2, [x1]
         b       .
 
 fail:
         PUTS    s_fail
         mov     x0, #1
+        mrs     x1, CurrentEL
+        cmp     x1, #8
+        b.eq    1f
         hvc     #0xC001                 // coolvm exit(1)
+        b       .
+1:      ldr     x1, =0x1ff000000        // finisher: exit(1)
+        ldr     w2, =0x13333
+        str     w2, [x1]
         b       .
 
 // ---------------------------------------------------------------------------
@@ -677,6 +732,7 @@ s_p_reg:        .asciz "reg"
 s_p_reladdr:    .asciz "cpu-release-addr"
 s_n_memory:     .asciz "memory@800000000"
 s_n_cpu1:       .asciz "cpu@1"
+s_n_finisher:   .asciz "finisher@1ff000000"
 
         .ltorg
         .balign 16

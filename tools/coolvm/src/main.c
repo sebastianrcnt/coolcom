@@ -39,6 +39,7 @@ static void usage(void)
             "  --lenient       unknown MMIO reads as 0 / writes ignored (default: fatal)\n"
             "  --strict        unknown system registers are fatal (default: log + inject UNDEF)\n"
             "  --verbose       log boot and CPU lifecycle events\n"
+            "  --el2           EXPERIMENTAL: enter the guest at EL2h with HCR_EL2 like m1n1 (needs macOS 15+ on M3 or later)\n"
             "The optional kernel.dtb replaces the generated device tree verbatim (no fix-ups are applied).\n"
             "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n",
             MAX_CPUS, (unsigned long long)DRAM_BASE);
@@ -118,6 +119,7 @@ int main(int argc, char **argv)
         {"bootargs", required_argument, 0, 'b'}, {"dump-dtb", required_argument, 0, 'd'},
         {"lenient", no_argument, 0, 'l'},        {"strict", no_argument, 0, 's'},
         {"verbose", no_argument, 0, 'v'},        {"help", no_argument, 0, 'h'},
+        {"el2", no_argument, 0, 'E'},
         {0, 0, 0, 0}};
     int o;
     while ((o = getopt_long(argc, argv, "h", opts, NULL)) != -1) {
@@ -130,6 +132,7 @@ int main(int argc, char **argv)
         case 'd': dump_dtb = optarg; break;
         case 'l': g.lenient = true; break;
         case 's': g.strict = true; break;
+        case 'E': g.el2 = true; break;
         case 'v': verbose = true; break;
         default: usage(); return 2;
         }
@@ -170,7 +173,12 @@ int main(int argc, char **argv)
         fprintf(stderr, "coolvm: warning: %s has no arm64 Image header (magic 'ARM\\x64' at 0x38); loading as a flat binary at the load base\n",
                 kernel_path);
     }
-    uint64_t kernel_off = KERNEL_BASE_OFF + text_offset;
+    /* m1n1 (payload.c) ignores text_offset and places the kernel at a 2 MiB-aligned address; do the
+     * same (Linux >= 5.8 sets text_offset to 0 anyway, flags bit 3 "placement anywhere"). */
+    uint64_t kernel_off = KERNEL_BASE_OFF;
+    if (have_hdr && text_offset)
+        fprintf(stderr, "coolvm: note: image header text_offset=0x%llx ignored (m1n1 loads at the 2 MiB-aligned base)\n",
+                (unsigned long long)text_offset);
     uint64_t fdt_off = align_up(kernel_off + image_size, KERNEL_ALIGN);
 
     uint8_t *fdt;
@@ -199,7 +207,18 @@ int main(int argc, char **argv)
     }
 
     /* ---- VM + memory ---- */
-    hv_return_t r = hv_vm_create(NULL);
+    hv_vm_config_t cfg = NULL;
+    if (g.el2) {
+        bool ok = false;
+        hv_vm_config_get_el2_supported(&ok);
+        if (!ok) {
+            fprintf(stderr, "coolvm: --el2: this host/OS does not support EL2 guests\n");
+            return 2;
+        }
+        cfg = hv_vm_config_create();
+        hv_vm_config_set_el2_enabled(cfg, true);
+    }
+    hv_return_t r = hv_vm_create(cfg);
     if (r != HV_SUCCESS) {
         fprintf(stderr, "coolvm: hv_vm_create failed: 0x%x%s\n", r,
                 r == (hv_return_t)0xfae94007 ? " (HV_DENIED: binary needs the com.apple.security.hypervisor entitlement; run via build.sh)" : "");

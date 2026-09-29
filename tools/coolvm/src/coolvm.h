@@ -38,6 +38,13 @@
 #define AIC_BASE 0x23b100000ULL
 #define AIC_SIZE 0x8000ULL
 
+/* VM-only "test finisher" (SiFive-test style): a write of 0x5555 powers the VM off (exit 0),
+ * (code << 16) | 0x3333 exits with `code`, 0x7777 = reset (treated as power off).
+ * Advertised in the device tree as /soc/finisher@1ff000000; NOT present on real hardware.
+ * Unlike the PSCI-style HVC it also works for guests running at EL2. */
+#define FINISHER_BASE 0x1ff000000ULL
+#define FINISHER_SIZE 0x1000ULL
+
 #define MAX_CPUS 8
 
 /* Boot-time layout inside DRAM (coolvm's own choice, see README). */
@@ -88,6 +95,7 @@ struct vm {
     bool trace_mmio;
     bool lenient; /* unknown MMIO reads-as-zero / writes ignored instead of fatal */
     bool strict;  /* unknown sysregs are fatal instead of injecting UNDEF */
+    bool el2;     /* experimental: run guests at EL2h (VHE-style, like m1n1 hands over) */
     uint64_t cntvoff;
     uint64_t cntfrq;
     pthread_mutex_t stop_lock;

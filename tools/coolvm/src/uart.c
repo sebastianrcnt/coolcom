@@ -5,20 +5,19 @@
  * Register offsets: include/linux/serial_s3c.h (S3C2410_U*), m1n1 src/uart_regs.h.
  *   0x00 ULCON   0x04 UCON    0x08 UFCON   0x0c UMCON
  *   0x10 UTRSTAT 0x14 UERSTAT 0x18 UFSTAT  0x1c UMSTAT
- *   0x20 UTXH    0x24 URXH    0x28 UBRDIV
+ *   0x20 UTXH    0x24 URXH    0x28 UBRDIV  0x2c UFRACVAL
  * UTRSTAT: bit0 RXD, bit1 TX buffer empty (TXBE/TXFE), bit2 TX empty (TXE),
  *   Apple: bit3 RXTO_LEGACY, bit4 RXTHRESH, bit5 TXTHRESH, bit9 RXTO
  * UFSTAT: [3:0] RX count, [7:4] TX count, bit8 RX full, bit9 TX full
  * UCON (Apple): bit9 RXTO_ENA, bit11 RXTO_LEGACY_ENA, bit12 RXTHRESH_ENA, bit13 TXTHRESH_ENA
  *   (include/linux/serial_s3c.h APPLE_S5L_UCON_*, drivers/tty/serial/samsung_tty.c).
  *
- * Model: TX is instantaneous (FIFO always empty; bytes go straight to stdout).
- * RX is a 256-byte ring fed from a host stdin thread. The interrupt line
- * (AIC hwirq 605) is the OR of the enabled threshold conditions, computed as a
- * level; the "write 1 to clear" UTRSTAT bits are accepted and ignored because
- * the status is derived from FIFO state. A pending TXTHRESH with TXTHRESH_ENA
- * therefore fires continuously (as on hardware, where the FIFO is under its
- * trigger level), which is what samsung_tty.c expects (it disables the enable).
+ * Model (same idea as m1n1's hypervisor vuart, src/hv/hv_vuart.c): TX is instantaneous (FIFO
+ * always empty; bytes go straight to stdout). RX is a 256-byte ring fed from a host stdin thread.
+ * The interrupt line (AIC hwirq 605) is the OR of the enabled threshold conditions, computed as a
+ * level from UCON (mode field == 1 means "interrupt") and the FIFO state; the "write 1 to clear"
+ * UTRSTAT bits are accepted and ignored because the status is derived. TXTHRESH with
+ * TXTHRESH_ENA therefore stays asserted until the driver clears the enable (samsung_tty.c does).
  */
 #include "coolvm.h"
 
@@ -36,6 +35,7 @@
 #define UTXH 0x20
 #define URXH 0x24
 #define UBRDIV 0x28
+#define UFRACVAL 0x2c
 
 #define UCON_RXTO_ENA (1u << 9)
 #define UCON_RXTO_LEGACY_ENA (1u << 11)
@@ -43,7 +43,7 @@
 #define UCON_TXTHRESH_ENA (1u << 13)
 
 static struct {
-    uint32_t ulcon, ucon, ufcon, umcon, ubrdiv;
+    uint32_t ulcon, ucon, ufcon, umcon, ubrdiv, ufracval;
     uint8_t rx[256];
     int rxh, rxn;
     bool stdin_thread;
@@ -55,16 +55,20 @@ static bool tio_saved;
 
 static uint32_t utrstat_val(void)
 {
+    /* Mirrors m1n1 src/hv/hv_vuart.c update_irq(): IRQ status bits are derived from UCON
+     * (mode field = 1 means "interrupt") and the FIFO state. */
     uint32_t v = (1u << 1) | (1u << 2); /* TX buffer empty, TX empty */
-    if (u.rxn)
+    bool rx_irq_mode = (u.ucon & 3) == 1, tx_irq_mode = ((u.ucon >> 2) & 3) == 1;
+    if (u.rxn) {
         v |= 1u;
-    if ((u.ucon & UCON_RXTHRESH_ENA) && u.rxn)
-        v |= 1u << 4;
-    if ((u.ucon & UCON_RXTO_ENA) && u.rxn)
-        v |= 1u << 9;
-    if ((u.ucon & UCON_RXTO_LEGACY_ENA) && u.rxn)
-        v |= 1u << 3;
-    if (u.ucon & UCON_TXTHRESH_ENA)
+        if (rx_irq_mode) {
+            /* Deviation: hardware raises RXTHRESH at the UFCON trigger level; we raise it for any byte. */
+            if (u.ucon & UCON_RXTHRESH_ENA) v |= 1u << 4;
+            if (u.ucon & UCON_RXTO_ENA) v |= 1u << 9;
+            if (u.ucon & UCON_RXTO_LEGACY_ENA) v |= 1u << 3;
+        }
+    }
+    if (tx_irq_mode && (u.ucon & UCON_TXTHRESH_ENA))
         v |= 1u << 5;
     return v;
 }
@@ -123,6 +127,7 @@ bool uart_mmio(cpu_t *c, uint64_t off, int size, bool wr, uint64_t *val)
             break;
         }
         case UBRDIV: u.ubrdiv = v; break;
+        case UFRACVAL: u.ufracval = v; break;
         default:
             LOGE("uart: write to unknown register +0x%llx = 0x%x\n", (unsigned long long)off, v);
             return false;
@@ -150,6 +155,7 @@ bool uart_mmio(cpu_t *c, uint64_t off, int size, bool wr, uint64_t *val)
         }
         break;
     case UBRDIV: r = u.ubrdiv; break;
+    case UFRACVAL: r = u.ufracval; break;
     default:
         LOGE("uart: read from unknown register +0x%llx\n", (unsigned long long)off);
         return false;

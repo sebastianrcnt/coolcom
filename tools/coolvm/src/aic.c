@@ -3,11 +3,11 @@
  *
  * Register map: linux drivers/irqchip/irq-apple-aic.c (AIC_* defines and the
  * offsets computed in aic_of_ic_init() for version 1) and m1n1 src/aic_regs.h:
- *   0x0004 INFO        [15:0] NR_IRQ   (t8103: 896)
+ *   0x0004 INFO        [15:0] NR_IRQ   (t8103: 896; reads 0x000a0380 on real hardware)
  *   0x0010 CONFIG
  *   0x2000 WHOAMI      index of the reading CPU (Linux WARNs if != cpu id)
  *   0x2004 EVENT       read = ack: type<<16 | num, 0 if none; auto-masks the IRQ
- *   0x2008 IPI_SEND    bit n: OTHER IPI to cpu n            (non-fast-IPI path)
+ *   0x2008 IPI_SEND    bit n: OTHER IPI to cpu n, bit 31: SELF IPI (non-fast-IPI path)
  *   0x200c IPI_ACK     bit0 OTHER, bit31 SELF
  *   0x2024 IPI_MASK_SET / 0x2028 IPI_MASK_CLR
  *   0x3000 TARGET_CPU[irq] (4 bytes each, cpu bitmask)
@@ -43,6 +43,7 @@
 #define AIC_CPU_BASE 0x5000
 
 #define AIC_NR_IRQ 896
+#define AIC_INFO_VALUE 0x000a0380 /* value read from a real M1 (docs: dev-quickstart), NR_IRQ = 0x380 */
 #define AIC_MAX_IRQ 0x400
 #define AIC_WORDS (AIC_MAX_IRQ / 32)
 
@@ -249,7 +250,7 @@ bool aic_mmio(cpu_t *c, uint64_t off, int size, bool wr, uint64_t *val)
         return true;
     } else {
         switch (off) {
-        case AIC_INFO: if (wr) return false; r = AIC_NR_IRQ; break;
+        case AIC_INFO: if (wr) return false; r = AIC_INFO_VALUE; break;
         case AIC_CONFIG: if (wr) a.config = v; else r = a.config; break;
         case AIC_WHOAMI: if (wr) return false; r = (uint32_t)c->idx; break;
         case AIC_EVENT: if (wr) return false; r = event_read(c->idx); break;
@@ -257,8 +258,9 @@ bool aic_mmio(cpu_t *c, uint64_t off, int size, bool wr, uint64_t *val)
             if (!wr) return false;
             for (int i = 0; i < g.ncpus; i++) {
                 if (v & (1u << i)) a.ipi_pend[i] |= AIC_IPI_OTHER;
-                if (v & (1u << (16 + i))) a.ipi_pend[i] |= AIC_IPI_SELF;
             }
+            if (v & AIC_IPI_SELF)
+                a.ipi_pend[c->idx] |= AIC_IPI_SELF;
             break;
         case AIC_IPI_ACK:
             if (!wr) return false;

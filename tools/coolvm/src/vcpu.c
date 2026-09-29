@@ -30,6 +30,7 @@
 #define SR_PMCR0 SR(3, 1, 15, 0, 0)
 #define SR_UPMCR0 SR(3, 7, 15, 0, 4)
 #define SR_UPMSR SR(3, 7, 15, 6, 4)
+#define SR_CNTPCT SR(3, 3, 14, 0, 1) /* traps under Hypervisor.framework */
 
 #define PSCI_SYSTEM_OFF 0x84000008ULL
 #define PSCI_SYSTEM_RESET 0x84000009ULL
@@ -275,6 +276,24 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
         *reg = aic_regname(off);
         *offp = off;
         ok = aic_mmio(c, off, size, wr, val);
+    } else if (pa >= FINISHER_BASE && pa < FINISHER_BASE + FINISHER_SIZE) {
+        *dev = "finisher";
+        *reg = "FINISH";
+        *offp = pa - FINISHER_BASE;
+        ok = true;
+        if (wr && *offp == 0) {
+            uint32_t v = (uint32_t)*val;
+            if ((v & 0xffff) == 0x5555 || (v & 0xffff) == 0x7777)
+                vm_stop(0, "finisher: power off");
+            else if ((v & 0xffff) == 0x3333)
+                vm_stop((int)(v >> 16) & 0xff, "finisher: exit");
+            else
+                ok = false;
+        } else if (wr || *offp != 0) {
+            ok = false;
+        } else {
+            *val = 0;
+        }
     } else {
         *dev = NULL;
         return false;
@@ -384,9 +403,34 @@ static void handle_sysreg(cpu_t *c, uint64_t esr)
     case SR_PMCR0: name = "PMCR0_EL1"; scratch = &c->pmcr0; break;
     case SR_UPMCR0: name = "UPMCR0_EL1"; scratch = &c->upmcr0; break;
     case SR_UPMSR: name = "UPMSR_EL1"; if (!rd) name = NULL; break; /* RO: reads 0 */
+    case SR_CNTPCT:
+        if (rd) {
+            name = "CNTPCT_EL0";
+            v = cntpct();
+        }
+        break;
     default: break;
     }
 
+    if (!name && g.el2) {
+        /* EL2 mode: EL2 registers that Hypervisor.framework virtualizes in software trap to us;
+         * the hv_sys_reg_t values use the same op0/op1/CRn/CRm/op2 packing as SR(). */
+        uint64_t hv = 0;
+        hv_return_t hr;
+        if (rd)
+            hr = hv_vcpu_get_sys_reg(c->vcpu, (hv_sys_reg_t)enc, &hv);
+        else
+            hr = hv_vcpu_set_sys_reg(c->vcpu, (hv_sys_reg_t)enc, v);
+        if (hr == HV_SUCCESS) {
+            if (g.trace_mmio)
+                fprintf(stderr, "sysreg cpu%d %s S%u_%u_C%u_C%u_%u (forwarded to hv) 0x%llx pc=0x%llx\n", c->idx, rd ? "R" : "W",
+                        op0, op1, crn, crm, op2, (unsigned long long)(rd ? hv : v), (unsigned long long)pc);
+            if (rd)
+                gpr_set(c, rt, hv);
+            set_pc(c, pc + 4);
+            return;
+        }
+    }
     if (!name) {
         LOGE("cpu%d: UNKNOWN system register %s S%u_%u_C%u_C%u_%u pc=0x%llx%s\n", c->idx, rd ? "read" : "write", op0, op1,
              crn, crm, op2, (unsigned long long)pc, rd ? "" : "");
@@ -485,16 +529,35 @@ static bool vcpu_create(cpu_t *c, uint64_t entry, uint64_t x0)
         vm_stop(1, "vcpu create failed");
         return false;
     }
-    r = hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_MPIDR_EL1, c->mpidr);
-    if (r != HV_SUCCESS)
-        LOGE("cpu%d: setting MPIDR_EL1 failed: 0x%x (guest will see the host's)\n", c->idx, r);
+    if (g.el2) {
+        r = hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_VMPIDR_EL2, c->mpidr);
+        if (r != HV_SUCCESS)
+            LOGE("cpu%d: setting VMPIDR_EL2 failed: 0x%x\n", c->idx, r);
+        /* Hand-over state of m1n1 (src/exception.c): E2H|TGE (VHE host), RW, AMO|IMO|FMO,
+         * TEA, API|APK; SCTLR_EL2 has MMU and caches off. */
+        hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_HCR_EL2,
+                            (1ULL << 41) | (1ULL << 40) | (1ULL << 37) | (1ULL << 34) | (1ULL << 31) |
+                                (1ULL << 27) | (1ULL << 5) | (1ULL << 4) | (1ULL << 3));
+        hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_SCTLR_EL2, 0x30c50830ULL);
+        if (verbose) {
+            uint64_t hcr = 0, mp = 0;
+            hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_HCR_EL2, &hcr);
+            hv_vcpu_get_sys_reg(c->vcpu, HV_SYS_REG_MPIDR_EL1, &mp);
+            LOGE("cpu%d: EL2 guest: HCR_EL2=0x%llx MPIDR_EL1=0x%llx\n", c->idx, (unsigned long long)hcr, (unsigned long long)mp);
+        }
+        hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_CPTR_EL2, 3ULL << 20 | (1ULL << 28)); /* E2H: FPEN=3 */
+    } else {
+        r = hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_MPIDR_EL1, c->mpidr);
+        if (r != HV_SUCCESS)
+            LOGE("cpu%d: setting MPIDR_EL1 failed: 0x%x (guest will see the host's)\n", c->idx, r);
+    }
     hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_SCTLR_EL1, SCTLR_EL1_INIT);
     hv_vcpu_set_sys_reg(c->vcpu, HV_SYS_REG_CPACR_EL1, 3ULL << 20); /* FP/SIMD not trapped */
     hv_vcpu_set_vtimer_offset(c->vcpu, g.cntvoff);
     for (int i = 0; i < 31; i++)
         hv_vcpu_set_reg(c->vcpu, HV_REG_X0 + i, 0);
     hv_vcpu_set_reg(c->vcpu, HV_REG_X0, x0);
-    hv_vcpu_set_reg(c->vcpu, HV_REG_CPSR, CPSR_EL1H_MASKED);
+    hv_vcpu_set_reg(c->vcpu, HV_REG_CPSR, g.el2 ? 0x3c9ULL : CPSR_EL1H_MASKED);
     hv_vcpu_set_reg(c->vcpu, HV_REG_PC, entry);
     atomic_store(&c->started, true);
     return true;

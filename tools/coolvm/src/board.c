@@ -39,8 +39,10 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
 
     fdt_begin(f, "");
     {
-        const char *compat[] = {"coolcom,coolvm", "apple,t8103", "apple,arm-platform"};
-        fdt_prop_strs(f, "compatible", compat, 3);
+        /* First entry marks the VM (kernels can detect it); the rest is the j274 (Mac mini M1)
+         * list from t8103-j274.dts, which is what m1n1's payload loader matches on. */
+        const char *compat[] = {"coolcom,coolvm", "apple,j274", "apple,t8103", "apple,arm-platform"};
+        fdt_prop_strs(f, "compatible", compat, 4);
     }
     fdt_prop_str(f, "model", "coolvm (emulated Apple M1 t8103)");
     fdt_prop_u32(f, "#address-cells", 2);
@@ -115,6 +117,14 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
         fdt_prop_strs(f, "clock-names", cn, 2);
     }
     fdt_prop_str(f, "status", "okay");
+    fdt_end(f);
+
+    fdt_begin(f, "finisher@1ff000000");
+    fdt_prop_str(f, "compatible", "coolcom,coolvm-finisher");
+    {
+        uint32_t reg[4] = {(uint32_t)(FINISHER_BASE >> 32), (uint32_t)FINISHER_BASE, 0, (uint32_t)FINISHER_SIZE};
+        fdt_prop_cells(f, "reg", reg, 4);
+    }
     fdt_end(f);
 
     fdt_begin(f, "interrupt-controller@23b100000");
