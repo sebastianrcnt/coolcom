@@ -69,7 +69,12 @@ CHashClass *AssignRawTypeToNode(CRPN *r) {
     switch (r->type) {
         break; case IC_IMM_I64: return r->ic_class = cmp.internal_types[RT_I64];
             break; case IC_IMM_F64: return r->ic_class = cmp.internal_types[RT_F64];
+            // FIX(9): A string constant is a U8 *, so "str"[i] loads one byte.
+#ifdef COOLC_FRONTEND_FIXES
+            break; case IC_STR_CONST: return r->ic_class = cmp.internal_types[RT_U8] + 1;
+#else
             break; case IC_STR_CONST: return r->ic_class = cmp.internal_types[RT_PTR];
+#endif
             break; case IC_ADDR_IMPORT:
             if (r->glbl_var->type & HTT_FUN) {
                 return r->glbl_var;
