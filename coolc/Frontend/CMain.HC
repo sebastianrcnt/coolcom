@@ -387,7 +387,9 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
         }
 
         *ptr++ = IET_END;
-        MemSet(ptr, 0, 16);
+        // FIX(native): The file copies 31 bytes past IET_END; zero them all, not 16, or
+        // the BIN ends in whatever MAlloc left there (the kernel heap poisons it).
+        MemSet(ptr, 0, 31);
         i = ptr - patch_table;
         //Needs 16 ALIGN
         size = (sizeof(CBinFile) + aot_U8s + i + 15) + 16;
