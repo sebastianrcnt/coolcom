@@ -31,24 +31,36 @@ fixed point and compile `os/Kernel/Kernel.HC` to the same BIN as Aiwnios.
 `tools/native/bootstrap.sh [out.BIN]` builds a stage-zero image from the owned
 frontend and runtime sources plus the existing backend. In a separate worktree,
 set `AIWNIOS_DIR` and `AIWNIOS_BIN` to the built stage-zero Aiwnios checkout.
-The script copies sources into `build/native-src` and renames colliding backend
-helpers there; it never changes the tracked backend translation.
+The backend's colliding helper names are resolved in `coolc/Compiler` itself;
+the script only copies the tracked sources into `build/native-src`.
 
-The current image compiles with `Errs:0`, but still has unresolved native
-runtime imports. This is a source integration check, not an executable native
-compiler yet. The native host probe (`coolc/Host/test.sh`) verifies BIN loading,
-relocation, initializers, and an exported function independently.
+The default build leaves frontend fixes 6 and 7 disabled for baseline parity.
+After native 24/24 codegen, compiler self-build, and kernel parity succeed, use
+`NATIVE_FIXES=1 tools/native/bootstrap.sh` to enable those changes and compare
+only the affected outputs. Aggregate value assignment (bug 5) is deferred until
+after the parity milestones.
+
+`tools/native/check.sh` verifies the baseline: all 24 codegen modules match
+Aiwnios under `bincmp.py`, the complete second and third generation compiler
+BINs match byte for byte, and the kernel matches Aiwnios under `bincmp.py`.
+`bincmp.py` clears import and heap relocation slots before comparing machine
+code; those slots hold process addresses until the BIN loader patches them.
+The compiler's own BIN clears those slots when it writes them, giving the
+required full-file fixed point. `make AIWNIOS=/path/to/aiwnios native-kernel`
+builds the optional `build/Kernel.native.BIN` through the self-built compiler.
+
+`tools/native/behavior.sh` prepares a compiler with fixes 6 and 7 enabled,
+compiles and executes the native 6, 7, and 8 behavior cases, and compares their
+printed probe results against expected output. Bug 5 remains deferred until
+after the parity and fixed point milestones.
 
 ## Current integration risks
 
 - Aiwnios' `HCRT2.BIN` contains the whole graphical kernel, so it is unsuitable
   as the native compiler image. The compiler needs its own source bundle and
   a small set of runtime services.
-- The frontend expects `Fs`, task heaps, exception handling, hashes, strings,
-  and file access from the TempleOS runtime. Those calls must be supplied by
-  the owned HolyC runtime or by the small C host before a compiler BIN can run.
-- The frontend bugs documented in `tests/behavior/frontend/README.md` must
-  be fixed in the owned frontend copy, then covered by native behavior tests.
-- Frontend fixes 6, 7, and 8 have source changes and native test inputs, but
-  their execution checks must wait until the native runtime can run the
-  compiler image. Class value assignment (5) still needs aggregate IR lowering.
+- The small host still contains diagnostic traps for imports that the current
+  compiler and validation paths never call. A future larger runtime workload
+  can expose a missing service through a named trap.
+- Class value assignment (bug 5) still needs aggregate IR lowering. Fixes 6
+  and 7 are guarded by `COOLC_FRONTEND_FIXES` so baseline parity stays testable.

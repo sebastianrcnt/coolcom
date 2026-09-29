@@ -1,2 +1,2 @@
 F64 f = 18446744073709551616.0;
-Print("%X\n", f(I64i));
+I64i LargeFloatBits() {return f(I64i);}
