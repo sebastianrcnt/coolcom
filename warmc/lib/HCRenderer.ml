@@ -50,6 +50,7 @@ let render units entry =
     | CPointer t -> typ t ^ " *"
     | CNamedType n -> (match n with
       | "au_unit_t" | "au_bool_t" | "au_region_t" | "au_nat8_t" | "uint8_t" -> "U8"
+      | "void" -> "U0"
       | "au_int8_t" -> "I8" | "au_nat16_t" -> "U16" | "au_int16_t" -> "I16"
       | "au_nat32_t" -> "U32" | "au_int32_t" -> "I32"
       | "au_nat64_t" | "au_index_t" | "size_t" -> "U64"
@@ -205,7 +206,7 @@ let render units entry =
   and call n t args =
     let args = List.map (fun e ->
       let v = expr e in if aggregate (typeof e) then "&" ^ par v else v) args in
-    if t = CNamedType "au_unit_t" && Hashtbl.mem foreign n then begin
+    if (t = CNamedType "au_unit_t" || t = CNamedType "void") && Hashtbl.mem foreign n then begin
       (* HolyC U0 has no value. Warm Unit is represented by a dummy byte. *)
       emit (n ^ "(" ^ join args ^ ");"); "0"
     end else if aggregate t then begin

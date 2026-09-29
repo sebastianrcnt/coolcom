@@ -92,7 +92,7 @@ Current deliberate limits:
 - `@embed` supports the builtin arithmetic, numeric casts, memory/span and
   printing patterns; arbitrary C syntax is rejected with a backend diagnostic.
 - Foreign imports call their HolyC symbol verbatim. Scalar integers, booleans,
-  Float64, Unit/U0, pointers, references and span inputs are supported. The symbol must
+  Float64, Unit/U0, pointers and span inputs are supported. The symbol must
   already be declared by an included HolyC header or adapter. Span arguments
   decay to pointers; pass their length explicitly. Aggregate/span returns need
   an explicit adapter; arbitrary C libraries are not automatically available.
@@ -237,7 +237,9 @@ a rectangle whose exact pixels are checked in the VM screenshot; Key waits
 for a scripted 'x' through Key.HC. Errors injects a throwing FileWrite at the
 adapter boundary and checks exception conversion, missing files, memory
 bounds and string operations. Four negative compilation fixtures check
-capabilities and linear ownership. Logs, generated sources, disk and
+capabilities and linear ownership. A native execution fixture also checks
+general Unit/U0, integer and span foreign calls, with a C-side void-return
+regression in the compiler suite. Logs, generated sources, disk and
 screenshots remain in `build/warm-kernel`.
 
 Root `make test` includes `warm-kernel-test`. The existing

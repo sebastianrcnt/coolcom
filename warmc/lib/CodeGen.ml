@@ -586,8 +586,8 @@ let gen_decl (env: env) (mn: module_name) (decl: mdecl): c_decl list =
      in
      let return_type_to_c_type t =
        match t with
-       | _ ->
-          param_type_to_c_type t
+       | MonoUnit -> CNamedType "void"
+       | _ -> param_type_to_c_type t
      in
      let ff_params = List.map (fun (MValueParameter (n, t)) -> CValueParam (gen_ident n, param_type_to_c_type t)) params
      and ff_rt = return_type_to_c_type rt in
@@ -601,10 +601,10 @@ let gen_decl (env: env) (mn: module_name) (decl: mdecl): c_decl list =
      in
      let args = List.map (fun (MValueParameter (n, t)) -> make_param n t) params in
      let funcall = CFuncall (underlying, args) in
-     let body = CBlock [
-                    ff_local_decl;
-                    CReturn funcall
-                  ] in
+     let body = CBlock (ff_local_decl ::
+       (match rt with
+        | MonoUnit -> [CDiscarding funcall; CReturn (CInt "0")]
+        | _ -> [CReturn funcall])) in
      let def = CFunctionDefinition (def_d, gen_decl_id id, gen_params mn params, gen_type rt, body) in
      [def]
   | MConcreteInstance (_, _, _, methods) ->

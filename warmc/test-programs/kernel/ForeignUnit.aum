@@ -1,0 +1,17 @@
+pragma Unsafe_Module;
+module body ForeignUnit is
+    pragma Foreign_Import(External_Name => "Print");
+    function emit(text: Span[Nat8, Static]): Unit is
+    end;
+    pragma Foreign_Import(External_Name => "StrLen");
+    function size(text: Span[Nat8, Static]): Int64 is
+    end;
+    function main(): ExitCode is
+        if size("abc") = 3 then
+            emit("FOREIGN UNIT PASS\n");
+            return ExitSuccess();
+        else
+            return ExitFailure();
+        end if;
+    end;
+end module body.

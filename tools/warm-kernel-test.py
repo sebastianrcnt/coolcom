@@ -36,6 +36,16 @@ def main():
         (OUT / (name + ".log")).write_text(diagnostic_text)
         assert result.returncode and diagnostic in diagnostic_text, diagnostic_text
         print("warm-kernel: rejects " + name, flush=True)
+    # Exercise Unit/U0, scalar and decayed-span foreign calls directly.
+    foreign_hc = OUT / "ForeignUnit.HC"
+    foreign_bin = OUT / "ForeignUnit.BIN"
+    run(ROOT / "warmc/warmc", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.aum",
+        "--entrypoint=ForeignUnit:main", "--target-type=hc", "--output=" + str(foreign_hc))
+    compiled = run("env", "COOLC_COMPILER_BIN=" + str(ROOT / "coolc/seed/Compiler.BIN"),
+                   ROOT / "build/coolc", foreign_hc, foreign_bin)
+    assert b"Errs:0 " in compiled.stdout, compiled.stdout
+    assert run(ROOT / "build/coolc", "--run", foreign_bin).stdout == b"FOREIGN UNIT PASS\n"
+    print("warm-kernel: native foreign Unit/scalar/span PASS", flush=True)
     disk = OUT / "disk.img"
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
