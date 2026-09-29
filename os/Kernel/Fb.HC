@@ -11,6 +11,9 @@ class CFb
     I64 w, h, stride, cols, rows, cx, cy, fg, bg;
     I64 cur_drawn;             // the cursor block is currently XORed onto the screen
     I64 u8_left, u8_cp;        // UTF-8 sequence being received
+    I64 esc, csi_n, csi_val[8], csi_private, bold;
+    U8 *saved_pixels, *saved_cw;
+    I64 saved_cx, saved_cy, saved_fg, saved_bg, alternate;
     U8 *cw;                    // per cell: 1 = narrow or blank, 2 = left half of a wide glyph, 0 = its right half
 };
 
@@ -173,10 +176,151 @@ U0 FbClear()
     FbCursorShow;
 }
 
+I64 FbAnsiColor(I64 n)
+{// Standard ANSI palette in 0xRRGGBB.
+    switch (n & 15) {
+        case 0: return 0x000000;
+        case 1: return 0xAA0000;
+        case 2: return 0x00AA00;
+        case 3: return 0xAA5500;
+        case 4: return 0x0000AA;
+        case 5: return 0xAA00AA;
+        case 6: return 0x00AAAA;
+        case 7: return 0xAAAAAA;
+        case 8: return 0x555555;
+        case 9: return 0xFF5555;
+        case 10: return 0x55FF55;
+        case 11: return 0xFFFF55;
+        case 12: return 0x5555FF;
+        case 13: return 0xFF55FF;
+        case 14: return 0x55FFFF;
+        case 15: return 0xFFFFFF;
+    }
+    return 0;
+
+}
+
+I64 FbParam(I64 i, I64 def)
+{
+    if (i > fb.csi_n || !fb.csi_val[i])
+        return def;
+    return fb.csi_val[i];
+}
+
+U0 FbErase(I64 x1, I64 y1, I64 x2, I64 y2)
+{
+    I64 x, y;
+    for (y = y1; y <= y2; y++)
+        for (x = x1; x <= x2; x++)
+            FbBlank(x, y);
+}
+
+U0 FbAlt(Bool on)
+{
+    I64 bytes = fb.stride * fb.h, cells = fb.cols * fb.rows;
+    if (on && !fb.alternate) {
+        if (!fb.saved_pixels) {
+            fb.saved_pixels = MAlloc(bytes);
+            fb.saved_cw = MAlloc(cells);
+        }
+        MemCpy(fb.saved_pixels, fb.base, bytes);
+        MemCpy(fb.saved_cw, fb.cw, cells);
+        fb.saved_cx = fb.cx;
+        fb.saved_cy = fb.cy;
+        fb.saved_fg = fb.fg;
+        fb.saved_bg = fb.bg;
+        fb.alternate = TRUE;
+        FbClear;
+    } else if (!on && fb.alternate) {
+        MemCpy(fb.base, fb.saved_pixels, bytes);
+        MemCpy(fb.cw, fb.saved_cw, cells);
+        fb.cx = fb.saved_cx;
+        fb.cy = fb.saved_cy;
+        fb.fg = fb.saved_fg;
+        fb.bg = fb.saved_bg;
+        fb.alternate = FALSE;
+        fb.cur_drawn = FALSE;
+    }
+}
+
+U0 FbCsi(U8 c)
+{
+    I64 i, n = fb.csi_val[0], x, y;
+    if (fb.csi_private) {
+        if ((c == 'h' || c == 'l') && (n == 1049 || n == 47))
+            FbAlt(c == 'h');
+        return;
+    }
+    switch (c) {
+        case 'm':
+            for (i = 0; i <= fb.csi_n; i++) {
+                n = fb.csi_val[i];
+                if (!n) {fb.fg = 0xFFFFFF; fb.bg = 0; fb.bold = FALSE;}
+                else if (n == 1) fb.bold = TRUE;
+                else if (n == 22) fb.bold = FALSE;
+                else if (n == 39) fb.fg = 0xFFFFFF;
+                else if (n == 49) fb.bg = 0;
+                else if (n >= 30 && n <= 37) fb.fg = FbAnsiColor(n - 30 + 8 * fb.bold);
+                else if (n >= 40 && n <= 47) fb.bg = FbAnsiColor(n - 40);
+                else if (n >= 90 && n <= 97) fb.fg = FbAnsiColor(n - 90 + 8);
+                else if (n >= 100 && n <= 107) fb.bg = FbAnsiColor(n - 100 + 8);
+            }
+            break;
+        case 'H': case 'f':
+            fb.cy = FbParam(0, 1) - 1;
+            fb.cx = FbParam(1, 1) - 1;
+            break;
+        case 'A': fb.cy -= FbParam(0, 1); break;
+        case 'B': fb.cy += FbParam(0, 1); break;
+        case 'C': fb.cx += FbParam(0, 1); break;
+        case 'D': fb.cx -= FbParam(0, 1); break;
+        case 'G': fb.cx = FbParam(0, 1) - 1; break;
+        case 'd': fb.cy = FbParam(0, 1) - 1; break;
+        case 'J':
+            if (n == 2 || n == 3) FbErase(0, 0, fb.cols - 1, fb.rows - 1);
+            else if (n == 0) {
+                FbErase(fb.cx, fb.cy, fb.cols - 1, fb.cy);
+                for (y = fb.cy + 1; y < fb.rows; y++) FbErase(0, y, fb.cols - 1, y);
+            } else if (n == 1) {
+                for (y = 0; y < fb.cy; y++) FbErase(0, y, fb.cols - 1, y);
+                FbErase(0, fb.cy, fb.cx, fb.cy);
+            }
+            break;
+        case 'K':
+            x = fb.cx;
+            y = fb.cols - 1;
+            if (n == 1) {x = 0; y = fb.cx;}
+            else if (n == 2) x = 0;
+            FbErase(x, fb.cy, y, fb.cy);
+            break;
+    }
+    if (fb.cx < 0) fb.cx = 0;
+    if (fb.cx >= fb.cols) fb.cx = fb.cols - 1;
+    if (fb.cy < 0) fb.cy = 0;
+    if (fb.cy >= fb.rows) fb.cy = fb.rows - 1;
+}
+
 U0 FbPutC1(U8 c)
 {//Console output: \n \r \b \t are handled, other control codes are ignored. UTF-8 is decoded;
     //a character takes Utf8Width columns, like on a terminal, so \b (one column) matches the
     //shell's line editing, which backs up by columns.
+    if (fb.esc == 1) {
+        fb.esc = 0;
+        if (c == '[') {
+            fb.esc = 2;
+            fb.csi_n = fb.csi_private = 0;
+            MemSet(fb.csi_val, 0, sizeof(fb.csi_val));
+        }
+        return;
+    }
+    if (fb.esc == 2) {
+        if (c == '?' && !fb.csi_n && !fb.csi_val[0]) fb.csi_private = TRUE;
+        else if (c >= '0' && c <= '9') fb.csi_val[fb.csi_n] = fb.csi_val[fb.csi_n] * 10 + c - '0';
+        else if (c == ';' && fb.csi_n < 7) fb.csi_n++;
+        else {fb.esc = 0; FbCsi(c);}
+        return;
+    }
+    if (c == 27) {fb.esc = 1; fb.u8_left = 0; return;}
     if (c >= 0x80) {
         if (Utf8Len(c) > 1) {
             fb.u8_left = Utf8Len(c) - 1;
