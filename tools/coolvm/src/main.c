@@ -48,6 +48,8 @@ static void usage(void)
             "  --input-script F  preload input events (type code value, one per line)\n"
             "  --disk F        attach writable raw image; repeat up to four times\n"
             "  --net           attach a virtio-net NIC behind a user-mode NAT (guest 10.0.2.15, gateway 10.0.2.2)\n"
+            "  --net-forward [ADDR:]HOST:GUEST  forward TCP host port HOST (on ADDR, default 127.0.0.1) to guest\n"
+            "                  port GUEST; repeatable, implies --net\n"
             "The optional kernel.dtb replaces the generated device tree verbatim (no fix-ups are applied).\n"
             "stdout = guest UART, stderr = coolvm diagnostics. Exit status: 0 guest power-off, 124 timeout, 1 fatal.\n"
             "A guest reset (finisher 0x7777) starts coolvm again with the same options, without --input-script.\n",
@@ -137,7 +139,7 @@ int main(int argc, char **argv)
         {"headless", no_argument, 0, 'H'}, {"screenshot", required_argument, 0, 'S'},
         {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
-        {"net", no_argument, 0, 'N'},
+        {"net", no_argument, 0, 'N'}, {"net-forward", required_argument, 0, 'F'},
         {0, 0, 0, 0}};
     int o;
     while ((o = getopt_long(argc, argv, "h", opts, NULL)) != -1) {
@@ -155,6 +157,7 @@ int main(int argc, char **argv)
         case 'v': verbose = true; break;
         case 'H': g.headless = true; break;
         case 'N': g.net = true; break;
+        case 'F': if (!net_add_forward(optarg)) { fprintf(stderr, "coolvm: bad --net-forward %s\n", optarg); return 2; } break;
         case 'S': g.screenshot = optarg; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
