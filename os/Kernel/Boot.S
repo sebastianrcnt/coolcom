@@ -43,6 +43,8 @@ boot_entry:
   ldr x5, [x0, x4]
   add x5, x5, x2
   str x5, [x0, x4]
+  add x6, x0, x4
+  dc civac, x6             // drop any stale cached copy: the MMU is off, the stores bypass the caches
   sub w3, w3, #1
   b 1b
 2:
@@ -164,7 +166,7 @@ mmu_tables:
 
 mmu_enable:
   adr x0, l2_table
-  ldr x1, =0xff00
+  ldr x1, =0x44ff00   // attr0 Device-nGnRnE, attr1 Normal WB, attr2 Normal non-cacheable
   msr mair_el1, x1
   // 16K granule, 36-bit VA, 40-bit PA, inner-shareable WB walks.
   ldr x1, =((28 << 0) | (1 << 8) | (1 << 10) | (3 << 12) | (2 << 14) | (1 << 23) | (2 << 32))
@@ -184,6 +186,7 @@ mmu_enable:
 
 .section .bss
 .balign 16384
+.global l2_table
 l2_table: .space 16384
 .balign 16
 boot_stack: .space 65536

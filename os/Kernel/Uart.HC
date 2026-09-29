@@ -10,11 +10,3 @@ U0 UartPutS(U8 *s)
     while (*s)
         UartPut(*s++);
 }
-
-U0 PutChars(U64 ch)
-{
-    while (ch) {
-        UartPut(ch & 0xFF);
-        ch >>= 8;
-    }
-}

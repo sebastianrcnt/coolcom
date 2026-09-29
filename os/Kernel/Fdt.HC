@@ -12,6 +12,18 @@ I64 fdt_uart = 0x235200000, fdt_aic = 0x23B100000;
 I64 fdt_finisher, fdt_size;
 Bool fdt_vm, fdt_test;
 
+// VM devices, found by compatible string under /soc and /chosen:
+//   simple-framebuffer, coolcom,coolvm-input, virtio,mmio (any number).
+#define FDT_BLKS 4
+class CFdtDev {I64 base, size, irq;};
+CFdtDev fdt_input, fdt_blk[FDT_BLKS], fdt_fb;
+I64 fdt_nblk, fdt_fb_w, fdt_fb_h, fdt_fb_stride;
+Bool fdt_fb_32bpp;  // format x8r8g8b8 or a8r8g8b8
+// The node being parsed (leaf nodes below /soc and /chosen).
+CFdtDev fdt_nd;
+I64 fdt_nd_kind, fdt_nd_w, fdt_nd_h, fdt_nd_stride;
+Bool fdt_nd_32bpp;
+
 I64 Fdt32(U8 *p)
 {
     return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
@@ -38,6 +50,51 @@ Bool FdtEqual(U8 *a, U8 *b)
         b++;
     }
     return *a == *b;
+}
+
+Bool FdtCompat(U8 *data, I64 len, U8 *want)
+{//Is want one of the NUL-separated strings of a compatible property?
+    U8 *end = data + len;
+    while (data < end) {
+        if (FdtEqual(data, want))
+            return TRUE;
+        while (*data)
+            data++;
+        data++;
+    }
+    return FALSE;
+}
+
+U0 FdtNodeStart()
+{
+    fdt_nd.base = fdt_nd.size = fdt_nd.irq = 0;
+    fdt_nd_kind = fdt_nd_w = fdt_nd_h = fdt_nd_stride = 0;
+    fdt_nd_32bpp = FALSE;
+}
+
+U0 FdtNodeDone()
+{
+    if (fdt_nd_kind == 1) {
+        fdt_input.base = fdt_nd.base;
+        fdt_input.size = fdt_nd.size;
+        fdt_input.irq = fdt_nd.irq;
+    } else if (fdt_nd_kind == 2) {
+        if (fdt_nblk < FDT_BLKS) {
+            fdt_blk[fdt_nblk].base = fdt_nd.base;
+            fdt_blk[fdt_nblk].size = fdt_nd.size;
+            fdt_blk[fdt_nblk].irq = fdt_nd.irq;
+            fdt_nblk++;
+        }
+    } else if (fdt_nd_kind == 3 && fdt_nd_32bpp && fdt_nd_w && fdt_nd_h) {
+        fdt_fb.base = fdt_nd.base;
+        fdt_fb.size = fdt_nd.size;
+        fdt_fb_w = fdt_nd_w;
+        fdt_fb_h = fdt_nd_h;
+        fdt_fb_stride = fdt_nd_stride;
+        if (!fdt_fb_stride)
+            fdt_fb_stride = fdt_fb_w * 4;
+        fdt_fb_32bpp = TRUE;
+    }
 }
 
 U0 FdtReserve(I64 start, I64 size)
@@ -90,9 +147,13 @@ Bool FdtInit(U8 *dt)
                 if (kind[1] == 4) k = 9;
             }
             kind[depth] = k;
+            if (depth == 2 && (kind[1] == 3 || kind[1] == 10))
+                FdtNodeStart;
             while (*p) p++;
             p = ((p + 4)(I64) & ~3)(U8 *);
         } else if (tok == 2) {
+            if (depth == 2 && (kind[1] == 3 || kind[1] == 10))
+                FdtNodeDone;
             depth--;
         } else if (tok == 3) {
             len = Fdt32(p);
@@ -119,6 +180,28 @@ Bool FdtInit(U8 *dt)
                 if (kind[depth] == 7) fdt_aic = start;
                 if (kind[depth] == 8) fdt_finisher = start;
                 if (kind[depth] == 9) FdtReserve(start, size);
+            }
+            if (depth == 2 && (kind[1] == 3 || kind[1] == 10)) {
+                if (FdtEqual(str + nameoff, "reg") && len >= 16) {
+                    fdt_nd.base = Fdt64(data);
+                    fdt_nd.size = Fdt64(data + 8);
+                } else if (FdtEqual(str + nameoff, "interrupts") && len >= 8)
+                    fdt_nd.irq = Fdt32(data + 4);
+                else if (FdtEqual(str + nameoff, "compatible")) {
+                    if (FdtCompat(data, len, "coolcom,coolvm-input"))
+                        fdt_nd_kind = 1;
+                    else if (FdtCompat(data, len, "virtio,mmio"))
+                        fdt_nd_kind = 2;
+                    else if (FdtCompat(data, len, "simple-framebuffer"))
+                        fdt_nd_kind = 3;
+                } else if (FdtEqual(str + nameoff, "width") && len >= 4)
+                    fdt_nd_w = Fdt32(data);
+                else if (FdtEqual(str + nameoff, "height") && len >= 4)
+                    fdt_nd_h = Fdt32(data);
+                else if (FdtEqual(str + nameoff, "stride") && len >= 4)
+                    fdt_nd_stride = Fdt32(data);
+                else if (FdtEqual(str + nameoff, "format"))
+                    fdt_nd_32bpp = FdtEqual(data, "x8r8g8b8") || FdtEqual(data, "a8r8g8b8");
             }
             if (kind[depth] == 5) {
                 if (FdtEqual(str + nameoff, "reg") && len >= 8 && fdt_ncpu)
