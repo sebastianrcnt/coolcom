@@ -17,6 +17,8 @@
 // After a call: hcfmt_err is 0 (ok) or 1 (token check failed, input returned),
 // hcfmt_warn is 0 or 1 (unbalanced braces/quotes/comment: output may be off).
 
+#include "HCTok.HC"
+
 #define HCF_MAX    256
 #define HCF_INDENT 4  // spaces per indent level
 #define HCF_CONT_LEVELS 2  // continuation lines: this many levels past the statement
@@ -60,58 +62,39 @@ class CHCFmt
     U8 *lb;
     I64 lblen, lbcap, lend, lastcmt, tokcol, pk, plc;
     I64 pd, in_stmt, want, pend, hdr, dotail, pendsw, isenum, asm_next, incase;
-    I64 in_bc, in_str, need_ind, ind, prev, nostate;
+    I64 need_ind, ind, prev, nostate;
+    CHCTok *tk;  // lexer state, incl. the block comment and string carried over lines
 };
-
-Bool HCFIsWs(I64 c)
-{
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == 11 || c == 12;
-}
-
-Bool HCFIsId(I64 c)
-{
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-            c == '_' || c == '@';
-}
-
-Bool HCFStrEq(U8 *p, I64 n, U8 *s)
-{
-    I64 i;
-    for (i = 0; i < n; i++)
-        if (p[i] != s[i] || !s[i])
-            return FALSE;
-    return !s[n];
-}
 
 I64 HCFKw(U8 *p, I64 n)
 {
     if (n < 2 || n > 7)
         return 0;
-    if (HCFStrEq(p, n, "if"))
+    if (HCTStrEq(p, n, "if"))
         return HCFK_IF;
-    if (HCFStrEq(p, n, "else"))
+    if (HCTStrEq(p, n, "else"))
         return HCFK_ELSE;
-    if (HCFStrEq(p, n, "while"))
+    if (HCTStrEq(p, n, "while"))
         return HCFK_WHILE;
-    if (HCFStrEq(p, n, "for"))
+    if (HCTStrEq(p, n, "for"))
         return HCFK_FOR;
-    if (HCFStrEq(p, n, "do"))
+    if (HCTStrEq(p, n, "do"))
         return HCFK_DO;
-    if (HCFStrEq(p, n, "switch"))
+    if (HCTStrEq(p, n, "switch"))
         return HCFK_SWITCH;
-    if (HCFStrEq(p, n, "case"))
+    if (HCTStrEq(p, n, "case"))
         return HCFK_CASE;
-    if (HCFStrEq(p, n, "default"))
+    if (HCTStrEq(p, n, "default"))
         return HCFK_DEFAULT;
-    if (HCFStrEq(p, n, "try"))
+    if (HCTStrEq(p, n, "try"))
         return HCFK_TRY;
-    if (HCFStrEq(p, n, "catch"))
+    if (HCTStrEq(p, n, "catch"))
         return HCFK_CATCH;
-    if (HCFStrEq(p, n, "asm"))
+    if (HCTStrEq(p, n, "asm"))
         return HCFK_ASM;
-    if (HCFStrEq(p, n, "enum"))
+    if (HCTStrEq(p, n, "enum"))
         return HCFK_ENUM;
-    if (HCFStrEq(p, n, "start") || HCFStrEq(p, n, "end"))
+    if (HCTStrEq(p, n, "start") || HCTStrEq(p, n, "end"))
         return HCFK_START;
     return 0;
 }
@@ -292,7 +275,7 @@ U0 HCFTok(CHCFmt *s, I64 k, U8 *p, I64 n)
         i = n;
         if (k == 'L') {
             i = 0;
-            while (HCFIsId(p[i]))
+            while (HCTIsId(p[i]))
                 i++;
         }
         kw = HCFKw(p, i);
@@ -623,50 +606,6 @@ I64 HCFGap(CHCFmt *s, I64 ck, I64 c1)
 
 //---- token classification
 
-Bool HCFIsUp(I64 c)
-{
-    return c >= 'A' && c <= 'Z';
-}
-
-Bool HCFIsDigit(I64 c)
-{
-    return c >= '0' && c <= '9';
-}
-
-// Builtin type names: U0 U8 U16 U32 U64 I8 I16 I32 I64 F64 Bool and the raw
-// types with a trailing i.
-Bool HCFIsType(U8 *p, I64 n)
-{
-    I64 v, i;
-    if (HCFStrEq(p, n, "Bool"))
-        return TRUE;
-    if (n < 2 || n > 4 || (p[0] != 'U' && p[0] != 'I' && p[0] != 'F'))
-        return FALSE;
-    if (p[n - 1] == 'i')
-        n--;
-    if (n < 2)
-        return FALSE;
-    v = 0;
-    for (i = 1; i < n; i++) {
-        if (!HCFIsDigit(p[i]))
-            return FALSE;
-        v = v * 10 + p[i] - '0';
-    }
-    return v == 0 || v == 8 || v == 16 || v == 32 || v == 64;
-}
-
-// C+Uppercase without '_': CTask, CMemBlk, CBRPN (but not CLSF_VARGS).
-Bool HCFIsClsName(U8 *p, I64 n)
-{
-    I64 i;
-    if (n < 3 || p[0] != 'C' || !HCFIsUp(p[1]))
-        return FALSE;
-    for (i = 0; i < n; i++)
-        if (p[i] == '_')
-            return FALSE;
-    return TRUE;
-}
-
 // Is p[0..n) a class or union declared in this file (class Name / union Name)?
 Bool HCFKnownCls(CHCFmt *s, U8 *p, I64 n)
 {
@@ -685,14 +624,14 @@ U0 HCFFindClasses(CHCFmt *s, U8 *src)
 {
     U8 *p = src, *q;
     while (*p) {
-        if ((p == src || !HCFIsId(p[-1])) &&
-                (HCFStrEq(p, 5, "class") || HCFStrEq(p, 5, "union")) && !HCFIsId(p[5])) {
+        if ((p == src || !HCTIsId(p[-1])) &&
+                (HCTStrEq(p, 5, "class") || HCTStrEq(p, 5, "union")) && !HCTIsId(p[5])) {
             q = p + 5;
             while (*q == ' ' || *q == '\t')
                 q++;
-            if (HCFIsUp(*q) && s->ncls < HCF_NCLS) {
+            if (HCTIsUp(*q) && s->ncls < HCF_NCLS) {
                 s->cnp[s->ncls] = q;
-                while (HCFIsId(*q))
+                while (HCTIsId(*q))
                     q++;
                 s->cnl[s->ncls] = q - s->cnp[s->ncls];
                 s->ncls++;
@@ -703,61 +642,20 @@ U0 HCFFindClasses(CHCFmt *s, U8 *src)
     }
 }
 
-// Words that are followed by a space and are not operands.
-Bool HCFIsKwSp(U8 *p, I64 n)
-{
-    return HCFStrEq(p, n, "if") || HCFStrEq(p, n, "else") || HCFStrEq(p, n, "while") ||
-            HCFStrEq(p, n, "for") || HCFStrEq(p, n, "do") || HCFStrEq(p, n, "switch") ||
-            HCFStrEq(p, n, "case") || HCFStrEq(p, n, "try") || HCFStrEq(p, n, "catch") ||
-            HCFStrEq(p, n, "return") || HCFStrEq(p, n, "goto");
-}
-
-// Modifiers that come before a declaration.
-Bool HCFIsMod(U8 *p, I64 n)
-{
-    return HCFStrEq(p, n, "extern") || HCFStrEq(p, n, "public") ||
-            HCFStrEq(p, n, "static") || HCFStrEq(p, n, "reg") || HCFStrEq(p, n, "noreg") ||
-            HCFStrEq(p, n, "import") || HCFStrEq(p, n, "export") ||
-            HCFStrEq(p, n, "_extern") || HCFStrEq(p, n, "_import") ||
-            HCFStrEq(p, n, "_intern") || HCFStrEq(p, n, "interrupt") ||
-            HCFStrEq(p, n, "haserrcode") || HCFStrEq(p, n, "argpop");
-}
-
 // Class of an identifier or number (p[0..n)).
 I64 HCFWordClass(CHCFmt *s, U8 *p, I64 n)
 {
-    if (HCFIsDigit(p[0]) || p[0] == '.' || s->pk == HCFS_DOT)
+    if (HCTIsDigit(p[0]) || p[0] == '.' || s->pk == HCFS_DOT)
         return HCFS_ID;  // numbers and member names
-    if (HCFIsKwSp(p, n))
+    if (HCTIsKwSp(p, n))
         return HCFS_KW;
-    if (HCFIsMod(p, n))
+    if (HCTIsMod(p, n))
         return HCFS_MOD;
-    if (HCFIsType(p, n))
+    if (HCTIsType(p, n))
         return HCFS_TYPE;
-    if ((HCFIsClsName(p, n) || HCFKnownCls(s, p, n)) && HCFDeclStart(s->pk))
+    if ((HCTIsClsName(p, n) || HCFKnownCls(s, p, n)) && HCFDeclStart(s->pk))
         return HCFS_CLSD;
     return HCFS_ID;
-}
-
-// End of the number starting at ls[i]: 0x1F, 1.5e-3, .5, stops before "...".
-I64 HCFNumEnd(U8 *ls, I64 i, I64 n)
-{
-    I64 j = i;
-    Bool hex = FALSE;
-    if (ls[j] == '0' && j + 1 < n && (ls[j + 1] == 'x' || ls[j + 1] == 'X'))
-        hex = TRUE;
-    while (j < n) {
-        if (HCFIsId(ls[j])) {
-            j++;
-            if (!hex && (ls[j - 1] == 'e' || ls[j - 1] == 'E') && j + 1 < n &&
-                    (ls[j] == '+' || ls[j] == '-') && HCFIsDigit(ls[j + 1]))
-                j++;
-        } else if (ls[j] == '.' && !(j + 1 < n && ls[j + 1] == '.'))
-            j++;
-        else
-            break;
-    }
-    return j;
 }
 
 //---- line buffer
@@ -812,11 +710,9 @@ U0 HCFPk(CHCFmt *s, I64 ck, I64 lc)
 // Handle the punctuation token at ls[i]; returns its length.
 I64 HCFPunct(CHCFmt *s, U8 *ls, I64 i, I64 n)
 {
-    I64 c = ls[i], c2 = 0, c3 = 0, m = 1, ck = HCFS_UNK, k = 'o', hd, j;
+    I64 c = ls[i], c2 = 0, m = HCTPunctLen(ls, i, n), ck = HCFS_UNK, k = 'o', hd, j;
     if (i + 1 < n)
         c2 = ls[i + 1];
-    if (i + 2 < n)
-        c3 = ls[i + 2];
     if (c == '(') {
         ck = HCFS_OPEN;
         k = c;
@@ -839,41 +735,32 @@ I64 HCFPunct(CHCFmt *s, U8 *ls, I64 i, I64 n)
         ck = HCFS_SEMI;
         k = c;
     } else if (c == ':') {
-        if (c2 == ':')
-            m = 2;
-        else {
+        if (c2 != ':') {
             ck = HCFS_COLON;
             k = c;
         }
     } else if (c == ',')
         ck = HCFS_COMMA;
     else if (c == '.') {
-        if (c2 == '.' && c3 == '.') {
-            m = 3;
+        if (m == 3)
             ck = HCFS_ELL;
-        } else
+        else
             ck = HCFS_DOT;
-    } else if (c == '-' && c2 == '>') {
-        m = 2;
+    } else if (c == '-' && c2 == '>')
         ck = HCFS_DOT;
-    } else if ((c == '+' || c == '-') && c2 == c) {
-        m = 2;
+    else if ((c == '+' || c == '-') && c2 == c) {
         if (HCFOperandEnd(s->pk))
             ck = HCFS_POST;
         else
             ck = HCFS_PRE;
     } else if (c2 == '=' && (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' ||
                              c == '&' || c == '|' || c == '^' || c == '<' || c == '>' || c == '=' || c == '!' ||
-                             c == '`')) {
-        m = 2;
+                             c == '`'))
         ck = HCFS_BIN;
-    } else if (c2 == c && (c == '&' || c == '|' || c == '^' || c == '<' || c == '>')) {
-        m = 2;
-        if ((c == '<' || c == '>') && c3 == '=')
-            m = 3;
+    else if (c2 == c && (c == '&' || c == '|' || c == '^' || c == '<' || c == '>'))
         ck = HCFS_BIN;
-    } else if (c == '=' || c == '<' || c == '>' || c == '/' || c == '%' || c == '|' ||
-               c == '^' || c == '`')
+    else if (c == '=' || c == '<' || c == '>' || c == '/' || c == '%' || c == '|' ||
+             c == '^' || c == '`')
         ck = HCFS_BIN;
     else if (c == '!' || c == '~')
         ck = HCFS_UN;
@@ -888,9 +775,9 @@ I64 HCFPunct(CHCFmt *s, U8 *ls, I64 i, I64 n)
             else if (s->pk == HCFS_CLSD) {
                 // a declarator if a name (or more stars) follows, else a product
                 j = i + 1;
-                while (j < n && HCFIsWs(ls[j]))
+                while (j < n && HCTIsWs(ls[j]))
                     j++;
-                if (j >= n || (HCFIsId(ls[j]) && !HCFIsDigit(ls[j])) || ls[j] == '*' ||
+                if (j >= n || (HCTIsId(ls[j]) && !HCTIsDigit(ls[j])) || ls[j] == '*' ||
                         ls[j] == ')' || ls[j] == ',')
                     ck = HCFS_PTR;
             }
@@ -905,105 +792,59 @@ I64 HCFPunct(CHCFmt *s, U8 *ls, I64 i, I64 n)
     return m;
 }
 
-// Scan ls[i,n) of one line, feeding tokens to HCFTok and the line buffer.
-// Starts in the string or block comment state left by the previous line.
+// Scan ls[i,n) of one line, feeding tokens to HCFTok and the line buffer. The lexer
+// (HCTok.HC) splits the line; it starts in the string or block comment state left by the
+// previous line. The three context flags are the formatter's own parse state.
 U0 HCFScan(CHCFmt *s, U8 *ls, I64 i, I64 n)
 {
-    I64 c, j, k, t, ck;
+    CHCTok *tk = s->tk;
+    I64 c, j, k, ck;
     while (i < n) {
+        tk->num_ok = !HCFOperandEnd(s->pk) && s->pk != HCFS_DOT;
+        tk->label_ok = !s->in_stmt && !s->pd;
+        tk->asm_ok = s->nf && s->kind[s->nf - 1] == HCF_ASM;
+        k = HCTNext(tk, ls, i, n);
+        if (k == HCT_END)
+            break;
+        i = tk->start;
+        j = i + tk->len;
         c = ls[i];
-        if (s->in_bc) {
-            j = i;
-            while (i < n && !(ls[i] == '*' && i + 1 < n && ls[i + 1] == '/'))
-                i++;
-            if (i < n) {
-                s->in_bc = FALSE;
-                i += 2;
-            }
-            HCFRaw(s, ls, j, i);
+        if (k == HCT_BCBODY) {
+            HCFRaw(s, ls, i, j);
             s->lastcmt = TRUE;
-        } else if (s->in_str) {
-            j = i;
-            while (i < n && ls[i] != '"') {
-                if (ls[i] == '\\')
-                    i++;
-                i++;
-            }
-            if (i < n) {
-                s->in_str = FALSE;
-                i++;
-            } else
-                i = n;
-            HCFRaw(s, ls, j, i);
-        } else if (HCFIsWs(c))
-            i++;
-        else if (c == '/' && i + 1 < n && ls[i + 1] == '/') {
+        } else if (k == HCT_STRBODY)
+            HCFRaw(s, ls, i, j);
+        else if (k == HCT_LINECMT)
             HCFOut(s, ls, i, n - i, HCFS_CMT);
-            i = n;
-        } else if (c == '/' && i + 1 < n && ls[i + 1] == '*') {
+        else if (k == HCT_BCOPEN)
             HCFOut(s, ls, i, 2, HCFS_CMT);
-            s->in_bc = TRUE;
-            i += 2;
-        } else if (c == '"') {
+        else if (k == HCT_STROPEN) {
             HCFOut(s, ls, i, 1, HCFS_STR);
             HCFTok(s, 's', ls + i, 1);
             HCFPk(s, HCFS_STR, c);
-            s->in_str = TRUE;
-            i++;
-        } else if (c == '\'') {
-            j = i + 1;
-            while (j < n && ls[j] != '\'') {
-                if (ls[j] == '\\')
-                    j++;
-                j++;
-            }
-            if (j < n) {
-                HCFOut(s, ls, i, j + 1 - i, HCFS_STR);
-                HCFTok(s, 'c', ls + i, j + 1 - i);
-                HCFPk(s, HCFS_STR, c);
-                i = j + 1;
-            } else {
-                HCFOut(s, ls, i, 1, HCFS_UNK);
-                HCFTok(s, 'o', ls + i, 1);
-                HCFPk(s, HCFS_UNK, c);
-                i++;
-            }
-        } else if (HCFIsId(c) || (c == '.' && i + 1 < n && HCFIsDigit(ls[i + 1]) &&
-                                  !HCFOperandEnd(s->pk) && s->pk != HCFS_DOT)) {
-            j = i;
-            if (HCFIsDigit(c) || c == '.')
-                j = HCFNumEnd(ls, i, n);
-            else
-                while (j < n && HCFIsId(ls[j]))
-                    j++;
-            k = j;
-            while (k < n && (ls[k] == ' ' || ls[k] == '\t'))
-                k++;
-            t = 0;
-            if (k < n && ls[k] == ':' && !HCFIsDigit(ls[i]) && ls[i] != '.' && !s->in_stmt &&
-                    !s->pd) {
-                if (k + 1 >= n || ls[k + 1] != ':')
-                    t = 1;
-                else if (s->nf && s->kind[s->nf - 1] == HCF_ASM)
-                    t = 2;
-            }
-            if (t) {
-                // label: the name and its colon(s) are joined
-                HCFOut(s, ls, i, j - i, HCFS_ID);
-                HCFLbPut(s, "::", t);
-                s->lend = k + t;
-                HCFTok(s, 'L', ls + i, k + t - i);
-                HCFPk(s, HCFS_COLON, ':');
-                i = k + t;
-            } else {
-                ck = HCFWordClass(s, ls + i, j - i);
-                HCFOut(s, ls, i, j - i, ck);
-                HCFTok(s, 'i', ls + i, j - i);
-                HCFPk(s, ck, ls[j - 1]);
-                i = j;
-            }
+        } else if (k == HCT_CHAR) {
+            HCFOut(s, ls, i, j - i, HCFS_STR);
+            HCFTok(s, 'c', ls + i, j - i);
+            HCFPk(s, HCFS_STR, c);
+        } else if (k == HCT_BADQUOTE) {
+            HCFOut(s, ls, i, 1, HCFS_UNK);
+            HCFTok(s, 'o', ls + i, 1);
+            HCFPk(s, HCFS_UNK, c);
+        } else if (k == HCT_LABEL) {
+            // label: the name and its colon(s) are joined
+            HCFOut(s, ls, i, tk->id_len, HCFS_ID);
+            HCFLbPut(s, "::", tk->colons);
+            s->lend = j;
+            HCFTok(s, 'L', ls + i, j - i);
+            HCFPk(s, HCFS_COLON, ':');
+        } else if (k == HCT_ID || k == HCT_NUM) {
+            ck = HCFWordClass(s, ls + i, j - i);
+            HCFOut(s, ls, i, j - i, ck);
+            HCFTok(s, 'i', ls + i, j - i);
+            HCFPk(s, ck, ls[j - 1]);
         } else
-            i += HCFPunct(s, ls, i, n);
+            HCFPunct(s, ls, i, n);
+        i = j;
     }
 }
 
@@ -1023,8 +864,8 @@ U0 HCFEmit(CHCFmt *s, I64 ind, U8 *p, I64 n)
 I64 HCFLineEnd(CHCFmt *s)
 {
     I64 e = s->lblen;
-    if (!s->in_str)
-        while (e > 0 && HCFIsWs(s->lb[e - 1]))
+    if (!s->tk->in_str)
+        while (e > 0 && HCTIsWs(s->lb[e - 1]))
             e--;
     return e;
 }
@@ -1034,9 +875,9 @@ U0 HCFLine(CHCFmt *s, U8 *ls, I64 n)
     I64 q = 0, e, st, spk, splc;
     while (n > 0 && ls[n - 1] == '\r')
         n--;
-    if (s->in_str)
+    if (s->tk->in_str)
         st = 1;
-    else if (s->in_bc)
+    else if (s->tk->in_bc)
         st = 2;
     else
         st = 0;
@@ -1050,7 +891,7 @@ U0 HCFLine(CHCFmt *s, U8 *ls, I64 n)
         HCFEmit(s, 0, s->lb, HCFLineEnd(s));
         return;
     }
-    while (q < n && HCFIsWs(ls[q]))
+    while (q < n && HCTIsWs(ls[q]))
         q++;
     if (q == n) {
         if (!s->last_blank) {
@@ -1067,7 +908,7 @@ U0 HCFLine(CHCFmt *s, U8 *ls, I64 n)
         spk = s->pk;
         splc = s->plc;
         s->need_ind = FALSE;
-        if (n - q >= 4 && ls[q + 1] == 'e' && ls[q + 2] == 'x' && ls[q + 3] == 'e' && !HCFIsId(ls[q + 4]))
+        if (n - q >= 4 && ls[q + 1] == 'e' && ls[q + 2] == 'x' && ls[q + 3] == 'e' && !HCTIsId(ls[q + 4]))
             HCFScan(s, ls, q + 4, n);
         else {
             s->nostate = TRUE;
@@ -1077,8 +918,8 @@ U0 HCFLine(CHCFmt *s, U8 *ls, I64 n)
         s->pk = spk;
         s->plc = splc;
         e = n;
-        if (!s->in_str)
-            while (e > q && HCFIsWs(ls[e - 1]))
+        if (!s->tk->in_str)
+            while (e > q && HCTIsWs(ls[e - 1]))
                 e--;
         HCFEmit(s, 0, ls + q, e - q);
         return;
@@ -1095,9 +936,9 @@ U0 HCFLine(CHCFmt *s, U8 *ls, I64 n)
 Bool HCFSameTokens(U8 *a, U8 *b)
 {
     while (TRUE) {
-        while (*a && HCFIsWs(*a))
+        while (*a && HCTIsWs(*a))
             a++;
-        while (*b && HCFIsWs(*b))
+        while (*b && HCTIsWs(*b))
             b++;
         if (*a != *b)
             return FALSE;
@@ -1114,6 +955,8 @@ U8 *HCFmt(U8 *src)
     U8 *res, *p, *ls;
     I64 i;
     MemSet(s, 0, sizeof(CHCFmt));
+    s->tk = MAlloc(sizeof(CHCTok));
+    MemSet(s->tk, 0, sizeof(CHCTok));
     s->lbcap = 256;
     s->lb = MAlloc(s->lbcap);
     HCFFindClasses(s, src);
@@ -1132,7 +975,7 @@ U8 *HCFmt(U8 *src)
         if (*p)
             p++;
     }
-    if (s->pd || s->in_str || s->in_bc)
+    if (s->pd || s->tk->in_str || s->tk->in_bc)
         hcfmt_warn = 1;
     for (i = 0; i < s->nf; i++)
         if (s->kind[i] == HCF_BLOCK || s->kind[i] == HCF_INIT || s->kind[i] == HCF_ASM)
@@ -1143,6 +986,7 @@ U8 *HCFmt(U8 *src)
     }
     res = s->out;
     Free(s->lb);
+    Free(s->tk);
     Free(s);
     if (!HCFSameTokens(src, res)) {
         hcfmt_err = 1;

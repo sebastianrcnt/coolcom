@@ -1,7 +1,7 @@
-KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC)
+KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -39,7 +39,7 @@ $(B)/Kernel.BIN: $(KSRC) coolc/seed/Compiler.BIN build/coolc | $(B)
 	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc os/Kernel/Kernel.HC $@ > $(B)/coolc-kernel.log 2>&1
 	tail -1 $(B)/coolc-kernel.log
 
-build/hcfmt.BIN: coolc/Fmt/Native.HC coolc/Fmt/HCFmt.HC coolc/seed/Compiler.BIN build/coolc | build
+build/hcfmt.BIN: coolc/Fmt/Native.HC coolc/Fmt/HCFmt.HC coolc/Fmt/HCTok.HC coolc/seed/Compiler.BIN build/coolc | build
 	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc coolc/Fmt/Native.HC $@ > build/hcfmt-compile.log 2>&1
 	tail -1 build/hcfmt-compile.log
 
@@ -126,7 +126,11 @@ tmux-test: build/kernel.Image coolvm
 ansi-test: build/kernel.Image coolvm
 	python3 tools/ansi-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test warm-kernel-test
+# Vim highlighting by file extension, block-comment state and compiler symbol-table colors (os/Kernel/Syntax.HC).
+syntax-test: build/kernel.Image coolvm
+	python3 tools/syntax-test.py $<
+
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

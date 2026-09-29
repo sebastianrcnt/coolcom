@@ -1,0 +1,339 @@
+// HolyC (Cool) lexical scanner, shared by the formatter (HCFmt.HC) and Vim
+// (os/Disk/Vim.HC includes it from C:/HCTok.HC for syntax highlighting).
+// Plain HolyC: no calls, no allocation, no kernel services, so it compiles into the
+// native formatter image as well as on the shell.
+//
+// A line is scanned token by token:
+//     CHCTok t;  MemSet(&t, 0, sizeof(CHCTok));  t.label_ok = TRUE;  t.track = TRUE;
+//     while (HCTNext(&t, ls, i, n)) { ...t.kind, t.start, t.len...; i = t.start + t.len; }
+// The state that lets a token span lines (a /* */ comment, a string) stays in t.in_bc and
+// t.in_str: hand the same CHCTok to the next line. The scanner splits a comment or string
+// into an opening token and a body token (HCT_BCOPEN + HCT_BCBODY, HCT_STROPEN +
+// HCT_STRBODY) exactly like the formatter needs; the body ends at the closing delimiter or
+// at the end of the line.
+//
+// Three decisions depend on what came before, not on the characters: is ".5" a number
+// (num_ok: the previous token did not end an operand), is "name:" a label (label_ok: a
+// statement starts here) and is "name::" an asm label (asm_ok). The formatter sets them
+// from its own parse state before every call; with track set, HCTNext keeps them up to
+// date itself, well enough for coloring.
+
+#define HCT_END      0
+#define HCT_ID       1   // identifier or keyword
+#define HCT_NUM      2   // 12, 0x1F, 1.5e-3, .5
+#define HCT_LABEL    3   // name: (len covers the colon(s), id_len only the name)
+#define HCT_LINECMT  4   // // to the end of the line
+#define HCT_BCOPEN   5   // /*
+#define HCT_BCBODY   6   // inside /* */, up to and including */ or to the end of the line
+#define HCT_STROPEN  7   // the opening "
+#define HCT_STRBODY  8   // inside "...", up to and including the closing " or to the end of the line
+#define HCT_CHAR     9   // 'x' with both quotes
+#define HCT_BADQUOTE 10  // a ' that does not close
+#define HCT_PUNCT    11  // operator or bracket (len from HCTPunctLen)
+#define HCT_PP       12  // #include, #define, ... at the start of a line
+
+class CHCTok
+{
+    I64 in_bc, in_str;              // line state: inside a block comment or string
+    I64 num_ok, label_ok, asm_ok;   // context, see above
+    I64 track, pd;                  // track: keep the context (and the paren depth pd) here
+    I64 kind, start, len, id_len, colons; // the token
+};
+
+Bool HCTIsWs(I64 c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == 11 || c == 12;
+}
+
+Bool HCTIsId(I64 c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '_' || c == '@';
+}
+
+Bool HCTIsUp(I64 c)
+{
+    return c >= 'A' && c <= 'Z';
+}
+
+Bool HCTIsDigit(I64 c)
+{
+    return c >= '0' && c <= '9';
+}
+
+Bool HCTStrEq(U8 *p, I64 n, U8 *s)
+{
+    I64 i;
+    for (i = 0; i < n; i++)
+        if (p[i] != s[i] || !s[i])
+            return FALSE;
+    return !s[n];
+}
+
+// Builtin type names: U0 U8 U16 U32 U64 I8 I16 I32 I64 F64 Bool and the raw
+// types with a trailing i.
+Bool HCTIsType(U8 *p, I64 n)
+{
+    I64 v, i;
+    if (HCTStrEq(p, n, "Bool"))
+        return TRUE;
+    if (n < 2 || n > 4 || (p[0] != 'U' && p[0] != 'I' && p[0] != 'F'))
+        return FALSE;
+    if (p[n - 1] == 'i')
+        n--;
+    if (n < 2)
+        return FALSE;
+    v = 0;
+    for (i = 1; i < n; i++) {
+        if (!HCTIsDigit(p[i]))
+            return FALSE;
+        v = v * 10 + p[i] - '0';
+    }
+    return v == 0 || v == 8 || v == 16 || v == 32 || v == 64;
+}
+
+// C+Uppercase without '_': CTask, CMemBlk, CBRPN (but not CLSF_VARGS).
+Bool HCTIsClsName(U8 *p, I64 n)
+{
+    I64 i;
+    if (n < 3 || p[0] != 'C' || !HCTIsUp(p[1]))
+        return FALSE;
+    for (i = 0; i < n; i++)
+        if (p[i] == '_')
+            return FALSE;
+    return TRUE;
+}
+
+// Words that are followed by a space and are not operands.
+Bool HCTIsKwSp(U8 *p, I64 n)
+{
+    return HCTStrEq(p, n, "if") || HCTStrEq(p, n, "else") || HCTStrEq(p, n, "while") ||
+            HCTStrEq(p, n, "for") || HCTStrEq(p, n, "do") || HCTStrEq(p, n, "switch") ||
+            HCTStrEq(p, n, "case") || HCTStrEq(p, n, "try") || HCTStrEq(p, n, "catch") ||
+            HCTStrEq(p, n, "return") || HCTStrEq(p, n, "goto");
+}
+
+// Modifiers that come before a declaration.
+Bool HCTIsMod(U8 *p, I64 n)
+{
+    return HCTStrEq(p, n, "extern") || HCTStrEq(p, n, "public") ||
+            HCTStrEq(p, n, "static") || HCTStrEq(p, n, "reg") || HCTStrEq(p, n, "noreg") ||
+            HCTStrEq(p, n, "import") || HCTStrEq(p, n, "export") ||
+            HCTStrEq(p, n, "_extern") || HCTStrEq(p, n, "_import") ||
+            HCTStrEq(p, n, "_intern") || HCTStrEq(p, n, "interrupt") ||
+            HCTStrEq(p, n, "haserrcode") || HCTStrEq(p, n, "argpop");
+}
+
+// Statement and declaration keywords not covered above (for coloring).
+Bool HCTIsKw2(U8 *p, I64 n)
+{
+    return HCTStrEq(p, n, "default") || HCTStrEq(p, n, "break") || HCTStrEq(p, n, "class") ||
+            HCTStrEq(p, n, "union") || HCTStrEq(p, n, "sizeof") || HCTStrEq(p, n, "throw") ||
+            HCTStrEq(p, n, "asm") || HCTStrEq(p, n, "enum") || HCTStrEq(p, n, "lock") ||
+            HCTStrEq(p, n, "offset") || HCTStrEq(p, n, "no_warn") || HCTStrEq(p, n, "start") ||
+            HCTStrEq(p, n, "end") || HCTStrEq(p, n, "continue");
+}
+
+Bool HCTIsConst(U8 *p, I64 n)
+{
+    return HCTStrEq(p, n, "TRUE") || HCTStrEq(p, n, "FALSE") || HCTStrEq(p, n, "NULL");
+}
+
+// End of the number starting at ls[i]: 0x1F, 1.5e-3, .5, stops before "...".
+I64 HCTNumEnd(U8 *ls, I64 i, I64 n)
+{
+    I64 j = i;
+    Bool hex = FALSE;
+    if (ls[j] == '0' && j + 1 < n && (ls[j + 1] == 'x' || ls[j + 1] == 'X'))
+        hex = TRUE;
+    while (j < n) {
+        if (HCTIsId(ls[j])) {
+            j++;
+            if (!hex && (ls[j - 1] == 'e' || ls[j - 1] == 'E') && j + 1 < n &&
+                    (ls[j] == '+' || ls[j] == '-') && HCTIsDigit(ls[j + 1]))
+                j++;
+        } else if (ls[j] == '.' && !(j + 1 < n && ls[j + 1] == '.'))
+            j++;
+        else
+            break;
+    }
+    return j;
+}
+
+// Length of the punctuation token at ls[i]: ( ) [ ] { } ; , . -> ... :: ++ -- and the
+// operators with their = and doubled forms (+= <<= && ^^ == ...).
+I64 HCTPunctLen(U8 *ls, I64 i, I64 n)
+{
+    I64 c = ls[i], c2 = 0, c3 = 0;
+    if (i + 1 < n)
+        c2 = ls[i + 1];
+    if (i + 2 < n)
+        c3 = ls[i + 2];
+    if (c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == ';')
+        return 1;
+    if (c == ':') {
+        if (c2 == ':')
+            return 2;
+        return 1;
+    }
+    if (c == ',')
+        return 1;
+    if (c == '.') {
+        if (c2 == '.' && c3 == '.')
+            return 3;
+        return 1;
+    }
+    if (c == '-' && c2 == '>')
+        return 2;
+    if ((c == '+' || c == '-') && c2 == c)
+        return 2;
+    if (c2 == '=' && (c == '+' || c == '-' || c == '*' || c == '/' || c == '%' ||
+                      c == '&' || c == '|' || c == '^' || c == '<' || c == '>' || c == '=' || c == '!' ||
+                      c == '`'))
+        return 2;
+    if (c2 == c && (c == '&' || c == '|' || c == '^' || c == '<' || c == '>')) {
+        if ((c == '<' || c == '>') && c3 == '=')
+            return 3;
+        return 2;
+    }
+    return 1;
+}
+
+Bool HCTOnlyWsBefore(U8 *ls, I64 i)
+{
+    while (i > 0)
+        if (!HCTIsWs(ls[--i]))
+            return FALSE;
+    return TRUE;
+}
+
+I64 HCTRet(CHCTok *t, I64 kind, I64 start, I64 len)
+{
+    t->kind = kind;
+    t->start = start;
+    t->len = len;
+    return kind;
+}
+
+// With t->track: update the context after the token just returned.
+U0 HCTTrack(CHCTok *t, U8 *ls)
+{
+    I64 c;
+    if (t->kind == HCT_ID || t->kind == HCT_NUM || t->kind == HCT_CHAR || t->kind == HCT_STROPEN) {
+        t->num_ok = FALSE;
+        t->label_ok = FALSE;
+    } else if (t->kind == HCT_LABEL || t->kind == HCT_PP) {
+        t->num_ok = TRUE;
+        t->label_ok = FALSE;
+    } else if (t->kind == HCT_PUNCT) {
+        c = ls[t->start];
+        if (c == '(')
+            t->pd++;
+        else if (c == ')' && t->pd > 0)
+            t->pd--;
+        t->num_ok = !(c == ')' || c == ']' || c == '.' || (t->len == 2 && (c == '+' || c == '-') && ls[t->start + 1] == c) ||
+                      (c == '-' && t->len == 2 && ls[t->start + 1] == '>'));
+        t->label_ok = !t->pd && (c == ';' || c == '{' || c == '}');
+    }
+}
+
+// The token at or after ls[i] of the line ls[0..n). Returns t->kind, HCT_END when only
+// whitespace is left. t->start and t->len give the token.
+I64 HCTNext(CHCTok *t, U8 *ls, I64 i, I64 n)
+{
+    I64 c, j, k, m, colons, kind;
+    if (i >= n)
+        return HCTRet(t, HCT_END, n, 0);
+    if (t->in_bc) {
+        j = i;
+        while (i < n && !(ls[i] == '*' && i + 1 < n && ls[i + 1] == '/'))
+            i++;
+        if (i < n) {
+            t->in_bc = FALSE;
+            i += 2;
+        }
+        return HCTRet(t, HCT_BCBODY, j, i - j);
+    }
+    if (t->in_str) {
+        j = i;
+        while (i < n && ls[i] != '"') {
+            if (ls[i] == '\\')
+                i++;
+            i++;
+        }
+        if (i < n) {
+            t->in_str = FALSE;
+            i++;
+        } else
+            i = n;
+        return HCTRet(t, HCT_STRBODY, j, i - j);
+    }
+    while (i < n && HCTIsWs(ls[i]))
+        i++;
+    if (i >= n)
+        return HCTRet(t, HCT_END, n, 0);
+    c = ls[i];
+    kind = HCT_PUNCT;
+    m = 1;
+    if (c == '/' && i + 1 < n && ls[i + 1] == '/') {
+        kind = HCT_LINECMT;
+        m = n - i;
+    } else if (c == '/' && i + 1 < n && ls[i + 1] == '*') {
+        kind = HCT_BCOPEN;
+        t->in_bc = TRUE;
+        m = 2;
+    } else if (c == '"') {
+        kind = HCT_STROPEN;
+        t->in_str = TRUE;
+    } else if (c == '\'') {
+        j = i + 1;
+        while (j < n && ls[j] != '\'') {
+            if (ls[j] == '\\')
+                j++;
+            j++;
+        }
+        if (j < n) {
+            kind = HCT_CHAR;
+            m = j + 1 - i;
+        } else
+            kind = HCT_BADQUOTE;
+    } else if (HCTIsId(c) || (c == '.' && i + 1 < n && HCTIsDigit(ls[i + 1]) && t->num_ok)) {
+        j = i;
+        if (HCTIsDigit(c) || c == '.') {
+            kind = HCT_NUM;
+            j = HCTNumEnd(ls, i, n);
+        } else {
+            kind = HCT_ID;
+            while (j < n && HCTIsId(ls[j]))
+                j++;
+        }
+        m = j - i;
+        k = j;
+        while (k < n && (ls[k] == ' ' || ls[k] == '\t'))
+            k++;
+        colons = 0;
+        if (k < n && ls[k] == ':' && !HCTIsDigit(ls[i]) && ls[i] != '.' && t->label_ok) {
+            if (k + 1 >= n || ls[k + 1] != ':')
+                colons = 1;
+            else if (t->asm_ok)
+                colons = 2;
+        }
+        if (colons) {
+            kind = HCT_LABEL;
+            t->id_len = j - i;
+            t->colons = colons;
+            m = k + colons - i;
+            // the colon(s) are joined to the name, and the caller resumes after them
+        }
+    } else if (c == '#' && HCTOnlyWsBefore(ls, i) && i + 1 < n && (HCTIsId(ls[i + 1]) && !HCTIsDigit(ls[i + 1]))) {
+        kind = HCT_PP;
+        m = 1;
+        while (i + m < n && HCTIsId(ls[i + m]))
+            m++;
+    } else
+        m = HCTPunctLen(ls, i, n);
+    HCTRet(t, kind, i, m);
+    if (t->track)
+        HCTTrack(t, ls);
+    return kind;
+}

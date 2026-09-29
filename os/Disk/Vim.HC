@@ -14,6 +14,12 @@ I64 vim_count, vim_op, vim_opcount, vim_pending, vim_cmd_n, vim_prompt;
 I64 vim_search_dir, vim_goal, vim_active, vim_transaction;
 I64 vim_keys[VIM_KEYS], vim_dot[VIM_KEYS], vim_kn, vim_dn, vim_replay;
 I64 vim_changed, vim_record, vim_overflow;
+// Syntax highlighting (os/Kernel/Syntax.HC): the language, the group of each byte of the
+// line being drawn, and the lexer state at the start of a line, kept while the text is
+// unchanged (vim_gen counts edits) so scrolling does not rescan the file.
+I64 vim_lang, vim_gen, vim_syn_gen, vim_syn_off, vim_syn_lang;
+U8 *vim_grp;
+CSyn vim_syn_cp;
 
 I64 VimStep(I64 p)
 {
@@ -156,6 +162,7 @@ U0 VimUndo(I64 dir)
     vim_len = vim_hlen[next];
     vim_pos = vim_hpos[next];
     MemCpy(vim_buf, vim_hist + next * VIM_CAP, vim_len + 1);
+    vim_gen++;
     VimClamp();
     VimDirty();
 }
@@ -169,6 +176,7 @@ Bool VimInsert(U8 *s, I64 n)
     MemCpy(vim_buf + vim_pos, s, n);
     vim_pos += n;
     vim_len += n;
+    vim_gen++;
     vim_changed = vim_dirty = TRUE;
     return TRUE;
 }
@@ -180,6 +188,7 @@ U0 VimDelete(I64 a, I64 b)
     for (i = b; i <= vim_len; i++) vim_buf[a + i - b] = vim_buf[i];
     vim_len -= b - a;
     vim_pos = a;
+    vim_gen++;
     vim_changed = vim_dirty = TRUE;
 }
 
@@ -319,6 +328,8 @@ Bool VimLoad(U8 *name)
     if (file) {MemCpy(vim_buf, file, n); Free(file);}
     vim_buf[n] = 0;
     vim_len = n;
+    vim_gen++;
+    vim_lang = SynLang(name);
     StrCpy(vim_name, name);
     MemCpy(vim_saved, vim_buf, n + 1);
     vim_saved_len = n;
@@ -362,6 +373,21 @@ Bool VimCommand()
     if (!StrCmp(cmd, "q")) {
         if (!vim_dirty) return TRUE;
         vim_msg = "Unsaved changes: use :w or :q!";
+        return FALSE;
+    }
+    if (!StrNCmp(cmd, "set ft=", 7)) {
+        if (!StrCmp(cmd + 7, "cool")) vim_lang = SYN_COOL;
+        else if (!StrCmp(cmd + 7, "warm")) vim_lang = SYN_WARM;
+        else if (!StrCmp(cmd + 7, "text")) vim_lang = SYN_TEXT;
+        else {vim_msg = "Unknown filetype (cool, warm, text)"; return FALSE;}
+        vim_msg = "Filetype set";
+        return FALSE;
+    }
+    if (!StrNCmp(cmd, "hi ", 3)) {//:hi comment 2  (a highlight group and an Ansi color 0..255)
+        for (i = 0; i < SYN_G_COUNT; i++)
+            if (!StrNCmp(cmd + 3, SynGroupName(i), StrLen(SynGroupName(i))) && cmd[3 + StrLen(SynGroupName(i))] == ' ') break;
+        if (i == SYN_G_COUNT) {vim_msg = "Unknown highlight group"; return FALSE;}
+        syn_color[i] = Str2I64(cmd + 4 + StrLen(SynGroupName(i)));
         return FALSE;
     }
     if (!StrNCmp(cmd, "e ", 2)) {
@@ -674,30 +700,34 @@ U0 VimText(U8 *s, I64 limit)
     }
 }
 
-// Classify Cool tokens rather than coloring every identifier as a keyword.
-I64 VimTokenColor(I64 p)
-{
-    I64 a = p, n;
-    U8 word[80];
-    while (a && VimClass(VimPrev(a)) == 1) a = VimPrev(a);
-    p = a;
-    while (p < vim_len && VimClass(p) == 1) p = VimStep(p);
-    n = p - a;
-    if (n > 76) return ANSI_WHITE;
-    word[0] = '|';
-    MemCpy(word + 1, vim_buf + a, n);
-    word[n + 1] = '|'; word[n + 2] = 0;
-    if (StrMatch(word, "|if|else|for|while|do|switch|case|break|return|goto|class|union|extern|import|public|sizeof|try|catch|throw|")) return ANSI_MAGENTA;
-    if (StrMatch(word, "|U0|U8|U16|U32|U64|I8|I16|I32|I64|F64|Bool|TRUE|FALSE|NULL|")) return ANSI_CYAN;
-    if (vim_buf[a] >= '0' && vim_buf[a] <= '9') return ANSI_YELLOW;
-    return ANSI_WHITE;
+U0 VimSynState(CSyn *st, I64 target)
+{//The highlighter state at the start of the line that begins at target. The state at
+    //the last target is kept, so scrolling forward only scans the new lines.
+    I64 p, q;
+    if (vim_syn_gen != vim_gen || vim_syn_lang != vim_lang || vim_syn_off > target) {
+        SynStart(&vim_syn_cp, vim_lang, TRUE);
+        vim_syn_off = 0;
+        vim_syn_gen = vim_gen;
+        vim_syn_lang = vim_lang;
+    }
+    MemCpy(st, &vim_syn_cp, sizeof(CSyn));
+    st->fast = TRUE;
+    for (p = vim_syn_off; p < target; p = q + 1) {
+        q = VimEnd(p);
+        SynLine(st, vim_buf + p, q - p, vim_grp);
+        if (q >= vim_len) break;
+    }
+    MemCpy(&vim_syn_cp, st, sizeof(CSyn));
+    vim_syn_off = target;
+    st->fast = FALSE;
 }
 
 U0 VimDraw()
 {
     I64 rows, cols, p, q, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
-    I64 color, quote, comment, cp, i, token_end = 0, token_color = ANSI_WHITE;
+    I64 color, cp, i, ls, last_color, last_sel, sel;
     U8 number[32], status[512];
+    CSyn st;
     AnsiTermSize(&rows, &cols);
     if (rows < 3 || cols < 12) return;
     if (vim_mode >= 3) VimRange(&a, &b);
@@ -710,58 +740,34 @@ U0 VimDraw()
     if (col >= vim_left + cols - 8) vim_left = col - cols + 9;
     for (p = 0; p < vim_top; p++) if (vim_buf[p] == '\n') line++;
     p = vim_top;
-    comment = 0;
-    // Recover block-comment state even when its opening delimiter scrolled away.
-    quote = 0;
-    for (i = 0; i < p; i++) {
-        if (comment == 2) {if (vim_buf[i] == '*' && vim_buf[i + 1] == '/') {comment = 0; i++;}}
-        else if (comment == 1) {if (vim_buf[i] == '\n') comment = 0;}
-        else if (quote) {if (vim_buf[i] == '\\') i++; else if (vim_buf[i] == quote) quote = 0;}
-        else if (vim_buf[i] == '"' || vim_buf[i] == 39) quote = vim_buf[i];
-        else if (vim_buf[i] == '/' && vim_buf[i + 1] == '*') {comment = 2; i++;}
-        else if (vim_buf[i] == '/' && vim_buf[i + 1] == '/') comment = 1;
-    }
+    VimSynState(&st, p);
     for (y = 1; y < rows; y++) {
         AnsiCursor(y, 1); AnsiReset; AnsiClearEol;
-        if (p > VimLastLine()) {AnsiFg(ANSI_GRAY); ConsPut('~');}
+        if (p > VimLastLine()) {AnsiFg(SynColor(SYN_G_NONTEXT)); ConsPut('~');}
         else {
             if (VimLine(vim_pos) == p) row = y;
             StrPrint(number, "%5d ", line++);
-            AnsiFg(ANSI_GRAY); ConsPutS(number);
-            q = VimEnd(p); x = 0; quote = 0;
+            AnsiFg(SynColor(SYN_G_LINENR)); ConsPutS(number);
+            q = VimEnd(p); x = 0; ls = p;
+            SynLine(&st, vim_buf + p, q - p, vim_grp);
+            last_color = last_sel = -2;
             while (p < q) {
                 k = VimStep(p) - p; w = VimWidth(p, x);
                 cp = Utf8Cp(vim_buf + p, k);
-                color = ANSI_WHITE;
-                if (!comment && !quote && cp == '/' && p + 1 < q) {
-                    if (vim_buf[p + 1] == '/') comment = 1;
-                    if (vim_buf[p + 1] == '*') comment = 2;
-                }
-                if (comment) color = ANSI_GRAY;
-                else if (quote || cp == '"' || cp == 39) color = ANSI_GREEN;
-                else if (VimClass(p) == 1) {
-                    if (p >= token_end) {
-                        token_color = VimTokenColor(p); token_end = p;
-                        while (token_end < vim_len && VimClass(token_end) == 1) token_end = VimStep(token_end);
-                    }
-                    color = token_color;
-                }
-                else if (cp == '#') color = ANSI_MAGENTA;
                 if (x >= vim_left && x + w <= vim_left + cols - 7) {
-                    if (p >= a && p < b) AnsiSet(color, ANSI_BLUE);
-                    else AnsiSet(color);
+                    color = SynColor(vim_grp[p - ls]);
+                    sel = p >= a && p < b;
+                    if (color != last_color || sel != last_sel) {
+                        if (sel) AnsiSet(color, ANSI_BLUE);
+                        else AnsiSet(color);
+                        last_color = color; last_sel = sel;
+                    }
                     if (cp == '\t') {for (i = 0; i < w; i++) ConsPut(' ');}
                     else if (cp < 32 || cp == 127) ConsPut('?');
                     else {for (i = 0; i < k; i++) ConsPut(vim_buf[p + i]);}
                 } else if (x < vim_left && x + w > vim_left) ConsPut(' ');
-                if (comment == 2 && cp == '/' && p && vim_buf[p - 1] == '*') comment = 0;
-                if (!comment) {
-                    if (quote && cp == quote && (!p || vim_buf[p - 1] != '\\')) quote = 0;
-                    else if (!quote && (cp == '"' || cp == 39)) quote = cp;
-                }
                 p += k; x += w;
             }
-            if (comment == 1) comment = 0;
             p = q + 1;
         }
     }
@@ -789,7 +795,8 @@ U0 VimClose()
     vim_active = FALSE;
     AnsiReset; AnsiCursorShow; AnsiAltScreen(FALSE);
     Free(vim_buf); Free(vim_saved); Free(vim_yank); Free(vim_hist);
-    vim_buf = vim_saved = vim_yank = vim_hist = NULL;
+    Free(vim_grp);
+    vim_buf = vim_saved = vim_yank = vim_hist = vim_grp = NULL;
     shell_stmt_cleanup = NULL;
 }
 
@@ -800,7 +807,8 @@ Bool VimOpen(U8 *name)
     shell_stmt_cleanup = &VimClose;
     vim_buf = CAlloc(VIM_CAP); vim_saved = MAlloc(VIM_CAP);
     vim_yank = MAlloc(VIM_CAP); vim_hist = MAlloc(VIM_CAP * VIM_HIST);
-    if (!vim_buf || !vim_saved || !vim_yank || !vim_hist) {VimClose(); Print("Vim: out of memory\n"); return FALSE;}
+    vim_grp = MAlloc(VIM_CAP);
+    if (!vim_buf || !vim_saved || !vim_yank || !vim_hist || !vim_grp) {VimClose(); Print("Vim: out of memory\n"); return FALSE;}
     vim_mode = vim_count = vim_op = vim_pending = vim_transaction = 0;
     vim_record = vim_kn = vim_dn = vim_replay = vim_yank_len = 0;
     vim_search[0] = 0; vim_search_dir = 1; vim_goal = -1; vim_msg = "";

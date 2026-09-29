@@ -181,7 +181,7 @@ def screen_test(d, disk, kernel):
     # Same ANSI stream is consumed by Fb.HC and the serial console. Check token
     # classes, selected wide glyphs, line numbers, status mode and cell cursor.
     for marker in ('\x1b[0;36mI', '\x1b[0;33m4', '\x1b[0;35mi',
-                   '\x1b[0;90m/', '\x1b[0;32;44m한', '\x1b[0;32;44m글',
+                   '\x1b[0;90m/', '\x1b[0;32;44m한글',
                    '    3 ', 'VISUAL C:/Screen.HC', '\x1b[3;18H'):
         if marker not in log:
             raise AssertionError(f'missing screen marker {marker!r}; see {d / "screen.log"}')

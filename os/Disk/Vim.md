@@ -43,3 +43,10 @@ and compares each FAT32 result and byte cursor with independent host expectation
 It also checks scroll state, capacity/large-file handling, forced quit, and a
 real null-pointer fault while the editor is open followed by successful reentry.
 Generated disks, scripts and diagnostic logs stay in `build/vim-test`.
+
+Syntax highlighting follows the file extension: Cool (`.HC`, `.HH`, with identifiers colored from the
+shell compiler's symbol table: functions, types, globals, `#define`s), Warm (`.aum`, `.aui`) and plain
+text. `:set ft=cool|warm|text` overrides it and `:hi GROUP COLOR` changes a group's Ansi color
+(groups: normal comment string number keyword type storage preproc label constant function global
+linenr nontext). Rules: `os/Kernel/Syntax.HC`; tokenizer shared with
+the formatter: `coolc/Fmt/HCTok.HC`; `make syntax-test`.
