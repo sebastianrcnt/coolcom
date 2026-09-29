@@ -441,7 +441,8 @@ static void *dns_main(void *arg)
     int rcode = 0, an = 0;
     struct addrinfo hints = {0}, *res = NULL;
     memcpy(r, q->q, n);
-    if (q->qtype == 1) {
+    if (getenv("COOLVM_NET_OFFLINE")) rcode = 2; /* pretend the host is offline (tests the guest's skip path) */
+    else if (q->qtype == 1) {
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
         int e = getaddrinfo(q->name, NULL, &hints, &res);

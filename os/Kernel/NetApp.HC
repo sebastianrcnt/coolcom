@@ -1,0 +1,288 @@
+// TCP/IP, part 3: DHCP client, DNS resolver, the network task and NetInit.
+
+// ---- DHCP ----------------------------------------------------------------
+
+I64 DhcpBuild(U8 *m, I64 xid, I64 type, I64 req_ip, I64 server)
+{//A BOOTP request with DHCP options; returns its length.
+    U8 *o;
+    MemSet(m, 0, 300);
+    m[0] = 1;
+    m[1] = 1;
+    m[2] = 6;
+    NetPut32(m + 4, xid);
+    NetPut16(m + 10, 0x8000);  // answer by broadcast: we have no address yet
+    MemCpy(m + 28, net_mac, 6);
+    NetPut32(m + 236, 0x63825363);
+    o = m + 240;
+    *o++ = 53;
+    *o++ = 1;
+    *o++ = type;
+    if (req_ip) {
+        *o++ = 50;
+        *o++ = 4;
+        NetPut32(o, req_ip);
+        o += 4;
+    }
+    if (server) {
+        *o++ = 54;
+        *o++ = 4;
+        NetPut32(o, server);
+        o += 4;
+    }
+    *o++ = 55;
+    *o++ = 3;
+    *o++ = 1;
+    *o++ = 3;
+    *o++ = 6;
+    *o++ = 255;
+    return 300;
+}
+
+I64 DhcpParse(U8 *m, I64 len, I64 xid, I64 *_ip, I64 *_mask, I64 *_gw, I64 *_dns, I64 *_server, I64 *_lease)
+{//Message type of a reply to xid (0 if it is not one), and its fields.
+    I64 i = 240, type = 0, l;
+    if (len < 240 || m[0] != 2 || NetGet32(m + 4) != xid || NetGet32(m + 236) != 0x63825363)
+        return 0;
+    *_ip = NetGet32(m + 16);
+    while (i + 1 < len && m[i] != 255) {
+        if (!m[i]) {
+            i++;
+            goto dhcp_next;
+        }
+        l = m[i + 1];
+        if (i + 2 + l > len)
+            break;
+        if (m[i] == 53 && l >= 1) type = m[i + 2];
+        if (m[i] == 1 && l >= 4) *_mask = NetGet32(m + i + 2);
+        if (m[i] == 3 && l >= 4) *_gw = NetGet32(m + i + 2);
+        if (m[i] == 6 && l >= 4) *_dns = NetGet32(m + i + 2);
+        if (m[i] == 54 && l >= 4) *_server = NetGet32(m + i + 2);
+        if (m[i] == 51 && l >= 4) *_lease = NetGet32(m + i + 2);
+        i += 2 + l;
+dhcp_next:
+    }
+    return type;
+}
+
+Bool Dhcp(I64 tries = 4)
+{//Get an address, netmask, router and DNS server; TRUE when bound.
+    CUdpSock *s = UdpOpen(68);
+    U8 m[600];
+    I64 xid, n, attempt, type, ip, mask, gw, dns, server, lease, deadline, offer_ip, offer_server, daif;
+    Bool ok = FALSE;
+    if (!s || !net_nic) {
+        if (s) UdpClose(s);
+        return FALSE;
+    }
+    for (attempt = 0; attempt < tries && !ok; attempt++) {
+        xid = NetRand & 0xFFFFFFFF;
+        offer_ip = offer_server = 0;
+        n = DhcpBuild(m, xid, 1, 0, 0);
+        UdpSendFrom(s, NET_BCAST, 67, m, n, 0);
+        deadline = jiffies + 1000 + 1000 * attempt;
+        while (jiffies < deadline && !ok) {
+            n = UdpRecv(s, m, 600, NULL, NULL, deadline - jiffies);
+            if (n < 0)
+                break;
+            ip = mask = gw = dns = server = 0;
+            lease = 0;
+            type = DhcpParse(m, n, xid, &ip, &mask, &gw, &dns, &server, &lease);
+            if (type == 2 && !offer_ip) {  // OFFER: request it
+                offer_ip = ip;
+                offer_server = server;
+                n = DhcpBuild(m, xid, 3, offer_ip, offer_server);
+                UdpSendFrom(s, NET_BCAST, 67, m, n, 0);
+            } else if (type == 5 && offer_ip && ip == offer_ip) {  // ACK
+                daif = NetLock;
+                net_ip = ip;
+                net_mask = mask;
+                if (!net_mask)
+                    net_mask = 0xFFFFFF00;
+                net_gw = gw;
+                net_dns = dns;
+                net_lease = lease;
+                NetUnlock(daif);
+                ok = TRUE;
+            } else if (type == 6) // NAK
+                break;
+        }
+    }
+    UdpClose(s);
+    if (ok && net_gw) {
+        daif = NetLock;
+        IcmpEcho(net_gw, 0, 0, 0);  // fills the ARP cache (the reply is ignored)
+        NetUnlock(daif);
+    }
+    return ok;
+}
+
+// ---- DNS -----------------------------------------------------------------
+
+#define DNS_CACHE 16
+#define DNS_MAX_ADDRS 8
+#define DNS_ERR_NXDOMAIN -1
+#define DNS_ERR_TIMEOUT  -2
+#define DNS_ERR_FAIL     -3
+
+class CDnsCache
+{
+    U8 name[64];
+    I64 cnt, expire;
+    I64 ip[DNS_MAX_ADDRS];
+};
+
+CDnsCache dns_cache[DNS_CACHE];
+I64 dns_cache_next;
+
+I64 DnsSkipName(U8 *m, I64 len, I64 off)
+{//Offset after a (possibly compressed) name, -1 if malformed.
+    I64 l;
+    while (off < len) {
+        l = m[off];
+        if (!l)
+            return off + 1;
+        if ((l & 0xC0) == 0xC0)
+            return off + 2;
+        off += l + 1;
+    }
+    return -1;
+}
+
+I64 DnsQuery(U8 *name, I64 *ips, I64 max = DNS_MAX_ADDRS)
+{//Look up the A records of name: count (>= 1) or DNS_ERR_*.
+    CUdpSock *s;
+    U8 q[300], r[600], *p, *dot;
+    I64 i, n, id, attempt, ql, rl, an, off, type, cls, rdl, ttl, cnt = 0, src, sport, daif;
+    CDnsCache *c;
+    if (NetParseIp(name, &ips[0]))
+        return 1;
+    n = StrLen(name);
+    if (!n || n > 253)
+        return DNS_ERR_FAIL;
+    daif = NetLock;
+    for (i = 0; i < DNS_CACHE; i++) {
+        c = &dns_cache[i];
+        if (c->cnt && jiffies < c->expire && !StrICmp(c->name, name)) {
+            cnt = MinI64(c->cnt, max);
+            MemCpy(ips, c->ip, cnt * sizeof(I64));
+            NetUnlock(daif);
+            return cnt;
+        }
+    }
+    NetUnlock(daif);
+    if (!net_dns)
+        return DNS_ERR_FAIL;
+    id = NetRand & 0xFFFF;
+    NetPut16(q, id);
+    NetPut16(q + 2, 0x0100);  // recursion desired
+    NetPut16(q + 4, 1);
+    NetPut16(q + 6, 0);
+    NetPut16(q + 8, 0);
+    NetPut16(q + 10, 0);
+    ql = 12;
+    p = name;
+    while (*p) {
+        dot = p;
+        while (*dot && *dot != '.')
+            dot++;
+        if (dot == p || dot - p > 63)
+            return DNS_ERR_FAIL;
+        q[ql++] = dot - p;
+        MemCpy(q + ql, p, dot - p);
+        ql += dot - p;
+        p = dot;
+        if (*p)
+            p++;
+    }
+    q[ql++] = 0;
+    NetPut16(q + ql, 1);  // A
+    NetPut16(q + ql + 2, 1);  // IN
+    ql += 4;
+    if (!(s = UdpOpen))
+        return DNS_ERR_FAIL;
+    for (attempt = 0; attempt < 3; attempt++) {
+        UdpSend(s, net_dns, 53, q, ql);
+        while (TRUE) {
+            rl = UdpRecv(s, r, 600, &src, &sport, 2000);
+            if (rl < 0)
+                break;
+            if (rl < 12 || src != net_dns || sport != 53 || NetGet16(r) != id || !(r[2] & 0x80))
+                goto dns_next;
+            UdpClose(s);
+            if ((r[3] & 15) == 3)
+                return DNS_ERR_NXDOMAIN;
+            if (r[3] & 15)
+                return DNS_ERR_FAIL;
+            an = NetGet16(r + 6);
+            off = 12;
+            for (i = NetGet16(r + 4); i > 0 && off >= 0; i--)
+                if ((off = DnsSkipName(r, rl, off)) >= 0)
+                    off += 4;
+            ttl = 3600;
+            while (an-- > 0 && off >= 0 && cnt < max) {
+                off = DnsSkipName(r, rl, off);
+                if (off < 0 || off + 10 > rl)
+                    break;
+                type = NetGet16(r + off);
+                cls = NetGet16(r + off + 2);
+                rdl = NetGet16(r + off + 8);
+                if (off + 10 + rdl > rl)
+                    break;
+                if (type == 1 && cls == 1 && rdl == 4) {
+                    ips[cnt++] = NetGet32(r + off + 10);
+                    ttl = MinI64(ttl, NetGet32(r + off + 4));
+                }
+                off += 10 + rdl;
+            }
+            if (!cnt)
+                return DNS_ERR_NXDOMAIN;  // a name without addresses
+            if (n < 64) {
+                daif = NetLock;
+                c = &dns_cache[dns_cache_next++ % DNS_CACHE];
+                StrCpy(c->name, name);
+                c->cnt = MinI64(cnt, DNS_MAX_ADDRS);
+                MemCpy(c->ip, ips, c->cnt * sizeof(I64));
+                c->expire = jiffies + MaxI64(ttl, 1) * 1000;
+                NetUnlock(daif);
+            }
+            return cnt;
+dns_next:
+        }
+    }
+    UdpClose(s);
+    return DNS_ERR_TIMEOUT;
+}
+
+Bool DnsResolve(U8 *host, I64 *_ip)
+{//host (a name or a dotted quad) to its first address.
+    I64 ips[DNS_MAX_ADDRS];
+    if (DnsQuery(host, ips) < 1)
+        return FALSE;
+    *_ip = ips[0];
+    return TRUE;
+}
+
+// ---- task and init --------------------------------------------------------
+
+U0 NetTask(U8 *data)
+{//Configure by DHCP, then poll the device every millisecond.
+    U8 a[16];
+    if (Dhcp)
+        Print("net: DHCP address %s\n", NetIpStr(a, net_ip));
+    else
+        Print("net: DHCP failed\n");
+    while (TRUE)
+        NetWait;
+}
+
+Bool NetInit()
+{//Find the virtio-net device, start the network task (DHCP). FALSE without a NIC.
+    I64 i;
+    for (i = 0; i < fdt_nblk && !net_nic; i++)
+        net_nic = NetDrvProbe(fdt_blk[i].base, net_mac);
+    if (!net_nic)
+        return FALSE;
+    net_next_port = 49152 + NetRand % 16000;
+    net_task = Spawn(&NetTask, NULL, "Net", mp_cnt - 1);
+    return TRUE;
+}

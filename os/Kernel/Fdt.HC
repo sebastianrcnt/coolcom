@@ -15,7 +15,7 @@ I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate
 
 // VM devices, found by compatible string under /soc and /chosen:
 //   simple-framebuffer, coolcom,coolvm-input, virtio,mmio (any number).
-#define FDT_BLKS 4
+#define FDT_BLKS 8  // virtio-mmio nodes: block devices (Blk.HC) and the NIC (NetDrv.HC)
 class CFdtDev {I64 base, size, irq;};
 CFdtDev fdt_input, fdt_blk[FDT_BLKS], fdt_fb;
 I64 fdt_nblk, fdt_fb_w, fdt_fb_h, fdt_fb_stride;

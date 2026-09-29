@@ -1,0 +1,619 @@
+// TCP/IP, part 1: Ethernet, ARP, IPv4, ICMP, UDP, loopback and the network
+// task. TCP is in NetTcp.HC, DHCP/DNS and the shell tools in NetApp.HC.
+// Written for coolcom (not a port); the design is deliberately simple:
+// - one lock (net_lock, taken with IRQs masked) covers the whole stack; the
+//   network task and every blocking call run NetPoll, which drains the
+//   virtio-net receive ring, the loopback queue and the TCP timers;
+// - packets are built in stack buffers and copied into the driver's ring;
+//   received frames are parsed in place, sockets copy what they keep;
+// - addresses are I64 host-order IPv4 numbers (10.0.2.15 = 0x0A00020F);
+// - no IP fragmentation or reassembly, no IP options, no multicast.
+#define ETH_HLEN     14
+#define ETH_T_ARP    0x0806
+#define ETH_T_IP     0x0800
+#define IP_P_ICMP    1
+#define IP_P_TCP     6
+#define IP_P_UDP     17
+#define NET_FRAME    1514
+#define NET_IP_MAX   1500
+#define NET_ARPS     16
+#define NET_PENDS    8
+#define NET_LOOPQ    128
+#define NET_LOOPBACK 0x7F000001
+#define NET_BCAST    0xFFFFFFFF
+#define UDP_QLEN     16
+
+class CArpEnt
+{
+    I64 ip, jiffy;
+    U8 mac[6];
+};
+
+class CNetPend
+{//An IP packet waiting for an ARP reply.
+    I64 hop, jiffy, len;
+    U8 *pkt;
+};
+
+class CNetStats
+{
+    I64 rx_frames, tx_frames, rx_bytes, tx_bytes, tx_drop, arp_rx, ip_rx, ip_drop, csum_bad,
+            icmp_rx, udp_rx, udp_drop, tcp_rx, tcp_tx, tcp_retx, tcp_rst, loop_pkts;
+};
+
+class CUdpSock
+{
+    CUdpSock *next;
+    I64 port, head, cnt;
+    U8 *data[UDP_QLEN];
+    I64 len[UDP_QLEN], src[UDP_QLEN], sport[UDP_QLEN];
+};
+
+U8 net_mac[6];
+Bool net_nic;
+I64 net_lock, net_ip, net_mask, net_gw, net_dns, net_lease, net_next_port;
+CArpEnt net_arp[NET_ARPS];
+CNetPend net_pend[NET_PENDS];
+U8 *net_loop_pkt[NET_LOOPQ];
+I64 net_loop_len[NET_LOOPQ], net_loop_head, net_loop_cnt;
+CNetStats net_stats;
+CUdpSock *net_udp;
+I64 net_ping_id, net_ping_got_seq = -1, net_ping_got_jiffy, net_ping_got_ttl, net_ping_got_len;
+CTask *net_task;
+I64 net_ip_id;
+
+extern U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len);
+extern U0 TcpTimers();
+
+I64 net_rand_state;
+
+I64 NetRand()
+{//xorshift64, seeded from the counter (ISS, ports, DNS and DHCP ids).
+    I64 x = net_rand_state;
+    if (!x)
+        x = ArchCntVct | 1;
+    x = x ^ (x << 13);
+    x = x ^ ((x >> 7) & 0x01FFFFFFFFFFFFFF);
+    x = x ^ (x << 17);
+    net_rand_state = x;
+    return (x >> 1) & 0x7FFFFFFFFFFFFFFF;
+}
+
+I64 NetGet16(U8 *p)
+{
+    return (p[0] << 8) | p[1];
+}
+
+I64 NetGet32(U8 *p)
+{
+    return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+}
+
+U0 NetPut16(U8 *p, I64 v)
+{
+    p[0] = (v >> 8) & 0xFF;
+    p[1] = v & 0xFF;
+}
+
+U0 NetPut32(U8 *p, I64 v)
+{
+    p[0] = (v >> 24) & 0xFF;
+    p[1] = (v >> 16) & 0xFF;
+    p[2] = (v >> 8) & 0xFF;
+    p[3] = v & 0xFF;
+}
+
+I64 NetSum(U8 *p, I64 len, I64 sum = 0)
+{//Ones'-complement sum of big-endian 16-bit words (not folded).
+    while (len > 1) {
+        sum += (p[0] << 8) | p[1];
+        p += 2;
+        len -= 2;
+    }
+    if (len > 0)
+        sum += p[0] << 8;
+    return sum;
+}
+
+I64 NetFold(I64 sum)
+{//The Internet checksum of a NetSum.
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    return (~sum) & 0xFFFF;
+}
+
+I64 NetPseudo(I64 src, I64 dst, I64 proto, I64 len)
+{
+    return (src >> 16) + (src & 0xFFFF) + (dst >> 16) + (dst & 0xFFFF) + proto + len;
+}
+
+U8 *NetIpStr(U8 *buf, I64 ip)
+{//Dotted quad into buf (16 bytes); returns buf.
+    StrPrint(buf, "%d.%d.%d.%d", (ip >> 24) & 0xFF, (ip >> 16) & 0xFF, (ip >> 8) & 0xFF, ip & 0xFF);
+    return buf;
+}
+
+Bool NetParseIp(U8 *s, I64 *_ip)
+{//"a.b.c.d" (exactly) to an address.
+    I64 i, v, ip = 0, digits;
+    for (i = 0; i < 4; i++) {
+        v = 0;
+        digits = 0;
+        while (*s >= '0' && *s <= '9') {
+            v = v * 10 + *s++ - '0';
+            digits++;
+        }
+        if (!digits || digits > 3 || v > 255)
+            return FALSE;
+        ip = (ip << 8) | v;
+        if (i < 3 && *s++ != '.')
+            return FALSE;
+    }
+    if (*s)
+        return FALSE;
+    *_ip = ip;
+    return TRUE;
+}
+
+I64 NetLock()
+{
+    return SpinLockIrq(&net_lock);
+}
+
+U0 NetUnlock(I64 daif)
+{
+    SpinUnlockIrq(&net_lock, daif);
+}
+
+// ---- Ethernet and ARP ----------------------------------------------------
+
+Bool EthSend(U8 *dst_mac, I64 type, U8 *payload, I64 len)
+{
+    U8 f[NET_FRAME + 2];
+    if (!net_nic || len > NET_FRAME - ETH_HLEN)
+        return FALSE;
+    MemCpy(f, dst_mac, 6);
+    MemCpy(f + 6, net_mac, 6);
+    NetPut16(f + 12, type);
+    MemCpy(f + ETH_HLEN, payload, len);
+    if (len < 46) {  // pad to the Ethernet minimum
+        MemSet(f + ETH_HLEN + len, 0, 46 - len);
+        len = 46;
+    }
+    if (!NetDrvTx(f, ETH_HLEN + len)) {
+        net_stats.tx_drop++;
+        return FALSE;
+    }
+    net_stats.tx_frames++;
+    net_stats.tx_bytes += ETH_HLEN + len;
+    return TRUE;
+}
+
+U0 ArpSend(I64 op, U8 *tha, I64 tpa)
+{
+    U8 a[28], bc[6];
+    MemSet(bc, 0xFF, 6);
+    NetPut16(a, 1);
+    NetPut16(a + 2, ETH_T_IP);
+    a[4] = 6;
+    a[5] = 4;
+    NetPut16(a + 6, op);
+    MemCpy(a + 8, net_mac, 6);
+    NetPut32(a + 14, net_ip);
+    if (tha)
+        MemCpy(a + 18, tha, 6);
+    else
+        MemSet(a + 18, 0, 6);
+    NetPut32(a + 24, tpa);
+    if (tha)
+        EthSend(tha, ETH_T_ARP, a, 28);
+    else
+        EthSend(bc, ETH_T_ARP, a, 28);
+}
+
+CArpEnt *ArpFind(I64 ip)
+{
+    I64 i;
+    for (i = 0; i < NET_ARPS; i++)
+        if (net_arp[i].ip == ip && ip)
+            return &net_arp[i];
+    return NULL;
+}
+
+U0 ArpLearn(I64 ip, U8 *mac)
+{//Record ip's MAC and send the packets that waited for it.
+    CArpEnt *e = ArpFind(ip);
+    I64 i, oldest = 0;
+    if (!ip)
+        return;
+    if (!e) {
+        for (i = 0; i < NET_ARPS; i++) {
+            if (!net_arp[i].ip) {
+                oldest = i;
+                break;
+            }
+            if (net_arp[i].jiffy < net_arp[oldest].jiffy)
+                oldest = i;
+        }
+        e = &net_arp[oldest];
+        e->ip = ip;
+    }
+    MemCpy(e->mac, mac, 6);
+    e->jiffy = jiffies;
+    for (i = 0; i < NET_PENDS; i++)
+        if (net_pend[i].pkt && net_pend[i].hop == ip) {
+            EthSend(mac, ETH_T_IP, net_pend[i].pkt, net_pend[i].len);
+            Free(net_pend[i].pkt);
+            net_pend[i].pkt = NULL;
+        }
+}
+
+U0 ArpRx(U8 *a, I64 len)
+{
+    I64 op, spa, tpa;
+    if (len < 28 || NetGet16(a) != 1 || NetGet16(a + 2) != ETH_T_IP || a[4] != 6 || a[5] != 4)
+        return;
+    net_stats.arp_rx++;
+    op = NetGet16(a + 6);
+    spa = NetGet32(a + 14);
+    tpa = NetGet32(a + 24);
+    if (!net_ip || tpa != net_ip)
+        return;
+    ArpLearn(spa, a + 8);
+    if (op == 1)
+        ArpSend(2, a + 8, spa);
+}
+
+// ---- IPv4 ----------------------------------------------------------------
+
+Bool NetIsLocal(I64 ip)
+{//Our own address or 127/8: delivered through the loopback queue.
+    return (net_ip && ip == net_ip) || ((ip >> 24) & 0xFF) == 127;
+}
+
+I64 IpSend(I64 proto, I64 dst, U8 *payload, I64 len, I64 src = -1)
+{//Send one IPv4 packet; src -1 = our address. 0 or -1 (no route, too big).
+    U8 p[NET_IP_MAX], bc[6];
+    I64 hop, i, slot = -1;
+    CArpEnt *e;
+    if (len > NET_IP_MAX - 20)
+        return -1;
+    if (src == -1)
+        src = net_ip;
+    if (NetIsLocal(dst) && src == net_ip && (dst >> 24) == 127)
+        src = dst;
+    p[0] = 0x45;
+    p[1] = 0;
+    NetPut16(p + 2, 20 + len);
+    NetPut16(p + 4, net_ip_id++);
+    NetPut16(p + 6, 0x4000);  // don't fragment
+    p[8] = 64;
+    p[9] = proto;
+    NetPut16(p + 10, 0);
+    NetPut32(p + 12, src);
+    NetPut32(p + 16, dst);
+    NetPut16(p + 10, NetFold(NetSum(p, 20)));
+    MemCpy(p + 20, payload, len);
+    if (NetIsLocal(dst)) {
+        if (net_loop_cnt >= NET_LOOPQ)
+            return -1;
+        i = (net_loop_head + net_loop_cnt) % NET_LOOPQ;
+        net_loop_pkt[i] = MAlloc(20 + len);
+        MemCpy(net_loop_pkt[i], p, 20 + len);
+        net_loop_len[i] = 20 + len;
+        net_loop_cnt++;
+        net_stats.loop_pkts++;
+        return 0;
+    }
+    if (!net_nic)
+        return -1;
+    if (dst == NET_BCAST || (net_ip && dst == (net_ip | (~net_mask & 0xFFFFFFFF)))) {
+        MemSet(bc, 0xFF, 6);
+        return EthSend(bc, ETH_T_IP, p, 20 + len) - 1;
+    }
+    hop = dst;
+    if ((dst & net_mask) != (net_ip & net_mask))
+        hop = net_gw;
+    if (!hop)
+        return -1;
+    if (e = ArpFind(hop))
+        return EthSend(e->mac, ETH_T_IP, p, 20 + len) - 1;
+    for (i = 0; i < NET_PENDS; i++)
+        if (!net_pend[i].pkt) {
+            slot = i;
+            break;
+        }
+    if (slot >= 0) {
+        net_pend[slot].pkt = MAlloc(20 + len);
+        MemCpy(net_pend[slot].pkt, p, 20 + len);
+        net_pend[slot].len = 20 + len;
+        net_pend[slot].hop = hop;
+        net_pend[slot].jiffy = jiffies;
+    }
+    ArpSend(1, NULL, hop);
+    return 0;
+}
+
+extern U0 UdpRx(I64 src, I64 dst, U8 *u, I64 len);
+extern U0 IcmpRx(I64 src, I64 dst, U8 *p, I64 len, I64 ttl);
+
+U0 IpRx(U8 *p, I64 len)
+{
+    I64 hl, tl, src, dst;
+    if (len < 20 || (p[0] >> 4) != 4) {
+        net_stats.ip_drop++;
+        return;
+    }
+    hl = (p[0] & 15) * 4;
+    tl = NetGet16(p + 2);
+    if (hl < 20 || tl < hl || tl > len) {
+        net_stats.ip_drop++;
+        return;
+    }
+    if (NetFold(NetSum(p, hl))) {
+        net_stats.csum_bad++;
+        return;
+    }
+    if (NetGet16(p + 6) & 0x3FFF) {  // a fragment
+        net_stats.ip_drop++;
+        return;
+    }
+    src = NetGet32(p + 12);
+    dst = NetGet32(p + 16);
+    if (net_ip && dst != net_ip && dst != NET_BCAST && !NetIsLocal(dst) &&
+            dst != (net_ip | (~net_mask & 0xFFFFFFFF))) {
+        net_stats.ip_drop++;
+        return;
+    }
+    net_stats.ip_rx++;
+    if (p[9] == IP_P_ICMP)
+        IcmpRx(src, dst, p + hl, tl - hl, p[8]);
+    else if (p[9] == IP_P_UDP)
+        UdpRx(src, dst, p + hl, tl - hl);
+    else if (p[9] == IP_P_TCP)
+        TcpRx(src, dst, p + hl, tl - hl);
+}
+
+U0 EthRx(U8 *f, I64 len)
+{
+    I64 type;
+    if (len < ETH_HLEN)
+        return;
+    net_stats.rx_frames++;
+    net_stats.rx_bytes += len;
+    type = NetGet16(f + 12);
+    if (type == ETH_T_ARP)
+        ArpRx(f + ETH_HLEN, len - ETH_HLEN);
+    else if (type == ETH_T_IP)
+        IpRx(f + ETH_HLEN, len - ETH_HLEN);
+}
+
+// ---- ICMP ----------------------------------------------------------------
+
+U0 IcmpRx(I64 src, I64 dst, U8 *p, I64 len, I64 ttl)
+{
+    U8 r[NET_IP_MAX];
+    if (len < 8 || NetFold(NetSum(p, len))) {
+        net_stats.csum_bad++;
+        return;
+    }
+    net_stats.icmp_rx++;
+    if (p[0] == 8 && p[1] == 0) {  // echo request: answer from the address it was sent to
+        MemCpy(r, p, len);
+        r[0] = 0;
+        NetPut16(r + 2, 0);
+        NetPut16(r + 2, NetFold(NetSum(r, len)));
+        if (dst == NET_BCAST)
+            dst = -1;
+        IpSend(IP_P_ICMP, src, r, len, dst);
+    } else if (p[0] == 0 && NetGet16(p + 4) == net_ping_id) {
+        net_ping_got_seq = NetGet16(p + 6);
+        net_ping_got_jiffy = jiffies;
+        net_ping_got_ttl = ttl;
+        net_ping_got_len = len;
+    }
+}
+
+I64 IcmpEcho(I64 dst, I64 id, I64 seq, I64 size = 56)
+{//Send an echo request with size bytes of data.
+    U8 m[NET_IP_MAX];
+    I64 i;
+    if (size < 0 || size > NET_IP_MAX - 28)
+        return -1;
+    m[0] = 8;
+    m[1] = 0;
+    NetPut16(m + 2, 0);
+    NetPut16(m + 4, id);
+    NetPut16(m + 6, seq);
+    for (i = 0; i < size; i++)
+        m[8 + i] = i;
+    NetPut16(m + 2, NetFold(NetSum(m, 8 + size)));
+    return IpSend(IP_P_ICMP, dst, m, 8 + size);
+}
+
+// ---- UDP -----------------------------------------------------------------
+
+CUdpSock *UdpFind(I64 port)
+{
+    CUdpSock *s = net_udp;
+    while (s && s->port != port)
+        s = s->next;
+    return s;
+}
+
+U0 UdpRx(I64 src, I64 dst, U8 *u, I64 len)
+{
+    I64 ul, i;
+    CUdpSock *s;
+    if (len < 8 || (ul = NetGet16(u + 4)) < 8 || ul > len) {
+        net_stats.ip_drop++;
+        return;
+    }
+    if (NetGet16(u + 6) && NetFold(NetSum(u, ul, NetPseudo(src, dst, IP_P_UDP, ul)))) {
+        net_stats.csum_bad++;
+        return;
+    }
+    net_stats.udp_rx++;
+    s = UdpFind(NetGet16(u + 2));
+    if (!s || s->cnt >= UDP_QLEN) {
+        net_stats.udp_drop++;
+        return;
+    }
+    i = (s->head + s->cnt) % UDP_QLEN;
+    s->data[i] = MAlloc(ul - 8 + 1);
+    MemCpy(s->data[i], u + 8, ul - 8);
+    s->len[i] = ul - 8;
+    s->src[i] = src;
+    s->sport[i] = NetGet16(u);
+    s->cnt++;
+}
+
+extern Bool NetPortFree(I64 port);  // NetTcp.HC
+
+I64 NetEphemeral()
+{//A free local port for UDP and TCP (49152..65535). Caller holds net_lock.
+    I64 i;
+    for (i = 0; i < 16384; i++) {
+        net_next_port++;
+        if (net_next_port < 49152 || net_next_port > 65535)
+            net_next_port = 49152;
+        if (!UdpFind(net_next_port) && NetPortFree(net_next_port))
+            return net_next_port;
+    }
+    return 0;
+}
+
+CUdpSock *UdpOpen(I64 port = 0)
+{//Open a UDP socket on port (0 = any free one); NULL if the port is taken.
+    CUdpSock *s;
+    I64 daif = NetLock;
+    if (!port)
+        port = NetEphemeral;
+    if (!port || UdpFind(port)) {
+        NetUnlock(daif);
+        return NULL;
+    }
+    s = CAlloc(sizeof(CUdpSock));
+    s->port = port;
+    s->next = net_udp;
+    net_udp = s;
+    NetUnlock(daif);
+    return s;
+}
+
+U0 UdpClose(CUdpSock *s)
+{
+    CUdpSock *prev = NULL, *cur;
+    I64 daif = NetLock;
+    cur = net_udp;
+    while (cur && cur != s) {
+        prev = cur;
+        cur = cur->next;
+    }
+    if (cur && prev)
+        prev->next = s->next;
+    else if (cur)
+        net_udp = s->next;
+    while (s->cnt) {
+        Free(s->data[s->head]);
+        s->head = (s->head + 1) % UDP_QLEN;
+        s->cnt--;
+    }
+    NetUnlock(daif);
+    Free(s);
+}
+
+I64 UdpSendFrom(CUdpSock *s, I64 dst, I64 dport, U8 *buf, I64 len, I64 src)
+{
+    U8 u[NET_IP_MAX];
+    I64 c, res, daif;
+    if (len < 0 || len > NET_IP_MAX - 28)
+        return -1;
+    daif = NetLock;
+    if (src == -1)
+        src = net_ip;
+    if (NetIsLocal(dst) && (dst >> 24) == 127)
+        src = dst;
+    NetPut16(u, s->port);
+    NetPut16(u + 2, dport);
+    NetPut16(u + 4, 8 + len);
+    NetPut16(u + 6, 0);
+    MemCpy(u + 8, buf, len);
+    c = NetFold(NetSum(u, 8 + len, NetPseudo(src, dst, IP_P_UDP, 8 + len)));
+    if (!c)
+        c = 0xFFFF;
+    NetPut16(u + 6, c);
+    res = IpSend(IP_P_UDP, dst, u, 8 + len, src);
+    NetUnlock(daif);
+    if (res < 0)
+        return res;
+    return len;
+}
+
+I64 UdpSend(CUdpSock *s, I64 dst, I64 dport, U8 *buf, I64 len)
+{//Send a datagram; returns len or -1.
+    return UdpSendFrom(s, dst, dport, buf, len, -1);
+}
+
+extern U0 NetWait();
+
+I64 UdpRecv(CUdpSock *s, U8 *buf, I64 max, I64 *_src = NULL, I64 *_sport = NULL, I64 timeout_ms = -1)
+{//Next datagram (truncated to max); its length, or -1 after timeout_ms (-1 = forever).
+    I64 daif, n, deadline = jiffies + timeout_ms;
+    while (TRUE) {
+        daif = NetLock;
+        if (s->cnt) {
+            n = MinI64(max, s->len[s->head]);
+            MemCpy(buf, s->data[s->head], n);
+            if (_src) *_src = s->src[s->head];
+            if (_sport) *_sport = s->sport[s->head];
+            Free(s->data[s->head]);
+            s->head = (s->head + 1) % UDP_QLEN;
+            s->cnt--;
+            NetUnlock(daif);
+            return n;
+        }
+        NetUnlock(daif);
+        if (timeout_ms >= 0 && jiffies >= deadline)
+            return -1;
+        NetWait;
+    }
+}
+
+// ---- polling and the network task ---------------------------------------
+
+U0 NetPoll()
+{//Process received frames, looped-back packets and timers.
+    U8 *f;
+    I64 len, n, i, daif = NetLock;
+    if (net_nic) {
+        n = 0;
+        while (n++ < NET_RXN && (f = NetDrvRx(&len))) {
+            EthRx(f, len);
+            NetDrvRxDone;
+        }
+        NetDrvKick;
+    }
+    n = net_loop_cnt;
+    while (n-- > 0 && net_loop_cnt) {
+        f = net_loop_pkt[net_loop_head];
+        len = net_loop_len[net_loop_head];
+        net_loop_head = (net_loop_head + 1) % NET_LOOPQ;
+        net_loop_cnt--;
+        IpRx(f, len);
+        Free(f);
+    }
+    for (i = 0; i < NET_PENDS; i++)
+        if (net_pend[i].pkt && jiffies - net_pend[i].jiffy > 3000) {
+            Free(net_pend[i].pkt);
+            net_pend[i].pkt = NULL;
+        }
+    TcpTimers;
+    NetUnlock(daif);
+}
+
+U0 NetWait()
+{//Blocking calls: poll, then give the core away for a tick (1 ms).
+    NetPoll;
+    Sleep(1);
+}

@@ -166,7 +166,7 @@ root nor vmnet is needed. The guest network is QEMU's: guest `10.0.2.15/24`, gat
   port forwarding.
 
 `COOLVM_NET_DEBUG=1` logs DNS lookups, TCP connects, every guest TCP segment and bad guest checksums,
-and prints frame counts at exit. `test/nat-test.c` (part of `make coolvm-test`) drives the NAT from a
+and prints frame counts at exit. `COOLVM_NET_OFFLINE=1` makes every DNS query fail with SERVFAIL, as if the host were offline. `test/nat-test.c` (part of `make coolvm-test`) drives the NAT from a
 host program acting as the guest driver: ARP, ICMP, DHCP, DNS and an HTTP GET of example.com (skipped
 with status 77 when the host is offline).
 
