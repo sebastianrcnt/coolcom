@@ -17,7 +17,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     && grep -q 'SELFTEST PASS' "$log" && grep -q '2 cores online' "$log" \
     && grep -q 'KERNEL TEST PASS' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
     && [ "$(tr -d '\r' <"$log" | grep -cx 'Break')" = 2 ] \
-    && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && python3 tools/kernel-verify.py verify "$dir"; then
+    && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx '63' && python3 tools/kernel-verify.py verify "$dir"; then
     tail -n 12 "$log"
     exit 0
 fi

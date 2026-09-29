@@ -2,7 +2,7 @@
 // tools/kernel-test.sh supplies a 64 KiB disk (128 sectors, sector s byte j =
 // s*31 + j*7 mod 256), a FAT32 disk, a scripted input queue (mouse +5,-3,
 // wheel +2, left button, then the keys h x BACKSPACE i SHIFT+a ENTER, then
-// seven shell lines) and a 640x480 framebuffer, and afterwards checks the
+// nine shell lines) and a 640x480 framebuffer, and afterwards checks the
 // disk files, the screenshot and that the shell printed 49.
 
 U8 dt_line[64];
@@ -87,7 +87,7 @@ U0 DevTestFs()
         KTFail("fs: DirCur in Sub");
     Free(s);
     Cd("..");
-    if (Dir != 3)
+    if (Dir != 4)
         KTFail("fs: Dir count");
     s = FileRead("FromCoolcom.txt", &size);
     if (!s || size != 3000 || MemCmp(s, a, 3000))
@@ -97,6 +97,9 @@ U0 DevTestFs()
     if (!s || size != 700 || MemCmp(s, b, 700))
         KTFail("fs: read back Sub/Inner.TXT");
     Free(s);
+    if (!Copy("C:/Sub/Inner.TXT", "C:/Copy.TXT") || !Move("Copy.TXT", "Moved.TXT") || FileFind("Copy.TXT") ||
+            Del("Moved.TXT") != 1 || FileFind("Moved.TXT") || !IsDir("Sub") || IsDir("HostNote.txt"))
+        KTFail("fs: Copy/Move/Del/IsDir");
     s = FileRead("Missing.TXT");
     if (s)
         KTFail("fs: FileRead of a missing file");
@@ -136,9 +139,10 @@ U0 DevTestShell()
     //  Print("%d\n", 51);
     //  Print("%d\n", 7); edited to print 42 (Left, Left, Backspace, 4, 2)
     //  Up, Up recalls the 51 line, which prints 51 again
+    //  #include "Test.HC" (from the FAT32 disk) and Print("%d\n", Tripled(21)); print 63
     //then runs Sq(7) itself, so Sq must have persisted.
     I64 deadline = ArchCntVct + 20 * ArchCntFrq, f0 = kt_fails;
-    ShellStart(7);
+    ShellStart(9);
     while (shell_state < 2 && shell_state >= 0 && ArchCntVct < deadline)
         Sleep(10);
     if (shell_state != 2)

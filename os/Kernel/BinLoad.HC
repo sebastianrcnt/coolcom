@@ -109,9 +109,14 @@ I64 BinSymFind(CBinMod *m, U8 *name)
     return 0;
 }
 
+U0 (*bin_trap_hook)();  // the shell: return to its prompt instead of halting
+
 U0 BinTrap(I64 id)
 {//Reached through an import stub: nothing defines the import.
-    Print("bin: unresolved import %s was called; task halted\n", bin_trap_mod->imps[id].name);
+    Print("ERROR: unresolved import %s was called\n", bin_trap_mod->imps[id].name);
+    if (bin_trap_hook)
+        (*bin_trap_hook)();  // doesn't return on the shell task
+    Print("bin: task halted\n");
     while (TRUE) {
         Yield;
         ArchWfi;
