@@ -1,4 +1,4 @@
-name = "HolyC"
+name = "Cool"
 grammar = "holyc"
 path_suffixes = ["cool", "coolh", "HC", "HH", "hc", "hh"]
 line_comments = ["// "]

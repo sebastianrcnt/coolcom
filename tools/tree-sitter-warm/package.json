@@ -1,0 +1,13 @@
+{
+  "name": "tree-sitter-warm",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Warm, coolcom's fork of the Austral language",
+  "license": "MIT",
+  "main": "bindings/node",
+  "tree-sitter": [
+    {
+      "scope": "source.warm",
+      "file-types": ["warm", "warmh"]
+    }
+  ]
+}
