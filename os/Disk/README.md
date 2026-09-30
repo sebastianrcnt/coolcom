@@ -1,6 +1,6 @@
 # C: programs
 
-`make run` copies these files into `build/disk.img` before boot (only the ones that are missing, so edits made inside the OS survive; `make disk-install` overwrites them) with `tools/disk-files.sh`, which also puts the kernel's own sources under `C:/Kernel` (`os/Kernel`, and `Runtime/` for the shared TempleOS library files) so the OS can show its source. The shell runs `C:/Init.cool` at startup, which loads the programs below into that shell (each Tmux pane's shell loads its own copy).
+`make run` copies these files into `build/disk.img` before boot (only the ones that are missing, so edits made inside the OS survive; `make disk-install` overwrites them) with `tools/disk-files.sh`, which also puts the kernel's own sources under `C:/Kernel` (`os/Kernel`), with shared libraries in `C:/Cool/Runtime` and `C:/Cool/Fmt` so the OS can show its source. The shell runs `C:/Init.cool` at startup, which loads the programs below into that shell (each Tmux pane's shell loads its own copy).
 
 | File | What |
 |---|---|

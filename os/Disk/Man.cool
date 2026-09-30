@@ -2,13 +2,13 @@
 // The shell compiler's symbol table says what Name is. A symbol defined in a file the shell
 // compiled (Vim.cool, your own #include) carries its file and line, and Vim opens there. The
 // kernel's own symbols come from the compiler's prelude, so their source is looked up in
-// the kernel sources on the disk (C:/Kernel: os/Kernel; C:/coolc: the shared library files) by
+// the kernel sources on the disk (C:/Kernel: os/Kernel; C:/Cool: the shared library files) by
 // the shape of a definition: a function is a line with a return type and Name(, a class is
 // "class Name", a global is a declaration at the start of a line, a #define is #define Name.
 // Vim has no file size limit, so a big file (KernelA.coolh) opens the same way.
 //   Man("StrLen");   Man("CTask");   Man("VimOpen");   Man("jiffies");
 #define MAN_SRC   "C:/Kernel/*"
-#define MAN_SRC2  "C:/coolc/*"
+#define MAN_SRC2  "C:/Cool/*"
 #define MAN_FUN   1
 #define MAN_CLASS 2
 #define MAN_GLOBAL 3
@@ -173,7 +173,7 @@ U0 Man(U8 *name)
     n = ManSearch(name, kind, file, &line);
     if (!n && kind) n = ManSearch(name, 0, file, &line);
     if (!n) {
-        if (h) Print("Man: no source found for %s (looked in C:/Kernel and C:/coolc)\n", name);
+        if (h) Print("Man: no source found for %s (looked in C:/Kernel and C:/Cool)\n", name);
         else Print("Man: unknown symbol %s\n", name);
         return;
     }
