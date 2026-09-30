@@ -2,7 +2,7 @@
 """The text tools on C: (os/Disk): Find, HexDump, Diff (report and merge), Less and Man, driven
 by typed shell statements; results from the UART stream, the disk files and one screenshot.
 
-Man opens Vim (or Less, for a file over Vim's 128 KiB) at the symbol's file and line, found from the
+Man opens Vim at the symbol's file and line, found from the
 compiler's symbol table (Vim.cool's own functions) or the kernel sources on the disk (C:/Kernel).
 """
 import importlib.util
@@ -65,11 +65,9 @@ def main():
     script += keys('2') + keys('2')
     script += line('Print("\\nSTEP-SAME\\n"); Diff("C:/B.TXT", "C:/B.TXT");')
     # Man: VimOpen is defined in the shell (its own file and line); the rest come from C:/Kernel.
-    for i, sym in enumerate(('VimOpen', 'StrLen', 'jiffies', 'VIM_CAP', 'CTask', 'I64', 'NoSuchSymbol')):
+    for i, sym in enumerate(('VimOpen', 'StrLen', 'jiffies', 'VIM_HIST', 'CTask', 'I64', 'NoSuchSymbol')):
         script += line(f'Print("\\nSTEP-MAN{i}\\n"); Man("{sym}");', 700)
-        if sym == 'CTask':
-            script += keys('q')  # KernelA.coolh is too big for Vim: opened in Less
-        elif sym not in ('I64', 'NoSuchSymbol'):
+        if sym not in ('I64', 'NoSuchSymbol'):
             script += keys(':q\n')
     # Less: paging, search, and (left open for the screenshot) a wide-character line.
     script += line('Print("\\nSTEP-LESS\\n"); Less("C:/L.TXT");', 600)
@@ -137,9 +135,8 @@ def main():
             failures.append(f'Man({sym}): expected {kind} at {path}:{want}; got {man[i][:200]!r}')
         else:
             need(man[i], f'{want:5d} ')
-    need(man[3], 'VIM_CAP: #define, C:/Vim.cool:4\n')
+    need(man[3], 'VIM_HIST: #define, C:/Vim.cool:4\n')
     need(man[4], 'CTask: type, C:/Kernel/KernelA.coolh:')
-    need(man[4], 'C:/Kernel/KernelA.coolh is too big for Vim; opening it in Less')
     need(man[4], 'class CTask')
     need(man[5], 'I64 is a built-in type')
     need(man[6], 'Man: unknown symbol NoSuchSymbol')

@@ -103,6 +103,56 @@ def vim_panes(kernel):
     print('Tmux Vim: concurrent editors, per-pane save/page scrolling, normal/break/fault cleanup isolation and shell restoration PASS')
 
 
+def exit_panes(kernel):
+    """exit/Exit() closes panes and windows; the last pane restores the original shell."""
+    d = ROOT / 'build/tmux-exit-test'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'screen.png').unlink(missing_ok=True)
+    disk = d / 'disk.img'
+    with disk.open('wb') as f:
+        f.truncate(40 * 1024 * 1024)
+    subprocess.run(['newfs_msdos', '-F', '32', '-S', '512', '-c', '1', '-s', '81920',
+                    '-h', '16', '-u', '63', '-v', 'TMUXEXIT', str(disk)], check=True, capture_output=True)
+    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    # Closing the last pane returns to the invoking compiler, preserving its definitions.
+    script = vim.BOOT + line('I64 Keep=41;') + line('Tmux;') + 'delay 2500\n'
+    script += line('exit') + 'delay 500\n'
+    script += line('Print("BACK%d-%d\\n", Keep, tm_session==NULL);') + vim.wait('BACK41-1')
+    # Exit() in the right pane expands the left pane back to the full terminal width.
+    script += line('Tmux;') + 'delay 2500\n' + prefix('%') + 'delay 2500\n'
+    script += line('Exit();') + 'delay 500\n'
+    script += line('Print("LEFT%d-%d\\n", 2, VtCurrent->cols);') + vim.wait('LEFT2-80')
+    # Closing the selected window focuses the surviving window.
+    script += prefix('c') + 'delay 2500\n' + line('exit') + 'delay 500\n'
+    script += line('Print("WIN%d\\n", 3);') + vim.wait('WIN3')
+    # A background window and then an inactive pane can end while another has focus.
+    script += prefix('c') + 'delay 2500\n'
+    script += line('Sleep(1000); Exit();') + prefix('n') + 'delay 1500\n'
+    script += line('Print("HIDDEN%d\\n", 4);') + vim.wait('HIDDEN4')
+    script += prefix('%') + 'delay 2500\n'
+    script += line('Sleep(1000); Exit();') + prefix('o') + 'delay 1500\n'
+    script += line('Print("INACTIVE%d-%d\\n", 5, VtCurrent->cols);') + vim.wait('INACTIVE5-80')
+    script += line('Exit();') + 'delay 500\n'
+    script += line('Print("\\x1b[2J\\x1b[HBACK%d-%d\\n", Keep+1, tm_session==NULL);')
+    script += vim.finish('BACK42-1', 300)
+    (d / 'input.txt').write_text(script)
+    with (d / 'vm.log').open('wb') as out:
+        proc = subprocess.run(['gtimeout', '-k', '2', '50', 'build/coolvm', '--headless', '--cpus', '2',
+                               '--mem', '1024', '--timeout', '45', '--width', '640', '--height', '480',
+                               '--input-script', str(d / 'input.txt'), '--disk', str(disk),
+                               '--screenshot', str(d / 'screen.png'), kernel], stdout=out, stderr=subprocess.STDOUT)
+    log = (d / 'vm.log').read_text(errors='replace')
+    vim.check_init_log(log)
+    after_boot = log.split('SELFTEST PASS', 1)[-1]
+    assert 'heap overflow' not in after_boot and '*** Exception:' not in after_boot, 'kernel failure'
+    assert 'ERROR:' not in after_boot, 'unexpected shell exception'
+    assert proc.returncode == 0, f'exit VM failed; see {d}/vm.log'
+    for marker in ['BACK41-1', 'LEFT2-80', 'WIN3', 'HIDDEN4', 'INACTIVE5-80', 'BACK42-1']:
+        assert marker in after_boot, f'{marker} missing; see {d}/vm.log'
+    check_pixels(d, [('BACK42-1', 0)])
+    print('Tmux exit: last pane returns to original compiler, active/inactive panes expand, active/background windows close PASS')
+
+
 def main():
     d = ROOT / 'build/tmux-test'
     d.mkdir(parents=True, exist_ok=True)
@@ -147,3 +197,4 @@ def main():
 if __name__ == '__main__':
     main()
     vim_panes(sys.argv[1])
+    exit_panes(sys.argv[1])

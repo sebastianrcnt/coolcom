@@ -19,11 +19,11 @@ I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate
 #define FDT_BLKS 8  // virtio-mmio nodes: block devices (Blk.cool) and the NIC (NetDrv.cool)
 class CFdtDev {I64 base, size, irq;};
 CFdtDev fdt_input, fdt_blk[FDT_BLKS], fdt_fb;
-I64 fdt_nblk, fdt_fb_w, fdt_fb_h, fdt_fb_stride;
+I64 fdt_nblk, fdt_fb_w, fdt_fb_h, fdt_fb_stride, fdt_fb_scanout;
 Bool fdt_fb_32bpp;  // format x8r8g8b8 or a8r8g8b8
 // The node being parsed (leaf nodes below /soc and /chosen).
 CFdtDev fdt_nd;
-I64 fdt_nd_kind, fdt_nd_w, fdt_nd_h, fdt_nd_stride;
+I64 fdt_nd_kind, fdt_nd_w, fdt_nd_h, fdt_nd_stride, fdt_nd_scanout;
 Bool fdt_nd_32bpp;
 
 I64 Fdt32(U8 *p)
@@ -71,6 +71,7 @@ U0 FdtNodeStart()
 {
     fdt_nd.base = fdt_nd.size = fdt_nd.irq = 0;
     fdt_nd_kind = fdt_nd_w = fdt_nd_h = fdt_nd_stride = 0;
+    fdt_nd_scanout = 0;
     fdt_nd_32bpp = FALSE;
 }
 
@@ -95,6 +96,7 @@ U0 FdtNodeDone()
         fdt_fb_stride = fdt_nd_stride;
         if (!fdt_fb_stride)
             fdt_fb_stride = fdt_fb_w * 4;
+        fdt_fb_scanout = fdt_nd_scanout;
         fdt_fb_32bpp = TRUE;
     }
 }
@@ -208,6 +210,8 @@ Bool FdtInit(U8 *dt)
                     fdt_nd_h = Fdt32(data);
                 else if (FdtEqual(str + nameoff, "stride") && len >= 4)
                     fdt_nd_stride = Fdt32(data);
+                else if (FdtEqual(str + nameoff, "coolcom,scanout-y") && len == 8)
+                    fdt_nd_scanout = Fdt64(data);
                 else if (FdtEqual(str + nameoff, "format"))
                     fdt_nd_32bpp = FdtEqual(data, "x8r8g8b8") || FdtEqual(data, "a8r8g8b8");
             }

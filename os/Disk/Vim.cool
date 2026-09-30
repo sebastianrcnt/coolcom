@@ -1,34 +1,278 @@
 // Modal UTF-8 editor, loaded on the shell task by Init.cool.
 // Positions and ranges are byte offsets; all movement follows character boundaries.
-// Bounded storage: 128 KiB text, 32 undo transactions, 4096 keys per dot command.
-#define VIM_CAP 131072
+// The text is a gap buffer that grows as needed; undo keeps 32 transactions of edits; 4096 keys per dot command.
 #define VIM_HIST 33
 #define VIM_KEYS 4096
-U8 *vim_buf, *vim_yank, *vim_saved, *vim_hist;
+#define VIM_GAP 4096
+U8 *vim_buf, *vim_yank, *vim_saved, *vim_line, *vim_grp, *vim_ea, *vim_orig;
+I64 *vim_el;
 U8 vim_name[256], vim_cmd[256], vim_search[256];
 U8 *vim_msg;
-I64 vim_len, vim_pos, vim_top, vim_left, vim_mode, vim_anchor;
+I64 vim_pos, vim_top, vim_left, vim_mode, vim_anchor;
 I64 vim_dirty, vim_saved_len, vim_yank_len, vim_yank_line;
-I64 vim_hlen[VIM_HIST], vim_hpos[VIM_HIST], vim_hn, vim_hi;
 I64 vim_count, vim_op, vim_opcount, vim_pending, vim_cmd_n, vim_prompt;
 I64 vim_search_dir, vim_goal, vim_active, vim_transaction;
 I64 vim_keys[VIM_KEYS], vim_dot[VIM_KEYS], vim_kn, vim_dn, vim_replay;
 I64 vim_changed, vim_record, vim_overflow;
+// Text storage. Only VimLen, VimAt, VimCopy, VimInsert and VimDelete (with what they call)
+// know it: a gap buffer, vim_buf[0, vim_cap) with the text before the gap in [0, vim_gs)
+// and the text after it in [vim_ge, vim_cap).
+I64 vim_cap, vim_gs, vim_ge, vim_ycap, vim_lcap;
+// Undo: an edit log of {position, bytes removed, bytes inserted, offset of the text}, 4 words
+// each; at that offset of vim_ea are the removed text and then the inserted text. History slot
+// i is the state after its transaction i: vim_hent/vim_har are the log entries and text bytes
+// used up to it, vim_hpos the cursor to come back to.
+I64 vim_ecap, vim_en, vim_acap, vim_an;
+I64 vim_hpos[VIM_HIST], vim_hent[VIM_HIST], vim_har[VIM_HIST], vim_hn, vim_hi;
+I64 vim_tx_e, vim_tx_a;
+// The window of the running transaction: [vim_wl, vim_wr) is the smallest span of the text
+// holding all its edits and vim_orig[0, vim_ol) what it held before, so a transaction whose
+// edits cancel out (rx over an x) is told from a change without comparing the whole text.
+I64 vim_win, vim_wl, vim_wr, vim_ol, vim_ocap, vim_wbad;
 // Syntax highlighting (os/Kernel/Syntax.cool): the language, the group of each byte of the
-// line being drawn, and the lexer state at the start of a line, kept while the text is
-// unchanged (vim_gen counts edits) so scrolling does not rescan the file.
-I64 vim_lang, vim_gen, vim_syn_gen, vim_syn_off, vim_syn_lang;
-U8 *vim_grp;
+// line being drawn (vim_line is a copy of it), and the lexer state at the start of a line,
+// kept while the text before that line is unchanged so scrolling does not rescan the file.
+Bool vim_number, vim_rnu;
+I64 vim_lang, vim_syn_ok, vim_syn_off, vim_syn_lang;
 CSyn vim_syn_cp;
+
+I64 VimLen()
+{
+    return vim_cap - (vim_ge - vim_gs);
+}
+
+I64 VimAt(I64 i)
+{//The byte at offset i, 0 outside the text.
+    if (i < 0) return 0;
+    if (i < vim_gs) return vim_buf[i];
+    i += vim_ge - vim_gs;
+    if (i >= vim_cap) return 0;
+    return vim_buf[i];
+}
+
+U0 VimCopy(U8 *dst, I64 a, I64 n)
+{//Copy the n bytes of text from offset a.
+    I64 k;
+    if (a < vim_gs) {
+        k = vim_gs - a;
+        if (k > n) k = n;
+        MemCpy(dst, vim_buf + a, k);
+        dst += k; a += k; n -= k;
+    }
+    if (n > 0) MemCpy(dst, vim_buf + a + vim_ge - vim_gs, n);
+}
+
+Bool VimSame(U8 *s, I64 n)
+{//Is the text these n bytes?
+    if (n != VimLen()) return FALSE;
+    if (MemCmp(vim_buf, s, vim_gs)) return FALSE;
+    return !MemCmp(vim_buf + vim_ge, s + vim_gs, n - vim_gs);
+}
+
+I64 VimNewlines(I64 a, I64 b)
+{//The line breaks in the text [a, b).
+    I64 i, k = 0, e = b, g = vim_ge - vim_gs;
+    if (e > vim_gs) e = vim_gs;
+    for (i = a; i < e; i++) if (vim_buf[i] == '\n') k++;
+    if (a < vim_gs) a = vim_gs;
+    for (i = a + g; i < b + g; i++) if (vim_buf[i] == '\n') k++;
+    return k;
+}
+
+U0 VimTouch(I64 p)
+{//The text changed at p: the highlighter state kept for a line after p is stale.
+    if (p < vim_syn_off) vim_syn_ok = FALSE;
+}
+
+Bool VimRoom(I64 n)
+{//Make the gap at least n bytes.
+    I64 tail = vim_cap - vim_ge, cap;
+    U8 *nb;
+    if (vim_ge - vim_gs >= n) return TRUE;
+    cap = (VimLen() + n) * 3 / 2 + VIM_GAP;
+    nb = MAlloc(cap);
+    if (!nb) {cap = VimLen() + n + 64; nb = MAlloc(cap);}
+    if (!nb) return FALSE;
+    MemCpy(nb, vim_buf, vim_gs);
+    MemCpy(nb + cap - tail, vim_buf + vim_ge, tail);
+    Free(vim_buf);
+    vim_buf = nb;
+    vim_ge = cap - tail;
+    vim_cap = cap;
+    return TRUE;
+}
+
+U0 VimGapAt(I64 p)
+{//Move the gap to offset p.
+    I64 g = vim_ge - vim_gs;
+    if (p < vim_gs) MemCpy(vim_buf + p + g, vim_buf + p, vim_gs - p);
+    else if (p > vim_gs) MemCpy(vim_buf + vim_gs, vim_buf + vim_ge, p - vim_gs);
+    vim_gs = p;
+    vim_ge = p + g;
+}
+
+U0 VimRawInsert(I64 p, U8 *s, I64 n)
+{//Insert without the log; the room is there (VimRoom).
+    VimGapAt(p);
+    MemCpy(vim_buf + vim_gs, s, n);
+    vim_gs += n;
+    VimTouch(p);
+}
+
+U0 VimRawDelete(I64 p, I64 n)
+{
+    VimGapAt(p);
+    vim_ge += n;
+    VimTouch(p);
+}
+
+Bool VimLogRoom(I64 bytes)
+{//Room in the log for one more edit with this much text.
+    I64 cap;
+    I64 *ne;
+    U8 *na;
+    if (vim_en >= vim_ecap) {
+        cap = vim_ecap * 2 + 64;
+        ne = ReAlloc(vim_el, cap * 4 * sizeof(I64));
+        if (!ne) return FALSE;
+        vim_el = ne;
+        vim_ecap = cap;
+    }
+    if (vim_an + bytes > vim_acap) {
+        cap = (vim_an + bytes) * 2 + 256;
+        na = ReAlloc(vim_ea, cap);
+        if (!na) return FALSE;
+        vim_ea = na;
+        vim_acap = cap;
+    }
+    return TRUE;
+}
+
+Bool VimLogInsert(I64 p, U8 *s, I64 n)
+{
+    I64 *e;
+    if (!VimLogRoom(n)) return FALSE;
+    if (vim_en > vim_tx_e) {
+        e = vim_el + (vim_en - 1) * 4;
+        if (!e[1] && e[0] + e[2] == p) {//typing goes on where the last insert ended
+            MemCpy(vim_ea + vim_an, s, n);
+            e[2] += n;
+            vim_an += n;
+            return TRUE;
+        }
+    }
+    e = vim_el + vim_en * 4;
+    e[0] = p; e[1] = 0; e[2] = n; e[3] = vim_an;
+    MemCpy(vim_ea + vim_an, s, n);
+    vim_an += n;
+    vim_en++;
+    return TRUE;
+}
+
+Bool VimLogDelete(I64 a, I64 n)
+{//Call before the text is removed: the log takes a copy.
+    I64 *e;
+    if (!VimLogRoom(n)) return FALSE;
+    if (vim_en > vim_tx_e) {
+        e = vim_el + (vim_en - 1) * 4;
+        if (!e[2] && a == e[0]) {//Delete goes on
+            VimCopy(vim_ea + vim_an, a, n);
+            e[1] += n;
+            vim_an += n;
+            return TRUE;
+        }
+        if (!e[2] && a + n == e[0]) {//Backspace goes on
+            MemCpy(vim_ea + e[3] + n, vim_ea + e[3], e[1]);
+            VimCopy(vim_ea + e[3], a, n);
+            e[0] = a;
+            e[1] += n;
+            vim_an += n;
+            return TRUE;
+        }
+    }
+    e = vim_el + vim_en * 4;
+    e[0] = a; e[1] = n; e[2] = 0; e[3] = vim_an;
+    VimCopy(vim_ea + vim_an, a, n);
+    vim_an += n;
+    vim_en++;
+    return TRUE;
+}
+
+U0 VimWinGrow(I64 room)
+{
+    U8 *nb;
+    I64 cap;
+    if (vim_wbad || vim_ol + room <= vim_ocap) return;
+    cap = (vim_ol + room) * 2 + 64;
+    nb = ReAlloc(vim_orig, cap);
+    if (!nb) {vim_wbad = TRUE; return;}
+    vim_orig = nb;
+    vim_ocap = cap;
+}
+
+U0 VimWinNote(I64 p, I64 nrem, I64 nins)
+{//An edit is about to remove nrem bytes at p and insert nins bytes there.
+    I64 k;
+    if (!vim_win) {vim_win = TRUE; vim_wl = vim_wr = p; vim_ol = 0;}
+    if (p < vim_wl) {
+        k = vim_wl - p;
+        VimWinGrow(k);
+        if (!vim_wbad) {
+            MemCpy(vim_orig + k, vim_orig, vim_ol);
+            VimCopy(vim_orig, p, k);
+            vim_ol += k;
+        }
+        vim_wl = p;
+    }
+    if (p + nrem > vim_wr) {
+        k = p + nrem - vim_wr;
+        VimWinGrow(k);
+        if (!vim_wbad) {
+            VimCopy(vim_orig + vim_ol, vim_wr, k);
+            vim_ol += k;
+        }
+        vim_wr = p + nrem;
+    }
+    vim_wr += nins - nrem;
+}
+
+Bool VimNoop()
+{//Did the transaction's edits cancel out?
+    I64 i;
+    if (vim_wbad || vim_wr - vim_wl != vim_ol) return FALSE;
+    for (i = 0; i < vim_ol; i++) if (VimAt(vim_wl + i) != vim_orig[i]) return FALSE;
+    return TRUE;
+}
+
+Bool VimInsert(U8 *s, I64 n)
+{//Insert at the cursor, which ends after the new text.
+    if (n <= 0) return TRUE;
+    if (!VimRoom(n) || !VimLogInsert(vim_pos, s, n)) {vim_msg = "Out of memory"; return FALSE;}
+    VimWinNote(vim_pos, 0, n);
+    VimRawInsert(vim_pos, s, n);
+    vim_pos += n;
+    vim_changed = vim_dirty = TRUE;
+    return TRUE;
+}
+
+U0 VimDelete(I64 a, I64 b)
+{//Delete [a, b); the cursor goes to a.
+    if (a < 0 || b > VimLen() || a >= b) return;
+    if (!VimLogDelete(a, b - a)) {vim_msg = "Out of memory"; return;}
+    VimWinNote(a, b - a, 0);
+    VimRawDelete(a, b - a);
+    vim_pos = a;
+    vim_changed = vim_dirty = TRUE;
+}
 
 I64 VimStep(I64 p)
 {
-    I64 k, i;
-    if (p >= vim_len) return vim_len;
-    k = Utf8Len(vim_buf[p]);
-    if (k < 1 || p + k > vim_len) k = 1;
+    I64 k, i, len = VimLen();
+    if (p >= len) return len;
+    k = Utf8Len(VimAt(p));
+    if (k < 1 || p + k > len) k = 1;
     for (i = 1; i < k; i++)
-        if ((vim_buf[p + i] & 0xC0) != 0x80) {k = 1; break;}
+        if ((VimAt(p + i) & 0xC0) != 0x80) {k = 1; break;}
     return p + k;
 }
 
@@ -36,42 +280,51 @@ I64 VimPrev(I64 p)
 {
     I64 q = p - 1, n = 0;
     if (p <= 0) return 0;
-    while (q > 0 && (vim_buf[q] & 0xC0) == 0x80 && n++ < 3) q--;
+    while (q > 0 && (VimAt(q) & 0xC0) == 0x80 && n++ < 3) q--;
     if (VimStep(q) != p) return p - 1;
     return q;
 }
 
 I64 VimLine(I64 p)
 {
-    while (p > 0 && vim_buf[p - 1] != '\n') p--;
+    while (p > 0 && VimAt(p - 1) != '\n') p--;
     return p;
 }
 
 I64 VimEnd(I64 p)
 {
-    while (p < vim_len && vim_buf[p] != '\n') p++;
+    I64 len = VimLen();
+    while (p < len && VimAt(p) != '\n') p++;
     return p;
 }
 
 I64 VimNextLine(I64 p)
 {
     p = VimEnd(p);
-    if (p < vim_len) p++;
+    if (p < VimLen()) p++;
     return p;
 }
 
 I64 VimLastLine()
 {
-    I64 p = vim_len;
-    if (p && vim_buf[p - 1] == '\n') p--;
+    I64 p = VimLen();
+    if (p && VimAt(p - 1) == '\n') p--;
     return VimLine(p);
+}
+
+I64 VimCp(I64 p)
+{//The code point at p.
+    U8 ub[4];
+    I64 i, k = VimStep(p) - p;
+    for (i = 0; i < k; i++) ub[i] = VimAt(p + i);
+    return Utf8Cp(ub, k);
 }
 
 I64 VimWidth(I64 p, I64 col)
 {
     I64 cp;
-    if (vim_buf[p] == '\t') return 4 - (col % 4);
-    cp = Utf8Cp(vim_buf + p, VimStep(p) - p);
+    if (VimAt(p) == '\t') return 4 - (col % 4);
+    cp = VimCp(p);
     if (cp < 32 || cp == 127) return 1;
     return Utf8Width(cp);
 }
@@ -97,12 +350,12 @@ I64 VimAtCol(I64 p, I64 col)
 
 U0 VimClamp()
 {
-    I64 end;
+    I64 end, len = VimLen();
     if (vim_pos < 0) vim_pos = 0;
-    if (vim_pos > vim_len) vim_pos = vim_len;
+    if (vim_pos > len) vim_pos = len;
     if (vim_mode != 1) {
-        if (vim_pos > VimLastLine() && vim_pos == vim_len && vim_len && vim_buf[vim_len - 1] == '\n')
-            vim_pos = vim_len - 1;
+        if (vim_pos > VimLastLine() && vim_pos == len && len && VimAt(len - 1) == '\n')
+            vim_pos = len - 1;
         end = VimEnd(vim_pos);
         if (vim_pos == end && end > VimLine(end)) vim_pos = VimPrev(end);
     }
@@ -110,43 +363,66 @@ U0 VimClamp()
 
 U0 VimDirty()
 {
-    vim_dirty = vim_len != vim_saved_len;
-    if (!vim_dirty) vim_dirty = MemCmp(vim_buf, vim_saved, vim_len) != 0;
-}
-
-U0 VimStore(I64 slot)
-{
-    MemCpy(vim_hist + slot * VIM_CAP, vim_buf, vim_len + 1);
-    vim_hlen[slot] = vim_len;
-    vim_hpos[slot] = vim_pos;
+    vim_dirty = !VimSame(vim_saved, vim_saved_len);
 }
 
 U0 VimBegin()
 {
     if (vim_transaction) return;
-    VimStore(vim_hi);
+    vim_hpos[vim_hi] = vim_pos;
+    vim_tx_e = vim_en;
+    vim_tx_a = vim_an;
+    vim_win = vim_wbad = FALSE;
+    vim_ol = 0;
     vim_transaction = TRUE;
     vim_changed = FALSE;
 }
 
+U0 VimLogMove(I64 from, I64 to, I64 da)
+{//Move the log entries [from, vim_en) down to `to`, their text down by da bytes.
+    I64 i, j, *e, *f;
+    for (i = from; i < vim_en; i++) {
+        e = vim_el + i * 4;
+        f = vim_el + (to + i - from) * 4;
+        for (j = 0; j < 4; j++) f[j] = e[j];
+        f[3] -= da;
+    }
+}
+
 U0 VimFinish()
 {
-    I64 i;
+    I64 i, de, da;
     if (!vim_transaction) return;
     vim_transaction = FALSE;
     if (!vim_changed) return;
-    if (vim_len == vim_hlen[vim_hi] && !MemCmp(vim_buf, vim_hist + vim_hi * VIM_CAP, vim_len)) {VimDirty(); return;}
-    if (vim_hi == VIM_HIST - 1) {
+    if (VimNoop()) {vim_en = vim_tx_e; vim_an = vim_tx_a; VimDirty(); return;}
+    if (vim_tx_e > vim_hent[vim_hi]) {//the redo branch is discarded
+        de = vim_tx_e - vim_hent[vim_hi];
+        da = vim_tx_a - vim_har[vim_hi];
+        VimLogMove(vim_tx_e, vim_hent[vim_hi], da);
+        MemCpy(vim_ea + vim_har[vim_hi], vim_ea + vim_tx_a, vim_an - vim_tx_a);
+        vim_en -= de;
+        vim_an -= da;
+    }
+    if (vim_hi == VIM_HIST - 1) {//the oldest transaction is forgotten
+        de = vim_hent[1];
+        da = vim_har[1];
+        VimLogMove(de, 0, da);
+        MemCpy(vim_ea, vim_ea + da, vim_an - da);
+        vim_en -= de;
+        vim_an -= da;
         for (i = 1; i < VIM_HIST; i++) {
-            MemCpy(vim_hist + (i - 1) * VIM_CAP, vim_hist + i * VIM_CAP, vim_hlen[i] + 1);
-            vim_hlen[i - 1] = vim_hlen[i];
             vim_hpos[i - 1] = vim_hpos[i];
+            vim_hent[i - 1] = vim_hent[i] - de;
+            vim_har[i - 1] = vim_har[i] - da;
         }
         vim_hi--;
     }
     vim_hi++;
     vim_hn = vim_hi + 1;
-    VimStore(vim_hi);
+    vim_hpos[vim_hi] = vim_pos;
+    vim_hent[vim_hi] = vim_en;
+    vim_har[vim_hi] = vim_an;
     if (!vim_replay && vim_record && !vim_overflow) {
         MemCpy(vim_dot, vim_keys, vim_kn * sizeof(I64));
         vim_dn = vim_kn;
@@ -156,47 +432,32 @@ U0 VimFinish()
 
 U0 VimUndo(I64 dir)
 {
-    I64 next = vim_hi + dir;
+    I64 next = vim_hi + dir, i, *e;
     if (next < 0 || next >= vim_hn) {vim_msg = "No more history"; return;}
+    if (dir < 0) {
+        for (i = vim_hent[vim_hi] - 1; i >= vim_hent[next]; i--) {
+            e = vim_el + i * 4;
+            VimRawDelete(e[0], e[2]);
+            VimRawInsert(e[0], vim_ea + e[3], e[1]);
+        }
+    } else {
+        for (i = vim_hent[vim_hi]; i < vim_hent[next]; i++) {
+            e = vim_el + i * 4;
+            VimRawDelete(e[0], e[1]);
+            VimRawInsert(e[0], vim_ea + e[3] + e[1], e[2]);
+        }
+    }
     vim_hi = next;
-    vim_len = vim_hlen[next];
     vim_pos = vim_hpos[next];
-    MemCpy(vim_buf, vim_hist + next * VIM_CAP, vim_len + 1);
-    vim_gen++;
     VimClamp();
     VimDirty();
-}
-
-Bool VimInsert(U8 *s, I64 n)
-{
-    I64 i;
-    if (n <= 0) return TRUE;
-    if (n >= VIM_CAP - vim_len) {vim_msg = "Buffer full (128 KiB limit)"; return FALSE;}
-    for (i = vim_len; i >= vim_pos; i--) vim_buf[i + n] = vim_buf[i];
-    MemCpy(vim_buf + vim_pos, s, n);
-    vim_pos += n;
-    vim_len += n;
-    vim_gen++;
-    vim_changed = vim_dirty = TRUE;
-    return TRUE;
-}
-
-U0 VimDelete(I64 a, I64 b)
-{
-    I64 i;
-    if (a < 0 || b > vim_len || a >= b) return;
-    for (i = b; i <= vim_len; i++) vim_buf[a + i - b] = vim_buf[i];
-    vim_len -= b - a;
-    vim_pos = a;
-    vim_gen++;
-    vim_changed = vim_dirty = TRUE;
 }
 
 I64 VimClass(I64 p)
 {
     I64 c;
-    if (p >= vim_len) return 0;
-    c = vim_buf[p];
+    if (p >= VimLen()) return 0;
+    c = VimAt(p);
     if (c == ' ' || c == '\t' || c == '\n' || c == '\r') return 0;
     if (c >= 128 || c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return 1;
     return 2;
@@ -211,14 +472,14 @@ I64 VimWord(I64 p, I64 motion)
         cl = VimClass(p);
         while (p && VimClass(VimPrev(p)) == cl) p = VimPrev(p);
     } else if (motion == 'e') {
-        if (p < vim_len) p = VimStep(p);
-        while (p < vim_len && !VimClass(p)) p = VimStep(p);
+        if (p < VimLen()) p = VimStep(p);
+        while (p < VimLen() && !VimClass(p)) p = VimStep(p);
         cl = VimClass(p);
-        while (p < vim_len && VimClass(VimStep(p)) == cl && VimStep(p) < vim_len) p = VimStep(p);
+        while (p < VimLen() && VimClass(VimStep(p)) == cl && VimStep(p) < VimLen()) p = VimStep(p);
     } else {
         cl = VimClass(p);
-        while (p < vim_len && VimClass(p) == cl) p = VimStep(p);
-        while (p < vim_len && !VimClass(p)) p = VimStep(p);
+        while (p < VimLen() && VimClass(p) == cl) p = VimStep(p);
+        while (p < VimLen() && !VimClass(p)) p = VimStep(p);
     }
     return p;
 }
@@ -226,7 +487,7 @@ I64 VimWord(I64 p, I64 motion)
 I64 VimFirst(I64 p)
 {
     p = VimLine(p);
-    while (p < vim_len && (vim_buf[p] == ' ' || vim_buf[p] == '\t')) p++;
+    while (p < VimLen() && (VimAt(p) == ' ' || VimAt(p) == '\t')) p++;
     return p;
 }
 
@@ -277,8 +538,17 @@ Bool VimMotion(I64 c, I64 count, Bool explicit_count)
 
 U0 VimYank(I64 a, I64 b, Bool line)
 {
-    vim_yank_len = b - a;
-    MemCpy(vim_yank, vim_buf + a, vim_yank_len);
+    U8 *y;
+    I64 n = b - a;
+    if (n + 2 > vim_ycap) {
+        y = MAlloc(n + 258);
+        if (!y) {vim_yank_len = 0; vim_msg = "Out of memory"; return;}
+        Free(vim_yank);
+        vim_yank = y;
+        vim_ycap = n + 258;
+    }
+    vim_yank_len = n;
+    VimCopy(vim_yank, a, n);
     vim_yank_line = line;
     if (line && (!vim_yank_len || vim_yank[vim_yank_len - 1] != '\n'))
         vim_yank[vim_yank_len++] = '\n';
@@ -291,14 +561,14 @@ U0 VimOperate(I64 op, I64 a, I64 b, Bool line)
     if (op != 'y') VimBegin();
     vim_pos = a;
     if (op == 'y') {vim_mode = 0; return;}
-    if (op == 'c' && line && b > a && vim_buf[b - 1] == '\n') end--;
-    if (op == 'd' && line && b == vim_len && a && vim_buf[b - 1] != '\n') a--;
+    if (op == 'c' && line && b > a && VimAt(b - 1) == '\n') end--;
+    if (op == 'd' && line && b == VimLen() && a && VimAt(b - 1) != '\n') a--;
     VimDelete(a, end);
     if (op == 'c') vim_mode = 1;
     else {
         vim_mode = 0;
         if (line) {
-            if (vim_pos >= vim_len) vim_pos = VimLastLine();
+            if (vim_pos >= VimLen()) vim_pos = VimLastLine();
             vim_pos = VimFirst(vim_pos);
         }
     }
@@ -315,27 +585,37 @@ U0 VimRange(I64 *a, I64 *b)
 
 Bool VimLoad(U8 *name)
 {
-    I64 n = 0;
-    U8 *file = NULL;
+    I64 n = 0, cap;
+    U8 *file = NULL, *nb;
     CDirEntry de;
     if (!*name || StrLen(name) >= sizeof(vim_name)) {vim_msg = "Invalid file name"; return FALSE;}
+    de.full_name = NULL;
     if (FileFind(name, &de)) {
-        if (de.size >= VIM_CAP) {vim_msg = "File too large (128 KiB limit)"; return FALSE;}
+        Free(de.full_name);
         file = FileRead(name, &n);
         if (!file) {vim_msg = "Read failed"; return FALSE;}
-        if (n >= VIM_CAP) {Free(file); vim_msg = "File too large"; return FALSE;}
-    }
-    if (file) {MemCpy(vim_buf, file, n); Free(file);}
-    vim_buf[n] = 0;
-    vim_len = n;
-    vim_gen++;
+    } else file = CAlloc(1);
+    cap = n + VIM_GAP;
+    nb = MAlloc(cap);
+    if (!file || !nb) {Free(file); Free(nb); vim_msg = "Out of memory"; return FALSE;}
+    MemCpy(nb, file, n);
+    Free(vim_buf); Free(vim_saved);
+    vim_buf = nb; vim_cap = cap; vim_gs = n; vim_ge = cap;
+    vim_saved = file; vim_saved_len = n;
+    vim_syn_ok = FALSE;
     vim_lang = SynLang(name);
     StrCpy(vim_name, name);
-    MemCpy(vim_saved, vim_buf, n + 1);
-    vim_saved_len = n;
     vim_pos = vim_top = vim_left = vim_dirty = vim_hi = 0;
     vim_hn = 1;
-    VimStore(0);
+    vim_en = vim_an = 0;
+    vim_hpos[0] = vim_hent[0] = vim_har[0] = 0;
+    return TRUE;
+}
+
+Bool VimMatch(I64 p, U8 *s, I64 n)
+{
+    I64 i;
+    for (i = 0; i < n; i++) if (VimAt(p + i) != s[i]) return FALSE;
     return TRUE;
 }
 
@@ -343,28 +623,150 @@ Bool VimSearch(I64 dir)
 {
     I64 p = vim_pos, n = StrLen(vim_search), i;
     if (!n) {vim_msg = "No previous search"; return FALSE;}
-    for (i = 0; i < vim_len; i++) {
-        if (dir > 0) {p = VimStep(p); if (p >= vim_len) p = 0;}
-        else {if (!p) p = vim_len; p = VimPrev(p);}
-        if (p + n <= vim_len && !MemCmp(vim_buf + p, vim_search, n)) {vim_pos = p; return TRUE;}
+    for (i = 0; i < VimLen(); i++) {
+        if (dir > 0) {p = VimStep(p); if (p >= VimLen()) p = 0;}
+        else {if (!p) p = VimLen(); p = VimPrev(p);}
+        if (p + n <= VimLen() && VimMatch(p, vim_search, n)) {vim_pos = p; return TRUE;}
     }
     vim_msg = "Pattern not found";
     return FALSE;
+}
+
+extern I64 VimLineGet(I64 p, I64 q);
+// Man is loaded after Vim by Init.cool; resolve through its shared symbol lookup.
+extern CHashSrcSym *ManHash(U8 *name);
+extern I64 ManKind(CHashSrcSym *h);
+extern Bool ManSrcLink(CHashSrcSym *h, U8 *file, I64 *_line);
+extern I64 ManSearch(U8 *name, I64 kind, U8 *file, I64 *_line);
+#define VIM_JUMPS 32
+U8 vim_jfile[VIM_JUMPS][256];
+I64 vim_jpos[VIM_JUMPS], vim_jtop[VIM_JUMPS], vim_jleft[VIM_JUMPS], vim_jn;
+
+U0 VimJumpPush(U8 *file, I64 pos, I64 top, I64 left)
+{
+    if (vim_jn == VIM_JUMPS) {
+        MemCpy(vim_jfile, vim_jfile + 1, (VIM_JUMPS - 1) * 256);
+        MemCpy(vim_jpos, vim_jpos + 1, (VIM_JUMPS - 1) * 8);
+        MemCpy(vim_jtop, vim_jtop + 1, (VIM_JUMPS - 1) * 8);
+        MemCpy(vim_jleft, vim_jleft + 1, (VIM_JUMPS - 1) * 8);
+        vim_jn--;
+    }
+    StrCpy(vim_jfile[vim_jn], file);
+    vim_jpos[vim_jn] = pos; vim_jtop[vim_jn] = top; vim_jleft[vim_jn++] = left;
+}
+
+U0 VimJumpBack()
+{
+    I64 i = vim_jn - 1;
+    if (i < 0) {vim_msg = "No older jump"; return;}
+    if (StrCmp(vim_name, vim_jfile[i])) {
+        if (vim_dirty) {vim_msg = "Unsaved changes: use :w first"; return;}
+        if (!VimLoad(vim_jfile[i])) return;
+    }
+    vim_pos = vim_jpos[i]; vim_top = vim_jtop[i]; vim_left = vim_jleft[i];
+    vim_jn--; vim_goal = -1;
+}
+
+I64 VimDefinition(U8 *name)
+{//Scan the live buffer, including unsaved declarations; ignore comments and strings.
+    I64 p, q, n, i, j, k, a, nl = StrLen(name);
+    CSyn st;
+    SynStart(&st, vim_lang, TRUE);
+    for (p = 0; p < VimLen(); p = q + 1) {
+        q = VimEnd(p); n = VimLineGet(p, q);
+        SynLine(&st, vim_line, n, vim_grp);
+        for (i = 0; i < n; i++)
+            if (vim_grp[i] == SYN_G_COMMENT || vim_grp[i] == SYN_G_STRING) vim_line[i] = ' ';
+        i = 0;
+        while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+        a = i;
+        if (vim_lang == SYN_WARM) {
+            while (i < n && HCTIsId(vim_line[i])) i++;
+            if (HCTStrEq(vim_line + a, i - a, "public") || HCTStrEq(vim_line + a, i - a, "private")) {
+                while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+                a = i; while (i < n && HCTIsId(vim_line[i])) i++;
+            }
+            if (!HCTStrEq(vim_line + a, i - a, "function") && !HCTStrEq(vim_line + a, i - a, "type") &&
+                    !HCTStrEq(vim_line + a, i - a, "record")) goto vim_def_next;
+            while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+            if (i + nl <= n && !MemCmp(vim_line + i, name, nl) && (i + nl == n || !HCTIsId(vim_line[i + nl]))) return p + i;
+            goto vim_def_next;
+        }
+        if (i < n && vim_line[i] == '#') {
+            if (i + 7 > n || MemCmp(vim_line + i, "#define", 7)) goto vim_def_next;
+            i += 7; while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+            if (i + nl <= n && !MemCmp(vim_line + i, name, nl) && (i + nl == n || !HCTIsId(vim_line[i + nl]))) return p + i;
+            goto vim_def_next;
+        }
+        while (i < n && HCTIsId(vim_line[i])) i++;
+        if (i == a || HCTIsKwSp(vim_line + a, i - a) || HCTIsKw2(vim_line + a, i - a)) {
+            if (!HCTStrEq(vim_line + a, i - a, "class") && !HCTStrEq(vim_line + a, i - a, "union")) goto vim_def_next;
+        }
+        for (j = i; j + nl <= n; j++) {
+            if (vim_line[j] == '(' || vim_line[j] == '=' || vim_line[j] == ';' || vim_line[j] == '{') break;
+            if (j > a && !HCTIsId(vim_line[j - 1]) && !MemCmp(vim_line + j, name, nl) &&
+                    (j + nl == n || !HCTIsId(vim_line[j + nl]))) {
+                k = j + nl; while (k < n && (vim_line[k] == ' ' || vim_line[k] == '\t')) k++;
+                if (k == n || vim_line[k] == '(' || vim_line[k] == '=' || vim_line[k] == ';' ||
+                        vim_line[k] == '[' || vim_line[k] == ',' || vim_line[k] == '{' || vim_line[k] == ':') return p + j;
+            }
+        }
+vim_def_next:
+    }
+    return -1;
+}
+
+U0 VimGotoDefinition()
+{
+    U8 name[256], file[256], oldfile[256];
+    I64 a = vim_pos, b, dest, line = 0, kind, pos = vim_pos, top = vim_top, left = vim_left;
+    CHashSrcSym *h;
+    if (!HCTIsId(VimAt(a))) {vim_msg = "No identifier under cursor"; return;}
+    while (a && HCTIsId(VimAt(a - 1))) a--;
+    b = a; while (b < VimLen() && HCTIsId(VimAt(b))) b++;
+    if (b - a > 255) {vim_msg = "Identifier too long"; return;}
+    VimCopy(name, a, b - a); name[b - a] = 0;
+    dest = VimDefinition(name);
+    if (dest >= 0) {
+        if (dest != vim_pos) VimJumpPush(vim_name, pos, top, left);
+        vim_pos = dest; vim_goal = -1; return;
+    }
+    h = ManHash(name);
+    if (!h) {vim_msg = "Definition not found"; return;}
+    kind = ManKind(h);
+    if (!ManSrcLink(h, file, &line)) {
+        if (!ManSearch(name, kind, file, &line) && (!kind || !ManSearch(name, 0, file, &line))) {
+            vim_msg = "Definition not found"; return;
+        }
+    }
+    if (vim_dirty) {vim_msg = "Unsaved changes: use :w first"; return;}
+    StrCpy(oldfile, vim_name);
+    if (StrCmp(file, vim_name) && !VimLoad(file)) return;
+    VimJumpPush(oldfile, pos, top, left);
+    vim_pos = VimGoto(line); vim_goal = -1;
 }
 
 Bool VimCommand()
 {
     I64 i, n = 0, result;
     CDirEntry de;
-    U8 *cmd = vim_cmd;
+    U8 *cmd = vim_cmd, *file;
     if (!StrCmp(cmd, "w") || !StrCmp(cmd, "wq")) {
-        result = FileWrite(vim_name, vim_buf, vim_len);
+        n = VimLen();
+        file = MAlloc(n + 1);
+        if (!file) {vim_msg = "Out of memory"; return FALSE;}
+        VimCopy(file, 0, n);
+        file[n] = 0;
+        result = FileWrite(vim_name, file, n);
         // Empty FAT files correctly return cluster zero; validate the directory too.
-        if (result == INVALID_CLUS || (!result && vim_len) || !FileFind(vim_name, &de) || de.size != vim_len) {
-            vim_msg = "Write failed"; return FALSE;
+        de.full_name = NULL;
+        if (result == INVALID_CLUS || (!result && n) || !FileFind(vim_name, &de) || de.size != n) {
+            Free(de.full_name); Free(file); vim_msg = "Write failed"; return FALSE;
         }
-        MemCpy(vim_saved, vim_buf, vim_len + 1);
-        vim_saved_len = vim_len;
+        Free(de.full_name);
+        Free(vim_saved);
+        vim_saved = file;
+        vim_saved_len = n;
         vim_dirty = FALSE;
         vim_msg = "Written";
         return !StrCmp(cmd, "wq");
@@ -378,9 +780,25 @@ Bool VimCommand()
     if (!StrNCmp(cmd, "set ft=", 7)) {
         if (!StrCmp(cmd + 7, "cool")) vim_lang = SYN_COOL;
         else if (!StrCmp(cmd + 7, "warm")) vim_lang = SYN_WARM;
+        else if (!StrCmp(cmd + 7, "asm")) vim_lang = SYN_ASM;
         else if (!StrCmp(cmd + 7, "text")) vim_lang = SYN_TEXT;
-        else {vim_msg = "Unknown filetype (cool, warm, text)"; return FALSE;}
+        else {vim_msg = "Unknown filetype (cool, warm, asm, text)"; return FALSE;}
         vim_msg = "Filetype set";
+        return FALSE;
+    }
+    if (!StrNCmp(cmd, "set ", 4)) {
+        file = cmd + 4;
+        while (*file) {
+            while (*file == ' ') file++;
+            if (!*file) break;
+            for (i = 0; file[i] && file[i] != ' '; i++);
+            if (HCTStrEq(file, i, "number") || HCTStrEq(file, i, "nu")) vim_number = TRUE;
+            else if (HCTStrEq(file, i, "nonumber") || HCTStrEq(file, i, "nonu")) vim_number = FALSE;
+            else if (HCTStrEq(file, i, "relativenumber") || HCTStrEq(file, i, "rnu")) vim_rnu = TRUE;
+            else if (HCTStrEq(file, i, "norelativenumber") || HCTStrEq(file, i, "nornu")) vim_rnu = FALSE;
+            else {vim_msg = "Unknown option"; return FALSE;}
+            file += i;
+        }
         return FALSE;
     }
     if (!StrNCmp(cmd, "hi ", 3)) {//:hi comment 2  (a highlight group and an Ansi color 0..255)
@@ -397,7 +815,7 @@ Bool VimCommand()
     }
     for (i = 0; cmd[i] >= '0' && cmd[i] <= '9'; i++) {
         n = n * 10 + cmd[i] - '0';
-        if (n > VIM_CAP) n = VIM_CAP;
+        if (n > VimLen() + 1) n = VimLen() + 1;
     }
     if (i && !cmd[i]) {vim_pos = VimGoto(n); return FALSE;}
     vim_msg = "Unknown command";
@@ -417,6 +835,7 @@ Bool VimNormal(I64 c)
         p = vim_pending;
         vim_pending = 0;
         if (p == 'g') {
+            if (c == 'd' && !vim_op && vim_mode == 0) {VimGotoDefinition(); vim_count = 0; return FALSE;}
             if (c != 'g') {vim_op = vim_count = 0; return FALSE;}
             c = 'g';
         } else if (p == 'r') {
@@ -440,7 +859,7 @@ Bool VimNormal(I64 c)
             if (vim_op) k *= vim_opcount;
             for (i = 0; i < k; i++) {
                 b = VimStep(b);
-                while (b < VimEnd(a) && Utf8Cp(vim_buf + b, VimStep(b) - b) != c) b = VimStep(b);
+                while (b < VimEnd(a) && VimCp(b) != c) b = VimStep(b);
                 if (b >= VimEnd(a)) {vim_op = vim_count = 0; return FALSE;}
             }
             if (p == 't') b = VimPrev(b);
@@ -471,7 +890,7 @@ Bool VimNormal(I64 c)
         op = vim_op;
         vim_op = 0;
         n *= vim_opcount;
-        if (n > VIM_CAP) n = VIM_CAP;
+        if (n > VimLen() + 1) n = VimLen() + 1;
         a = vim_pos;
         if (c == op) {
             a = VimLine(a);
@@ -484,8 +903,8 @@ Bool VimNormal(I64 c)
                 b = a;
                 for (i = 0; i < n; i++) {
                     k = VimClass(b);
-                    while (b < vim_len && VimClass(b) == k) b = VimStep(b);
-                    if (i + 1 < n) while (b < vim_len && !VimClass(b)) b = VimStep(b);
+                    while (b < VimLen() && VimClass(b) == k) b = VimStep(b);
+                    if (i + 1 < n) while (b < VimLen() && !VimClass(b)) b = VimStep(b);
                 }
                 VimOperate(op, a, b, FALSE);
             } else if (VimMotion(c, n, explicit_count)) {
@@ -525,17 +944,17 @@ Bool VimNormal(I64 c)
         for (i = 0; i < n && b < VimEnd(a); i++) b = VimStep(b);
         if (b > a) VimOperate('d', a, b, FALSE);
     } else if (c == 'p' || c == 'P') {
-        if (vim_yank_len && vim_yank_len * n + vim_len + 1 < VIM_CAP) {
+        if (vim_yank_len) {
             VimBegin();
             if (vim_yank_line) {
                 if (c == 'P') vim_pos = VimLine(vim_pos);
                 else {
                     vim_pos = VimNextLine(vim_pos);
-                    if (vim_pos && vim_buf[vim_pos - 1] != '\n') VimInsert(&ch, 1);
+                    if (vim_pos && VimAt(vim_pos - 1) != '\n') VimInsert(&ch, 1);
                 }
             } else if (c == 'p' && vim_pos < VimEnd(vim_pos)) vim_pos = VimStep(vim_pos);
             a = vim_pos;
-            for (i = 0; i < n; i++) VimInsert(vim_yank, vim_yank_len);
+            for (i = 0; i < n; i++) if (!VimInsert(vim_yank, vim_yank_len)) break;
             if (vim_yank_line) vim_pos = VimFirst(a);
             else vim_pos = VimPrev(vim_pos);
         }
@@ -544,11 +963,11 @@ Bool VimNormal(I64 c)
         if (n < 2) n = 2;
         for (i = 1; i < n; i++) {
             a = VimEnd(vim_pos);
-            if (a < vim_len && a + 1 < vim_len) {
+            if (a < VimLen() && a + 1 < VimLen()) {
                 b = VimFirst(a + 1);
                 VimDelete(a, b);
                 ch = ' ';
-                if (a && vim_buf[a - 1] != ' ' && vim_buf[a - 1] != '\t') VimInsert(&ch, 1);
+                if (a && VimAt(a - 1) != ' ' && VimAt(a - 1) != '\t') VimInsert(&ch, 1);
                 vim_pos = a;
             }
         }
@@ -578,7 +997,7 @@ U0 VimPage(I64 dir, I64 n)
     I64 i;
     for (i = 0; i < n; i++) {
         if (dir > 0) {
-            if (VimNextLine(vim_top) >= vim_len)
+            if (VimNextLine(vim_top) >= VimLen())
                 break;
             vim_top = VimNextLine(vim_top);
         } else {
@@ -615,6 +1034,7 @@ Bool VimKey(I64 ev)
         goto done;
     }
     if (ev & KF_CTRL) {
+        if (c == 'o' && vim_mode == 0) {VimJumpBack(); vim_count = 0;}
         if (vim_mode == 0 && (c == 'f' || c == 'b' || c == 'd' || c == 'u')) {
             n = VimPageRows();
             if (c == 'd' || c == 'u')
@@ -700,32 +1120,58 @@ U0 VimText(U8 *s, I64 limit)
     }
 }
 
+I64 VimLineGet(I64 p, I64 q)
+{//Copy the line [p, q) to vim_line, which has room for its highlight groups in vim_grp; returns the bytes copied.
+    I64 n = q - p;
+    U8 *a, *b;
+    if (n + 1 > vim_lcap) {
+        a = MAlloc(n + 257);
+        b = MAlloc(n + 257);
+        if (a && b) {
+            Free(vim_line); Free(vim_grp);
+            vim_line = a; vim_grp = b;
+            vim_lcap = n + 257;
+        } else {Free(a); Free(b);}
+    }
+    if (n > vim_lcap - 1) n = vim_lcap - 1;
+    VimCopy(vim_line, p, n);
+    vim_line[n] = 0;
+    return n;
+}
+
 U0 VimSynState(CSyn *st, I64 target)
 {//The highlighter state at the start of the line that begins at target. The state at
     //the last target is kept, so scrolling forward only scans the new lines.
     I64 p, q;
-    if (vim_syn_gen != vim_gen || vim_syn_lang != vim_lang || vim_syn_off > target) {
+    if (!vim_syn_ok || vim_syn_lang != vim_lang || vim_syn_off > target) {
         SynStart(&vim_syn_cp, vim_lang, TRUE);
         vim_syn_off = 0;
-        vim_syn_gen = vim_gen;
+        vim_syn_ok = TRUE;
         vim_syn_lang = vim_lang;
     }
     MemCpy(st, &vim_syn_cp, sizeof(CSyn));
     st->fast = TRUE;
     for (p = vim_syn_off; p < target; p = q + 1) {
         q = VimEnd(p);
-        SynLine(st, vim_buf + p, q - p, vim_grp);
-        if (q >= vim_len) break;
+        SynLine(st, vim_line, VimLineGet(p, q), vim_grp);
+        if (q >= VimLen()) break;
     }
     MemCpy(&vim_syn_cp, st, sizeof(CSyn));
     vim_syn_off = target;
     st->fast = FALSE;
 }
 
+I64 VimDisplayNumber(I64 line, I64 current)
+{
+    if (!vim_rnu || (vim_number && line == current)) return line;
+    if (line < current) return current - line;
+    return line - current;
+}
+
 U0 VimDraw()
 {
-    I64 rows, cols, p, q, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
-    I64 color, cp, i, ls, last_color, last_sel, sel;
+    I64 rows, cols, p, q, qe, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
+    I64 color, cp, i, ls, last_color, last_sel, sel, gutter = 0, current;
     U8 number[32], status[512];
     CSyn st;
     AnsiTermSize(&rows, &cols);
@@ -736,10 +1182,12 @@ U0 VimDraw()
     p = vim_top;
     for (y = 1; y < rows - 1; y++) p = VimNextLine(p);
     while (VimLine(vim_pos) > p) {vim_top = VimNextLine(vim_top); p = VimNextLine(p);}
+    if (vim_number || vim_rnu) gutter = 6;
+    current = 1 + VimNewlines(0, VimLine(vim_pos));
     col = VimCol(vim_pos);
     if (col < vim_left) vim_left = col;
-    if (col >= vim_left + cols - 8) vim_left = col - cols + 9;
-    for (p = 0; p < vim_top; p++) if (vim_buf[p] == '\n') line++;
+    if (col >= vim_left + cols - gutter - 2) vim_left = col - cols + gutter + 3;
+    line += VimNewlines(0, vim_top);
     p = vim_top;
     VimSynState(&st, p);
     for (y = 1; y < rows; y++) {
@@ -747,15 +1195,19 @@ U0 VimDraw()
         if (p > VimLastLine()) {AnsiFg(SynColor(SYN_G_NONTEXT)); ConsPut('~');}
         else {
             if (VimLine(vim_pos) == p) row = y;
-            StrPrint(number, "%5d ", line++);
-            AnsiFg(SynColor(SYN_G_LINENR)); ConsPutS(number);
+            if (gutter) {
+                StrPrint(number, "%5d ", VimDisplayNumber(line, current));
+                AnsiFg(SynColor(SYN_G_LINENR)); ConsPutS(number);
+            }
+            line++;
             q = VimEnd(p); x = 0; ls = p;
-            SynLine(&st, vim_buf + p, q - p, vim_grp);
+            qe = q; q = p + VimLineGet(p, q);
+            SynLine(&st, vim_line, q - p, vim_grp);
             last_color = last_sel = -2;
             while (p < q) {
                 k = VimStep(p) - p; w = VimWidth(p, x);
-                cp = Utf8Cp(vim_buf + p, k);
-                if (x >= vim_left && x + w <= vim_left + cols - 7) {
+                cp = VimCp(p);
+                if (x >= vim_left && x + w <= vim_left + cols - gutter - 1) {
                     color = SynColor(vim_grp[p - ls]);
                     sel = p >= a && p < b;
                     if (color != last_color || sel != last_sel) {
@@ -765,11 +1217,11 @@ U0 VimDraw()
                     }
                     if (cp == '\t') {for (i = 0; i < w; i++) ConsPut(' ');}
                     else if (cp < 32 || cp == 127) ConsPut('?');
-                    else {for (i = 0; i < k; i++) ConsPut(vim_buf[p + i]);}
+                    else {for (i = 0; i < k; i++) ConsPut(VimAt(p + i));}
                 } else if (x < vim_left && x + w > vim_left) ConsPut(' ');
                 p += k; x += w;
             }
-            p = q + 1;
+            p = qe + 1;
         }
     }
     AnsiCursor(rows, 1); AnsiSet(ANSI_BLACK, ANSI_WHITE); AnsiClearEol;
@@ -786,7 +1238,7 @@ U0 VimDraw()
         if (ime_on) StrCat(status, " [한]");
         StrCat(status, "  "); StrCat(status, vim_msg);
         VimText(status, cols - 1);
-        AnsiCursor(row, 7 + col - vim_left);
+        AnsiCursor(row, 1 + gutter + col - vim_left);
     }
     AnsiReset; AnsiCursorShow;
 }
@@ -796,9 +1248,9 @@ U0 VimClose()
     if (!vim_active) return;
     vim_active = FALSE;
     AnsiReset; AnsiCursorShow; AnsiAltScreen(FALSE);
-    Free(vim_buf); Free(vim_saved); Free(vim_yank); Free(vim_hist);
-    Free(vim_grp);
-    vim_buf = vim_saved = vim_yank = vim_hist = vim_grp = NULL;
+    Free(vim_buf); Free(vim_saved); Free(vim_yank); Free(vim_el); Free(vim_ea); Free(vim_orig);
+    Free(vim_line); Free(vim_grp);
+    vim_buf = vim_saved = vim_yank = vim_el = vim_ea = vim_orig = vim_line = vim_grp = NULL;
     shell_stmt_cleanup = NULL;
 }
 
@@ -807,12 +1259,14 @@ Bool VimOpen(U8 *name)
     if (vim_active) {Print("Vim is already active\n"); return FALSE;}
     vim_active = TRUE;
     shell_stmt_cleanup = &VimClose;
-    vim_buf = CAlloc(VIM_CAP); vim_saved = MAlloc(VIM_CAP);
-    vim_yank = MAlloc(VIM_CAP); vim_hist = MAlloc(VIM_CAP * VIM_HIST);
-    vim_grp = MAlloc(VIM_CAP);
-    if (!vim_buf || !vim_saved || !vim_yank || !vim_hist || !vim_grp) {VimClose(); Print("Vim: out of memory\n"); return FALSE;}
+    vim_cap = vim_gs = vim_ge = vim_ycap = vim_ecap = vim_en = vim_acap = vim_an = vim_ocap = 0;
+    vim_lcap = 512;
+    vim_line = MAlloc(vim_lcap); vim_grp = MAlloc(vim_lcap);
+    if (!vim_line || !vim_grp) {VimClose(); Print("Vim: out of memory\n"); return FALSE;}
     vim_mode = vim_count = vim_op = vim_pending = vim_transaction = 0;
     vim_record = vim_kn = vim_dn = vim_replay = vim_yank_len = 0;
+    vim_number = TRUE; vim_rnu = FALSE;
+    vim_jn = 0;
     vim_search[0] = 0; vim_search_dir = 1; vim_goal = -1; vim_msg = "";
     if (!VimLoad(name)) {Print("Vim: %s\n", vim_msg); VimClose(); return FALSE;}
     AnsiAltScreen(TRUE); AnsiCursorShow;
@@ -827,7 +1281,7 @@ U0 Vim(U8 *name, I64 line = 0)
         p = 0;
         for (i = 1; i < line; i++) {
             q = VimNextLine(p);
-            if (q >= vim_len) break;
+            if (q >= VimLen()) break;
             p = q;
         }
         AnsiTermSize(&rows, &cols);

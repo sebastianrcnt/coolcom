@@ -133,11 +133,11 @@ U0 TmWindowMove(I64 delta)
     }
 }
 
-U0 TmClose()
-{
-    CTmWindow *w = &tm_session->win[tm_session->current];
-    CTmPane *p = w->active, *parent = p->parent, *sibling, *grand;
-    vt_focus = NULL;
+U0 TmClosePane(CTmWindow *w, CTmPane *p)
+{//Remove pane p of window w: its terminal and tasks stop, the sibling takes its place.
+    CTmPane *parent = p->parent, *sibling, *grand;
+    Bool shown = w == &tm_session->win[tm_session->current], active = w->active == p;
+    if (shown && active) vt_focus = NULL;
     VtStop(p->term);
     VtRelease(p->term);
     tm_session->panes--;
@@ -149,15 +149,42 @@ U0 TmClose()
         if (!grand) w->root = sibling;
         else if (grand->a == parent) grand->a = sibling;
         else grand->b = sibling;
-        w->active = TmLeaf(sibling);
+        if (active) w->active = TmLeaf(sibling);
         Free(parent);
         TmLayout(w->root, 0, 0, tm_session->cols, tm_session->rows - 1);
-        TmFocus;
+        if (shown) TmFocus;
     } else {
         w->root = w->active = NULL;
-        TmWindowMove(1);
+        if (shown) TmWindowMove(1);  // a window with no panes left closes
     }
     Free(p);
+}
+
+U0 TmClose()
+{
+    CTmWindow *w = &tm_session->win[tm_session->current];
+    TmClosePane(w, w->active);
+}
+
+CTmPane *TmDead(CTmPane *p)
+{//A pane whose shell has ended (exit), or NULL.
+    CTmPane *d;
+    if (!p->a) {
+        if (p->term->owner) return NULL;
+        return p;
+    }
+    d = TmDead(p->a);
+    if (d) return d;
+    return TmDead(p->b);
+}
+
+U0 TmReap()
+{//Close the panes whose program ended, as tmux does.
+    I64 i;
+    CTmPane *d;
+    for (i = 0; i < TM_WINDOWS; i++)
+        while (tm_session->win[i].root && (d = TmDead(tm_session->win[i].root)))
+            TmClosePane(&tm_session->win[i], d);
 }
 
 Bool TmDirty(CTmPane *p)
@@ -221,6 +248,8 @@ U0 Tmux()
     AnsiAltScreen(TRUE);
     TmFocus;
     while (tm_session->panes) {
+        TmReap;
+        if (!tm_session->panes) break;
         // Batch bursts of input/output instead of repainting the entire
         // screen for every byte typed into an editor or shell command.
         if (tm_session->redraw || jiffies >= paint_at) {

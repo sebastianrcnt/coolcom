@@ -3,11 +3,51 @@
 #import <CoreServices/CoreServices.h>
 #import <QuartzCore/QuartzCore.h>
 #include "coolvm.h"
+#include <math.h>
+
+void fb_snapshot(uint8_t *dst)
+{
+    size_t stride = (size_t)g.fb_width * 4;
+    uint32_t top = atomic_load(&g.fb_scanout_y);
+    size_t first = (g.fb_height - top) * stride;
+    memcpy(dst, g.fb + top * stride, first);
+    memcpy(dst + first, g.fb, top * stride);
+}
+
+/* The window draws the two physical slices directly. Only exported screenshots
+ * and raw frame dumps flatten the ring into a contiguous visible image. */
+static CGImageRef framebuffer_slice(uint32_t y, uint32_t height)
+{
+    size_t stride = (size_t)g.fb_width * 4;
+    CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, g.fb + y * stride,
+                                                            height * stride, NULL);
+    CGImageRef image = CGImageCreate(g.fb_width, height, 8, 32, stride,
+        color, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little,
+        provider, NULL, false, kCGRenderingIntentDefault);
+    CGDataProviderRelease(provider);
+    CGColorSpaceRelease(color);
+    return image;
+}
+
+static void release_pixels(void *info, const void *data, size_t size)
+{
+    (void)info; (void)size;
+    free((void *)data);
+}
 
 static CGImageRef framebuffer_image(void)
 {
     CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
-    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, g.fb, g.fb_width*g.fb_height*4, NULL);
+    size_t size = (size_t)g.fb_width * g.fb_height * 4;
+    CGDataProviderRef provider;
+    if (atomic_load(&g.fb_scanout_y)) {
+        uint8_t *pixels = malloc(size);
+        if (!pixels) { CGColorSpaceRelease(color); return NULL; }
+        fb_snapshot(pixels);
+        provider = CGDataProviderCreateWithData(NULL, pixels, size, release_pixels);
+    } else
+        provider = CGDataProviderCreateWithData(NULL, g.fb, size, NULL);
     CGImageRef image = CGImageCreate(g.fb_width, g.fb_height, 8, 32, g.fb_width*4,
         color, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little,
         provider, NULL, false, kCGRenderingIntentDefault);
@@ -51,10 +91,29 @@ static const uint16_t keymap[128] = {
 - (BOOL)acceptsFirstResponder { return YES; }
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
-    CGImageRef image = framebuffer_image();
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
-    CGContextDrawImage(ctx, self.bounds, image);
+    uint32_t top = atomic_load(&g.fb_scanout_y), first = g.fb_height - top;
+    CGRect bounds = NSRectToCGRect(self.bounds);
+    CGSize device = CGContextConvertSizeToDeviceSpace(ctx, bounds.size);
+    if (fabs(device.width) != g.fb_width || fabs(device.height) != g.fb_height) {
+        /* Interpolation across the ring seam needs neighboring visible rows.
+         * Flatten scaled displays to retain the old whole-image filtering. */
+        CGImageRef image = framebuffer_image();
+        CGContextDrawImage(ctx, bounds, image);
+        CGImageRelease(image);
+        return;
+    }
+    CGFloat scale = bounds.size.height / g.fb_height;
+    CGImageRef image = framebuffer_slice(top, first);
+    CGContextDrawImage(ctx, CGRectMake(bounds.origin.x, bounds.origin.y + top * scale,
+                                      bounds.size.width, first * scale), image);
     CGImageRelease(image);
+    if (top) {
+        image = framebuffer_slice(0, top);
+        CGContextDrawImage(ctx, CGRectMake(bounds.origin.x, bounds.origin.y,
+                                          bounds.size.width, top * scale), image);
+        CGImageRelease(image);
+    }
 }
 - (void)keyDown:(NSEvent *)event {
     /* macOS virtual key codes to Linux KEY_* for common keyboard keys. */

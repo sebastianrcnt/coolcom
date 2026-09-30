@@ -231,7 +231,7 @@ module OS.Net: acquireNetwork(&!root): Network
                  close(s); udpOpen, udpSend, udpReceive
 ```
 
-**Stage 4 - tasks, time, random** (depends on: 1; `spawn` also needs function values that
+**Stage 4 - tasks, time, random** (design of `spawn`: [warm-closures.md](warm-closures.md)) (depends on: 1; `spawn` also needs function values that
 can be called from a new kernel task and a decision on how Warm code shares state between
 tasks, likely none: pass linear values in, get a result back through `join`).
 
