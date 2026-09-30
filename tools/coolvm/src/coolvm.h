@@ -178,6 +178,7 @@ bool blk_irq_level(int disk);
 bool net_mmio(uint64_t off, int size, bool wr, uint64_t *val);
 bool net_irq_level(void);
 void net_start(void);
+bool net_add_forward(const char *spec); /* --net-forward [addr:]host:guest */
 void net_report(void);
 void display_init(void);
 void display_pump(void);

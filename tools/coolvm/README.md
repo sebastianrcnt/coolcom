@@ -9,7 +9,7 @@ that proposal, with the findings below).
 ```
 make coolvm-test                 # build (ad-hoc codesigned) + run the assembly test guest, under a timeout
 tools/coolvm/build.sh            # -> build/coolvm
-build/coolvm [--cpus N] [--mem MB] [--headless] [--disk image] [--net] [--timeout S] kernel.Image [kernel.dtb]
+build/coolvm [--cpus N] [--mem MB] [--headless] [--disk image] [--net] [--net-forward H:G] [--timeout S] kernel.Image [kernel.dtb]
 ```
 
 Options: `--cpus N` (1..8, default 2; order = 4 e-cores then 4 p-cores), `--mem MB` (default 256),
@@ -165,8 +165,13 @@ root nor vmnet is needed. The guest network is QEMU's: guest `10.0.2.15/24`, gat
   rest); host data is buffered (256 KiB) and sent within the guest's window, with go-back-N
   retransmission after 300 ms and zero-window probes. FINs map to `shutdown(SHUT_WR)` and host EOF.
   Connections idle for 5 minutes are reset.
-- TCP and UDP to `10.0.2.2` go to the host's `127.0.0.1`. IP fragments are dropped. There is no inbound
-  port forwarding.
+- TCP and UDP to `10.0.2.2` go to the host's `127.0.0.1`. IP fragments are dropped.
+- **Inbound forwarding** (`--net-forward [ADDR:]HOST:GUEST`, repeatable, implies `--net`): coolvm listens on
+  TCP port `HOST` of `ADDR` (default `127.0.0.1`, so only the Mac itself can connect). Each accepted
+  connection becomes a connection to the guest's port `GUEST` from `10.0.2.2` (source ports
+  40000..48999): coolvm sends the SYN (retransmitted every 300 ms, given up after 10 s, an RST from the
+  guest closes the host socket), then relays both ways like an outbound connection. Example:
+  `--net-forward 2323:23 --net-forward 8080:80`, then `nc localhost 2323` on the Mac.
 
 `COOLVM_NET_DEBUG=1` logs DNS lookups, TCP connects, every guest TCP segment and bad guest checksums,
 and prints frame counts at exit. `COOLVM_NET_OFFLINE=1` makes every DNS query fail with SERVFAIL, as if the host were offline. `test/nat-test.c` (part of `make coolvm-test`) drives the NAT from a

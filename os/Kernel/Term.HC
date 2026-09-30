@@ -21,6 +21,8 @@ class CVTerm
     I64 dirty, refs, lock;
     Bool direct, closed;
     CTask *owner;
+    U8 *sink;       // optional U0 (*)(CVTerm *v, U8 c): sees every output byte, called under v->lock (NetShell.HC)
+    U8 *sink_data;
 };
 CVTerm *vt_focus;
 
@@ -233,9 +235,11 @@ Bool VtOutput(U8 c)
 {
     CVTerm *v = VtCurrent;
     I64 daif;
+    U0 (*sink)(CVTerm *v, U8 c);
     if (!v) return FALSE;
     daif = SpinLockIrq(&v->lock);
     VtPut(v, c); v->dirty = TRUE;
+    if (sink = v->sink) (*sink)(v, c);
     SpinUnlockIrq(&v->lock, daif);
     return !v->direct;
 }
