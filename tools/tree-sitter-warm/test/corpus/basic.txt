@@ -299,3 +299,70 @@ end module body.
             (arguments
               (argument
                 value: (identifier)))))))))
+
+================================================================================
+Warm additions: private, region elision, bitwise operators, Export_Layout
+================================================================================
+
+module body Example is
+    pragma Export_Layout(Name => "CFoo");
+    private record R: Free is end;
+    generic [T: Type] private function f(a: Span[T], b: &![T]): Nat8 is
+        return a[0] << 8 | b[1] ^ ~c & 2 + 1;
+    end;
+end module body.
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (module_definition
+    (module_name
+      (identifier))
+    (record_declaration
+      (pragma
+        (identifier)
+        (arguments
+          (argument
+            (identifier)
+            (string
+              (string_content)))))
+      (type_identifier)
+      (universe))
+    (function_declaration
+      (generic_prefix
+        (type_parameters
+          (type_parameter
+            (type_identifier)
+            (universe))))
+      (identifier)
+      (parameters
+        (parameter
+          (identifier)
+          (reference_type
+            (type_application
+              (type_identifier))))
+        (parameter
+          (identifier)
+          (reference_type
+            (type_application
+              (type_identifier)))))
+      (type_application
+        (type_identifier))
+      (block
+        (return_statement
+          (binary_expression
+            (binary_expression
+              (path_expression
+                (identifier)
+                (integer))
+              (integer))
+            (binary_expression
+              (path_expression
+                (identifier)
+                (integer))
+              (binary_expression
+                (unary_expression
+                  (identifier))
+                (binary_expression
+                  (integer)
+                  (integer))))))))))

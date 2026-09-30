@@ -11,14 +11,29 @@ function commaSep1(rule) {
   return seq(rule, repeat(seq(',', rule)));
 }
 
+// pragmas, then `private` (Warm: not importable from other modules)
+function head($) {
+  return seq(repeat($.pragma), optional('private'));
+}
+
+// ... and for functions/instances, `private` may also follow `generic [...]`
+function generic_head($) {
+  return seq(head($), optional(seq($.generic_prefix, optional('private'))));
+}
+
+// Loosest to tightest, as in warmc/Parser.cool (WOpLevel). and/or share a level (mixing them
+// is a compiler error, not a parse difference), comparisons do not chain.
 const PREC = {
   cast: 0,
-  or: 1,
-  and: 2,
-  compare: 3,
-  add: 4,
-  mul: 5,
-  unary: 6,
+  logical: 1,
+  compare: 2,
+  bit_or: 3,
+  bit_xor: 4,
+  bit_and: 5,
+  shift: 6,
+  add: 7,
+  mul: 8,
+  unary: 9,
 };
 
 module.exports = grammar({
@@ -97,7 +112,7 @@ module.exports = grammar({
     ),
 
     constant_declaration: $ => seq(
-      repeat($.pragma),
+      head($),
       'constant',
       field('name', $.identifier),
       ':',
@@ -107,7 +122,7 @@ module.exports = grammar({
     ),
 
     type_declaration: $ => seq(
-      repeat($.pragma),
+      head($),
       'type',
       field('name', alias($.identifier, $.type_identifier)),
       optional($.type_parameters),
@@ -117,7 +132,7 @@ module.exports = grammar({
     ),
 
     record_declaration: $ => seq(
-      repeat($.pragma),
+      head($),
       'record',
       field('name', alias($.identifier, $.type_identifier)),
       optional($.type_parameters),
@@ -130,7 +145,7 @@ module.exports = grammar({
     ),
 
     union_declaration: $ => seq(
-      repeat($.pragma),
+      head($),
       'union',
       field('name', alias($.identifier, $.type_identifier)),
       optional($.type_parameters),
@@ -156,8 +171,7 @@ module.exports = grammar({
     ),
 
     function_declaration: $ => seq(
-      repeat($.pragma),
-      optional($.generic_prefix),
+      generic_head($),
       'function',
       field('name', $.identifier),
       $.parameters,
@@ -168,7 +182,7 @@ module.exports = grammar({
     ),
 
     typeclass_declaration: $ => seq(
-      repeat($.pragma),
+      head($),
       'typeclass',
       field('name', alias($.identifier, $.type_identifier)),
       '(',
@@ -181,8 +195,7 @@ module.exports = grammar({
     ),
 
     instance_declaration: $ => seq(
-      repeat($.pragma),
-      optional($.generic_prefix),
+      generic_head($),
       'instance',
       field('name', alias($.identifier, $.type_identifier)),
       '(',
@@ -237,13 +250,13 @@ module.exports = grammar({
       optional(seq('[', commaSep($._type), ']')),
     ),
 
-    // &[T, R]  &![T, R]  Span[T, R]  Span![T, R]
+    // &[T, R]  &![T, R]  Span[T, R]  Span![T, R]; in function parameters the region may
+    // be left out: Span[T]
     reference_type: $ => seq(
       field('kind', choice('&', '&!', 'Span', 'Span!')),
       '[',
       $._type,
-      ',',
-      $._type,
+      optional(seq(',', $._type)),
       ']',
     ),
 
@@ -406,9 +419,12 @@ module.exports = grammar({
 
     binary_expression: $ => {
       const table = [
-        [PREC.or, 'or'],
-        [PREC.and, 'and'],
+        [PREC.logical, choice('and', 'or')],
         [PREC.compare, choice('=', '/=', '<', '<=', '>', '>=')],
+        [PREC.bit_or, '|'],
+        [PREC.bit_xor, '^'],
+        [PREC.bit_and, '&'],
+        [PREC.shift, choice('<<', '>>')],
         [PREC.add, choice('+', '-')],
         [PREC.mul, choice('*', '/')],
       ];
@@ -420,8 +436,8 @@ module.exports = grammar({
     },
 
     unary_expression: $ => prec(PREC.unary, seq(
-      field('operator', choice('not', '-')),
-      field('operand', $._atom),
+      field('operator', choice('not', '-', '~')),
+      field('operand', choice($.unary_expression, $._atom)),
     )),
 
     cast_expression: $ => prec.left(PREC.cast, seq(
