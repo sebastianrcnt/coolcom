@@ -113,6 +113,18 @@ def resident_and_fallback():
         assert proc.returncode==0 and text.count('Cool shell:')==3 and text.count('VENUS TERMINAL READY')==1
         assert 'LIFE1 1' in text and not any(x in text for x in ['ERROR:','VENUS FAIL','compiler exited'])
         print(f'venus-term-test: resident across two shell restarts, {cpus} CPU PASS',flush=True)
+    # Shutdown must publish the last coalesced frame without a delay or input quit.
+    inp=d/'shutdown.input'
+    inp.write_text(vim.BOOT+vim.typed('ConsClear; FbFillRect(40,30,90,50,0x3060C0); FbCursorHide; Shutdown;\n'))
+    log=d/'shutdown.log'; png=d/'shutdown.png'
+    with log.open('wb') as f:
+        proc=subprocess.run([str(ROOT/'build/coolvm-venus'),'--headless','--cpus','2','--mem','1024',
+            '--timeout','30','--disk',str(disk),'--input-script',str(inp),'--screenshot',str(png),sys.argv[1]],
+            stdout=f,stderr=subprocess.STDOUT,timeout=35)
+    text=log.read_text(errors='replace'); image=verify.read_png(png)
+    assert proc.returncode==0 and 'Power off.' in text and 'timeout' not in text and 'VENUS FAIL' not in text
+    assert tuple(image[2][30][40*3:40*3+3])==(0x30,0x60,0xC0)
+    print('venus-term-test: final frame drained before shutdown PASS',flush=True)
     # The real renderer remains advertised, but a missing shader must keep CPU.
     subprocess.run(['mdel','-i',str(disk),'::Vulkan/terminal.frag.spv'],check=True)
     inp=d/'fallback.input'

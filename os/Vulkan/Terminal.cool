@@ -28,7 +28,7 @@ class CVenusTerm
     I64 w, h, cols, rows, first, cx, cy, cw;
     U64i sampler, set_layout, descriptor_pool, set, layout, pipeline, shaders[2];
     Bool overlay_used, images_ready, installing;
-    I64 install_daif;
+    I64 install_daif, next_service;
     U64i frames, changed_rows, cell_bytes;
 };
 CVenusTerm vterm;
@@ -207,7 +207,7 @@ U0 VenusGrid(I64 w, I64 h)
         }
         GfxExecute; VenusCache(f);
     }
-    vterm.images_ready = TRUE; vterm.overlay_used = FALSE; vterm.overlay_y0 = 0; vterm.overlay_y1 = h;
+    vterm.next_service = 0; vterm.images_ready = TRUE; vterm.overlay_used = FALSE; vterm.overlay_y0 = 0; vterm.overlay_y1 = h;
 }
 U0 VenusDraw()
 {
@@ -247,10 +247,23 @@ U0 VenusDraw()
     vterm.pending = FALSE; vterm.atlas_y0 = vterm.atlas_y1 = 0; vterm.overlay_y0 = vterm.overlay_y1 = 0;
     fb.pending = TRUE; // timer polls completion even when the console becomes idle
 }
+// A terminal frame is a latest-state update, not a requirement to draw every
+// producer write. Bound presentation work to 120 Hz even in headless benchmarks;
+// GPU rendering still happens continuously, never only at screenshot time.
+U0 VenusService()
+{
+    I64 now = ArchCntVct;
+    if (now >= vterm.next_service) {
+        vterm.next_service = now + cnt_freq / 120;
+        VenusPoll;
+        if (vterm.pending) VenusDraw;
+    } else if (vterm.pending) {vterm.coalesced++; fb.venus_coalesced++;}
+    if (vterm.pending || vterm.slot[0].busy || vterm.slot[1].busy) fb.pending = TRUE;
+}
 U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
 {
     I64 y, physical; Bool changed = all || scrolled; CVtCell *s, *d;
-    VenusGrid(fb.w, fb.h); VenusPoll;
+    VenusGrid(fb.w, fb.h);
     if (all) {
         vterm.first = 0; MemSet(vterm.overlay_upload.mapping, 0, vterm.w * vterm.h * 4);
         vterm.overlay_y0 = 0; vterm.overlay_y1 = vterm.h; vterm.overlay_used = FALSE;
@@ -276,8 +289,8 @@ U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
     if (cx != vterm.cx || cy != vterm.cy || cells != vterm.cw) changed = TRUE;
     vterm.cx = cx; vterm.cy = cy; vterm.cw = cells;
     if (changed) vterm.pending = TRUE;
-    if (vterm.pending) VenusDraw; else {vterm.skipped++; fb.venus_skipped++;}
-    if (vterm.slot[0].busy || vterm.slot[1].busy) fb.pending = TRUE;
+    if (!changed && !vterm.pending) {vterm.skipped++; fb.venus_skipped++;}
+    VenusService;
 }
 U0 VenusFill(I64 x, I64 y, I64 w, I64 h, I64 rgb)
 {
@@ -286,7 +299,12 @@ U0 VenusFill(I64 x, I64 y, I64 w, I64 h, I64 rgb)
         for (i = 0; i < w; i++) p[i] = 0xFF000000 | (rgb & 0xFFFFFF);
         VenusDirty(&vterm.overlay_y0, &vterm.overlay_y1, row, 1);
     }
-    vterm.overlay_used = TRUE; vterm.pending = TRUE; VenusPoll; VenusDraw;
+    vterm.overlay_used = TRUE; vterm.pending = TRUE; VenusService;
+}
+U0 VenusFinish()
+{
+    VenusDrain;
+    if (vterm.pending) {VenusDraw; VenusDrain;}
 }
 U0 VenusSamplerInit() {
     VkSamplerCreateInfo sampler;
@@ -329,7 +347,7 @@ U0 VenusSetup() {
     VenusSamplerInit; VenusSetInit;
     daif = FbRenderLock; vterm.install_daif = daif; vterm.installing = TRUE;
     VenusGrid(fb.w, fb.h);
-    FbVenusHooks(&VenusFrame, &VenusFill);
+    FbVenusHooks(&VenusFrame, &VenusFill, &VenusFinish);
     fb.venus = TRUE; fb.redraw_all = TRUE; FbRenderLocked;
     FbRenderUnlock(daif); vterm.installing = FALSE; gfx.soft_fail = FALSE;
     Print("VENUS TERMINAL READY\n");

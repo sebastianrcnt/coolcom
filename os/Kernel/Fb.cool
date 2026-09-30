@@ -40,7 +40,7 @@ class CFb
     U8 *snap_row;             // 1: snap holds this row
     I64 *x0, *x1;             // per row, the columns of the back buffer to copy (x0 >= x1: none)
     I64 cur_x, cur_y, cur_w;  // the cursor on the framebuffer, cur_w pixels wide (0: none)
-    I64 render_lock, put_owner;
+    I64 render_lock, render_owner, put_owner;
     I64 last_put, last_render; // jiffies
     Bool pending;             // the grid changed since the last frame (set and cleared under vt->lock)
     Bool redraw_all;          // forget the back buffer (ConsClear)
@@ -57,7 +57,8 @@ CFb fb;
 // The generated Vulkan layer stays on disk, owned by a resident compiler task.
 U8 *venus_frame_hook;  // U0 (*)(Bool all, I64 scroll, I64 cx, I64 cy, I64 cells)
 U8 *venus_fill_hook;   // U0 (*)(I64 x, I64 y, I64 w, I64 h, I64 rgb)
-U0 FbVenusHooks(U8 *frame, U8 *fill) {venus_frame_hook = frame; venus_fill_hook = fill;}
+U8 *venus_finish_hook; // explicit completion before shutdown/halt
+U0 FbVenusHooks(U8 *frame, U8 *fill, U8 *finish = NULL) {venus_frame_hook = frame; venus_fill_hook = fill; venus_finish_hook = finish;}
 I64 venus_console_boot;  // 0 untried, 1 loading, 2 resident or unavailable
 
 #define FB_BLK_SHIFT  25   // level-2 block: 32 MiB
@@ -414,12 +415,13 @@ I64 FbRenderLock()
     ArchIrqOff;
     while (ArchXchg(&fb.render_lock, 1))
         while (fb.render_lock) {}
+    fb.render_owner = ArchCpuNum + 1;
     return daif;
 }
 
 U0 FbRenderUnlock(I64 daif)
 {
-    fb.last_render = jiffies;
+    fb.last_render = jiffies; fb.render_owner = 0;
     ArchStoreRel(&fb.render_lock, 0);
     ArchIntRestore(daif);
 }
@@ -432,7 +434,7 @@ U0 FbRender()
     daif = ArchDaif;
     ArchIrqOff;
     if (!ArchXchg(&fb.render_lock, 1)) {
-        FbRenderLocked;
+        fb.render_owner = ArchCpuNum + 1; FbRenderLocked;
         FbRenderUnlock(daif);
         return;
     }
@@ -440,8 +442,20 @@ U0 FbRender()
 }
 
 U0 FbFlush()
-{//Put everything written so far on the screen (before halting, powering off, ...).
+{//Request a frame now; Venus coalesces asynchronously. FbFinish drains before halt.
     FbRender;
+}
+
+U0 FbFinish()
+{//Explicit completion before halt. Wait for another core, never recurse on our own GPU failure.
+    I64 daif, me = ArchCpuNum + 1, deadline; U0 (*finish)();
+    if (!fb.base || !fb.venus || !venus_finish_hook) return;
+    daif = ArchDaif; ArchIrqOff; deadline = ArchCntVct + cnt_freq * 5;
+    while (ArchXchg(&fb.render_lock, 1)) {
+        if (fb.render_owner == me || ArchCntVct >= deadline) {ArchIntRestore(daif); return;}
+    }
+    fb.render_owner = me; FbRenderLocked;
+    finish = venus_finish_hook; (*finish)(); FbRenderUnlock(daif);
 }
 
 Bool FbCursorOff()

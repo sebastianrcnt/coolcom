@@ -753,3 +753,28 @@ host), `build/venus-linear-fallback-test.log`, `build/venus-window-test.log`, an
 cached pinned inputs, including idempotent patch application. The optional host
 links Metal; the ordinary coolvm still links neither Metal nor vendor libraries.
 `make venus-window-test` is the opt-in real-window test (it opens/closes its own VM).
+
+### Display-paced terminal frames and explicit halt completion
+
+The initial cache/async/direct-image changes cut 3200×2000 forced hooks to
+130.5 µs/line, but three-run whole-process CPU averaged 2.54 s versus the
+current CPU baseline's 2.51 s. The unpaced direct path still submitted about
+628 GPU frames during 3,000 forced lines (and 1,316 at 1024×768). It rendered
+much faster than a window could display, so direct presentation alone did not
+meet the host CPU target.
+
+Submission/completion service now runs at most **120 Hz**. Console hooks still
+write changed rows immediately into mapped memory, but merge producer changes
+until the next service deadline. Both headless and windowed guests render on
+this cadence; headless rendering is not deferred until a screenshot. Submitted
+slots remain immutable and the existing framebuffer timer drains the latest
+pending state after output stops. Unchanged state enqueues no new frame.
+
+`FbFlush` requests the asynchronous frame. `FbFinish` explicitly drains it before
+power-off/reboot or fatal halt, bypassing pacing for the final state. It waits
+for a renderer on another core, tracks lock ownership to avoid recursively
+waiting on a failing GPU hook on the same core, and has a bounded wait. The
+terminal regression immediately paints and powers off without a script delay;
+its shutdown screenshot must preserve the painted pixels. Final counters also
+show actual submitted/completed frames and command recordings, rather than
+pretending each forced producer hook completed a GPU frame.
