@@ -28,8 +28,8 @@ def keys_of(code):
 def typed(text):
     result = ''
     for ch in text:
-        if ch == '\x12':
-            result += '1 29 1\n' + keys_of(19) + '1 29 0\n'
+        if ch in ('\x12', '\x0f'):
+            result += '1 29 1\n' + keys_of(19 if ch == '\x12' else 24) + '1 29 0\n'
         else:
             code, shift = KEYS[ch]
             if shift:
@@ -71,11 +71,26 @@ def check_init_log(log):
         raise AssertionError('C:/Init.cool diagnostics:\n' + '\n'.join(diagnostics))
 
 
+KERNEL_A = pathlib.Path('coolc/Frontend/KernelA.coolh').read_bytes()
 BIG = ''.join(f'line {i:05d}\n' for i in range(30000))  # 330 KB, over the old 128 KiB limit
 
 # name, starting text, actual input keys, expected text, expected byte cursor.
 # Every session ends in :wq unless its test explicitly exercises quit behavior.
 CASES = [
+    ('kernel-a-save', KERNEL_A, 'iCHECK\x1bu\x12:w\nu', KERNEL_A, 0),
+    ('gd-function', 'Target();\nU0 Target() {}\n', ':set ft=cool\ngd', 'Target();\nU0 Target() {}\n', 13),
+    ('gd-class', 'Thing value;\nclass Thing {};\n', ':set ft=cool\ngd', 'Thing value;\nclass Thing {};\n', 19),
+    ('gd-variable', 'value++;\n  I64 value = 1;\n', ':set ft=cool\ngd', 'value++;\n  I64 value = 1;\n', 15),
+    ('gd-define', 'LIMIT\n#define LIMIT 42\n', ':set ft=cool\ngd', 'LIMIT\n#define LIMIT 42\n', 14),
+    ('gd-return', 'Target();\nU0 Target() {}\n', ':set ft=cool\nlgd\x0f', 'Target();\nU0 Target() {}\n', 1),
+    ('gd-warm-function', 'DoIt();\nfunction DoIt(): Unit is\n', ':set ft=warm\ngd', 'DoIt();\nfunction DoIt(): Unit is\n', 17),
+    ('gd-warm-record', 'Pair\nrecord Pair is\n', ':set ft=warm\ngd', 'Pair\nrecord Pair is\n', 12),
+    ('gd-warm-type', 'Size\ntype Size: Universe;\n', ':set ft=warm\ngd', 'Size\ntype Size: Universe;\n', 10),
+    ('gd-ignore-comment', 'Target();\n/* U0 Target() {}\n*/\nU0 Target() {}\n', ':set ft=cool\ngd', 'Target();\n/* U0 Target() {}\n*/\nU0 Target() {}\n', 34),
+    ('gd-kernel-return', 'StrCmp\n', 'gd\x0f', 'StrCmp\n', 0),
+    ('gd-missing', 'UnknownName\n', 'gd\x0f', 'UnknownName\n', 0),
+    ('gd-dirty-local', 'Target();\nU0 Target() {}\n', ':set ft=cool\nA \x1b0gd', 'Target(); \nU0 Target() {}\n', 14),
+    ('gd-dirty-kernel', 'StrLen\n', 'A \x1b0gd', 'StrLen \n', 0),
     ('insert', 'abc\n', 'iX\x1b', 'Xabc\n', 0),
     ('append', 'abc\n', 'aX\x1b', 'aXbc\n', 1),
     ('first-nonblank-insert', '  abc\n', 'IX\x1b', '  Xabc\n', 2),
@@ -233,6 +248,8 @@ def main():
     unicode_file = d / 'Unicode.txt'
     unicode_file.write_bytes(b'abc\n')
     copy(unicode_file, unicode_file.name)
+    run(['mmd', '-i', str(disk), '::coolc/Frontend'])
+    copy(pathlib.Path('coolc/Frontend/KernelA.coolh'), 'coolc/Frontend/KernelA.coolh')
     runner = ['U0 VimTests() {']
     script = BOOT + typed('#include "C:/Run.cool"\n') + wait('> ')
     script += typed('VimTests;\n')
@@ -240,10 +257,14 @@ def main():
         if i:  # the previous editor has quit; the next one gets these keys
             script += wait(f'VIMRESULT {i - 1} ')
         path = d / f'T{i:03}.txt'
-        path.write_bytes(source.encode())
+        path.write_bytes((source if isinstance(source, bytes) else source.encode()))
         copy(path, path.name)
-        runner.append(f'Vim("C:/{path.name}"); Print("\\nVIMRESULT {i} %d %d %d\\n", vim_pos, vim_top, vim_left);')
-        script += typed(keys + ':wq\n') + 'delay 60\n'
+        target = 'coolc/Frontend/KernelA.coolh' if name == 'kernel-a-save' else path.name
+        runner.append(f'Vim("C:/{target}"); Print("\\nVIMRESULT {i} %d %d %d\\n", vim_pos, vim_top, vim_left);')
+        if name == 'gd-kernel-return':
+            script += typed('gd') + wait('NORMAL C:/Kernel/KUtils.cool') + typed('\x0f:wq\n') + 'delay 60\n'
+        else:
+            script += typed(keys + ':wq\n') + 'delay 60\n'
     # Verify ordinary and forced exits as well as a real CPU fault and a fresh invocation.
     runner += ['Vim("C:/Quit.txt"); Print("\\nQUITRESULT %d\\n", vim_pos);',
                'Vim("C:/Quit.txt"); Print("\\nCLEANQUIT\\n");', '}']
@@ -301,14 +322,16 @@ def main():
     failures = []
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
         filename = f'T{i:03}.txt'
+        if name == 'kernel-a-save':
+            filename = 'coolc/Frontend/KernelA.coolh'
         if name == 'edit-file':
             filename = 'Other.txt'
         if name == 'edit-large-file':
             filename = 'Huge.txt'
         got = run(['mcopy', '-i', str(disk), '::' + filename, '-']).stdout
         state = results.get(i)
-        if got != expected.encode() or state is None or state[0] != pos:
-            failures.append(f'{i} {name}: text={got[:150]!r} cursor={state}; expected {expected.encode()[:150]!r}, {pos}')
+        if got != (expected if isinstance(expected, bytes) else expected.encode()) or state is None or state[0] != pos:
+            failures.append(f'{i} {name}: text={got[:150]!r} cursor={state}; expected {(expected if isinstance(expected, bytes) else expected.encode())[:150]!r}, {pos}')
         if state and name == 'vertical-scroll' and state[1] == 0:
             failures.append('vertical viewport did not scroll')
         if state and name == 'horizontal-scroll' and state[2] == 0:

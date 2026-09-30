@@ -11,6 +11,10 @@ loads the editor. The UART and VM keyboard use the same `GetKey` events.
   `p P`, `r<char>`, `J`, and `.` to repeat the last change including inserted text.
 - Visual: `v` selects characters, `V` selects whole lines; motions extend
   the selection, `d x c y` operate on it, Escape cancels.
+- Definitions: `gd` finds a declaration in the current live buffer (Cool functions,
+  classes, variables and defines; Warm functions, types and records), then uses
+  Man's compiler symbols and kernel sources. Ctrl+O restores the previous file,
+  cursor and viewport (32 jumps). Save before crossing files with changes.
 - History: `u`, Ctrl+R, with counts. A fresh change after undo discards the
   redo branch. Saving does not clear history; undo recomputes the modified flag.
 - Search: `/text` or `?text`, Enter; `n N` repeat in either direction.

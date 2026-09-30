@@ -631,6 +631,120 @@ Bool VimSearch(I64 dir)
     return FALSE;
 }
 
+extern I64 VimLineGet(I64 p, I64 q);
+// Man is loaded after Vim by Init.cool; resolve through its shared symbol lookup.
+extern CHashSrcSym *ManHash(U8 *name);
+extern I64 ManKind(CHashSrcSym *h);
+extern Bool ManSrcLink(CHashSrcSym *h, U8 *file, I64 *_line);
+extern I64 ManSearch(U8 *name, I64 kind, U8 *file, I64 *_line);
+#define VIM_JUMPS 32
+U8 vim_jfile[VIM_JUMPS][256];
+I64 vim_jpos[VIM_JUMPS], vim_jtop[VIM_JUMPS], vim_jleft[VIM_JUMPS], vim_jn;
+
+U0 VimJumpPush(U8 *file, I64 pos, I64 top, I64 left)
+{
+    if (vim_jn == VIM_JUMPS) {
+        MemCpy(vim_jfile, vim_jfile + 1, (VIM_JUMPS - 1) * 256);
+        MemCpy(vim_jpos, vim_jpos + 1, (VIM_JUMPS - 1) * 8);
+        MemCpy(vim_jtop, vim_jtop + 1, (VIM_JUMPS - 1) * 8);
+        MemCpy(vim_jleft, vim_jleft + 1, (VIM_JUMPS - 1) * 8);
+        vim_jn--;
+    }
+    StrCpy(vim_jfile[vim_jn], file);
+    vim_jpos[vim_jn] = pos; vim_jtop[vim_jn] = top; vim_jleft[vim_jn++] = left;
+}
+
+U0 VimJumpBack()
+{
+    I64 i = vim_jn - 1;
+    if (i < 0) {vim_msg = "No older jump"; return;}
+    if (StrCmp(vim_name, vim_jfile[i])) {
+        if (vim_dirty) {vim_msg = "Unsaved changes: use :w first"; return;}
+        if (!VimLoad(vim_jfile[i])) return;
+    }
+    vim_pos = vim_jpos[i]; vim_top = vim_jtop[i]; vim_left = vim_jleft[i];
+    vim_jn--; vim_goal = -1;
+}
+
+I64 VimDefinition(U8 *name)
+{//Scan the live buffer, including unsaved declarations; ignore comments and strings.
+    I64 p, q, n, i, j, k, a, nl = StrLen(name);
+    CSyn st;
+    SynStart(&st, vim_lang, TRUE);
+    for (p = 0; p < VimLen(); p = q + 1) {
+        q = VimEnd(p); n = VimLineGet(p, q);
+        SynLine(&st, vim_line, n, vim_grp);
+        for (i = 0; i < n; i++)
+            if (vim_grp[i] == SYN_G_COMMENT || vim_grp[i] == SYN_G_STRING) vim_line[i] = ' ';
+        i = 0;
+        while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+        a = i;
+        if (vim_lang == SYN_WARM) {
+            while (i < n && HCTIsId(vim_line[i])) i++;
+            if (HCTStrEq(vim_line + a, i - a, "public") || HCTStrEq(vim_line + a, i - a, "private")) {
+                while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+                a = i; while (i < n && HCTIsId(vim_line[i])) i++;
+            }
+            if (!HCTStrEq(vim_line + a, i - a, "function") && !HCTStrEq(vim_line + a, i - a, "type") &&
+                    !HCTStrEq(vim_line + a, i - a, "record")) goto vim_def_next;
+            while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+            if (i + nl <= n && !MemCmp(vim_line + i, name, nl) && (i + nl == n || !HCTIsId(vim_line[i + nl]))) return p + i;
+            goto vim_def_next;
+        }
+        if (i < n && vim_line[i] == '#') {
+            if (i + 7 > n || MemCmp(vim_line + i, "#define", 7)) goto vim_def_next;
+            i += 7; while (i < n && (vim_line[i] == ' ' || vim_line[i] == '\t')) i++;
+            if (i + nl <= n && !MemCmp(vim_line + i, name, nl) && (i + nl == n || !HCTIsId(vim_line[i + nl]))) return p + i;
+            goto vim_def_next;
+        }
+        while (i < n && HCTIsId(vim_line[i])) i++;
+        if (i == a || HCTIsKwSp(vim_line + a, i - a) || HCTIsKw2(vim_line + a, i - a)) {
+            if (!HCTStrEq(vim_line + a, i - a, "class") && !HCTStrEq(vim_line + a, i - a, "union")) goto vim_def_next;
+        }
+        for (j = i; j + nl <= n; j++) {
+            if (vim_line[j] == '(' || vim_line[j] == '=' || vim_line[j] == ';' || vim_line[j] == '{') break;
+            if (j > a && !HCTIsId(vim_line[j - 1]) && !MemCmp(vim_line + j, name, nl) &&
+                    (j + nl == n || !HCTIsId(vim_line[j + nl]))) {
+                k = j + nl; while (k < n && (vim_line[k] == ' ' || vim_line[k] == '\t')) k++;
+                if (k == n || vim_line[k] == '(' || vim_line[k] == '=' || vim_line[k] == ';' ||
+                        vim_line[k] == '[' || vim_line[k] == ',' || vim_line[k] == '{') return p + j;
+            }
+        }
+vim_def_next:
+    }
+    return -1;
+}
+
+U0 VimGotoDefinition()
+{
+    U8 name[256], file[256], oldfile[256];
+    I64 a = vim_pos, b, dest, line = 0, kind, pos = vim_pos, top = vim_top, left = vim_left;
+    CHashSrcSym *h;
+    if (!HCTIsId(VimAt(a))) {vim_msg = "No identifier under cursor"; return;}
+    while (a && HCTIsId(VimAt(a - 1))) a--;
+    b = a; while (b < VimLen() && HCTIsId(VimAt(b))) b++;
+    if (b - a > 255) {vim_msg = "Identifier too long"; return;}
+    VimCopy(name, a, b - a); name[b - a] = 0;
+    dest = VimDefinition(name);
+    if (dest >= 0) {
+        if (dest != vim_pos) VimJumpPush(vim_name, pos, top, left);
+        vim_pos = dest; vim_goal = -1; return;
+    }
+    h = ManHash(name);
+    if (!h) {vim_msg = "Definition not found"; return;}
+    kind = ManKind(h);
+    if (!ManSrcLink(h, file, &line)) {
+        if (!ManSearch(name, kind, file, &line) && (!kind || !ManSearch(name, 0, file, &line))) {
+            vim_msg = "Definition not found"; return;
+        }
+    }
+    if (vim_dirty) {vim_msg = "Unsaved changes: use :w first"; return;}
+    StrCpy(oldfile, vim_name);
+    if (StrCmp(file, vim_name) && !VimLoad(file)) return;
+    VimJumpPush(oldfile, pos, top, left);
+    vim_pos = VimGoto(line); vim_goal = -1;
+}
+
 Bool VimCommand()
 {
     I64 i, n = 0, result;
@@ -704,6 +818,7 @@ Bool VimNormal(I64 c)
         p = vim_pending;
         vim_pending = 0;
         if (p == 'g') {
+            if (c == 'd' && !vim_op && vim_mode == 0) {VimGotoDefinition(); vim_count = 0; return FALSE;}
             if (c != 'g') {vim_op = vim_count = 0; return FALSE;}
             c = 'g';
         } else if (p == 'r') {
@@ -902,6 +1017,7 @@ Bool VimKey(I64 ev)
         goto done;
     }
     if (ev & KF_CTRL) {
+        if (c == 'o' && vim_mode == 0) {VimJumpBack(); vim_count = 0;}
         if (vim_mode == 0 && (c == 'f' || c == 'b' || c == 'd' || c == 'u')) {
             n = VimPageRows();
             if (c == 'd' || c == 'u')
@@ -1120,6 +1236,7 @@ Bool VimOpen(U8 *name)
     if (!vim_line || !vim_grp) {VimClose(); Print("Vim: out of memory\n"); return FALSE;}
     vim_mode = vim_count = vim_op = vim_pending = vim_transaction = 0;
     vim_record = vim_kn = vim_dn = vim_replay = vim_yank_len = 0;
+    vim_jn = 0;
     vim_search[0] = 0; vim_search_dir = 1; vim_goal = -1; vim_msg = "";
     if (!VimLoad(name)) {Print("Vim: %s\n", vim_msg); VimClose(); return FALSE;}
     AnsiAltScreen(TRUE); AnsiCursorShow;
