@@ -159,8 +159,11 @@ mmu_tables:
   add x2, x2, #1
   cmp x2, x3
   b.lo 8b
-  // QEMU virt peripherals occupy the low 1 GiB. Keep the Apple MMIO map too.
-  mov x2, #0
+  // Only QEMU maps low MMIO. Leave the first 32 MiB unmapped, including NULL.
+  LA x7, _start
+  lsr x4, x7, #35
+  cbnz x4, 17f
+  mov x2, #1
   mov x3, #32
 16:
   lsl x4, x2, #25
@@ -170,6 +173,7 @@ mmu_tables:
   add x2, x2, #1
   cmp x2, x3
   b.lo 16b
+17:
   // Page-map the DRAM aperture before enabling translation. No live block
   // splitting (and no break-before-make window on the executing stack).
   LA x6, l3_tables

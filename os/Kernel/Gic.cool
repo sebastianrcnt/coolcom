@@ -75,7 +75,7 @@ U0 GicCpuInit()
     else {
         ArchMmioWrite32(fdt_gic_cpu + 4, 0xFF); // PMR
         ArchMmioWrite32(fdt_gic_cpu + 8, 0); // BPR
-        ArchMmioWrite32(fdt_gic_cpu, 3);
+        ArchMmioWrite32(fdt_gic_cpu, 7); // enable both groups; AckCtl accepts Group 1 without security extensions
     }
     ArchDsb;
 }
