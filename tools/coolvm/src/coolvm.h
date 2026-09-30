@@ -56,6 +56,9 @@
 #define FINISHER_BOOT_ADDR 0x8
 #define FINISHER_BOOT_SIZE 0x10
 #define FINISHER_FB_DAMAGE 0x18
+/* 32-bit pixel-row offset, modulo framebuffer height. FDT coolcom,scanout-y
+ * contains its 64-bit MMIO address; absent means fixed scanout. */
+#define FINISHER_FB_SCANOUT_Y 0x1c
 
 /* VM-only devices, deliberately outside the t8103 SoC MMIO window. */
 #define INPUT_BASE 0x1ff001000ULL
@@ -119,6 +122,8 @@ struct vm {
     uint8_t *fb;
     uint64_t fb_size;
     uint32_t fb_width, fb_height;
+    bool fb_scroll;              /* advertise optional scanout-y register */
+    _Atomic uint32_t fb_scanout_y;
     _Atomic bool fb_damage_used;  /* the guest reports damage (FINISHER_FB_DAMAGE) */
     _Atomic uint64_t fb_damage;   /* rows changed since the window last drew: (end << 32) | start, 0 none */
     bool headless;
@@ -186,6 +191,7 @@ bool net_irq_level(void);
 void net_start(void);
 bool net_add_forward(const char *spec); /* --net-forward [addr:]host:guest */
 void net_report(void);
+void fb_snapshot(uint8_t *dst); /* visible scanout, including ring wrap */
 void display_init(void);
 void display_pump(double seconds); /* run the window's event loop for that long */
 bool display_screenshot(const char *path);

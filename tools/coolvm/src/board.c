@@ -196,6 +196,8 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
     fdt_prop_u32(f, "width", g.fb_width);
     fdt_prop_u32(f, "height", g.fb_height);
     fdt_prop_u32(f, "stride", g.fb_width * 4);
+    if (g.fb_scroll)
+        fdt_prop_u64(f, "coolcom,scanout-y", FINISHER_BASE + FINISHER_FB_SCANOUT_Y);
     fdt_prop_str(f, "format", "x8r8g8b8");
     fdt_end(f);
     fdt_end(f);

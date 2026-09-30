@@ -29,6 +29,8 @@ class CFb
     U8 *base;                 // the framebuffer (non-cacheable)
     U8 *back;                 // what it shows without the cursor: same size and stride, cached
     I64 w, h, stride, cols, rows;
+    U8 *scanout;             // optional FDT scanout-y register (pixel rows)
+    I64 scan_top;            // offset last committed to the display
     I64 top;                 // first visible pixel row in the text-area ring
     CVTerm *vt;               // the grid shown (vt_screen)
     CVtCell *drawn;           // per cell, what the back buffer shows (all bytes 0xFF: unknown)
@@ -206,7 +208,7 @@ Bool FbCellSame(CVtCell *a, CVtCell *b)
 
 U0 FbCopyRect(I64 x, I64 y, I64 w, I64 h)
 {//Back buffer to framebuffer, in pixels.
-    I64 src, n, ring_h = fb.rows * FONT_CELL_H;
+    I64 src, dst, n, ring_h = fb.rows * FONT_CELL_H;
     if (w <= 0 || h <= 0)
         return;
     while (h > 0) {
@@ -220,7 +222,9 @@ U0 FbCopyRect(I64 x, I64 y, I64 w, I64 h)
             }
             if (n > h) n = h;
         }
-        MemCpy(fb.base + y * fb.stride + x * 4,
+        dst = y;
+        if (fb.scanout) dst = src;
+        MemCpy(fb.base + dst * fb.stride + x * 4,
                 fb.back + src * fb.stride + x * 4, (n - 1) * fb.stride + w * 4);
         y += n;
         h -= n;
@@ -234,6 +238,8 @@ U0 FbCursorDraw(I64 cx, I64 cy, I64 w)
     for (y = 0; y < FONT_CELL_H; y++) {
         s = fb.back + FbBackY(cy * FONT_CELL_H + y) * fb.stride + cx * FONT_CELL_W * 4;
         d = fb.base + off;
+        if (fb.scanout)
+            d = fb.base + FbBackY(cy * FONT_CELL_H + y) * fb.stride + cx * FONT_CELL_W * 4;
         for (x = 0; x < w; x++)
             d[x] = s[x] ^ 0xFFFFFF;
         off += fb.stride;
@@ -242,8 +248,10 @@ U0 FbCursorDraw(I64 cx, I64 cy, I64 w)
 
 U0 FbDamage(I64 y0, I64 y1)
 {
-    if (fb.damage && y1 > y0)
+    if (fb.damage && y1 > y0) {
+        ArchDsb;
         ArchMmioWrite32(fb.damage, (y1 << 16) | y0);
+    }
 }
 
 U0 FbSpan(I64 row, I64 x0, I64 x1)
@@ -285,6 +293,13 @@ U0 FbRenderLocked()
     fb.pending = FALSE;
     SpinUnlock(&v->lock);
 
+    // Remove the cursor at its old physical location before rotating scanout.
+    if (fb.scanout && fb.cur_w) {
+        FbCopyRect(fb.cur_x * FONT_CELL_W, fb.cur_y * FONT_CELL_H, fb.cur_w, FONT_CELL_H);
+        dy0 = fb.cur_y * FONT_CELL_H;
+        dy1 = dy0 + FONT_CELL_H;
+        fb.cur_w = 0;
+    }
     // Rotate the pixel ring; only the small cell cache moves.
     if (all || scrolled >= rows) {
         MemSet(fb.drawn, 0xFF, rows * cols * sizeof(CVtCell));
@@ -297,7 +312,7 @@ U0 FbRenderLocked()
         MemCpy(fb.drawn, fb.drawn + scrolled * cols, (rows - scrolled) * cols * sizeof(CVtCell));
         MemSet(fb.drawn + (rows - scrolled) * cols, 0xFF, scrolled * cols * sizeof(CVtCell));
     }
-    if (all || scrolled) {
+    if (all || scrolled >= rows || (scrolled && !fb.scanout)) {
         for (y = 0; y < rows; y++) {
             fb.x0[y] = 0;
             fb.x1[y] = cols;
@@ -325,18 +340,18 @@ U0 FbRenderLocked()
     // The old cursor goes with its row's copy.
     if (fb.cur_w)
         FbSpan(fb.cur_y, fb.cur_x, fb.cur_x + fb.cur_w / FONT_CELL_W);
-    if (all || (scrolled && fb.cols * FONT_CELL_W == fb.w)) {
+    if (all || (scrolled && !fb.scanout && fb.cols * FONT_CELL_W == fb.w)) {
         FbCopyRect(0, 0, fb.w, fb.h);
         dy0 = 0;
         dy1 = fb.h;
     }
     for (y = 0; y < rows; y++) {
         if (fb.x0[y] < fb.x1[y]) {
-            if (!all && !(scrolled && fb.cols * FONT_CELL_W == fb.w))
+            if (!all && !(scrolled && !fb.scanout && fb.cols * FONT_CELL_W == fb.w))
                 FbCopyRect(fb.x0[y] * FONT_CELL_W, y * FONT_CELL_H,
                            (fb.x1[y] - fb.x0[y]) * FONT_CELL_W, FONT_CELL_H);
             if (y * FONT_CELL_H < dy0) dy0 = y * FONT_CELL_H;
-            dy1 = (y + 1) * FONT_CELL_H;
+            if ((y + 1) * FONT_CELL_H > dy1) dy1 = (y + 1) * FONT_CELL_H;
         }
         fb.x0[y] = cols;
         fb.x1[y] = 0;
@@ -348,6 +363,13 @@ U0 FbRenderLocked()
         FbCursorDraw(cx, cy, cw);
         if (cy * FONT_CELL_H < dy0) dy0 = cy * FONT_CELL_H;
         if ((cy + 1) * FONT_CELL_H > dy1) dy1 = (cy + 1) * FONT_CELL_H;
+    }
+    if (fb.scanout && fb.scan_top != fb.top) {
+        ArchDsb;  // the newly exposed pixels must be visible before scanout moves
+        ArchMmioWrite32(fb.scanout, fb.top);
+        fb.scan_top = fb.top;
+        dy0 = 0;
+        dy1 = fb.h;
     }
     FbDamage(dy0, dy1);
 }
@@ -607,6 +629,10 @@ Bool FbInit()
             fb.ascii[i] = g;
     if (fdt_vm && fdt_finisher)
         fb.damage = fdt_finisher + FINISHER_FB_DAMAGE;
+    // Whole-frame scanout rotates margins too: keep the software path when
+    // dimensions leave partial cells, preserving those fixed pixel margins.
+    if (fdt_vm && fdt_fb_scanout && fb.h == fb.rows * FONT_CELL_H && fb.w == fb.cols * FONT_CELL_W)
+        fb.scanout = fdt_fb_scanout;
     fb.vt = vt_screen = VtAlloc(fb.cols, fb.rows);
     FbMapNC(fdt_fb.base, fb.stride * fb.h);
     fb.base = fdt_fb.base;

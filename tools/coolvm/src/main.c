@@ -44,6 +44,7 @@ static void usage(void)
             "  --headless      run without a Cocoa window\n"
             "  --width N       framebuffer width (default 1024)\n"
             "  --height N      framebuffer height (default 768)\n"
+            "  --no-fb-scroll  omit FDT scanout-y capability (software fallback)\n"
             "  --screenshot F  save framebuffer to PNG on exit\n"
             "  --input-script F  preload input events (type code value, one per line)\n"
             "  --disk F        attach writable raw image; repeat up to four times\n"
@@ -127,6 +128,7 @@ int main(int argc, char **argv)
     const char *input_script = NULL;
     const char *disk_paths[MAX_DISKS];
     int ndisks = 0;
+    g.fb_scroll = true;
     g.fb_width = 1024; g.fb_height = 768;
     bool verbose = false;
     bool temp_kernel = false;
@@ -139,6 +141,7 @@ int main(int argc, char **argv)
         {"verbose", no_argument, 0, 'v'},        {"help", no_argument, 0, 'h'},
         {"el2", no_argument, 0, 'E'},          {"load-offset", required_argument, 0, 'L'},
         {"headless", no_argument, 0, 'H'}, {"screenshot", required_argument, 0, 'S'},
+        {"no-fb-scroll", no_argument, 0, 1000},
         {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
         {"net", no_argument, 0, 'N'}, {"net-forward", required_argument, 0, 'F'},
@@ -163,6 +166,7 @@ int main(int argc, char **argv)
         case 'K': temp_kernel = true; break;
         case 'F': if (!net_add_forward(optarg)) { fprintf(stderr, "coolvm: bad --net-forward %s\n", optarg); return 2; } break;
         case 'S': g.screenshot = optarg; break;
+        case 1000: g.fb_scroll = false; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'I': input_script = optarg; break;
