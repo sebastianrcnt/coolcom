@@ -14,7 +14,7 @@
 /* COOLVM_FRAMES=DIR: save the framebuffer as DIR/NNNNN.raw (x8r8g8b8, fb_width x fb_height)
  * at every damage report, i.e. every frame the guest's renderer finished: what a viewer
  * could have seen, for checking transient drawing (a stray cursor) that one screenshot misses. */
-static void fb_frame_dump(void)
+void fb_frame_dump(void)
 {
     static const char *dir;
     static bool checked;
@@ -25,10 +25,14 @@ static void fb_frame_dump(void)
     snprintf(path, sizeof path, "%s/%05u.raw", dir, atomic_fetch_add(&n, 1));
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) return;
-    size_t bytes = (size_t)g.fb_width * g.fb_height * 4;
-    uint8_t *visible = malloc(bytes);
-    if (!visible) { close(fd); return; }
-    fb_snapshot(visible);
+    uint32_t width=g.fb_width, height=g.fb_height;
+    uint8_t *visible=NULL;
+    if (!g.gpu || !gpu_snapshot(&visible,&width,&height)) {
+        visible=malloc((size_t)width*height*4);
+        if (!visible) { close(fd); return; }
+        fb_snapshot(visible);
+    }
+    size_t bytes=(size_t)width*height*4;
     if (write(fd, visible, bytes) < 0) { /* best effort */ }
     free(visible);
     close(fd);
@@ -364,6 +368,9 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
         int disk = (int)((pa - BLK_BASE) / BLK_STRIDE);
         *dev = "virtio-blk"; *reg = "MMIO"; *offp = (pa - BLK_BASE) % BLK_STRIDE;
         ok = blk_mmio(disk, *offp, size, wr, val);
+    } else if (g.gpu && pa >= GPU_BASE && pa < GPU_BASE + GPU_SIZE) {
+        *dev = "virtio-gpu"; *reg = "MMIO"; *offp = pa - GPU_BASE;
+        ok = gpu_mmio(*offp, size, wr, val);
     } else if (g.net && pa >= NET_BASE && pa < NET_BASE + NET_SIZE) {
         *dev = "virtio-net"; *reg = "MMIO"; *offp = pa - NET_BASE;
         ok = net_mmio(*offp, size, wr, val);

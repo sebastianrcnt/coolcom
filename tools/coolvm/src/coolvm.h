@@ -72,6 +72,9 @@
 #define NET_BASE 0x1ff020000ULL
 #define NET_SIZE 0x1000ULL
 #define NET_IRQ 712
+#define GPU_BASE 0x1ff030000ULL
+#define GPU_SIZE 0x1000ULL
+#define GPU_IRQ 713
 #define FB_BASE 0x900000000ULL
 
 #define MAX_CPUS 8
@@ -122,6 +125,7 @@ struct vm {
     uint8_t *fb;
     uint64_t fb_size;
     uint32_t fb_width, fb_height;
+    bool gpu;                   /* modern virtio-gpu 2D */
     bool fb_scroll;              /* advertise optional scanout-y register */
     _Atomic uint32_t fb_scanout_y;
     _Atomic bool fb_damage_used;  /* the guest reports damage (FINISHER_FB_DAMAGE) */
@@ -191,6 +195,12 @@ bool net_irq_level(void);
 void net_start(void);
 bool net_add_forward(const char *spec); /* --net-forward [addr:]host:guest */
 void net_report(void);
+void fb_frame_dump(void); /* caller holds g.lock */
+void gpu_init(void);
+bool gpu_mmio(uint64_t off, int size, bool wr, uint64_t *val);
+bool gpu_irq_level(void);
+void gpu_resize(uint32_t width, uint32_t height);
+bool gpu_snapshot(uint8_t **pixels, uint32_t *width, uint32_t *height); /* g.lock held */
 void fb_snapshot(uint8_t *dst); /* visible scanout, including ring wrap */
 void display_init(void);
 void display_pump(double seconds); /* run the window's event loop for that long */

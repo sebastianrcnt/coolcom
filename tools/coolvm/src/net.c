@@ -20,7 +20,7 @@
  * held, the poll thread and the DNS threads take it.
  * COOLVM_NET_DEBUG=1 in the environment logs frames and bad guest checksums.
  */
-#include "coolvm.h"
+#include "virtio.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -85,7 +85,6 @@ static bool seq_le(uint32_t a, uint32_t b) { return (int32_t)(a - b) <= 0; }
 #define F_STATUS (1u << 16)
 #define F_VERSION_1 1u /* feature word 1 */
 
-struct vq { uint32_t num, ready; uint64_t desc, avail, used; uint16_t last_avail, used_idx; };
 static struct { uint32_t status, devsel, drvsel, drvfeat[2], qsel, isr; struct vq q[2]; } nv;
 
 /* Frames waiting for guest receive buffers. */
@@ -99,29 +98,19 @@ static int wake_pipe[2] = {-1, -1};
 
 static uint8_t *gptr(uint64_t pa, uint64_t len)
 {
-    if (pa < DRAM_BASE || len > g.ram_size || pa - DRAM_BASE > g.ram_size - len) return NULL;
-    return g.ram + (pa - DRAM_BASE);
+    return virtio_guest(pa, len);
 }
 
 static bool vq_desc(struct vq *q, unsigned id, uint64_t *addr, uint32_t *len, uint16_t *flags, uint16_t *next)
 {
-    uint8_t *p;
-    if (id >= q->num || !(p = gptr(q->desc + 16ULL * id, 16))) return false;
-    *addr = le64(p); *len = le32(p + 8); *flags = le16(p + 12); *next = le16(p + 14);
-    return !(*flags & 4);
+    return virtio_desc(q,id,addr,len,flags,next);
 }
 
 static bool vq_ok(struct vq *q) { return (nv.status & 4) && q->ready && q->num; }
 
 static void vq_used(struct vq *q, uint16_t head, uint32_t len)
 {
-    uint8_t *used = gptr(q->used, 6 + 8 * q->num);
-    if (!used) return;
-    uint8_t *e = used + 4 + 8 * (q->used_idx % q->num);
-    wle32(e, head); wle32(e + 4, len);
-    q->used_idx++;
-    atomic_thread_fence(memory_order_release);
-    wle16(used + 2, q->used_idx);
+    virtio_used(q,head,len);
 }
 
 static void vq_irq(struct vq *q)

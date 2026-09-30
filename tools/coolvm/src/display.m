@@ -39,8 +39,19 @@ static void release_pixels(void *info, const void *data, size_t size)
 static CGImageRef framebuffer_image(void)
 {
     CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
-    size_t size = (size_t)g.fb_width * g.fb_height * 4;
+    uint8_t *visible = NULL;
+    uint32_t width = g.fb_width, height = g.fb_height;
+    bool gpu_image = false;
+    if (g.gpu) {
+        pthread_mutex_lock(&g.lock);
+        gpu_image = gpu_snapshot(&visible, &width, &height);
+        pthread_mutex_unlock(&g.lock);
+    }
+    size_t size = (size_t)width * height * 4;
     CGDataProviderRef provider;
+    if (gpu_image)
+        provider = CGDataProviderCreateWithData(NULL, visible, size, release_pixels);
+    else
     if (atomic_load(&g.fb_scanout_y)) {
         uint8_t *pixels = malloc(size);
         if (!pixels) { CGColorSpaceRelease(color); return NULL; }
@@ -48,7 +59,7 @@ static CGImageRef framebuffer_image(void)
         provider = CGDataProviderCreateWithData(NULL, pixels, size, release_pixels);
     } else
         provider = CGDataProviderCreateWithData(NULL, g.fb, size, NULL);
-    CGImageRef image = CGImageCreate(g.fb_width, g.fb_height, 8, 32, g.fb_width*4,
+    CGImageRef image = CGImageCreate(width, height, 8, 32, width*4,
         color, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little,
         provider, NULL, false, kCGRenderingIntentDefault);
     CGDataProviderRelease(provider);
@@ -92,6 +103,12 @@ static const uint16_t keymap[128] = {
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
+    if (g.gpu) {
+        CGImageRef image = framebuffer_image();
+        CGContextDrawImage(ctx, NSRectToCGRect(self.bounds), image);
+        CGImageRelease(image);
+        return;
+    }
     uint32_t top = atomic_load(&g.fb_scanout_y), first = g.fb_height - top;
     CGRect bounds = NSRectToCGRect(self.bounds);
     CGSize device = CGContextConvertSizeToDeviceSpace(ctx, bounds.size);
@@ -150,6 +167,12 @@ static const uint16_t keymap[128] = {
 @interface VMWindowDelegate : NSObject <NSWindowDelegate>
 @end
 @implementation VMWindowDelegate
+- (void)windowDidResize:(NSNotification *)notification {
+    NSWindow *window = notification.object;
+    NSRect pixels = [window.contentView convertRectToBacking:window.contentView.bounds];
+    gpu_resize((uint32_t)llround(pixels.size.width), (uint32_t)llround(pixels.size.height));
+}
+- (void)windowDidChangeBackingProperties:(NSNotification *)notification { [self windowDidResize:notification]; }
 - (void)windowWillClose:(NSNotification *)notification { (void)notification; vm_stop(0, "window closed"); }
 @end
 
@@ -171,6 +194,7 @@ void display_init(void)
     [window makeFirstResponder:view];
     [window setAcceptsMouseMovedEvents:YES];
     [NSApp activateIgnoringOtherApps:YES];
+    [windowDelegate windowDidResize:[NSNotification notificationWithName:NSWindowDidResizeNotification object:window]];
 }
 /* Run the event loop for `seconds`: events are handled as they arrive, and once per
  * screen frame the window is redrawn and committed if the guest changed the framebuffer.
