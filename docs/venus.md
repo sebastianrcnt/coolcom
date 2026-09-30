@@ -233,3 +233,7 @@ and maps one blob.
    only; or skip QEMU until someone has a Linux machine.
 7. Logos: **keep it until milestone 3 passes, then delete it**; or keep it as a fallback for
    hosts without Vulkan.
+
+**Decided (user, 2026-09-30):** all seven follow the recommendations; downloading the
+pinned dependencies (virglrenderer, MoltenVK, Vulkan headers/registry, venus-protocol, a
+Linux VM image for testing) is approved.
