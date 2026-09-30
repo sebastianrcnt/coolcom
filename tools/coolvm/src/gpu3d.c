@@ -142,7 +142,8 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
     case 0x207: /* SUBMIT_3D uses dwords in the renderer API */
         if(len<32 || ci<0){result=BAD_CONTEXT;break;}
         if(vio32(p+24)!=len-32 || ((len-32)&3)){result=INVALID;break;}
-        if(virgl_renderer_submit_cmd((void *)(p+32),ctx,(int)((len-32)/4)))result=0x1200;
+        int submit_result=virgl_renderer_submit_cmd((void *)(p+32),ctx,(int)((len-32)/4));
+        if(submit_result){LOGE("Venus submit ctx=%u bytes=%zu failed: %d\n",ctx,len-32,submit_result);result=0x1200;}
         if(result==OK && (flags&1) && !wait_fence(ctx,flags&2?p[20]:0))result=0x1200;
         break;
     case 0x10c: { /* RESOURCE_CREATE_BLOB */
@@ -151,7 +152,7 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
         uint64_t bytes=vio64(p+48);
         if(!bytes || bytes>GPU3D_SHM_SIZE || (bytes&0x3fff) || bf!=1 ||
            (mem!=1 && mem!=2) || niov>1024 || len!=56+16ULL*niov ||
-           (mem==2 && (ci<0 || niov)) || (mem==1 && (ctx || !niov || vio64(p+40)))){result=INVALID;break;}
+           (mem==2 && (ci<0 || niov)) || (mem==1 && ((ctx && ci<0) || !niov || vio64(p+40)))){result=INVALID;break;}
         for(unsigned i=0;i<NRES;i++)if(!venus.blobs[i].id){b=&venus.blobs[i];break;}
         if(!b){result=0x1201;break;}
         uint64_t total=0;
@@ -170,6 +171,7 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
         struct virgl_renderer_resource_create_blob_args args={.res_handle=vio32(p+24),.ctx_id=ctx,
             .blob_mem=mem,.blob_flags=bf,.blob_id=vio64(p+40),.size=bytes,.iovecs=iov,.num_iovs=niov};
         if(virgl_renderer_resource_create_blob(&args)){free(iov);result=0x1200;break;}
+        if(mem==1 && ci>=0)virgl_renderer_ctx_attach_resource(ctx,args.res_handle);
         *b=(struct blob){.id=args.res_handle,.owner=ctx,.mem=mem,.flags=bf,.size=bytes,.iov=iov,.attached=ci<0?0:1u<<ci};
         break;
     }

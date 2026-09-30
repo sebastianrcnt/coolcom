@@ -1,0 +1,203 @@
+// Small synchronous Venus client. Object ids belong to this one guest context.
+// The generated library is placed beside this file on C:/Vulkan by venus-test.
+#include "C:/Vulkan/Vulkan.cool"
+class CGfx
+{
+    VenusWire enc, reply;
+    U8 *commands;
+    CGpuBlob *reply_blob;
+    U64i instance, physical, device, queue, pool, cmd, fence, next_id;
+    U32i family;
+    VkPhysicalDeviceMemoryProperties memory;
+};
+CGfx gfx;
+U0 GfxCheck(Bool ok, U8 *label)
+{
+    if (!ok) {Print("VENUS FAIL %s\n", label); Shutdown;}
+}
+U64i GfxId() {return ++gfx.next_id;}
+U0 GfxBegin()
+{
+    VkCommandStreamDescriptionMESA stream;
+    gfx.enc.pos = 0; gfx.enc.error = 0;
+    stream.resourceId = gfx.reply_blob->id; stream.offset = 0; stream.size = gfx.reply_blob->size;
+    vn_encode_vkSetReplyCommandStreamMESA(&gfx.enc, 0, &stream);
+    gfx.reply.pos = 0; gfx.reply.error = 0;
+}
+U0 GfxSubmit()
+{
+    Bool ok = !gfx.enc.error && GpuSubmit3D(gfx.enc.data, gfx.enc.pos);
+    if (!ok) Print("Venus stream: bytes=%d error=%d command=%d\n", gfx.enc.pos, gfx.enc.error, *(gfx.enc.data + 36)(U32i *));
+    GfxCheck(ok, "submit");
+    ArchDsb;
+}
+U0 GfxResult(I64 result, U8 *label)
+{
+    if (result || gfx.reply.error) Print("Venus result %d wire %d at %s\n", result, gfx.reply.error, label);
+    GfxCheck(!result && !gfx.reply.error, label);
+}
+U0 GfxInit()
+{
+    U32i count, families;
+    VkApplicationInfo app; VkInstanceCreateInfo instance;
+    VkQueueFamilyProperties props[16];
+    VkDeviceQueueCreateInfo qi; VkDeviceCreateInfo di;
+    VkDeviceQueueInfo2 queue_info; VkDeviceQueueTimelineInfoMESA timeline; VkFenceCreateInfo fi;
+    VkPhysicalDeviceDynamicRenderingFeatures dynamic;
+    VkPhysicalDeviceFeatures2 features;
+    VkCommandPoolCreateInfo pool_info; VkCommandBufferAllocateInfo bi;
+    U32i priority = 0x3F800000;
+    GfxCheck(GpuVenusInit && venus.cap_size >= 16 && *(venus.cap + 24)(U32i *) == VN_WIRE_FORMAT_VERSION, "real Venus capset");
+    gfx.commands = CAlloc(16384); gfx.enc.data = gfx.commands; gfx.enc.capacity = 16384;
+    gfx.reply_blob = GpuBlobCreate(16384, GPU_BLOB_HOST3D);
+    GfxCheck(gfx.reply_blob && GpuBlobMap(gfx.reply_blob), "reply mapping");
+    gfx.reply.data = gfx.reply_blob->mapping; gfx.reply.capacity = gfx.reply_blob->size;
+    gfx.instance = GfxId;
+    MemSet(&app, 0, sizeof(app)); MemSet(&instance, 0, sizeof(instance));
+    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; app.apiVersion = 0x00403000;
+    instance.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; instance.pApplicationInfo = &app;
+    GfxBegin; vn_encode_vkCreateInstance(&gfx.enc, 0, &instance, NULL, &gfx.instance); GfxSubmit;
+    GfxResult(vn_decode_vkCreateInstance_reply(&gfx.reply, &instance, NULL, &gfx.instance), "instance");
+    gfx.physical = GfxId; count = 1;
+    GfxBegin; vn_encode_vkEnumeratePhysicalDevices(&gfx.enc, 0, gfx.instance, &count, &gfx.physical); GfxSubmit;
+    GfxResult(vn_decode_vkEnumeratePhysicalDevices_reply(&gfx.reply, gfx.instance, &count, &gfx.physical), "physical device");
+    families = 16; MemSet(props, 0, sizeof(props));
+    GfxBegin; vn_encode_vkGetPhysicalDeviceQueueFamilyProperties(&gfx.enc, 0, gfx.physical, &families, props); GfxSubmit;
+    vn_decode_vkGetPhysicalDeviceQueueFamilyProperties_reply(&gfx.reply, gfx.physical, &families, props);
+    GfxCheck(!gfx.reply.error && families > 0 && families <= 16, "queue families");
+    for (gfx.family = 0; gfx.family < families; gfx.family++) if (props[gfx.family].queueFlags & VK_QUEUE_GRAPHICS_BIT) break;
+    GfxCheck(gfx.family < families, "graphics queue");
+    GfxBegin; vn_encode_vkGetPhysicalDeviceMemoryProperties(&gfx.enc, 0, gfx.physical, &gfx.memory); GfxSubmit;
+    vn_decode_vkGetPhysicalDeviceMemoryProperties_reply(&gfx.reply, gfx.physical, &gfx.memory);
+    GfxCheck(!gfx.reply.error, "memory properties");
+    MemSet(&dynamic, 0, sizeof(dynamic)); MemSet(&features, 0, sizeof(features));
+    dynamic.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2; features.pNext = &dynamic;
+    GfxBegin; vn_encode_vkGetPhysicalDeviceFeatures2(&gfx.enc, 0, gfx.physical, &features); GfxSubmit;
+    vn_decode_vkGetPhysicalDeviceFeatures2_reply(&gfx.reply, gfx.physical, &features);
+    GfxCheck(!gfx.reply.error && dynamic.dynamicRendering, "dynamic rendering");
+    MemSet(&qi, 0, sizeof(qi)); MemSet(&di, 0, sizeof(di));
+    qi.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO; qi.queueFamilyIndex = gfx.family;
+    qi.queueCount = 1; qi.pQueuePriorities = &priority;
+    di.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO; di.pNext = &dynamic;
+    di.queueCreateInfoCount = 1; di.pQueueCreateInfos = &qi; gfx.device = GfxId;
+    GfxBegin; vn_encode_vkCreateDevice(&gfx.enc, 0, gfx.physical, &di, NULL, &gfx.device); GfxSubmit;
+    GfxResult(vn_decode_vkCreateDevice_reply(&gfx.reply, gfx.physical, &di, NULL, &gfx.device), "device");
+    gfx.queue = GfxId;
+    MemSet(&queue_info, 0, sizeof(queue_info)); MemSet(&timeline, 0, sizeof(timeline));
+    timeline.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_TIMELINE_INFO_MESA; timeline.ringIdx = 1;
+    queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2; queue_info.pNext = &timeline;
+    queue_info.queueFamilyIndex = gfx.family;
+    GfxBegin; vn_encode_vkGetDeviceQueue2(&gfx.enc, 0, gfx.device, &queue_info, &gfx.queue); GfxSubmit;
+    vn_decode_vkGetDeviceQueue2_reply(&gfx.reply, gfx.device, &queue_info, &gfx.queue);
+    GfxCheck(!gfx.reply.error, "queue");
+    MemSet(&fi, 0, sizeof(fi)); fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; gfx.fence = GfxId;
+    GfxBegin; vn_encode_vkCreateFence(&gfx.enc, 0, gfx.device, &fi, NULL, &gfx.fence); GfxSubmit;
+    GfxResult(vn_decode_vkCreateFence_reply(&gfx.reply, gfx.device, &fi, NULL, &gfx.fence), "fence");
+    MemSet(&pool_info, 0, sizeof(pool_info)); pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.queueFamilyIndex = gfx.family; pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; gfx.pool = GfxId;
+    GfxBegin; vn_encode_vkCreateCommandPool(&gfx.enc, 0, gfx.device, &pool_info, NULL, &gfx.pool); GfxSubmit;
+    GfxResult(vn_decode_vkCreateCommandPool_reply(&gfx.reply, gfx.device, &pool_info, NULL, &gfx.pool), "command pool");
+    MemSet(&bi, 0, sizeof(bi)); bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    bi.commandPool = gfx.pool; bi.commandBufferCount = 1; bi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; gfx.cmd = GfxId;
+    GfxBegin; vn_encode_vkAllocateCommandBuffers(&gfx.enc, 0, gfx.device, &bi, &gfx.cmd); GfxSubmit;
+    GfxResult(vn_decode_vkAllocateCommandBuffers_reply(&gfx.reply, gfx.device, &bi, &gfx.cmd), "command buffer");
+}
+U64i GfxMemory(VkMemoryRequirements * req, I64 flags)
+{
+    U32i type; U64i memory = GfxId;
+    VkMemoryAllocateInfo ai;
+    for (type = 0; type < gfx.memory.memoryTypeCount; type++)
+        if ((req->memoryTypeBits & (1 << type)) && (gfx.memory.memoryTypes[type].propertyFlags & flags) == flags) break;
+    GfxCheck(type < gfx.memory.memoryTypeCount, "memory type");
+    MemSet(&ai, 0, sizeof(ai)); ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ai.allocationSize = (req->size + 16383) & ~16383; ai.memoryTypeIndex = type;
+    GfxBegin; vn_encode_vkAllocateMemory(&gfx.enc, 0, gfx.device, &ai, NULL, &memory); GfxSubmit;
+    GfxResult(vn_decode_vkAllocateMemory_reply(&gfx.reply, gfx.device, &ai, NULL, &memory), "allocate memory");
+    return memory;
+}
+class CGfxBuffer {U64i buffer, memory; CGpuBlob *blob; U8 *mapping;};
+U0 GfxBufferCreate(CGfxBuffer *b, I64 size, I64 usage)
+{
+    VkBufferCreateInfo ci; VkMemoryRequirements req;
+    MemSet(b, 0, sizeof(CGfxBuffer)); MemSet(&ci, 0, sizeof(ci));
+    ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; ci.size = size; ci.usage = usage; b->buffer = GfxId;
+    GfxBegin; vn_encode_vkCreateBuffer(&gfx.enc, 0, gfx.device, &ci, NULL, &b->buffer); GfxSubmit;
+    GfxResult(vn_decode_vkCreateBuffer_reply(&gfx.reply, gfx.device, &ci, NULL, &b->buffer), "buffer");
+    GfxBegin; vn_encode_vkGetBufferMemoryRequirements(&gfx.enc, 0, gfx.device, b->buffer, &req); GfxSubmit;
+    vn_decode_vkGetBufferMemoryRequirements_reply(&gfx.reply, gfx.device, b->buffer, &req);
+    GfxCheck(!gfx.reply.error, "buffer requirements");
+    b->memory = GfxMemory(&req, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    GfxBegin; vn_encode_vkBindBufferMemory(&gfx.enc, 0, gfx.device, b->buffer, b->memory, 0); GfxSubmit;
+    GfxResult(vn_decode_vkBindBufferMemory_reply(&gfx.reply, gfx.device, b->buffer, b->memory, 0), "bind buffer");
+    b->blob = GpuBlobCreate((req.size + 16383) & ~16383, GPU_BLOB_HOST3D, b->memory);
+    GfxCheck(b->blob && GpuBlobMap(b->blob), "buffer map"); b->mapping = b->blob->mapping;
+}
+U0 GfxBufferDestroy(CGfxBuffer *b)
+{
+    GfxCheck(GpuBlobDestroy(b->blob), "buffer unmap/unref");
+    GfxBegin; vn_encode_vkDestroyBuffer(&gfx.enc, 0, gfx.device, b->buffer, NULL);
+    vn_encode_vkFreeMemory(&gfx.enc, 0, gfx.device, b->memory, NULL); GfxSubmit;
+}
+U0 GfxRecord()
+{
+    VkCommandBufferBeginInfo bi; MemSet(&bi, 0, sizeof(bi)); bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    GfxBegin; vn_encode_vkResetCommandBuffer(&gfx.enc, 0, gfx.cmd, 0); GfxSubmit;
+    GfxResult(vn_decode_vkResetCommandBuffer_reply(&gfx.reply, gfx.cmd, 0), "reset command buffer");
+    GfxBegin; vn_encode_vkBeginCommandBuffer(&gfx.enc, 0, gfx.cmd, &bi); GfxSubmit;
+    GfxResult(vn_decode_vkBeginCommandBuffer_reply(&gfx.reply, gfx.cmd, &bi), "begin command buffer");
+    GfxBegin;
+}
+U0 GfxExecute()
+{
+    VkSubmitInfo submit; MemSet(&submit, 0, sizeof(submit));
+    // EndCommandBuffer generates the first reply in this command stream.
+    vn_encode_vkEndCommandBuffer(&gfx.enc, 0, gfx.cmd); GfxSubmit;
+    GfxResult(vn_decode_vkEndCommandBuffer_reply(&gfx.reply, gfx.cmd), "end command buffer");
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO; submit.commandBufferCount = 1; submit.pCommandBuffers = &gfx.cmd;
+    GfxBegin; vn_encode_vkQueueSubmit(&gfx.enc, 0, gfx.queue, 1, &submit, gfx.fence); GfxSubmit;
+    GfxResult(vn_decode_vkQueueSubmit_reply(&gfx.reply, gfx.queue, 1, &submit, gfx.fence), "queue submit");
+    // Poll a Vulkan fence: Venus forbids the blocking vkQueueWaitIdle command.
+    I64 status = VK_NOT_READY, attempts = 0;
+    while (status == VK_NOT_READY && attempts++ < 10000) {
+        GfxBegin; vn_encode_vkGetFenceStatus(&gfx.enc, 0, gfx.device, gfx.fence); GfxSubmit;
+        status = vn_decode_vkGetFenceStatus_reply(&gfx.reply, gfx.device, gfx.fence);
+        if (status == VK_NOT_READY) Sleep(1);
+    }
+    GfxResult(status, "GPU fence completion");
+    ArchDsb;
+    GfxBegin; vn_encode_vkResetFences(&gfx.enc, 0, gfx.device, 1, &gfx.fence); GfxSubmit;
+    GfxResult(vn_decode_vkResetFences_reply(&gfx.reply, gfx.device, 1, &gfx.fence), "reset fence");
+}
+U0 GfxCoherenceTest()
+{
+    CGfxBuffer src, dst; VkBufferCopy copy; VkMemoryBarrier barrier;
+    I64 round, i;
+    GfxBufferCreate(&src, 32768, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    GfxBufferCreate(&dst, 32768, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    MemSet(&copy, 0, sizeof(copy)); copy.size = 32768;
+    MemSet(&barrier, 0, sizeof(barrier)); barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    for (round = 0; round < 3; round++) {
+        for (i = 0; i < 32768; i++) {src.mapping[i] = (i * 17 + round * 73) & 255; dst.mapping[i] = 0xCC;}
+        ArchDsb;
+        GfxRecord;
+        barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+        vn_encode_vkCmdCopyBuffer(&gfx.enc, 0, gfx.cmd, src.buffer, dst.buffer, 1, &copy);
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+        GfxExecute;
+        for (i = 0; i < 32768; i++) GfxCheck(dst.mapping[i] == ((i * 17 + round * 73) & 255), "GPU coherence bytes");
+        GfxCheck(GpuBlobUnmap(src.blob) && GpuBlobMap(src.blob) == src.mapping, "guest remap");
+    }
+    GfxBufferDestroy(&dst); GfxBufferDestroy(&src);
+    Print("VENUS COHERENCE PASS\n");
+}
+U0 GfxDestroy()
+{
+    GfxBegin; vn_encode_vkDestroyFence(&gfx.enc, 0, gfx.device, gfx.fence, NULL);
+    vn_encode_vkDestroyCommandPool(&gfx.enc, 0, gfx.device, gfx.pool, NULL);
+    vn_encode_vkDestroyDevice(&gfx.enc, 0, gfx.device, NULL);
+    vn_encode_vkDestroyInstance(&gfx.enc, 0, gfx.instance, NULL); GfxSubmit;
+    GfxCheck(GpuBlobDestroy(gfx.reply_blob) && GpuVenusDestroy, "context cleanup"); Free(gfx.commands);
+}

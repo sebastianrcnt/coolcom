@@ -2,7 +2,7 @@
 // descriptor layout and synchronous split-ring protocol; coherent guest RAM.
 // Every command is fenced. A request is at most GPU_REQ_MAX bytes, the reply follows it. Rendering and display-info polling share the
 // control queue's lock; the cursor queue has its own lock.
-#define GPU_REQ_MAX  1536
+#define GPU_REQ_MAX  16384
 #define GPU_REPLY_MAX 65560
 #define GPU_F_VENUS  ((1 << 0) | (1 << 3) | (1 << 4))
 #define GPU_F_LOGOS  (1 << 23)  // Logos.cool, docs/logos.md: coolvm's cell renderer

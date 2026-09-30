@@ -398,3 +398,12 @@ venus-gen: venus-vendor
 venus-gen-test: build/coolc
 	python3 tools/venus/test_offline.py
 	python3 tools/venus/test.py
+
+# Real guest tests are opt-in; these targets never fetch dependencies.
+.PHONY: venus-memory-test
+build/venus/Vulkan.cool: tools/venus/gen.py tools/venus/subset.txt tools/venus/wire.cool
+	python3 tools/venus/gen.py
+build/coolvm-venus: $(wildcard tools/coolvm/src/*.[ch]) tools/coolvm/build.sh
+	COOLVM_VENUS=1 tools/coolvm/build.sh $@
+venus-memory-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool
+	python3 tools/venus/run_guest.py

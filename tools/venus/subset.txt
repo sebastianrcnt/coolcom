@@ -10,6 +10,7 @@ vkGetPhysicalDeviceQueueFamilyProperties
 vkCreateDevice
 vkDestroyDevice
 vkGetDeviceQueue
+vkGetDeviceQueue2
 vkDeviceWaitIdle
 vkQueueWaitIdle
 vkAllocateMemory
@@ -87,3 +88,4 @@ VkImportMemoryResourceInfoMESA
 VkExportMemoryAllocateInfo
 VkMemoryAllocateFlagsInfo
 VkRingMonitorInfoMESA
+VkDeviceQueueTimelineInfoMESA

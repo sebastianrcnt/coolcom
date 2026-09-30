@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define GPU3D_SHM_BASE 0xa00000000ULL
+#define GPU3D_SHM_BASE 0x400000000ULL
 #define GPU3D_SHM_SIZE (256ULL << 20)
 #define GPU3D_REPLY_MAX 4096
 /* VIRTIO_GPU_F_VIRGL, F_RESOURCE_BLOB, F_CONTEXT_INIT. */

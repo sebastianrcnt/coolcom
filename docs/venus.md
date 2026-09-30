@@ -401,7 +401,7 @@ the optional build is requested; renderer initialization failure falls back to 2
   completion and GPU timeline stress testing remain future work.
 - Mappable GUEST blobs from checked DRAM scatter lists and HOST3D blobs using
   the macOS pointer API. HOST3D maps/unmaps into shared-memory region **1** (`VIRTIO_GPU_SHM_ID_HOST_VISIBLE`),
-  advertised by MMIO SHMSel/SHMLen/SHMBase, at `0xa00000000`, size **256 MiB**.
+  advertised by MMIO SHMSel/SHMLen/SHMBase, at `0x400000000`, size **256 MiB**.
   This does not overlap coolvm's DRAM or framebuffer.
 - 16 KiB allocation/mapping alignment, aperture range and overlap checks, a
   256 MiB blob budget, 64 blob slots and 16 contexts, and a shared resource-id
@@ -450,3 +450,33 @@ transport and generator tests are attached to their individual Makefile rules.
 Offline merge validation: `make -j test` passed, including the four transport
 configurations and generator offline regression tests. Full generator wire-oracle
 tests reported SKIP because their separate pinned inputs had not yet been fetched.
+
+
+### Actual guest memory and coherence (2026-09-30)
+
+`make venus-memory-test` uses the generated Cool Vulkan layer, kernel virtio
+transport, real virglrenderer and MoltenVK. It requires the explicit host and
+generator vendor steps; it never downloads. The full pinned generator oracle
+suite also passed after fetching its inputs.
+
+The guest creates an instance/device, discovers graphics queues and memory
+properties, allocates two HOST_VISIBLE | HOST_COHERENT Vulkan buffers, exposes
+each allocation as a HOST3D blob and accesses them through guest page tables.
+For three rounds it writes 32 KiB of changing data, performs Vulkan GPU buffer
+copies with HOST/TRANSFER barriers, polls a Vulkan completion fence and checks
+every destination byte. Unmap/remap and resource/context teardown also pass.
+**PASS** on Apple M6, macOS 27, pinned MoltenVK/krunkit renderer. This establishes
+coherent memory for this device; noncoherent flush/invalidate is not tested.
+
+Integration corrected the shared window to **16 GiB**: HV accepted 40 GiB in
+the guestless spike, but Boot.S already installs guest stage-1 mappings for the
+32–48 GiB DRAM aperture. The kernel refuses to overwrite these entries. The
+unused 16 GiB window permits the actual guest stage-1 + HV stage-2 mapping.
+GUEST blob creation now accepts the kernel's owning context and attaches it.
+
+Venus deliberately rejects `vkGetDeviceQueue` and `vkQueueWaitIdle`; this is a
+renderer contract rather than a wire generator failure. The client uses
+`vkGetDeviceQueue2` with `VkDeviceQueueTimelineInfoMESA` (ring 1) and polls
+`vkGetFenceStatus` after `vkQueueSubmit`. Inline command decoding/replies are
+completed on CPU timeline 0; shared command rings and concurrent timelines
+remain future work. Kernel request capacity grows to 16 KiB for shaders/pipelines.

@@ -27,7 +27,7 @@ int main(void)
 {
     assert(hv_vm_create(NULL)==HV_SUCCESS);
     g.gpu=true;g.fb_width=8;g.fb_height=32;g.ram_size=1<<20;g.ram=calloc(1,g.ram_size);pthread_mutex_init(&g.lock,NULL);gpu_init();
-    assert(rd(0x10)==0x19);wr(0xac,1);assert(rd(0xb0)==GPU3D_SHM_SIZE && rd(0xb8)==0 && rd(0xbc)==10);
+    assert(rd(0x10)==0x19);wr(0xac,1);assert(rd(0xb0)==GPU3D_SHM_SIZE && rd(0xb8)==0 && rd(0xbc)==4);
     wr(0xac,0);assert(rd(0xb0)==UINT32_MAX && rd(0xb4)==UINT32_MAX);wr(0xac,1);
     wr(0x70,3);wr(0x24,1);wr(0x20,1);wr(0x24,0);wr(0x20,0x19);wr(0x70,11);initq(0);wr(0x70,15);
     assert(rd(0x10c)==1);
