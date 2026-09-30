@@ -35,6 +35,7 @@ Print("ex %d\n", ex_v * 3);
 ex_v * 7;
 EOF
 printf 'I64 bad = ;\n' >"$dir/Bad.HC"
+printf "StrLen('Tmux');\n" >"$dir/BadPtr.HC"
 # The shell runs C:/Init.HC at startup (typed input can outrun the UART FIFO).
 cat >"$dir/Init.HC" <<'EOF'
 Cd("C:/");
@@ -45,10 +46,11 @@ extern I64 hello_calls;
 Print("twice %d calls %d\n", Twice(20), hello_calls);
 Print("exe %d\n", ExeFile("Ex"));
 Print("bad %d\n", ExeFile("Bad"));
+ExeFile("BadPtr");
 Print("self %d\n", Cmp("C:/Compiler/Native.HC", "C:/Self.BIN"));
 Shutdown;
 EOF
-mcopy -i "$disk" "$dir/Hello.HC" "$dir/Ex.HC" "$dir/Init.HC" "$dir/Bad.HC" ::
+mcopy -i "$disk" "$dir/Hello.HC" "$dir/Ex.HC" "$dir/Init.HC" "$dir/Bad.HC" "$dir/BadPtr.HC" ::
 log=$dir/log
 status=0
 gtimeout -k 2 130 build/coolvm --headless --cpus 2 --mem 1024 --timeout 120 \
@@ -60,7 +62,7 @@ fail() {
     exit 1
 }
 [ "$status" = 0 ] || fail "coolvm exited with status $status"
-for line in 'cmp 0' 'Hello loaded 8' 'twice 40 calls 2' 'ex 15' 'exe 35' 'ERROR: Expected an expression' '  C:/Bad.HC,1' 'bad 0' 'self 0'; do
+for line in 'cmp 0' 'Hello loaded 8' 'twice 40 calls 2' 'ex 15' 'exe 35' 'ERROR: Expected an expression' '  C:/Bad.HC,1' 'bad 0' 'ERROR: Integer constant for a pointer parameter' 'self 0'; do
     grep -qx "$line" "$dir/out" || fail "missing line: $line"
 done
 mcopy -i "$disk" ::Self.BIN "$dir/Self.BIN"

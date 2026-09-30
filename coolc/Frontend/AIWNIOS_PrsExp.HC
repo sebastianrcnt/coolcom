@@ -1116,7 +1116,7 @@ Bool PrsExpression(CCmpCtrl *cc, U8 **ul = NULL, I64 flags = 0, CPrsStk *_ps = N
     CRPN *orig_next = cc->coc.coc_head.next, *argc, *argv, *next;
     CCodeMisc *misc;
     I64 intern_code;
-    Bool finish = FALSE;
+    Bool finish = FALSE, lit_arg;
     CPrsStk *old = cc->ps;
     CArrayDim tmpad, *ic_dim;
     if (!_ps) {
@@ -1433,12 +1433,22 @@ typecast:
                                 LexExcept(cc, "Missing dft argument at:");
                             Lex(cc);
                         } else if (cc->token != ')') {
+                            lit_arg = cc->token == TK_I64 || cc->token == TK_CHAR_CONST;
                             if (!PrsExpression(cc,, PEF_NO_COMMA))
                                 LexExcept(cc, "Expected a function argument at:");
                             PrsPush3(cc->ps, cc->coc.coc_head.next);
                             arity++;
                             rpn = cc->coc.coc_head.next;
                             last_c = rpn->ic_class;
+                            // FIX(10): A nonzero integer or char constant for a pointer parameter
+                            // (Man('Tmux') for Man("Tmux")) is an error; 0 (NULL) stays allowed.
+#ifdef COOLC_FRONTEND_FIXES
+                            // (A global's address is an IC_IMM_I64 too in JIT code: only literals count.)
+                            if (lit_arg && rpn->type == IC_IMM_I64 && rpn->ic_data &&
+                                    !(rpn->ic_class && rpn->ic_class->ptr_stars_cnt) &&
+                                    mlst->member_class && mlst->member_class->ptr_stars_cnt)
+                                LexExcept(cc, "Integer constant for a pointer parameter at ");
+#endif
                             if (mlst->str && !StrCmp(mlst->str, "fmt") && Bt(&ic_fun->flags, Ff_DOT_DOT_DOT))
                                 fmt_kind = PrsFmtKind(rpn, &fmt_str);
                             if (rpn->ic_class->raw_type == RT_F64 && mlst->member_class->raw_type != RT_F64) {
