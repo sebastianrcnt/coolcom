@@ -9,6 +9,25 @@
 #include <sys/event.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+
+/* COOLVM_FRAMES=DIR: save the framebuffer as DIR/NNNNN.raw (x8r8g8b8, fb_width x fb_height)
+ * at every damage report, i.e. every frame the guest's renderer finished: what a viewer
+ * could have seen, for checking transient drawing (a stray cursor) that one screenshot misses. */
+static void fb_frame_dump(void)
+{
+    static const char *dir;
+    static bool checked;
+    static _Atomic unsigned n;
+    char path[1024];
+    if (!checked) { dir = getenv("COOLVM_FRAMES"); checked = true; }
+    if (!dir) return;
+    snprintf(path, sizeof path, "%s/%05u.raw", dir, atomic_fetch_add(&n, 1));
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    if (write(fd, g.fb, (size_t)g.fb_width * g.fb_height * 4) < 0) { /* best effort */ }
+    close(fd);
+}
 
 /* ARM ESR_ELx exception classes */
 #define EC_WFX 0x01
@@ -320,6 +339,7 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
                 } while (!atomic_compare_exchange_weak(&g.fb_damage, &old, merged));
             }
             atomic_store(&g.fb_damage_used, true);
+            fb_frame_dump();
         } else if (wr || *offp != 0) {
             ok = false;
         } else {

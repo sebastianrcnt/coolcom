@@ -122,7 +122,7 @@ the previous `wait`'s text (the texts are matched in order as the output streams
 early still counts); later delays count from that moment. `quit [STATUS]` stops the VM (status 0 by
 default; `--screenshot` is still written). Prefer `wait` to delays: host-time delays race a guest slowed
 by host load (a Ctrl+Alt+C meant for a running statement can arrive while the kernel is still booting),
-and a test that ends with `wait` and `quit` does not idle until `--timeout`. `COOLVM_WAIT_DEBUG=1` logs each
+and a test that ends with `wait` and `quit` does not idle until `--timeout`. `COOLVM_FRAMES=DIR` saves the framebuffer as `DIR/NNNNN.raw` (x8r8g8b8) at every damage report, one file per frame the guest drew. `COOLVM_WAIT_DEBUG=1` logs each
 `wait` the feeder reaches. The texts are compared with the raw UART bytes, escape sequences included. Example:
 
 ```
