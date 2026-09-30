@@ -68,3 +68,9 @@ I64 CoolCVetCompat(U8 *entry)
 {
     return Vet(entry, TRUE);
 }
+
+I64 CoolCMainTarget(U8 *entry, U8 *output, I64 target, Bool compat)
+{
+    BTargetX86 = target == 1;
+    return Cmp(entry, NULL, output, 0, compat);
+}

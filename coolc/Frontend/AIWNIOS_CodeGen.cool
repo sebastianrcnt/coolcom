@@ -237,14 +237,28 @@ extern U8 *__HC_ICAdd_Gs(U8 *)
         //
         // See arm_backend.c
         //
-#ifdef TARGET_AARCH64
+        // AOT may target x86 while constant-expression JIT stays on the host.
+        I64 TargetIRegCount() {if (BEmitX86) return 7; return 9;}
+I64 TargetFRegCount() {if (BEmitX86) return 10; return 8;}
 #define AIWNIOS_IREG_START 19
-#define AIWNIOS_IREG_CNT (27 - 19 + 1)
+#define AIWNIOS_IREG_CNT (TargetIRegCount())
 #define AIWNIOS_FREG_START 8
-#define AIWNIOS_FREG_CNT (15 - 8 + 1)
-        I64 VarIRegToReg(I64 r) {return r + AIWNIOS_IREG_START;}
-I64 VarFRegToReg(I64 r) {return r + AIWNIOS_FREG_START;}
-#endif
+#define AIWNIOS_FREG_CNT (TargetFRegCount())
+I64 VarIRegToReg(I64 r) {
+    if (!BEmitX86) return r + 19;
+    switch (r) {
+        case 0: return 10;
+        case 1: return 11;
+        case 2: return 12;
+        case 3: return 14;
+        case 4: return 15;
+        case 5: return 7;
+        case 6: return 6;
+        case 7: return 13;
+    }
+    throw('Compile');
+}
+I64 VarFRegToReg(I64 r) {if (BEmitX86) return r + 6; return r + 8;}
 
 #ifdef TARGET_BYTECODE
 #define AIWNIOS_IREG_START 0
@@ -1365,6 +1379,7 @@ U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info = NULL, Boo
     U8 name[STR_LEN];
     U8 *name_ptr = name;
     Bool force_segment = FALSE;
+    BEmitX86 = BTargetX86 && (cc->flags & CCF_AOT_COMPILE);
     I64 statics_sz = 0;
 #ifdef NATIVE_CANONICAL_AOT
     stat_nam = MStrPrint(".STATIC_%d", native_static_cnt++);
@@ -1516,47 +1531,29 @@ skip_convert:;
             //idx here is the alignment
             align = 8;
             if (mlst->reg == REG_NONE) {
-#ifdef TARGET_AARCH64
-                foff_lookup[idx].i32[1] = foff;
-                foff_lookup[idx].i32[0] = mlst->offset;
-                mlst->offset = foff;
-                foff += mlst->member_class->size * mlst->dim.total_cnt;
-                if (foff & (align - 1))
-                    foff += align - (foff & (align - 1)); //Align to 8
-#else
-                if (IsFunArg(cc->htc.fun, mlst) && !(mlst->flags & MLF_DOT_DOT_DOT && !StrCmp(mlst->str, "argv"))) {
-                    //Arguments are passed on stack so no need to mode
+                if (!BEmitX86) {
+
+                    foff_lookup[idx].i32[1] = foff;
                     foff_lookup[idx].i32[0] = mlst->offset;
-                    //16 to offset [PC,RBP] pair at base
-#ifdef TARGET_RISCV
-                    //RISCV now uses a native SysV ABI srot of
-                    goto no_farg;
-#endif
-#ifdef TARGET_BYTECODE
-                    //RISCV now uses a native SysV ABI srot of
-                    goto no_farg;
-#else
-                    mlst->offset = -16 - 8 * FunArgIdx(cc->htc.fun, mlst);
-#endif
-                    foff_lookup[idx].i32[1] = mlst->offset;
-                } else {
-no_farg:
-                    foff_lookup[idx].i32[0] = mlst->offset;
-                    //In X86_64 the stack grows down and the RBP is above the stack pointer,
-                    //SO MOVE THE OFFSETS DOWN TO THE BOTTOM
-                    //RBP
-                    //x0
-                    //x1
-                    //....
-                    //x8 <<=offset
+                    mlst->offset = foff;
                     foff += mlst->member_class->size * mlst->dim.total_cnt;
                     if (foff & (align - 1))
                         foff += align - (foff & (align - 1)); //Align to 8
-                    mlst->offset = foff;
-                    foff_lookup[idx].i32[1] = foff;
+                } else {
+
+                    if (IsFunArg(cc->htc.fun, mlst) && !(mlst->flags & MLF_DOT_DOT_DOT && !StrCmp(mlst->str, "argv"))) {
+                        foff_lookup[idx].i32[0] = mlst->offset;
+                        mlst->offset = -16 - 8 * FunArgIdx(cc->htc.fun, mlst);
+                        foff_lookup[idx].i32[1] = mlst->offset;
+                    } else {
+                        foff_lookup[idx].i32[0] = mlst->offset;
+                        foff += mlst->member_class->size * mlst->dim.total_cnt;
+                        if (foff & (align - 1)) foff += align - (foff & (align - 1));
+                        mlst->offset = foff;
+                        foff_lookup[idx].i32[1] = foff;
+                    }
                 }
-#endif
-                      } else {
+            } else {
                 //Assign  them a spot on the stack for debugging purposes
                 foff += 8;
                 if (foff & 7)
@@ -1622,9 +1619,10 @@ found_offset:;;
                 __HC_ICAdd_Arg(cc2, idx);
 #endif
 
-#ifdef TARGET_AARCH64
-            __HC_ICAdd_Arg(cc2, idx);
-#endif
+            if (BEmitX86 && mlst->flags & MLF_DOT_DOT_DOT && !StrCmp(mlst->str, "argv"))
+                __HC_ICAdd_GetVargsPtr(cc2);
+            else
+                __HC_ICAdd_Arg(cc2, idx);
             mlst = mlst->next;
         }
         Free(mv);
@@ -1632,9 +1630,8 @@ found_offset:;;
 #ifdef TARGET_X86
         __HC_ICAdd_SetFrameSize(cc2, 0);
 #endif
-#ifdef TARGET_AARCH64
-        __HC_ICAdd_SetFrameSize(cc2, 16);
-#endif
+        if (BEmitX86) __HC_ICAdd_SetFrameSize(cc2, 0);
+        else __HC_ICAdd_SetFrameSize(cc2, 16);
 #ifdef TARGET_RISCV
         __HC_ICAdd_SetFrameSize(cc2, 16);
 #endif
@@ -1750,15 +1747,12 @@ found_offset:;;
                 misc = cur->ic_data;
                 misc->addr = INVALID_PTR(U8 *);
                 misc->flags &= ~CMF_SHORT_ADDR;
-#ifdef TARGET_X86
-                force_segment = TRUE;
-#else
-                force_segment = FALSE;
-#endif
+                force_segment = BEmitX86;
                 if (force_segment) {
                     //Bypass import and use raw one on X86,they are predictable
                     misc->h = HashFind("__Fs", Fs->hash_table, HTT_FUN);
-                    new = __HC_ICAdd_I64(cc2, misc->h(CHashFun *)->exe_addr);
+                    if (cur->type == IC_FS) new = __HC_ICAdd_I64(cc2, 0);
+                    else new = __HC_ICAdd_I64(cc2, 8);
                 } else if (!(misc->h->type & HTF_IMPORT)) {
                     new = __HC_ICAdd_I64(cc2, misc->h(CHashFun *)->exe_addr);
                 } else
@@ -1784,15 +1778,12 @@ found_offset:;;
                 misc->flags &= ~CMF_SHORT_ADDR;
                 misc->addr = INVALID_PTR(U8 *);
 
-#ifdef TARGET_X86
-                force_segment = TRUE;
-#else
-                force_segment = FALSE;
-#endif
+                force_segment = BEmitX86;
                 if (force_segment) {
                     //Bypass import and use raw one on X86,they are predictable
                     misc->h = HashFind("__Gs", Fs->hash_table, HTT_FUN);
-                    new = __HC_ICAdd_I64(cc2, misc->h(CHashFun *)->exe_addr);
+                    if (cur->type == IC_FS) new = __HC_ICAdd_I64(cc2, 0);
+                    else new = __HC_ICAdd_I64(cc2, 8);
                 } else if (!(misc->h->type & HTF_IMPORT)) {
                     new = __HC_ICAdd_I64(cc2, misc->h(CHashFun *)->exe_addr);
                 } else
@@ -1864,6 +1855,7 @@ found_offset:;;
                 break; case IC_LABEL:
                 new = __HC_ICAdd_Label(cc2, cur->ic_data(CCodeMisc *)->addr);
                 break; case IC_ASM:
+                if (BEmitX86) LexExcept(cc, "x86_64 inline assembly is not supported");
                 __HC_ICAdd_Label(cc2, __HC_CodeMiscLabelNew(acc, &cur->ic_data(CAiwniosAOTBlob *)->final_start_addr));
                 new = __HC_ICAdd_RawBytes(cc2, cur->ic_data(CAiwniosAOTBlob *)->data, cur->ic_data(CAiwniosAOTBlob *)->len);
 
@@ -2111,6 +2103,12 @@ found_offset:;;
                 __HC_ICAdd_UnboundedSwitch(cc2, cur->ic_data(CCodeMisc *)->addr);
                 break; case IC_RET:
                 new = __HC_ICAdd_Ret(cc2);
+                if (cur->ic_class) {
+                    if (cur->ic_class->ptr_stars_cnt)
+                        new(CBRPN *)->ic_class = rt2cls(BRT_PTR, 0);
+                    else
+                        new(CBRPN *)->ic_class = rt2cls(cur->ic_class->raw_type, 0);
+                }
                 break; case IC_CALL_INDIRECT:
                 new = __HC_ICAdd_Call(
                                       cc2,
@@ -2338,6 +2336,7 @@ norm_reloc:
     }
     __HC_CmpCtrlDel(acc);
     COCDel(cc, &cc->coc);
+    BEmitX86 = FALSE;
     return machine_code;
 }
 

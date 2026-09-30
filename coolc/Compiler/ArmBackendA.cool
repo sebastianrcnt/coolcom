@@ -1889,22 +1889,22 @@ I64 ATOMIC_STORE(CBCmpCtrl *cctrl, CBICArg *derefed, I64 r, I64 retry, U8 *bin,
     switch (derefed->raw_type) {
         case BRT_I8i:
         case BRT_U8i:
-            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrb(MIR(cctrl, 0), r, 1));
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrb(MIR(cctrl, BAIWNIOS_TMP_IREG_POOP2), r, 1));
             break;
         case BRT_I16i:
         case BRT_U16i:
-            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrh(MIR(cctrl, 0), r, 1));
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrh(MIR(cctrl, BAIWNIOS_TMP_IREG_POOP2), r, 1));
             break;
         case BRT_I32i:
         case BRT_U32i:
-            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrh(MIR(cctrl, 0), r, 1));
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxr(MIR(cctrl, BAIWNIOS_TMP_IREG_POOP2), r, 1));
             break;
         case BRT_I64i:
         case BRT_U64i:
-            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrX(MIR(cctrl, 0), r, 1));
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_stlxrX(MIR(cctrl, BAIWNIOS_TMP_IREG_POOP2), r, 1));
             break;
     }
-    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_cbnz(0, retry - code_off));
+    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_cbnz(BAIWNIOS_TMP_IREG_POOP2, retry - code_off));
     return code_off;
 }
 //PORT-NOTE: TYPECAST_ASSIGN_BEGIN/END were a pair of C macros that opened and closed one
@@ -2093,15 +2093,15 @@ I64 __SexyPostOp(CBCmpCtrl *cctrl, CBRPN *rpn,
                 retry = code_off;
                 code_off = ATOMIC_LOAD(cctrl, &derefed, bin, code_off);
                 tmp.mode = MD_REG;
-                tmp.reg = 1;
-                code = i_imm_op(MIR(cctrl, 1), 1, rpn->integer);
+                tmp.reg = 2;
+                code = i_imm_op(MIR(cctrl, 2), 0, rpn->integer);
                 if (code != ARM_ERR_INV_OFF) {
                     code_off = AIWNIOS_ADD_CODE(bin, code_off, code);
                 } else {
-                    code_off = __ICMoveI64(cctrl, 2, rpn->integer, bin, code_off);
-                    code_off = AIWNIOS_ADD_CODE(bin, code_off, i_reg_op(MIR(cctrl, 1), 1, 2));
+                    code_off = __ICMoveI64(cctrl, BAIWNIOS_TMP_IREG_POOP, rpn->integer, bin, code_off);
+                    code_off = AIWNIOS_ADD_CODE(bin, code_off, i_reg_op(MIR(cctrl, 2), 0, BAIWNIOS_TMP_IREG_POOP));
                 }
-                code_off = ATOMIC_STORE(cctrl, &derefed, 0, retry, bin, code_off);
+                code_off = ATOMIC_STORE(cctrl, &derefed, 2, retry, bin, code_off);
                 return code_off;
             }
             code_off = PutICArgIntoReg(cctrl, &tmp, tmp.raw_type, 2, bin, code_off);
@@ -2126,10 +2126,11 @@ I64 FBitOp(CBCmpCtrl *cctrl, CBICArg *res, CBICArg *next, CBICArg *next2,
         code_off = PutICArgIntoReg(cctrl, next, BRT_F64, 2, bin, code_off);
         code_off = PutICArgIntoReg(cctrl, next2, BRT_I64i, 1, bin, code_off);
         code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovI64F64(MIR(cctrl, 2), next->reg));
-        code_off = AIWNIOS_ADD_CODE(bin, code_off, bit_op(MIR(cctrl, 2), 2, 1));
+        code_off = AIWNIOS_ADD_CODE(bin, code_off, bit_op(MIR(cctrl, 2), 2, next2->reg));
         if (res->mode == MD_REG) {
             code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, res->reg), 2));
         } else {
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, 2), 2));
             tmp.mode = MD_REG;
             tmp.reg = 2;
             tmp.raw_type = BRT_F64;
@@ -2152,6 +2153,7 @@ I64 FBitOp(CBCmpCtrl *cctrl, CBICArg *res, CBICArg *next, CBICArg *next2,
         if (res->mode == MD_REG) {
             code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, res->reg), 2));
         } else {
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmovF64I64(MFR(cctrl, 2), 2));
             tmp.mode = MD_REG;
             tmp.reg = 2;
             tmp.raw_type = BRT_F64;
@@ -2376,7 +2378,7 @@ I64 __CompileMod(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                         ARM_udivX(MIR(cctrl, into_reg), tmp.reg, next2->res.reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
-                                        ARM_umullX(MIR(cctrl, into_reg), into_reg, next2->res.reg));
+                                        ARM_mulRegX(MIR(cctrl, into_reg), into_reg, next2->res.reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_subRegX(MIR(cctrl, into_reg), tmp.reg, into_reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                         ARM_uxtwX(into_reg, into_reg)); // umull takes into account 32bit
@@ -2422,7 +2424,7 @@ tc_fin:
         if (next->raw_type == BRT_U64i) {
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                         ARM_udivX(MIR(cctrl, into_reg), tmp.reg, next2->res.reg));
-            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_umullX(into_reg, into_reg, next2->res.reg));
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mulRegX(into_reg, into_reg, next2->res.reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_subRegX(into_reg, tmp.reg, into_reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                         ARM_uxtwX(into_reg, into_reg)); // umull takes into account 32bit
@@ -2461,7 +2463,7 @@ tc_fin:
         if (rpn->raw_type == BRT_U64i) {
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                         ARM_udivX(MIR(cctrl, into_reg), next->res.reg, next2->res.reg));
-            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_umullX(into_reg, into_reg, next2->res.reg));
+            code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mulRegX(into_reg, into_reg, next2->res.reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_subRegX(into_reg, next->res.reg, into_reg));
             code_off = AIWNIOS_ADD_CODE(bin, code_off,
                                         ARM_uxtwX(into_reg, into_reg)); // umull takes into account 32bit

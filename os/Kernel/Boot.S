@@ -148,7 +148,8 @@ park:
 // Identity-map SoC MMIO 0x2_0000_0000..0x2_ffff_ffff as nGnRnE,
 // and DRAM 0x8_0000_0000..0xc_0000_0000 as Normal WB, 16 KiB pages.
 mmu_tables:
-  adr x0, l2_table
+  adrp x0, l2_table
+  add x0, x0, :lo12:l2_table
   mov x2, #255
   mov x3, #384
 8:
@@ -234,7 +235,8 @@ mmu_tables:
   ret
 
 mmu_enable:
-  adr x0, l2_table
+  adrp x0, l2_table
+  add x0, x0, :lo12:l2_table
   ldr x1, =0x44ff00   // attr0 Device-nGnRnE, attr1 Normal WB, attr2 Normal non-cacheable
   msr mair_el1, x1
   // 16K granule, 36-bit VA, 40-bit PA, inner-shareable WB walks.

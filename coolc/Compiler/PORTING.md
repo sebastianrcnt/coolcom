@@ -1,5 +1,20 @@
 # Porting the Aiwnios AArch64 backend from C to Cool
 
+The x86-64 sibling is in `X64Backend.cool` and `X64Backend.coolh`. Regenerate it
+with `python3 tools/port-x86.py` from `vendor/aiwnios/c/x86_64_backend.c` (the
+same pinned upstream revision). The generator uses the existing clang AST
+translator, with a packed C shim derived from `BackendA.coolh`, so both backends
+consume the same IR objects. Generated functions keep the upstream name with
+an `X64` prefix to coexist with their ARM siblings. Macro expansions, narrowing,
+numeric conversions, function-pointer thunks and whole-record copies are
+explicit in the output. The computed dispatch becomes a switch to the same
+labels, and its one variable-length local array becomes a freed heap buffer.
+
+`BTargetX86` selects AOT output; `BEmitX86` selects the frontend's register and
+frame conventions during code generation. `LexExpression2Bin` temporarily
+uses the ARM backend because its results execute in the ARM compiler process.
+The shared optimization passes still run before backend dispatch.
+
 The owned HolyC frontend (`coolc/Frontend/*.cool`) builds IR
 through `__HC_*` functions implemented in C, and the C code optimizes the IR
 and emits AArch64 machine code. To make the whole compiler Cool (and so
