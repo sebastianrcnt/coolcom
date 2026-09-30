@@ -20,6 +20,31 @@ def run(*args):
         raise RuntimeError(p.stdout.decode(errors="replace") + p.stderr.decode(errors="replace"))
     return p
 
+def install(disk):
+    # Exercise the production installer rather than flattening library fixtures.
+    run(ROOT / "tools/disk-files.sh", disk)
+    run("mdel", "-i", disk, "::Init.cool")
+    assert b"Warm.cool" in run("mdir", "-b", "-i", disk, "::Warm/Warm.cool").stdout
+    for old in ("::Warm.cool", "::coolc", "::Compiler"):
+        assert subprocess.run(["mdir", "-i", str(disk), old], capture_output=True).returncode
+
+def disk_path(source):
+    path = Path(source).relative_to(ROOT / "warmc")
+    if path.parts[:2] == ("standard", "src"):
+        return "C:/Warm/Standard/" + "/".join(path.parts[2:])
+    if path.parts[0] == "examples":
+        return "C:/Warm/Examples/" + "/".join(path.parts[1:])
+    raise ValueError(source)
+
+def warm_run(paths, entry):
+    # The shell editor accepts 512 bytes per line; installed module paths can
+    # exceed that. Assemble the input list in short shell statements.
+    script = kv.typed("U8 warm_inputs[4096]; warm_inputs[0] = 0;")
+    assert len(paths) < 4096
+    for start in range(0, len(paths), 300):
+        script += kv.typed('StrCat(warm_inputs, "' + paths[start:start + 300] + '");')
+    return script + kv.typed('WarmRun(warm_inputs, "' + entry + '");')
+
 def stdin_test(OUT):
     """WarmRun the greet example in the shell: it reads a line typed at the terminal."""
     std = ROOT / "warmc/standard/src"
@@ -27,19 +52,17 @@ def stdin_test(OUT):
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
-    files = [(ROOT / "build/warmcool/Kernel.cool", "Warm.cool")]
-    for name in ("Buffer", "String", "StringBuilder", "OS/Terminal") :
-        base = name.split("/")[-1]
-        files += [(std / (name + ".warmh"), base + ".warmh"), (std / (name + ".warm"), base + ".warm")]
-    files += [(std / "OS/Error.warm", "Error.warm")]
-    files += [(ROOT / "warmc/examples/greet/Greet.warmh", "Greet.warmh"), (ROOT / "warmc/examples/greet/Greet.warm", "Greet.warm")]
-    for src, name in files:
-        run("mcopy", "-o", "-i", disk, src, "::" + name)
-    modules = ",".join("C:/" + n for _, n in files[1:])
+    install(disk)
+    files = []
+    for name in ("Buffer", "String", "StringBuilder", "OS/Terminal"):
+        files += [std / (name + ".warmh"), std / (name + ".warm")]
+    files += [std / "OS/Error.warm",
+              ROOT / "warmc/examples/greet/Greet.warmh", ROOT / "warmc/examples/greet/Greet.warm"]
+    modules = ",".join(disk_path(path) for path in files)
     script = OUT / "Stdin.input"
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm.cool"') +
+    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
                       kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
-                      kv.typed('WarmRun("' + modules + '", "Example.Greet:main");') +
+                      warm_run(modules, "Example.Greet:main") +
                       "delay 3000\n" + kv.typed("Zed") + "wait Hello, Zed!\ndelay 200\nquit\n")
     log = OUT / "Stdin.log"
     with log.open("wb") as stream:
@@ -57,19 +80,18 @@ def portable_test(OUT, name):
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
-    files = [(ROOT / "build/warmcool/Kernel.cool", "Warm.cool")]
+    install(disk)
+    files = []
     for pair in os_modules(ROOT):
         if "/Raw." in pair or "/CoolOS/" in pair or "/Terminal." in pair:
             continue
-        files += [(Path(path), Path(path).name) for path in pair.split(",")]
-    files += [(ROOT / ("warmc/examples/kernel/" + name + ".warm"), name + ".warm")]
-    for src, target in files:
-        run("mcopy", "-o", "-i", disk, src, "::" + target)
-    modules = ",".join("C:/" + target for _, target in files[1:])
+        files += [Path(path) for path in pair.split(",")]
+    files += [ROOT / ("warmc/examples/kernel/" + name + ".warm")]
+    modules = ",".join(disk_path(path) for path in files)
     marker = "WARM " + name.upper() + " PASS"
     script = OUT / (name + "Run.input")
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm.cool"') +
-        kv.typed('WarmRun("' + modules + '", "' + name + ':main");') +
+    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
+        warm_run(modules, name + ":main") +
         "wait " + marker + "\ndelay 200\nquit\n")
     log = OUT / (name + "Run.log")
     with log.open("wb") as stream:
@@ -87,10 +109,10 @@ def fmt_test(OUT):
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
-    run("mcopy", "-o", "-i", disk, ROOT / "build/warmcool/Kernel.cool", "::Warm.cool")
+    install(disk)
     run("mcopy", "-o", "-i", disk, ROOT / "warmc/fmt-tests/basic.in.warm", "::Fmt.warm")
     script = OUT / "Fmt.input"
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm.cool"') +
+    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
                       kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
                       kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT CHANGED C:/Fmt.warm\n" +
                       kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT OK C:/Fmt.warm\ndelay 300\nquit\n")

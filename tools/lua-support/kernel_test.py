@@ -16,10 +16,10 @@ def run(*args):
 img = OUT / 'disk.img'
 with img.open('wb') as f: f.truncate(64*1024*1024)
 run('mformat','-i',img,'-F','::')
-for d in ['coolc','coolc/LibC']: run('mmd','-i',img,'::'+d)
+for d in ['Cool','Cool/LibC']: run('mmd','-i',img,'::'+d)
 for src,dest in [(ROOT/'os/Disk/Lua.cool','Lua.cool'),
                  (ROOT/'build/lua/LuaRuntime.cool','LuaRuntime.cool'),
-                 (ROOT/'coolc/LibC/LibC.cool','coolc/LibC/LibC.cool'),
+                 (ROOT/'coolc/LibC/LibC.cool','Cool/LibC/LibC.cool'),
                  (ROOT/'tools/lua-support/test.lua','x.lua')]:
     run('mcopy','-o','-i',img,src,'::'+dest)
 init = OUT/'Init.cool'

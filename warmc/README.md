@@ -27,7 +27,7 @@ the implementation boundaries.
 | `Runtime.cool` | the runtime that every generated program starts with |
 | `ModuleRuntime.cool` | the smaller runtime of a kernel module (`--kernel-module`) |
 | `Native.cool` | the host command line (built into `build/warmcool/Warm.BIN`) |
-| `Kernel.cool` | `WarmRun` and `WarmCompile` for the kernel shell (`package_kernel.py` makes `C:/Warm.cool`) |
+| `Kernel.cool` | `WarmRun` and `WarmCompile` for the kernel shell (`package_kernel.py` makes `C:/Warm/Warm.cool`) |
 | `builtin/` | Pervasive and Memory, original Warm source that is embedded into the compiler (`embed_builtins.py`) |
 | `standard/` `examples/` | the standard library and example programs; `standard/src/OS` contains portable OS APIs |
 | `test-programs/` | the end-to-end test suites |
@@ -73,7 +73,7 @@ The only target is Cool source; there is no C or executable target.
 ## Use in the OS
 
 `make disk-install` and `make disk-seed` (also `make run`) put the packaged compiler on
-the disk as `C:/Warm.cool`, and `C:/Init.cool` loads it. In the kernel shell:
+the disk as `C:/Warm/Warm.cool`, and `C:/Init.cool` loads it. In the kernel shell:
 
 ```c
 WarmRun("C:/Test.warm");
@@ -94,7 +94,7 @@ in the shell symbol table; the compilation arena is released after every operati
 
 `tools/warmfmt [--check] files` formats `.warm`/`.warmh` files in place (`--check` only reports and exits 1 when a
 file would change; 2 is an error). In the OS, `WarmFmt("C:/x.warm");` does the same to a file (`WarmFmt(path, TRUE)`
-only reports); it comes with `C:/Warm.cool`. `make fmt` and `make fmt-check` cover the tracked Warm files too, next to
+only reports); it comes with `C:/Warm/Warm.cool`. `make fmt` and `make fmt-check` cover the tracked Warm files too, next to
 the HolyC ones (`tools/hcfmt.sh`), and the pre-commit hook (`make hooks`) refuses staged Warm files that are not
 formatted. The suites in `test-programs/suites` are left as they are: their expected diagnostics carry line and column numbers.
 

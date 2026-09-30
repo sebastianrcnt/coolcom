@@ -25,8 +25,12 @@ On an Apple silicon Mac, install the Homebrew packages `aarch64-elf-gcc`, `aarch
 
 `make run` and `make run-qemu` create `build/disk.img` (64 MiB FAT32) the first time. It then adds only the files that are
 missing, so edits made inside the OS are kept. The disk holds the programs of `os/Disk`, the kernel sources
-in `C:/Kernel` and `C:/coolc`, the shell prelude `C:/Kernel.coolh`, and the compiler sources in `C:/Compiler`.
-It also installs the Warm compiler `C:/Warm.cool` and the example `C:/HelloWarm.warm`.
+in `C:/Kernel` and `C:/Cool/Runtime` (tokenizer in `C:/Cool/Fmt`), the shell prelude `C:/Kernel.coolh`, and the compiler sources in `C:/Cool/Compiler`.
+It also installs the shared C library in `C:/Cool/LibC`, the Warm compiler in
+`C:/Warm/Warm.cool`, standard library sources in `C:/Warm/Standard` (including `builtin/`),
+and examples in `C:/Warm/Examples`, preserving their subdirectories. Repository directories
+`coolc/` and `warmc/` keep their names. The disk installer maps the kernel's library includes
+to `C:/Cool/...`; host compilation uses the original relative includes.
 To read the disk from the Mac, shut the VM down and run `hdiutil attach build/disk.img`.
 
 Source files: Cool is `.cool` (headers `.coolh`), Warm is `.warm` (interfaces `.warmh`). The old extensions
@@ -192,7 +196,7 @@ C:/> Print("%d\n", Tri(4));
 ```
 
 A program compiled with `Cmp` declares the kernel by including `C:/Kernel.coolh`, the shell prelude. The
-OS can also rebuild itself: `Cmp("C:/Compiler/Native.cool")` reproduces the compiler seed byte for byte, and
+OS can also rebuild itself: `Cmp("C:/Cool/Compiler/Native.cool")` reproduces the compiler seed byte for byte, and
 `MakeKernel;` followed by `Reboot("C:/Kernel.Image");` builds and boots a new kernel
 ([kernel-rebuild.md](kernel-rebuild.md)).
 
@@ -277,14 +281,23 @@ compiler, written in Cool (`warmc`), and it runs in two places:
   shell: `#include "C:/Adapter.cool"`, then the generated file. `make warm-kernel-test` does exactly this with
   `warmc/examples/kernel`; `make warm-test` runs the compiler's own tests.
 - **Inside the OS:** `make disk-install` and `make disk-seed`
-  automatically build and package the compiler as `C:/Warm.cool`. `C:/Init.cool` loads it for each shell,
+  automatically build and package the compiler as `C:/Warm/Warm.cool`. `C:/Init.cool` loads it for each shell,
   so after boot you can run `WarmRun("C:/HelloWarm.warm");` to print `Hello from Warm!`, or
   `WarmRun("C:/X.warm");` for your own module `Test` with a `main` function. For another module name,
   pass the entry point, e.g. `WarmRun("C:/X.warm", "X:main");`
   ([warmc/README.md](../warmc/README.md)). No manual build, copy, or `#include` is needed.
-  On an existing disk, run `make disk-install` once to update `Init.cool`; `disk-seed` (also used by
-  `make run`) preserves existing files, including `Init.cool`, Warm, and the example. A disk from before
-  the rename has `Init.HC` and `Warm.HC`: `make run` adds `Init.cool` and `Warm.cool`, and `Init.cool` wins.
+  Standard library inputs are explicit comma-separated paths, just as on the host. For example,
+  the installed greeting example uses the OS terminal library:
+
+  ```c
+  WarmRun("C:/Warm/Standard/Buffer.warmh,C:/Warm/Standard/Buffer.warm,C:/Warm/Standard/String.warmh,C:/Warm/Standard/String.warm,C:/Warm/Standard/StringBuilder.warmh,C:/Warm/Standard/StringBuilder.warm,C:/Warm/Standard/OS/Error.warm,C:/Warm/Standard/OS/Terminal.warmh,C:/Warm/Standard/OS/Terminal.warm,C:/Warm/Examples/greet/Greet.warmh,C:/Warm/Examples/greet/Greet.warm", "Example.Greet:main");
+  ```
+
+  Builtins are already embedded in the compiler; their installed sources are available for browsing.
+  On an existing disk, run `make disk-install` once to update `Init.cool` and kernel includes and
+  remove the old `C:/coolc`, `C:/Compiler`, `C:/Warm.cool` and `C:/Warm.HC` paths.
+  `disk-seed` (also used by `make run`) preserves existing files and adds missing files;
+  older installations retain their old files until that explicit migration.
 - **In the kernel:** the network stack's packet parser is Warm (`os/Kernel/NetParse.warm`), so a
   malformed packet from the network cannot make the kernel read or write outside the frame. `make` compiles
   it with `build/warmc --kernel-module=NetParse` into a Cool file the kernel includes
