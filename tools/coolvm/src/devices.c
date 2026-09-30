@@ -14,6 +14,7 @@ bool input_irq_level(void) { return input_head != input_tail; }
 
 void input_push(uint32_t type, uint32_t code, int32_t value)
 {
+    bool overflow = false;
     pthread_mutex_lock(&g.lock);
     unsigned next = (input_tail + 1) % INPUT_CAP;
     if (next != input_head) {
@@ -23,10 +24,11 @@ void input_push(uint32_t type, uint32_t code, int32_t value)
         input_tail = next;
         aic_update_locked();
     } else {
-        static unsigned dropped;
-        if (!dropped++) LOGE("input FIFO full: dropping records (the guest is not draining it)\n");
+        LOGE("input FIFO overflow: guest is not draining records\n");
+        overflow = true;
     }
     pthread_mutex_unlock(&g.lock);
+    if (overflow) vm_stop(2, "input FIFO overflow");
 }
 
 /* Records after a "delay MS" line are pushed by a feeder thread, MS
@@ -111,13 +113,17 @@ bool input_load_script(const char *path)
 {
     FILE *f = fopen(path, "r");
     if (!f) { perror(path); return false; }
-    char line[256];
+    char line[WAIT_MAX + 7];
     int n = 0, lineno = 0;
     unsigned delay = 0;
     bool waited = false;
     while (fgets(line, sizeof line, f)) {
         unsigned type, code, ms; int value;
         lineno++;
+        if (!strchr(line, '\n') && !feof(f)) {
+            LOGE("input script line %d exceeds %zu bytes\n", lineno, sizeof line - 2);
+            fclose(f); return false;
+        }
         if (line[0] == '#' || line[0] == '\n') continue;
         if (sscanf(line, "delay %u", &ms) == 1) {
             delay += ms;

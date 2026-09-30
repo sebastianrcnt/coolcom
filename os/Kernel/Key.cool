@@ -28,6 +28,7 @@
 #define KEY_PGDN      0x110008
 #define KEY_INS       0x110009
 #define KEY_DEL       0x11000A
+#define KEY_INPUT_LOST 0x11000C  // queue overflow; a line using it must be discarded
 #define KEY_RESIZE    0x11000B  // size changed; no user key consumed
 #define KEY_F1        0x110011  // KEY_F1 + n - 1 is Fn, up to F12
 
@@ -36,6 +37,7 @@
 
 I64 key_buf[KEY_BUF];
 I64 key_head, key_tail, key_lock;
+Bool key_overflow;
 
 U0 KeyPush(I64 ev)
 {//Queue an event (from the input IRQ or the UART decoder).
@@ -43,7 +45,8 @@ U0 KeyPush(I64 ev)
     if (next != key_head) {
         key_buf[key_tail] = ev;
         key_tail = next;
-    }
+    } else
+        key_overflow = TRUE;
     SpinUnlockIrq(&key_lock, daif);
     TaskEventWake;  // GetKey
 }
@@ -212,7 +215,7 @@ I64 KeyPending()
     if (KeyResizePending) return 1;
     if (VtCurrent && !VtCurrent->direct) return (VtCurrent->tail + 256 - VtCurrent->head) % 256;
     KeyUartPoll;
-    return (key_tail + KEY_BUF - key_head) % KEY_BUF;
+    return key_overflow + (key_tail + KEY_BUF - key_head) % KEY_BUF;
 }
 
 I64 KeyPop()
@@ -228,7 +231,10 @@ I64 KeyPop()
     if (VtCurrent && !VtCurrent->direct) return VtKeyPop;
     KeyUartPoll;
     daif = SpinLockIrq(&key_lock);
-    if (key_head != key_tail) {
+    if (key_overflow) {
+        key_overflow = FALSE;
+        ev = KEY_INPUT_LOST;
+    } else if (key_head != key_tail) {
         ev = key_buf[key_head];
         key_head = (key_head + 1) % KEY_BUF;
     }
@@ -316,6 +322,8 @@ I64 GetKey(Bool echo = FALSE)
     I64 ev, c;
     while (!(ev = KeyPop))
         KeyWait;
+    if (ev == KEY_INPUT_LOST)
+        Print("ERROR: key input queue overflow; input lost\n");
     c = KeyChar(ev);
     if (echo && (c >= 32 || c == KEY_ENTER || c == KEY_BACKSPACE || c == KEY_TAB))
         ConsPutCp(c);
@@ -467,6 +475,7 @@ U8 *GetLine(U8 *buf, I64 size)
     //cursor, UTF-8), and Up/Down through the history of earlier lines.
     I64 n = 0, pos = 0, hi = 0, ev, c, e;
     U8 ubuf[4];
+    Bool rejected = FALSE;
     U0 (*hook)(U8 *b, I64 size, I64 *_n, I64 *_pos);
     if (size > HIST_LEN)
         size = HIST_LEN;
@@ -476,7 +485,11 @@ U8 *GetLine(U8 *buf, I64 size)
         c = ev & KEY_CODE;
         if (c == KEY_ENTER)
             break;
-        if (c == KEY_LEFT) {
+        if (c == KEY_INPUT_LOST)
+            rejected = TRUE;
+        if (rejected) {
+            // Discard through Enter; never execute a partial line.
+        } else if (c == KEY_LEFT) {
             if (pos > 0) {
                 e = LinePrev(buf, pos);
                 LineBack(LineWidth(buf, e, pos));
@@ -519,11 +532,18 @@ U8 *GetLine(U8 *buf, I64 size)
             hook = line_complete_hook;
             if (hook)
                 (*hook)(buf, size, &n, &pos);
-        } else if (c >= 32 && c < KEY_SPECIAL && !(ev & (KF_CTRL | KF_ALT)))
-            LineInsert(buf, size, &n, &pos, ubuf, Utf8Enc(ubuf, c));
+        } else if (c >= 32 && c < KEY_SPECIAL && !(ev & (KF_CTRL | KF_ALT))) {
+            e = Utf8Enc(ubuf, c);
+            if (n + e > size - 1) {
+                Print("\nERROR: line exceeds %d bytes; input discarded\n", size - 1);
+                rejected = TRUE;
+            } else
+                LineInsert(buf, size, &n, &pos, ubuf, e);
+        }
     }
     LineOut(buf, pos, n);
     ConsPut('\n');
+    if (rejected) n = 0;
     buf[n] = 0;
     HistAdd(buf);
     return buf;

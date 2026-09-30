@@ -123,7 +123,14 @@ early still counts); later delays count from that moment. `quit [STATUS]` stops 
 default; `--screenshot` is still written). Prefer `wait` to delays: host-time delays race a guest slowed
 by host load (a Ctrl+Alt+C meant for a running statement can arrive while the kernel is still booting),
 and a test that ends with `wait` and `quit` does not idle until `--timeout`. `COOLVM_FRAMES=DIR` saves the framebuffer as `DIR/NNNNN.raw` (x8r8g8b8) at every damage report, one file per frame the guest drew. `COOLVM_WAIT_DEBUG=1` logs each
-`wait` the feeder reaches. The texts are compared with the raw UART bytes, escape sequences included. Example:
+`wait` the feeder reaches. The texts are compared with the raw UART bytes, escape sequences included. Input scripts have a 255-byte wait text limit,
+260 bytes per physical line, and 16384 delayed records (including waits and quits).
+Exceeding a script limit or overflowing the VM input FIFO prints an error and exits with status 2.
+The guest key queue holds 255 decoded events; it reports overflow, and GetLine discards
+an affected line through Enter. GetLine also rejects a line exceeding its buffer (511 bytes
+in the shell). Scripted shell commands should stay below the key queue capacity and wait
+for an execution acknowledgement between commands; fixed event pacing alone does not
+protect against a busy guest. Example:
 
 ```
 1 30 1    # KEY_A down
