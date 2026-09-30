@@ -5,7 +5,7 @@
 // the kernel sources on the disk (C:/Kernel: os/Kernel; C:/coolc: the shared library files) by
 // the shape of a definition: a function is a line with a return type and Name(, a class is
 // "class Name", a global is a declaration at the start of a line, a #define is #define Name.
-// A file too big for Vim (over 128 KiB, e.g. KernelA.coolh) opens in Less at the line.
+// Vim has no file size limit, so a big file (KernelA.coolh) opens the same way.
 //   Man("StrLen");   Man("CTask");   Man("VimOpen");   Man("jiffies");
 #define MAN_SRC   "C:/Kernel/*"
 #define MAN_SRC2  "C:/coolc/*"
@@ -146,15 +146,7 @@ man_next:
 
 U0 ManOpen(U8 *file, I64 line)
 {
-    CDirEntry de;
-    if (FileFind(file, &de) && de.size >= VIM_CAP) {
-        Free(de.full_name);
-        Print("%s is too big for Vim; opening it in Less\n", file);
-        Less(file, line);
-    } else {
-        if (de.full_name) Free(de.full_name);
-        Vim(file, line);
-    }
+    Vim(file, line);
 }
 
 U0 Man(U8 *name)

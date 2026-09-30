@@ -71,6 +71,8 @@ def check_init_log(log):
         raise AssertionError('C:/Init.cool diagnostics:\n' + '\n'.join(diagnostics))
 
 
+BIG = ''.join(f'line {i:05d}\n' for i in range(30000))  # 330 KB, over the old 128 KiB limit
+
 # name, starting text, actual input keys, expected text, expected byte cursor.
 # Every session ends in :wq unless its test explicitly exercises quit behavior.
 CASES = [
@@ -167,8 +169,12 @@ CASES = [
     ('hangul-yank', '가나다\n', 'vly$p', '가나다가나\n', 12),
     ('visual-line-change', 'a\nb\nc\n', 'VjcX\x1b', 'X\nc\n', 0),
     ('blank-insert-escape', 'a\nb\n', 'ji\x1b', 'a\nb\n', 2),
-    ('capacity', 'x' * 131071, 'iY\x1b', 'x' * 131071, 0),
-    ('edit-too-large', 'abc\n', ':e C:/Huge.txt\n', 'abc\n', 0),
+    ('capacity-grows', 'x' * 131071, 'iY\x1b', 'Y' + 'x' * 131071, 0),
+    ('edit-large-file', 'abc\n', ':e C:/Huge.txt\nx', 'x' * 131071, 0),
+    ('noop-keeps-redo', 'abcd\n', 'xxuura\x12\x12', 'cd\n', 0),
+    ('replace-same-no-history', 'abc\n', 'xrbu', 'abc\n', 0),
+    ('big-file-edit-undo-redo', BIG, 'GoEND\x1bggxuu\x12', BIG + 'END\n', 0),
+    ('big-file-search-delete', BIG, '/line 29999\ndd', BIG.replace('line 29999\n', ''), 29998 * 11),
 ]
 
 
@@ -297,6 +303,8 @@ def main():
         filename = f'T{i:03}.txt'
         if name == 'edit-file':
             filename = 'Other.txt'
+        if name == 'edit-large-file':
+            filename = 'Huge.txt'
         got = run(['mcopy', '-i', str(disk), '::' + filename, '-']).stdout
         state = results.get(i)
         if got != expected.encode() or state is None or state[0] != pos:

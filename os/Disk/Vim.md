@@ -25,8 +25,11 @@ numbers, strings and comments. Hangul/CJK occupy two cells, tabs use four-cell
 stops. Stored cursor offsets are UTF-8 byte boundaries. File control characters
 are displayed as placeholders rather than being sent as ANSI commands.
 
-Storage is deliberately bounded: files must be smaller than 128 KiB, there are
-32 undoable changes, counts are capped at 10000, and the dot recorder holds
+The text is a gap buffer that grows with the file, so there is no size limit
+but memory (KernelA.coolh, 231 KB, opens and saves). Undo records each edit
+(position, removed text, inserted text) instead of copying the text, grouped
+into the same transactions as before. Storage is still bounded in these ways:
+there are 32 undoable changes, counts are capped at 10000, and the dot recorder holds
 4096 key events. Longer edits still work and remain undoable but do not replace
 the previous dot command. This is a single-buffer editor, not full Vim: there
 are no regex searches, named registers, plugins or split windows. Insert counts
@@ -40,7 +43,7 @@ corruption cannot be made safe by an editor cleanup callback.
 
 `make vim-test` boots the real VM, injects keyboard input scripts and UART UTF-8,
 and compares each FAT32 result and byte cursor with independent host expectations.
-It also checks scroll state, capacity/large-file handling, forced quit, and a
+It also checks scroll state, files over 128 KiB, forced quit, and a
 real null-pointer fault while the editor is open followed by successful reentry.
 Generated disks, scripts and diagnostic logs stay in `build/vim-test`.
 
