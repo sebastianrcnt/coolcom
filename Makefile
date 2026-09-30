@@ -292,10 +292,11 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/cmdline-test.py $<
 
 # Console fonts (os/Kernel/Glyph.cool, docs/fonts.md): 2x Unifont is 1x doubled, on the CPU
-# renderer and (when the Venus stack is built) on the Vulkan terminal.
+# renderer and (when the Venus stack is installed) on the Vulkan terminal, whose shaders and
+# monitor are rebuilt first so a stale terminal.frag.spv is never tested.
 .PHONY: font-test
-font-test: build/kernel.Image coolvm $(if $(RUN_VENUS),build/coolvm-venus) build/warmcool/Kernel.cool
-	python3 tools/font-test.py $<
+font-test: build/kernel.Image coolvm $(if $(RUN_VENUS),build/coolvm-venus venus-terminal) build/warmcool/Kernel.cool
+	python3 tools/font-test.py $< $(if $(RUN_VENUS),--venus)
 
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output

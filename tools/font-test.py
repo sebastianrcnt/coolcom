@@ -25,8 +25,9 @@ def module(name, path):
 
 vim = module('vim_test', ROOT / 'tools/vim-test.py')
 verify = module('kernel_verify', ROOT / 'tools/kernel-verify.py')
-VENUS = (ROOT / 'build/coolvm-venus').exists() and all(
-    (ROOT / 'build/venus' / f).exists() for f in ('Vulkan.cool', 'terminal.vert.spv', 'terminal.frag.spv'))
+# The Makefile passes --venus when the Venus stack is installed, after rebuilding the
+# monitor and the terminal's shaders (files left over from an older build would be stale).
+VENUS = '--venus' in sys.argv[2:]
 
 
 SARASA = pathlib.Path.home() / 'Library/Fonts/SarasaMonoK-Regular.ttf'
@@ -124,7 +125,7 @@ hidpi(False)
 if VENUS:
     hidpi(True)
 else:
-    print('font-test: Venus stack not built, Vulkan terminal skipped (make venus-vendor venus-terminal)')
+    print('font-test: Venus stack not installed, Vulkan terminal skipped (make venus-vendor)')
 if SARASA.exists():
     one = ttf(False, 1)
     two = ttf(False, 2)
