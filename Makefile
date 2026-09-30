@@ -294,7 +294,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Console fonts (os/Kernel/Glyph.cool, docs/fonts.md): 2x Unifont is 1x doubled, on the CPU
 # renderer and (when the Venus stack is built) on the Vulkan terminal.
 .PHONY: font-test
-font-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
+font-test: build/kernel.Image coolvm $(if $(RUN_VENUS),build/coolvm-venus) build/warmcool/Kernel.cool
 	python3 tools/font-test.py $<
 
 # Every check boots its own VMs with its own disk images and output directory, so
