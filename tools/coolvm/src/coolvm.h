@@ -126,6 +126,7 @@ struct vm {
     uint64_t fb_size;
     uint32_t fb_width, fb_height;
     bool gpu;                   /* modern virtio-gpu 2D */
+    bool logos;                 /* offer Logos on it (logos.m, docs/logos.md) */
     bool fb_scroll;              /* advertise optional scanout-y register */
     _Atomic uint32_t fb_scanout_y;
     _Atomic bool fb_damage_used;  /* the guest reports damage (FINISHER_FB_DAMAGE) */

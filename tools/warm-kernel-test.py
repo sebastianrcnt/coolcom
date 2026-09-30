@@ -74,7 +74,7 @@ def stdin_test(OUT):
     log = OUT / "Stdin.log"
     with log.open("wb") as stream:
         proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
         proc.wait()
@@ -100,13 +100,16 @@ def portable_test(OUT, name):
     modules = ",".join(disk_path(path) for path in files)
     marker = "WARM " + name.upper() + " PASS"
     script = OUT / (name + "Run.input")
+    # Wait for the compiler to load before typing the long lines: keys typed while the
+    # shell is busy queue in a 256-key ring, and under load (make -j test) some were lost.
     script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
+        kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
         warm_run(modules, name + ":main") +
         "wait " + marker + "\ndelay 200\nquit\n")
     log = OUT / (name + "Run.log")
     with log.open("wb") as stream:
         proc = subprocess.run(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
     output = log.read_text(errors="replace")
@@ -131,7 +134,7 @@ def fmt_test(OUT):
     log = OUT / "Fmt.log"
     with log.open("wb") as stream:
         proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
         proc.wait()
@@ -209,7 +212,7 @@ def main():
         log = OUT / (name + ".log")
         with log.open("wb") as stream:
             proc = subprocess.Popen(["gtimeout", "-k", "2", "22", str(ROOT / "build/coolvm"),
-                "--headless", "--cpus", "2", "--mem", "1024", "--timeout", "18",
+                "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "18",
                 "--disk", str(disk), "--input-script", str(script),
                 "--screenshot", str(OUT / (name + ".png")), str(ROOT / "build/kernel.Image")],
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)

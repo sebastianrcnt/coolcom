@@ -26,7 +26,7 @@ def main():
             script += vim.typed('Cls;\n')  # only defined by Init.cool
         script += vim.typed('Print("FRESH%d\\n",RestartValue);\n') + vim.finish('FRESH33')
         (d / 'input.txt').write_text(script)
-        args = ['build/coolvm', '--headless', '--cpus', str(cpus), '--mem', '1024',
+        args = ['build/coolvm', '--headless', '--no-logos', '--cpus', str(cpus), '--mem', '1024',
                 '--timeout', '35', '--width', '640', '--height', '480',
                 '--input-script', str(d / 'input.txt')]
         if startup:

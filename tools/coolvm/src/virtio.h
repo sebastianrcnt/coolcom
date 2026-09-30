@@ -32,7 +32,7 @@ static inline bool virtio_used(struct vq *q, uint16_t head, uint32_t len)
     vio_put16(used+2, ++q->used_idx);
     return true;
 }
-struct virtio_mmio { uint32_t status, devsel, drvsel, drvfeat[2], qsel, isr, generation; struct vq q[2]; };
+struct virtio_mmio { uint32_t status, devsel, drvsel, drvfeat[2], qsel, isr, generation, devfeat0; struct vq q[2]; };
 /* Configuration and notify are device-specific; common modern MMIO registers. */
 static inline bool virtio_regs(struct virtio_mmio *v, unsigned devid, uint64_t off, bool wr, uint32_t *val)
 {
@@ -46,7 +46,7 @@ static inline bool virtio_regs(struct virtio_mmio *v, unsigned devid, uint64_t o
         case 0x38:if(!q || !x || x>256 || (x&(x-1)) || q->ready)return false;q->num=x;break;
         case 0x44:if(!q)return false;q->ready=x&1;break;
         case 0x64:v->isr&=~x;break;
-        case 0x70:v->status=x;if((x&8) && (v->drvfeat[0] || v->drvfeat[1]!=1))v->status&=~8u;break;
+        case 0x70:v->status=x;if((x&8) && ((v->drvfeat[0]&~v->devfeat0) || v->drvfeat[1]!=1))v->status&=~8u;break;
         case 0x80:case 0x84:case 0x90:case 0x94:case 0xa0:case 0xa4: {
             if(!q || q->ready)return false;
             uint64_t *p=off<0x90?&q->desc:off<0xa0?&q->avail:&q->used;
@@ -58,7 +58,7 @@ static inline bool virtio_regs(struct virtio_mmio *v, unsigned devid, uint64_t o
     } else {
         switch(off) {
         case 0:r=0x74726976;break;case 4:r=2;break;case 8:r=devid;break;case 12:r=0x554d5643;break;
-        case 0x10:r=v->devsel==1?1:0;break;
+        case 0x10:r=v->devsel==1?1:v->devsel==0?v->devfeat0:0;break; /* word 0: device-specific bits */
         case 0x20:r=v->drvsel<2?v->drvfeat[v->drvsel]:0;break;
         case 0x34:r=q?256:0;break;case 0x38:r=q?q->num:0;break;case 0x44:r=q?q->ready:0;break;
         case 0x60:r=v->isr;break;case 0x70:r=v->status;break;case 0xfc:r=v->generation;break;

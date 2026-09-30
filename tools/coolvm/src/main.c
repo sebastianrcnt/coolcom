@@ -45,6 +45,7 @@ static void usage(void)
             "  --width N       framebuffer width (default 1024)\n"
             "  --height N      framebuffer height (default 768)\n"
             "  --gpu/--no-gpu enable/disable virtio-gpu 2D\n"
+            "  --no-logos      do not offer Logos, the GPU cell renderer (the guest draws pixels)\n"
             "  --no-fb-scroll  omit FDT scanout-y capability (software fallback)\n"
             "  --screenshot F  save framebuffer to PNG on exit\n"
             "  --input-script F  preload input events (type code value, one per line)\n"
@@ -130,6 +131,7 @@ int main(int argc, char **argv)
     const char *disk_paths[MAX_DISKS];
     int ndisks = 0;
     g.gpu = true;
+    g.logos = true;
     g.fb_scroll = true;
     g.fb_width = 1024; g.fb_height = 768;
     bool verbose = false;
@@ -144,7 +146,7 @@ int main(int argc, char **argv)
         {"el2", no_argument, 0, 'E'},          {"load-offset", required_argument, 0, 'L'},
         {"headless", no_argument, 0, 'H'}, {"screenshot", required_argument, 0, 'S'},
         {"gpu", no_argument, 0, 1001}, {"no-gpu", no_argument, 0, 1002},
-        {"no-fb-scroll", no_argument, 0, 1000},
+        {"no-fb-scroll", no_argument, 0, 1000}, {"no-logos", no_argument, 0, 1003},
         {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
         {"net", no_argument, 0, 'N'}, {"net-forward", required_argument, 0, 'F'},
@@ -172,6 +174,7 @@ int main(int argc, char **argv)
         case 1001: g.gpu = true; break;
         case 1002: g.gpu = false; break;
         case 1000: g.fb_scroll = false; break;
+        case 1003: g.logos = false; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'I': input_script = optarg; break;

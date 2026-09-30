@@ -342,3 +342,11 @@ Top and Tmux handle this event, including applications inside Tmux panes.
 `make gpu-resize-test` injects three headless modes and verifies notifications,
 PNG dimensions/content and those programs' status bars at their new rows.
 `make run` uses GPU by default; `--no-gpu` keeps fixed simple-framebuffer mode.
+
+### Logos
+
+The virtio-gpu also offers Logos (`src/logos.m`, [docs/logos.md](../../docs/logos.md)), which
+draws the guest console's cell grid with Metal. It uses feature bit 23, FDT `coolcom,logos`
+and commands `0x4000`-`0x4006` on the control queue. `--no-logos` stops offering it, and the
+guest then draws pixels as before. `LOGOS_DEBUG=1` in the environment logs failed commands,
+and `LOGOS_DEBUG=2` logs every command.

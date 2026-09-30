@@ -54,7 +54,7 @@ def main():
     script += line('Print("\\nTOPDONE%d\\n", 1);') + vim.finish('TOPDONE1')
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',
+        subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2', '--mem', '1024',
                         '--timeout', '45', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
                         '--disk', str(disk), sys.argv[1]], stdout=out, stderr=subprocess.STDOUT)
     raw = (d / 'vm.log').read_text(errors='replace')

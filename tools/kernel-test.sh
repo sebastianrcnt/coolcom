@@ -15,7 +15,7 @@ dir=$(mktemp -d build/kernel-test.XXXXXX)
 trap 'rm -rf "$dir"' EXIT
 python3 tools/kernel-verify.py prepare "$dir"
 log=$dir/log
-if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --width 640 --height 480 \
+if gtimeout -k 2 45 build/coolvm --headless --no-logos --cpus 2 --mem 1024 --timeout 40 --width 640 --height 480 \
     --bootargs 'coolcom.test=1' --input-script "$dir/input.txt" --disk "$dir/disk.img" --disk "$dir/fat.img" --disk "$dir/format.img" --net \
     --screenshot "$dir/screen.png" "$@" "$image" >"$log" 2>&1 \
     && grep -q 'SELFTEST PASS' "$log" && grep -q '2 cores online' "$log" \
@@ -50,7 +50,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     # coolvm stops the VM once the shell has echoed the Korean line and printed it (an input script of
     # waits and quit: tools/coolvm/README.md), then the screenshot is saved.
     printf 'wait 한글 테스트\nwait 한글 테스트\ndelay 300\nquit\n' >"$dir/shell.wait"
-    gtimeout -k 2 30 build/coolvm --headless --cpus 2 --mem 1024 --timeout 20 --width 640 --height 480 \
+    gtimeout -k 2 30 build/coolvm --headless --no-logos --cpus 2 --mem 1024 --timeout 20 --width 640 --height 480 \
         --disk "$dir/fat.img" --screenshot "$dir/shell.png" --input-script "$dir/shell.wait" "$@" "$image" \
         <"$dir/shell.in" >"$dir/shell.log" 2>&1 || true
     # KTestHeap deliberately reports four corruptions; startup must add none.
