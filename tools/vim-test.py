@@ -76,9 +76,12 @@ BIG = ''.join(f'line {i:05d}\n' for i in range(30000))  # 330 KB, over the old 1
 
 # name, starting text, actual input keys, expected text, expected byte cursor.
 # Every session ends in :wq unless its test explicitly exercises quit behavior.
+ASM = '.text\n.global entry\nentry: mov x0, #42 // comment\n  add w30, sp, xzr ; tail\n/* multi\n still */ sub x30, w0, wzr\n# a comment\n#define VALUE 7\n1: b.eq entry\n  .byte 0xff\n  mov X30, W0\n  mov x31, x00\n'
+
 CASES = [
-    ('kernel-a-save', KERNEL_A, 'iCHECK\x1bu\x12:w\nu', KERNEL_A, 0),
+    ('kernel-a-save', KERNEL_A, 'iCHECK\x1bu\x12:w\n', b'CHECK' + KERNEL_A, 4),
     ('gd-function', 'Target();\nU0 Target() {}\n', ':set ft=cool\ngd', 'Target();\nU0 Target() {}\n', 13),
+    ('gd-inherited-class', 'Child value;\nclass Child: Parent {};\n', ':set ft=cool\ngd', 'Child value;\nclass Child: Parent {};\n', 19),
     ('gd-class', 'Thing value;\nclass Thing {};\n', ':set ft=cool\ngd', 'Thing value;\nclass Thing {};\n', 19),
     ('gd-variable', 'value++;\n  I64 value = 1;\n', ':set ft=cool\ngd', 'value++;\n  I64 value = 1;\n', 15),
     ('gd-define', 'LIMIT\n#define LIMIT 42\n', ':set ft=cool\ngd', 'LIMIT\n#define LIMIT 42\n', 14),
@@ -95,6 +98,9 @@ CASES = [
     ('rnu-only', 'a\nb\nc\nd\n', ':set nonu rnu\njj', 'a\nb\nc\nd\n', 4),
     ('rnu-off', 'a\nb\nc\nd\n', ':set rnu\n:set nornu\njj', 'a\nb\nc\nd\n', 4),
     ('rnu-no-number', 'a\nb\nc\nd\n', ':set nonumber norelativenumber\njj', 'a\nb\nc\nd\n', 4),
+    ('asm-extension', ASM, '', ASM, 0),
+    ('asm-filetype', ASM, ':set ft=asm\n', ASM, 0),
+    ('asm-block-scroll', '/* block\n' + 'continued\n' * 40 + 'end */\n', 'G', '/* block\n' + 'continued\n' * 40 + 'end */\n', 409),
     ('insert', 'abc\n', 'iX\x1b', 'Xabc\n', 0),
     ('append', 'abc\n', 'aX\x1b', 'aXbc\n', 1),
     ('first-nonblank-insert', '  abc\n', 'IX\x1b', '  Xabc\n', 2),
@@ -260,7 +266,8 @@ def main():
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
         if i:  # the previous editor has quit; the next one gets these keys
             script += wait(f'VIMRESULT {i - 1} ')
-        path = d / f'T{i:03}.txt'
+        suffix = 'S' if name in ('asm-extension', 'asm-block-scroll') else 'txt'
+        path = d / f'T{i:03}.{suffix}'
         path.write_bytes((source if isinstance(source, bytes) else source.encode()))
         copy(path, path.name)
         target = 'coolc/Frontend/KernelA.coolh' if name == 'kernel-a-save' else path.name
@@ -325,7 +332,8 @@ def main():
                re.findall(r'VIMRESULT (\d+) (\d+) (\d+) (\d+)', log)}
     failures = []
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
-        filename = f'T{i:03}.txt'
+        suffix = 'S' if name in ('asm-extension', 'asm-block-scroll') else 'txt'
+        filename = f'T{i:03}.{suffix}'
         if name == 'kernel-a-save':
             filename = 'coolc/Frontend/KernelA.coolh'
         if name == 'edit-file':
@@ -350,6 +358,21 @@ def main():
             cursor = '\x1b[3;1H' if numbers is None else '\x1b[3;7H'
             if cursor not in frame:
                 failures.append(f'{name}: wrong rendered cursor')
+        if name in ('asm-extension', 'asm-filetype', 'asm-block-scroll'):
+            end = log.index(f'VIMRESULT {i} ')
+            frame = log[log.rfind('\x1b[1;1H', 0, end):end]
+            markers = ['\x1b[0;90mcontinued', '\x1b[0;90mend */'] if name == 'asm-block-scroll' else [
+                '\x1b[0;35m.text', '\x1b[0;35m.global', '\x1b[0;33mentry:',
+                '\x1b[0;35mmov', '\x1b[0;35madd', '\x1b[0;35msub', '\x1b[0;35mb.eq',
+                '\x1b[0;36mx0', '\x1b[0;36mw30', '\x1b[0;36msp', '\x1b[0;36mxzr',
+                '\x1b[0;36mx30', '\x1b[0;36mw0', '\x1b[0;36mwzr', '\x1b[0;36mX30', '\x1b[0;36mW0',
+                '\x1b[0;33m#42', '\x1b[0;33m0xff', '\x1b[0;33m1:',
+                '\x1b[0;90m// comment', '\x1b[0;90m; tail', '\x1b[0;90m/* multi',
+                '\x1b[0;90m still */', '\x1b[0;90m# a comment', '\x1b[0;35m#define VALUE 7',
+                '\x1b[0;37m x31, x00']
+            for marker in markers:
+                if marker not in frame:
+                    failures.append(f'{name}: missing rendered syntax {marker!r}')
         if state and name == 'vertical-scroll' and state[1] == 0:
             failures.append('vertical viewport did not scroll')
         if state and name == 'horizontal-scroll' and state[2] == 0:

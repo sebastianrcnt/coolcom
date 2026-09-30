@@ -708,7 +708,7 @@ I64 VimDefinition(U8 *name)
                     (j + nl == n || !HCTIsId(vim_line[j + nl]))) {
                 k = j + nl; while (k < n && (vim_line[k] == ' ' || vim_line[k] == '\t')) k++;
                 if (k == n || vim_line[k] == '(' || vim_line[k] == '=' || vim_line[k] == ';' ||
-                        vim_line[k] == '[' || vim_line[k] == ',' || vim_line[k] == '{') return p + j;
+                        vim_line[k] == '[' || vim_line[k] == ',' || vim_line[k] == '{' || vim_line[k] == ':') return p + j;
             }
         }
 vim_def_next:
@@ -780,8 +780,9 @@ Bool VimCommand()
     if (!StrNCmp(cmd, "set ft=", 7)) {
         if (!StrCmp(cmd + 7, "cool")) vim_lang = SYN_COOL;
         else if (!StrCmp(cmd + 7, "warm")) vim_lang = SYN_WARM;
+        else if (!StrCmp(cmd + 7, "asm")) vim_lang = SYN_ASM;
         else if (!StrCmp(cmd + 7, "text")) vim_lang = SYN_TEXT;
-        else {vim_msg = "Unknown filetype (cool, warm, text)"; return FALSE;}
+        else {vim_msg = "Unknown filetype (cool, warm, asm, text)"; return FALSE;}
         vim_msg = "Filetype set";
         return FALSE;
     }

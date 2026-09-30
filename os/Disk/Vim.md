@@ -56,8 +56,13 @@ real null-pointer fault while the editor is open followed by successful reentry.
 Generated disks, scripts and diagnostic logs stay in `build/vim-test`.
 
 Syntax highlighting follows the file extension: Cool (`.cool`, `.coolh`, with identifiers colored from the
-shell compiler's symbol table: functions, types, globals, `#define`s), Warm (`.warm`, `.warmh`) and plain
-text. `:set ft=cool|warm|text` overrides it and `:hi GROUP COLOR` changes a group's Ansi color
+shell compiler's symbol table: functions, types, globals, `#define`s), Warm (`.warm`, `.warmh`), ARM64 assembly (`.S`, `.s`, `.asm`) and plain
+text. `:set ft=cool|warm|asm|text` overrides it and `:hi GROUP COLOR` changes a group's Ansi color
 (groups: normal comment string number keyword type storage preproc label constant function global
 linenr nontext). `Vim("name", line)` opens at a line. Rules: `os/Kernel/Syntax.cool`; tokenizer shared with
 the formatter: `coolc/Fmt/HCTok.cool`; `make syntax-test`.
+
+ARM64 assembly colors instruction/macro mnemonics, x0–x30/w0–w30, sp/wsp,
+xzr/wzr/fp/lr, dot directives, labels, numbers and quoted strings. `//`,
+`/* ... */`, `;` and `#` comments are supported; numeric `#` immediates
+and C preprocessor lines are distinguished from comments.
