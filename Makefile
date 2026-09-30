@@ -254,6 +254,10 @@ kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.co
 text-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/text-test.py $<
 
+.PHONY: input-limits-test
+input-limits-test: build/kernel.Image coolvm
+	python3 tools/input-limits-test.py
+
 # Hangul 2-beolsik input from the window's keyboard (os/Kernel/Ime.cool).
 ime-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/ime-test.py $<
@@ -273,7 +277,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
