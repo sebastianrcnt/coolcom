@@ -129,10 +129,10 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
             uint32_t id=vio32(p+(type==0x103?44:type==0x105?48:40));
             struct gpu_resource *r=resource(id);
             if(type==0x103 && vio32(p+40))result=0x1202;
-            else if(type==0x103 && !id){gpu.scan_id=0;gpu.active=true;damage();}
+            else if(type==0x103 && !id){gpu3d_scanout_disable();gpu.scan_id=0;gpu.active=true;damage();}
             else if(!r)result=0x1203;
             else if(!rect(r,x,y,w,h))result=0x1205;
-            else if(type==0x103){gpu.active=true;gpu.scan_id=id;gpu.sx=x;gpu.sy=y;gpu.sw=w;gpu.sh=h;damage();}
+            else if(type==0x103){gpu3d_scanout_disable();gpu.active=true;gpu.scan_id=id;gpu.sx=x;gpu.sy=y;gpu.sw=w;gpu.sh=h;damage();}
             else if(type==0x104){if(r->blob_mem && !stub_flush(r))result=0x1205;else if(gpu.scan_id==id){damage();fb_frame_dump();}}
             else {
                 uint64_t offset=vio64(p+40),stride=(uint64_t)r->w*4;
@@ -225,6 +225,7 @@ void gpu_resize(uint32_t width,uint32_t height)
  * to queue processing. Caller holds g.lock. */
 bool gpu_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
 {
+    if(gpu.venus && gpu3d_snapshot(pixels,width,height))return true;
     if(!gpu.active)return false;
     struct gpu_resource *r=resource(gpu.scan_id);
     uint32_t w=r?gpu.sw:gpu.width,h=r?gpu.sh:gpu.height;

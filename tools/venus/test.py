@@ -81,6 +81,11 @@ vn_encode_vkWaitForFences(&enc,1,device,2,fences,1,0x123456789);'''),
 COMMAND cmds[1]; cmds[0]=cmd;
 submit.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO; submit.commandBufferCount=1; submit.pCommandBuffers=cmds;
 vn_encode_vkQueueSubmit(&enc,1,queue,1,&submit,fences[0]);'''),
+    ('queue_timeline', """VkDeviceQueueInfo2 queue_info; ZERO(queue_info);
+VkDeviceQueueTimelineInfoMESA timeline; ZERO(timeline);
+queue_info.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2; queue_info.queueFamilyIndex=3; queue_info.pNext=&timeline;
+timeline.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_TIMELINE_INFO_MESA; timeline.ringIdx=1;
+vn_encode_vkGetDeviceQueue2(&enc,1,device,&queue_info,&queue);"""),
     ('viewport', '''VkViewport vp; ZERO(vp); vp.width=FLOAT(0x44000000); vp.height=FLOAT(0x43f00000); vp.maxDepth=FLOAT(0x3f800000);
 vn_encode_vkCmdSetViewport(&enc,0,cmd,0,1,&vp);'''),
     ('instance_strings', '''VkApplicationInfo app; ZERO(app); app.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO;

@@ -3,7 +3,7 @@
 `make venus-vendor` explicitly fetches the immutable generator inputs and C
 oracle dependencies. `make venus-gen` also fetches inputs, then writes `build/venus/Vulkan.cool`
 and `manifest.json`. `make venus-gen-test` compiles the complete generated library
-with `build/coolc`, runs its encoders/decoders on the host, and compares 16 packets
+with `build/coolc`, runs its encoders/decoders on the host, and compares 17 packets
 with the **unmodified upstream Venus C encoders**, generated from their own
 registry/templates. It also runs as part of `make -j test`. No GPU or renderer is
 needed. The test never downloads: when inputs or oracle dependencies are absent,
@@ -27,7 +27,7 @@ object SHA. Cached downloads need no network.
 Commands pull in parameter/member types transitively. `pNext` nodes are included
 only when reached by a command or explicitly listed; unsupported nodes are skipped
 on encode, as in Venus. The initial 80 commands cover the triangle milestone,
-including dynamic rendering, descriptors, compute, resource copies and the Venus
+including Venus queue timeline initialization, dynamic rendering, descriptors, compute, resource copies and the Venus
 ring/reply-stream commands. `vkMapMemory` is a guest blob operation and is not
 serialized. Adding a command requires a subset line and a host oracle test.
 
@@ -62,6 +62,9 @@ enumerations and memory requirements, plus selected chains, truncation, destinat
 capacity and overflow. The C oracle packets are saved as
 `build/venus/oracle-packets.json` for inspection.
 
-This milestone supplies generation and host verification. Transport, capability
-negotiation, blob mapping, `os/Vulkan` helpers, kernel and coolvm changes remain
-separate work described in `docs/venus.md`.
+The actual guest integration lives in `os/Vulkan/Gfx.cool` and the kernel
+transport. `make venus-memory-test` verifies GPU buffer copy coherence and
+`make venus-test` renders a triangle, copies it into a mapped blob, presents it
+and checks the headless screenshot. These opt-in targets require the explicit
+host and generator vendor steps and a host `glslang`; they never download.
+See [results and build instructions](../../docs/venus.md#milestone-1-complete-2026-09-30).

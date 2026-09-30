@@ -1,7 +1,8 @@
 # Venus: Vulkan for coolcom
 
 Status: decisions accepted. Kernel transport, the guest subset generator and the
-optional real host renderer are implemented; triangle integration remains in progress.
+optional real host renderer are implemented. Milestone 1 passes with real guest
+memory coherence, Vulkan triangle rendering and blob scanout pixel validation.
 See [generator usage](../tools/venus/README.md) and the host validation log below.
 The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
@@ -269,8 +270,9 @@ practical, and (c) keeps the rule that everything in the OS can be rebuilt in th
 
 Milestone 1 is the big one. The riskiest parts are the shared-memory mapping between
 virglrenderer, MoltenVK and `hv_vm_map`, and the virglrenderer build on macOS. Both were
-tested in the host spike recorded below: a C test program in coolvm that creates a Venus context
-and maps one blob.
+tested first in the host spike recorded below, then through actual guest Vulkan
+buffer copies and triangle rendering. Milestone 1 is complete; its exact tested
+scope and remaining limitations are recorded at the end.
 
 ## Decisions for you
 
@@ -426,11 +428,10 @@ passed `tools/coolvm/test/run.sh` (existing assembly guests, devices, GPU 2D
 queues and scanout). A default executable builds and `otool -L` confirms it has
 no virglrenderer/MoltenVK dependency.
 
-Remaining host milestone work: SET_SCANOUT_BLOB/presentation and triangle pixel
-validation, real guest shared-memory access/coherence, shared-ring operation and
-GPU timeline concurrency. No guest Venus transport, generator in Cool, or Vulkan
-triangle app was added in this host-first work. The existing 2D/Logos path stays
-available.
+At the end of the initial host-only work, guest coherence and triangle scanout
+were still pending. The integration results below complete these parts. The
+existing 2D/Logos path stays available; shared command rings and GPU timeline
+concurrency remain future work.
 
 The transport layout was checked against the [Linux v6.12 virtio-gpu ABI](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/virtio_gpu.h)
 and [MMIO register definitions](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/virtio_mmio.h):
@@ -480,3 +481,69 @@ renderer contract rather than a wire generator failure. The client uses
 `vkGetFenceStatus` after `vkQueueSubmit`. Inline command decoding/replies are
 completed on CPU timeline 0; shared command rings and concurrent timelines
 remain future work. Kernel request capacity grows to 16 KiB for shaders/pipelines.
+
+
+## Milestone 1 complete (2026-09-30)
+
+Build prerequisites (explicit downloads, outside `make test`):
+
+```sh
+tools/vendor-venus.sh --host
+tools/vendor-venus.sh --generator --test
+brew install glslang mtools  # if absent
+make venus-test
+```
+
+`venus-test` builds a separate `build/coolvm-venus` executable, generates the
+Cool Vulkan subset and compiles the checked-in vertex/fragment GLSL with host
+`glslang -V --target-env vulkan1.2` (tested glslang 16.6.0). It creates an isolated
+FAT disk containing the library and SPIR-V; all output stays in ignored `build/`.
+The default coolvm and `make -j test` still need no renderer or network.
+
+The actual Cool guest (`tools/venus/triangle-test.cool`) uses `Gfx` to create a
+Vulkan 1.3 device, an optimal-tiled BGRA8 image, shader modules and a dynamic
+rendering graphics pipeline. It draws three vertices, transitions the image to
+TRANSFER_SRC and copies it into a HOST_VISIBLE | HOST_COHERENT buffer. A Vulkan
+completion fence and HOST_READ barrier precede guest pixel reads. The guest
+checks coverage, center and background, then sends **SET_SCANOUT_BLOB followed
+by RESOURCE_FLUSH**, pointing to that same readback allocation. No host-side
+triangle drawing or software triangle rasterizer supplies the displayed pixels.
+
+coolvm's real 3D path now snapshots a checked linear BGRA/BGRX HOST3D plane for
+both the window and screenshots. It validates scanout 0, format, dimensions,
+crop, stride, offset, backing size and unused planes before changing scanout.
+Zero resource id disables it; selecting 2D or unref/reset clears it. The host
+MMIO test additionally checks cropped/padded rows, invalid stride/offset/crop,
+unknown resources, flush bounds and lifecycle transitions. **PASS**.
+
+The guest holds `fb.render_lock` during final presentation/power-off so periodic
+console rendering cannot replace the blob scanout. Render objects are explicitly
+destroyed; the displayed buffer/device remain alive until coolvm captures the
+screenshot, then host teardown unmaps blobs and destroys the renderer. The
+separate memory test exercises full guest resource/context cleanup.
+
+**`make venus-test`: PASS**, screenshot
+`build/venus-test/triangle.png` is 256×256 with **18,432 triangle pixels**.
+The host checks **63,004 pixels** against analytically expected triangle and
+background colors (±1 channel tolerance), excluding a narrow rasterization edge.
+This catches blank images, wrong orientation/stride/channel order and missing
+blob presentation. The same run first repeats the three-round coherence test.
+Guest logs are `build/venus-test/triangle.log`; `make venus-memory-test` runs
+memory verification separately. `make venus-gen-test` passes all **17** upstream
+C byte-oracle packets, including the newly required queue timeline pNext.
+
+Limits: one synchronous guest context/queue, bounded inline SUBMIT_3D, one
+linear four-byte scanout plane, offscreen image-to-buffer presentation. No Vulkan
+WSI, zero-copy Metal image export, shared command-ring execution, noncoherent
+memory, Linux/QEMU runtime or GPU concurrency result is claimed. These do not
+block the tested milestone-1 triangle path.
+
+
+Final validation: **`make -j test` exited 0 without downloads**, including
+transport stub/2D/Logos/no-GPU, generator, kernel and existing display tests.
+`make venus-host-test`, `make venus-memory-test`, `make venus-test` and the
+expanded generator suite pass. The real renderer executable also passes the
+40-submission/two-timeline `--gpu-3d-stub` guest, confirming stub precedence.
+`otool -L build/coolvm` confirms the default binary has no vendored dependency.
+Detailed local logs: `build/venus-final-test.log`, `build/venus-final-host-test.log`,
+`build/venus-final-gen-test.log`, `build/venus-real-build-stub.log`.

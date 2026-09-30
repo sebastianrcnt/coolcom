@@ -407,3 +407,13 @@ build/coolvm-venus: $(wildcard tools/coolvm/src/*.[ch]) tools/coolvm/build.sh
 	COOLVM_VENUS=1 tools/coolvm/build.sh $@
 venus-memory-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool
 	python3 tools/venus/run_guest.py
+
+.PHONY: venus-test
+build/venus/triangle.vert.spv: tools/venus/shaders/triangle.vert
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+build/venus/triangle.frag.spv: tools/venus/shaders/triangle.frag
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+venus-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool build/venus/triangle.vert.spv build/venus/triangle.frag.spv
+	python3 tools/venus/run_guest.py --triangle

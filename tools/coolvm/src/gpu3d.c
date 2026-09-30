@@ -24,6 +24,7 @@ static struct {
     bool ready;
     uint32_t ctx[NCTX],shmsel,capversion,capsize;
     struct blob blobs[NRES];
+    uint32_t scan_id,sx,sy,sw,sh,fullw,fullh,stride,scan_offset;
 } venus;
 static pthread_mutex_t fence_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t fence_cv=PTHREAD_COND_INITIALIZER;
@@ -40,6 +41,18 @@ static int context(uint32_t id)
 static struct blob *find(uint32_t id)
 { for(unsigned i=0;i<NRES;i++)if(id && venus.blobs[i].id==id)return &venus.blobs[i];return NULL; }
 bool gpu3d_resource(uint32_t id) { return find(id)!=NULL; }
+void gpu3d_scanout_disable(void) { venus.scan_id=0; }
+bool gpu3d_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
+{
+    struct blob *b=find(venus.scan_id);
+    if(!b || !b->ptr)return false;
+    uint8_t *dst=malloc((size_t)venus.sw*venus.sh*4);
+    if(!dst)return false;
+    for(uint32_t y=0;y<venus.sh;y++)memcpy(dst+(size_t)y*venus.sw*4,
+        (uint8_t *)b->ptr+venus.scan_offset+(uint64_t)(venus.sy+y)*venus.stride+(uint64_t)venus.sx*4,venus.sw*4);
+    *pixels=dst;*width=venus.sw;*height=venus.sh;return true;
+}
+
 bool gpu3d_init(void)
 {
     if(venus.ready)return true;
@@ -100,9 +113,10 @@ bool gpu3d_mmio(uint64_t off,bool wr,uint32_t *val)
 bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n)
 {
     uint32_t type=vio32(p),ctx=vio32(p+16),flags=vio32(p+4),result=OK;
-    bool is3d=(type>=0x200 && type<=0x207) || type==0x108 || type==0x109 || type==0x10c || type==0x208 || type==0x209;
+    bool is3d=(type>=0x200 && type<=0x207) || type==0x108 || type==0x109 || type==0x10c || type==0x10d || type==0x208 || type==0x209;
     struct blob *b=len>=32?find(vio32(p+24)):NULL;
-    if(type==0x102 && b)is3d=true;
+    if(type==0x104 && len>=48)b=find(vio32(p+40));
+    if((type==0x102 || type==0x104) && b)is3d=true;
     if(!is3d || !venus.ready)return false;
     int ci=context(ctx);
     if(flags&~3u || ((flags&2) && (!(flags&1) || p[20]>=64))){result=INVALID;goto end;}
@@ -193,8 +207,33 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
     case 0x209:
         if(len!=32 || !b){result=BAD_RESOURCE;break;}
         if(!b->mapped){result=INVALID;break;}unmap(b);break;
+    case 0x10d: { /* SET_SCANOUT_BLOB: one linear BGRA/BGRX plane */
+        if(len!=96 || vio32(p+40)){result=INVALID;break;}
+        if(!vio32(p+44)){gpu3d_scanout_disable();atomic_store(&g.fb_damage,1);break;}
+        b=find(vio32(p+44));
+        if(!b || b->mem!=2){result=BAD_RESOURCE;break;}
+        uint32_t x=vio32(p+24),y=vio32(p+28),w=vio32(p+32),h=vio32(p+36);
+        uint32_t fullw=vio32(p+48),fullh=vio32(p+52),format=vio32(p+56),stride=vio32(p+64),offset=vio32(p+80);
+        if(!w || !h || fullw>8192 || fullh>8192 || x>=fullw || y>=fullh ||
+           w>fullw-x || h>fullh-y || (format!=1 && format!=2) || stride<(uint64_t)fullw*4 || vio32(p+60) ||
+           offset>b->size || (uint64_t)(fullh-1)*stride+(uint64_t)fullw*4>b->size-offset ||
+           vio32(p+68) || vio32(p+72) || vio32(p+76) || vio32(p+84) || vio32(p+88) || vio32(p+92)){
+            result=INVALID;break;
+        }
+        uint64_t ptr=0;
+        if(virgl_renderer_resource_get_map_ptr(b->id,&ptr) || !ptr){result=0x1200;break;}
+        b->ptr=(void *)(uintptr_t)ptr;venus.scan_id=b->id;venus.sx=x;venus.sy=y;
+        venus.sw=w;venus.sh=h;venus.stride=stride;venus.scan_offset=offset;venus.fullw=fullw;venus.fullh=fullh;
+        atomic_store(&g.fb_damage_used,true);atomic_store(&g.fb_damage,1);break;
+    }
+    case 0x104:
+        if(len!=48){result=INVALID;break;}
+        if(venus.scan_id==b->id && (vio32(p+24)>venus.fullw || vio32(p+28)>venus.fullh ||
+           vio32(p+32)>venus.fullw-vio32(p+24) || vio32(p+36)>venus.fullh-vio32(p+28))){result=INVALID;break;}
+        if(venus.scan_id==b->id){atomic_store(&g.fb_damage,1);fb_frame_dump();}break;
     case 0x102:
         if(len!=32){result=INVALID;break;}
+        if(venus.scan_id==b->id)gpu3d_scanout_disable();
         unmap(b);virgl_renderer_resource_unref(b->id);free(b->iov);memset(b,0,sizeof *b);break;
     default:result=0x1200;break;
     }
