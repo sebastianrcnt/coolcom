@@ -29,8 +29,7 @@ lwIP was the other option: `tools/c2hc` could transpile it. It was not used beca
 | File | Contents |
 |---|---|
 | `os/Kernel/NetDrv.cool` | virtio-net over virtio-mmio v2: 64 receive and 64 transmit buffers of 2 KiB, polled |
-| `os/Kernel/NetParse.warm` | the parser of received packets, in Warm: Ethernet, ARP, IPv4, ICMP, UDP and TCP headers, lengths, checksums and the TCP MSS option |
-| `os/Kernel/NetParseExport.warm` | its boundary: the two functions Net.cool calls (`NetParseFrame`, `NetParsePacket`) |
+| `os/Kernel/NetParse.warm` | the parser of received packets, in Warm: Ethernet, ARP, IPv4, ICMP, UDP and TCP headers, lengths, checksums and the TCP MSS option; exports `NetParseFrame`, `NetParsePacket` and the class `CNetPkt` |
 | `os/Kernel/Net.cool` | Ethernet, ARP (16-entry cache, packets wait for the reply), IPv4, ICMP echo, UDP sockets, the loopback queue, `NetPoll`/`NetWait` |
 | `os/Kernel/NetTcp.cool` | TCP and the TCP socket calls |
 | `os/Kernel/NetApp.cool` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
@@ -70,29 +69,30 @@ Everything a received frame says about itself is untrusted, so the code that rea
 every index into the frame is bounds-checked and every length computation is overflow-checked. The
 rest of the stack (ARP cache, sockets, TCP state machine) stays in Cool and only sees the result.
 
-- **The boundary** is two functions and one record. `NetParseFrame(U8 *frame, I64 len, CNetPkt *out)`
-  parses an Ethernet frame, `NetParsePacket(U8 *pkt, I64 len, CNetPkt *out)` an IPv4 packet (from the
-  loopback queue). Both return the kind and fill `CNetPkt` (`Net.cool`): 22 `I64`s, the kind (ARP,
+- **The boundary** is two functions and one record. `NetParseFrame(CNetPkt *out, U8 *frame, I64 len)`
+  parses an Ethernet frame, `NetParsePacket(CNetPkt *out, U8 *pkt, I64 len)` an IPv4 packet (from the
+  loopback queue). Both fill `CNetPkt`, 22 `U64`s: the kind (ARP,
   ICMP, UDP, TCP, another IP protocol, another ethertype, or why it was dropped: runt, bad ARP, bad
   IPv4 lengths or version, fragment, IP checksum, bad ICMP/UDP/TCP lengths, their checksum) and the
   header fields: addresses, ports, sequence numbers, flags, window, the MSS option of a SYN, and the
   offsets and lengths of the transport header and the payload. Every offset and length lies inside the
-  buffer that was parsed. `NetParseExport.warm` is the only unsafe Warm (it turns the pointer and
-  length into a span and writes the 22 fields); `NetParse.warm` is safe Warm and cannot touch
-  anything but that span.
+  buffer that was parsed. It is all safe Warm and cannot touch anything but the frame: the two
+  functions are `Foreign_Export`s whose span parameter is a pointer and a length in Cool, and
+  `CNetPkt` is the class that NetParse.warm's record `Packet` becomes (`pragma Export_Layout`), so
+  there is one definition of the fields ([warmc/README.md](../warmc/README.md#warms-additions-to-austral)).
 - **The Cool side** is `NetParsePkt`, which calls one of them inside `try`. A failed check in Warm
   (which would be a bug in `NetParse.warm`, not a property of the packet) throws; the packet is then
   dropped and counted as a parser abort, and `NetRep` shows the count and the check's message. `EthRx`,
   `IpRx`, `ArpRx`, `IcmpRx`, `UdpRx` and `TcpRx` take the `CNetPkt` and the buffer; they keep the
   policy (is it for us, counters, sockets) and read payloads only at the offsets it gives.
-- **The build.** `make` compiles the two Warm files with `build/warmc --kernel-module=NetParse` into
+- **The build.** `make` compiles NetParse.warm with `build/warmc --kernel-module=NetParse` into
   `os/Kernel/NetParse.cool`, which `Kernel.cool` includes before `Net.cool`. The file is generated (in
   `.gitignore`), but `tools/disk-files.sh` copies it to `C:/Kernel` with the other sources, so
   `MakeKernel` in the OS compiles the same text and still reproduces the Image byte for byte. Every
   generated name, and the small module runtime (`warmc/ModuleRuntime.cool`), starts with `NetParse_`.
 - **Speed**, per packet in the kernel under coolvm on an M1 (the old Cool checks and field reads vs
-  `NetParsePkt`): a 1514-byte TCP segment 0.3 us vs 2.2 us, a TCP ACK or SYN 30 ns vs 280 ns, a
-  134-byte UDP datagram 40 ns vs 350 ns. About 70 ns of the Warm time is the `try`. Most of the rest
+  `NetParsePkt`): a 1514-byte TCP segment 0.3 us vs 2.2 us, a TCP ACK or SYN 30 ns vs 230 ns, a
+  134-byte UDP datagram 40 ns vs 310 ns. About 70 ns of the Warm time is the `try`. Most of the rest
   is the generated code's calls and copies; the checksum loop is the only part that scales with size.
 
 ### TCP

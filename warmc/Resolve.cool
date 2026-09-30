@@ -34,6 +34,7 @@ U0 WIndexDecl(CWUnit *u, CWNode *scope, CWNode *d, CWNode *owner)
     d->owner = owner;
     if (WEq(d->tag, "instance")) return;
     WBind(u, scope, d->name, d, "Declaration Error");
+    if (WEq(d->tag, "record")) for (c = d->first; c; c = c->next) if (WEq(c->role, "slot")) c->owner = d;
     if (WEq(d->tag, "union") || WEq(d->tag, "typeclass")) {
         for (c = d->first; c; c = c->next) if (WEq(c->role, "constructor") || WEq(c->role, "method")) {
                 c->owner = d; WBind(u, scope, c->name, c, "Declaration Error");
@@ -103,6 +104,7 @@ U0 WIndex(CWUnit *u)
                                 if (other) WFail(u, other->token, "Declaration Error", "Public type declared again in body");
                                 else WIndexDecl(u, p->scope, d, m);
                             } else if (!other) WFail(u, d->token, "Declaration Error", "Missing implementation for public declaration");
+                            else if (other->flags & 4096) WFail(u, other->token, "Declaration Error", "Declared in the interface but marked private");
                             else {WPublicSignature(u, d, other); d->pair = other; other->pair = d;}
                         }
                     }
@@ -131,7 +133,7 @@ U0 WIndex(CWUnit *u)
                 }
                 for (c = d->first; c && !u->error_kind; c = c->next) {
                     other = WLocal(p->scope, c->name);
-                    if (!other) {WFail(u, c->token, "Declaration Error", "Imported declaration is missing or private"); break;}
+                    if (!other || (other->flags & 4096) || (other->owner && (other->owner->flags & 4096))) {WFail(u, c->token, "Declaration Error", "Imported declaration is missing or private"); break;}
                     c->resolved = other;
                     prim = WChild(c, "alias"); names = c->name; if (prim) names = prim->name;
                     WBind(u, m->scope, names, other, "Declaration Error");

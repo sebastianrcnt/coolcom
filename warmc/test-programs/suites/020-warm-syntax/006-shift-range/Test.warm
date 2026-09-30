@@ -1,0 +1,10 @@
+module body Test is
+    function main(): ExitCode is
+        var n: Nat64 := 60;
+        while n < 70 do
+            printLn((1 : Nat64) << n);
+            n := n + 2;
+        end while;
+        return ExitSuccess();
+    end;
+end module body.

@@ -43,8 +43,9 @@ class CNetStats
 };
 
 // What the Warm parser (NetParse.warm) found in a received frame or IPv4 packet: the kind
-// (NetParse.warm's constants), and the header fields. Every offset and length is inside the
-// buffer that was parsed. NetParseExport.warm writes the fields in this order.
+// (NetParse.warm's constants) and the header fields, in a CNetPkt (defined by NetParse.warm's
+// Export_Layout record Packet, in the generated NetParse.cool). Every offset and length is
+// inside the buffer that was parsed.
 #define NP_ARP      1
 #define NP_ICMP     2
 #define NP_UDP      3
@@ -59,18 +60,6 @@ class CNetStats
 #define NP_BAD_L4   21  // ICMP, UDP or TCP lengths (the IPv4 fields are set)
 #define NP_L4_SUM   22  // the ICMP, UDP or TCP checksum (the IPv4 fields are set)
 #define NP_ABORT    23  // the parser aborted (a failed check in Warm: a bug in NetParse.warm)
-
-class CNetPkt
-{
-    I64 kind,
-            op, sha,             // ARP: operation, offset of the sender's MAC
-            src, dst, ttl, proto,// IPv4 (ARP: sender and target address)
-            l4, l4len,           // the ICMP message, UDP datagram or TCP segment
-            sport, dport,        // UDP, TCP
-            data, dlen,          // the UDP or TCP payload
-            seq, ack, flags, win, mss,  // TCP; mss: a SYN's MSS option, 0 if none
-            itype, icode, iid, iseq;    // ICMP: type, code, echo id and sequence number
-};
 
 class CUdpSock
 {
@@ -368,9 +357,9 @@ I64 NetParsePkt(CNetPkt *k, U8 *b, I64 len, Bool eth)
 {//Check a received Ethernet frame (eth) or IPv4 packet with the Warm parser; k->kind.
     try {
         if (eth)
-            NetParseFrame(b, len, k);
+            NetParseFrame(k, b, len);
         else
-            NetParsePacket(b, len, k);
+            NetParsePacket(k, b, len);
     } catch {  // a failed bounds or overflow check in NetParse.warm: drop the packet
         Fs->catch_except = TRUE;
         MemSet(k, 0, sizeof(CNetPkt));

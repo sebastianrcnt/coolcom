@@ -1,0 +1,3 @@
+module Lib is
+    function answer(): Nat64;
+end module.

@@ -18,6 +18,7 @@ class CWUnit {
     U8 *error_kind, *error_message;
     I64 nodes, tokens, depth, symbol_base, instance_depth;
     U8 *prefix;  // a kernel module's name (--kernel-module): prepended to every generated name
+    CWNode *elide;  // the function whose parameters are being parsed: a left-out region is its type parameter
 };
 U8 *WAlloc(CWUnit *u, I64 size)
 {

@@ -1,0 +1,5 @@
+{
+  "module": "Test",
+  "kind": "Declaration Error",
+  "text": [{"type": "text", "content": "Imported declaration is missing or private"}]
+}

@@ -127,7 +127,7 @@ it: the first is the network stack's packet parser, `os/Kernel/NetParse.warm`
 ([docs/networking.md](../docs/networking.md#the-packet-parser-in-warm)). The Makefile runs
 
 ```sh
-build/warmc compile os/Kernel/NetParse.warm os/Kernel/NetParseExport.warm \
+build/warmc compile os/Kernel/NetParse.warm \
   --kernel-module=NetParse --target-type=hc --output=os/Kernel/NetParse.cool
 ```
 
@@ -135,7 +135,8 @@ and `os/Kernel/Kernel.cool` includes the result. The output lives in the kernel'
 
 - Every generated name starts with `NAME_` (`NetParse_wf12`, `NetParse_WT8`), as do the names of
   the runtime (`NetParse_au_span_t`, `NetParse_wh_abort`). Only `Foreign_Export` functions keep the
-  name they declare; they are the module's interface, and Cool calls them with scalars and pointers.
+  name they declare, and `Export_Layout` records the class name they declare; together they are the
+  module's interface (see "Crossing to Cool" below).
 - The runtime is `ModuleRuntime.cool`, not `Runtime.cool`: spans, abort, and allocation through
   `CAlloc`/`Free`. It has no `#define`s, no output, input, arguments or Float32 helpers; a module that
   uses those does not compile into the kernel.
@@ -161,9 +162,73 @@ What the packet parser needed that Warm did not have, and what was added:
   (2.2 us) for a full segment and 9 times (280 ns) for a small one; see
   [docs/networking.md](../docs/networking.md#the-packet-parser-in-warm). These apply to every
   program, and all the test suites still pass.
-- Still missing: shift operators (the parser multiplies and divides by powers of two instead), and
-  a way to pass a span or record across `Foreign_Export` (the boundary uses a pointer and a length,
-  and writes its result as an array of `Nat64` through `spanWrite`).
+- Shift operators, precedence, and passing spans and records across `Foreign_Export`: added in
+  stage 0 of [docs/warm-stdlib.md](../docs/warm-stdlib.md) (next section). The parser is now one
+  safe file; its unsafe export module and the hand-kept Cool class are gone.
+
+## Warm's additions to Austral
+
+Stage 0 of [docs/warm-stdlib.md](../docs/warm-stdlib.md). All of them are additive: every Austral
+program that parsed before still parses and means the same (all test programs pass unchanged).
+
+**Operators and precedence.** Austral allowed one binary operator per expression, `(a * 256) + b`.
+Warm has precedence and adds the bitwise operators. From loosest to tightest:
+
+| Level | Operators | Notes |
+|---|---|---|
+| 1 | `and` `or` | a chain of one of them; mixing them needs parentheses (`a and (b or c)`) |
+| 2 | `=` `/=` `<` `<=` `>` `>=` | no chains: `a < b < c` is an error |
+| 3 | `\|` | bitwise or |
+| 4 | `^` | bitwise xor |
+| 5 | `&` | bitwise and |
+| 6 | `<<` `>>` | shifts |
+| 7 | `+` `-` | |
+| 8 | `*` `/` | |
+| prefix | `-` `not` `~` | `~` is bitwise not; prefix operators bind tighter than all binary ones |
+
+Levels 3-8 associate to the left. Unlike C, `&`, `^` and `|` bind tighter than comparisons, so
+`flags & 2 /= 0` means `(flags & 2) /= 0`. The bitwise operators and the shifts take two integers
+of the same type (Pervasive's `BitwiseOperations` and new `BitwiseShift` typeclasses:
+`bitwiseAnd`, `bitwiseOr`, `bitwiseXor`, `bitwiseNot`, `bitwiseShiftLeft`, `bitwiseShiftRight`).
+A shift amount outside `0 .. width - 1` aborts; bits shifted out are lost (no overflow check);
+`>>` of a signed type copies the sign bit. Lexing: `<<`, `>>`, `|`, `^` and `~` are new tokens;
+after an operand `&(` and `&~` are read as `&` followed by `(` or `~`, and `x -1` as `x - 1`.
+
+**Region elision.** In a function's parameter types, `Span[T]`, `Span![T]`, `&[T]` and `&![T]`
+may leave out the region. Each gets a fresh region type parameter of the function, as if
+declared in `generic [...]` (they are named `_R1`, `_R2`, ... in messages). A region shared
+between parameters, or one in the result or a `let` type, is still written out:
+
+```
+function get16(f: Span[Nat8], at: Index): Nat64 is          -- was generic [R: Region] ... Span[Nat8, R]
+    return widenToNat64(f[at]) << 8 | widenToNat64(f[at + 1]);
+end;
+```
+
+Only `function` declarations elide, not typeclass or instance methods.
+
+**`private` and optional interfaces.** A module can be one `.warm` file; everything in it is
+importable except declarations marked `private` (`private function f ...`, `private record`,
+`private constant`, also after `generic [...]`). `private` is a keyword now. In a module that has a
+`.warmh`, the interface decides what is public, and `private` on a declaration the interface
+declares is an error; `private` in a `.warmh` is a parse error.
+
+**`Result`.** Pervasive has `union Result[T: Type, E: Type]: Type` with cases `Ok(value: T)` and
+`Err(error: E)`, for fallible operations (the error model of docs/warm-stdlib.md).
+
+**Crossing to Cool.**
+
+- A `Foreign_Export` function may take spans: each `Span[T]` or `Span![T]` parameter is two C
+  parameters, a `T *` and an `I64` count (a negative count aborts). warmc emits a small wrapper
+  with the export's name around the function. An export may have region parameters (elided or
+  not); other type parameters are still an error.
+- `pragma Export_Layout(Name => "CFoo");` before a non-generic record makes it the Cool class
+  `CFoo`, with the record's field names and types (Nat64 is `U64`, Int32 `I32`, Bool `U8`,
+  pointers stay pointers), emitted into the generated file. Fields must be integers, booleans,
+  `Float64` or pointers. Cool code includes the generated file and uses the class directly.
+- An export's record result comes back through an out pointer, the first parameter:
+  `pragma Foreign_Export(External_Name => "NetParseFrame") function parseFrame(frame: Span[Nat8]): Packet`
+  is `U0 NetParseFrame(CNetPkt *out, U8 *frame, I64 len)` in Cool.
 
 ## Tests
 
