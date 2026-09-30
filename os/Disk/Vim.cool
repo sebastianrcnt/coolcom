@@ -1275,7 +1275,7 @@ Bool VimOpen(U8 *name)
 
 U0 Vim(U8 *name, I64 line = 0)
 {//line > 1: start on that line.
-    I64 rows, cols, p, q, i;
+    I64 rows, cols, p, q, i, ev;
     if (!VimOpen(name)) return;
     if (line > 1) {
         p = 0;
@@ -1292,8 +1292,9 @@ U0 Vim(U8 *name, I64 line = 0)
     }
     VimDraw();
     while (TRUE) {
-        if (VimKey(GetKey())) break;
-        if (!KeyPending()) VimDraw();
+        ev = GetKey;
+        if (ev != KEY_RESIZE && VimKey(ev)) break;
+        if (ev == KEY_RESIZE || !KeyPending()) VimDraw();
     }
     VimDraw();
     VimClose();

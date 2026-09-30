@@ -287,7 +287,7 @@ U0 FbRenderLocked()
     I64 dy0 = fb.h, dy1 = 0;
     Bool all, hardware = fb.scanout || (fb.gpu && fb.h == rows * FONT_CELL_H && fb.w == cols * FONT_CELL_W);
     SpinLock(&v->lock);
-    if (v->cols != cols || v->rows != rows) {  // the console grid is never resized
+    if (v->cols != cols || v->rows != rows) {  // buffer and grid resizing is serialized by this lock
         fb.pending = FALSE;
         SpinUnlock(&v->lock);
         return;
@@ -671,4 +671,56 @@ Bool FbInit()
     FbRender;  // clears the screen and draws the cursor
     ConsAdd(&FbPutC);
     return TRUE;
+}
+
+Bool FbResize(I64 w, I64 h)
+{//Prepare a replacement, then switch the grid and renderer under its lock.
+    CFb next;
+    I64 daif, n, i, id, old_id;
+    U8 *old_back;
+    if (!fb.gpu || (w == fb.w && h == fb.h)) return FALSE;
+    MemSet(&next, 0, sizeof(CFb));
+    next.w = w; next.h = h; next.stride = w * 4;
+    next.cols = w / FONT_CELL_W; next.rows = h / FONT_CELL_H;
+    n = next.cols * next.rows;
+    next.back = CAlloc(next.stride * h * 2);
+    next.drawn = MAlloc(n * sizeof(CVtCell)); next.snap = MAlloc(n * sizeof(CVtCell));
+    next.snap_row = CAlloc(next.rows); next.x0 = MAlloc(next.rows * sizeof(I64)); next.x1 = CAlloc(next.rows * sizeof(I64));
+    if (!next.back || !next.drawn || !next.snap || !next.snap_row || !next.x0 || !next.x1) goto fb_resize_fail;
+    id = GpuResource(next.back, w, h * 2, 2);
+    if (!id) goto fb_resize_fail;
+    daif = FbRenderLock;
+    GpuCursorHide;
+    old_back = fb.back; old_id = gpu.resource;
+    Free(fb.drawn); Free(fb.snap); Free(fb.snap_row); Free(fb.x0); Free(fb.x1);
+    fb.w = w; fb.h = h; fb.stride = next.stride; fb.cols = next.cols; fb.rows = next.rows;
+    fb.back = fb.base = next.back; fb.drawn = next.drawn; fb.snap = next.snap;
+    fb.snap_row = next.snap_row; fb.x0 = next.x0; fb.x1 = next.x1;
+    for (i = 0; i < fb.rows; i++) fb.x0[i] = fb.cols;
+    fb.top = 0; fb.cur_w = 0; gpu.resource = id;
+    VtResize(fb.vt, fb.cols, fb.rows);
+    fb.redraw_all = TRUE; fb.pending = TRUE;
+    FbRenderLocked; // transfer/select the replacement before releasing old backing
+    GpuUnref(old_id);
+    Free(old_back);
+    FbRenderUnlock(daif);
+    return TRUE;
+fb_resize_fail:
+    Free(next.back); Free(next.drawn); Free(next.snap); Free(next.snap_row); Free(next.x0); Free(next.x1);
+    return FALSE;
+}
+
+U0 FbDisplayTask(U8 *data)
+{//Mode changes allocate in task context, not the rendering timer interrupt.
+    I64 w, h;
+    CVirtBlk *d = &gpu.q[0];
+    no_warn data;
+    while (gpu.active) {
+        Sleep(50);
+        if (VioRd(d, VIO_CONFIG) & 1) {
+            // Clear first: changes during GET_DISPLAY_INFO remain pending.
+            VioWr(d, VIO_CONFIG + 4, 1); VioWr(d, VIO_ISR_ACK, 2);
+            if (GpuDisplayInfo(&w, &h)) FbResize(w, h);
+        }
+    }
 }

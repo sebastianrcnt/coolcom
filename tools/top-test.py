@@ -47,8 +47,8 @@ def main():
     script += line('U0 Burner(U8 *d) {I64 i; while (TRUE) {for (i = 0; i < 5000000; i++) {} Yield;}}')
     script += line('Spawn(&Napper, 0, "Napper", 1); Spawn(&Burner, 0, "Burner", 1);', 800)
     script += line('Top;', 3500)
-    script += vim.typed('n') + 'delay 1500\n'                    # sort by name: Adam Burner Napper Seth1 Shell
-    script += f'1 {KEY_DOWN} 1\n1 {KEY_DOWN} 0\ndelay 200\n' * 2   # select Napper
+    script += vim.typed('n') + 'delay 1500\n'                    # sort by name: Adam Burner Display Napper Seth1 Shell
+    script += f'1 {KEY_DOWN} 1\n1 {KEY_DOWN} 0\ndelay 200\n' * 3   # select Napper (GPU display worker precedes it)
     script += 'delay 1200\n' + vim.typed('k') + 'delay 300\n' + vim.typed('y') + 'delay 2500\n'
     script += vim.typed('q') + 'delay 400\n'
     script += line('Print("\\nTOPDONE%d\\n", 1);') + vim.finish('TOPDONE1')

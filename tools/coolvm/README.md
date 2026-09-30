@@ -327,3 +327,11 @@ Window and backing-scale changes update the preferred pixel dimensions, set
 `VIRTIO_GPU_EVENT_DISPLAY`, advance config generation and assert the config IRQ.
 Input scripts can inject the same event with `resize WIDTH HEIGHT` after a `wait`.
 `gpu-test.c` exercises the real MMIO queues and uses independent pixel oracles.
+
+The OS consumes display events in a task, replaces the resource/backing and
+resizes its existing terminal grid. `VtResize` wakes terminal readers with a
+coalesced `KEY_RESIZE` event; programs query `AnsiTermSize` to reflow. Vim, Less,
+Top and Tmux handle this event, including applications inside Tmux panes.
+`make gpu-resize-test` injects three headless modes and verifies notifications,
+PNG dimensions/content and those programs' status bars at their new rows.
+`make run` uses GPU by default; `--no-gpu` keeps fixed simple-framebuffer mode.

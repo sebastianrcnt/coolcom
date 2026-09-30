@@ -47,8 +47,8 @@ Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL)
     n = *(d->qused + 8 + 8 * (d->last_used % VQ_SIZE))(U32i *);
     d->last_used++;
     ok = n >= 24 && *(res + 4)(U32i *) == 1 && *(res + 8)(I64 *) == fence;
-    if (type == 0x100) ok = ok && n >= 408 && *res(U32i *) == 0x1101;
-    else ok = ok && *res(U32i *) == 0x1100;
+    if (type == 0x100) ok = ok && n == 408 && *res(U32i *) == 0x1101;
+    else ok = ok && n == 24 && *res(U32i *) == 0x1100;
     if (reply && ok) MemCpy(reply, res, n);
     VioWr(d, VIO_ISR_ACK, VioRd(d, VIO_ISR) & 1); // do not swallow display-change IRQs
     SpinUnlockIrq(&d->lock, daif);
