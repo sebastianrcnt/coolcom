@@ -99,7 +99,10 @@ derived, so it stays asserted until the driver clears the enable.
 
 The framebuffer is guest-writable memory mapped at `0x9_0000_0000`. Pixels are little-endian
 `x8r8g8b8`: a 32-bit word `0x00RRGGBB` appears as B, G, R, X bytes. The Cocoa view refreshes about
-20 times per second on the main thread; all vCPUs run on worker threads. Closing the window stops the VM.
+20 times per second on the main thread; all vCPUs run on worker threads. A guest may report the rows it drew
+with a 32-bit write of `(end << 16) | start` to the finisher's offset `0x18` (coolcom's console
+renderer does); once it has, the window redraws on those reports instead of comparing the whole
+framebuffer with the last frame shown. Closing the window stops the VM.
 `--headless` skips Cocoa window creation; `--screenshot` works in either mode. The fixed framebuffer
 address stays outside guest `/memory`, matching m1n1's usable-RAM carve-out layout.
 

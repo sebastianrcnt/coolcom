@@ -114,9 +114,10 @@ void display_init(void)
     [NSApp activateIgnoringOtherApps:YES];
 }
 /* Run the event loop for `seconds`: events are handled as they arrive, and once per
- * screen frame the window is redrawn and committed if the guest changed the framebuffer
- * (it writes guest RAM directly, so a copy of the last frame shown is the only way to
- * tell). The old loop handled events and redrew every 50 ms, and the drawing reached the
+ * screen frame the window is redrawn and committed if the guest changed the framebuffer.
+ * A guest that reports the rows it drew (FINISHER_FB_DAMAGE, coolvm.h) says so; for any
+ * other the guest writes RAM directly, so a copy of the last frame shown is the only way
+ * to tell. The old loop handled events and redrew every 50 ms, and the drawing reached the
  * screen one more pump later: 0.1-0.15 s from key to echo. */
 void display_pump(double seconds)
 {
@@ -147,9 +148,13 @@ void display_pump(double seconds)
             now = CFAbsoluteTimeGetCurrent();
             if (now >= next) {
                 next = now + (now < fast_until ? 0.001 : frame);
-                if (memcmp(shown, g.fb, g.fb_size)) {
-                    fast_until = 0;
+                bool changed;
+                if (atomic_load(&g.fb_damage_used))
+                    changed = atomic_exchange(&g.fb_damage, 0) != 0;
+                else if ((changed = memcmp(shown, g.fb, g.fb_size) != 0))
                     memcpy(shown, g.fb, g.fb_size);
+                if (changed) {
+                    fast_until = 0;
                     [view setNeedsDisplay:YES];
                     [view displayIfNeeded];
                     [CATransaction flush];

@@ -33,7 +33,6 @@
 #include "KDate.cool"
 #include "KSym.cool"
 #include "Font.cool"
-#include "Fb.cool"
 #include "KTest.cool"
 #include "Timer.cool"
 #include "Aic.cool"
@@ -43,6 +42,7 @@
 #include "KHost.cool"
 #include "Ansi.cool"
 #include "Term.cool"
+#include "Fb.cool"
 #include "Key.cool"
 #include "Ime.cool"
 #include "Input.cool"
@@ -159,6 +159,7 @@ U0 KMain(U8 *image_end, U8 *dt)
             Print("KERNEL TEST FAIL (%d)\n", code);
         else
             Print("KERNEL TEST PASS\n");
+        FbFlush;
         if (code)
             ArchMmioWrite32(fdt_finisher, (code << 16) | 0x3333);
         else
