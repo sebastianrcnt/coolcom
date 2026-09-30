@@ -357,4 +357,30 @@ module Austral.Pervasive is
     instance WidenToIndex(Nat32);
     instance WidenToIndex(Nat64);
     instance WidenToIndex(Index);
+
+    -- The shift operators << and >> (Warm): an amount outside 0 .. width - 1 aborts; bits
+    -- shifted out are lost (no overflow check); >> of a signed type copies the sign bit.
+    typeclass BitwiseShift(T: Type) is
+        method bitwiseShiftLeft(value: T, amount: T): T;
+        method bitwiseShiftRight(value: T, amount: T): T;
+    end;
+
+    instance BitwiseShift(Nat8);
+    instance BitwiseShift(Int8);
+    instance BitwiseShift(Nat16);
+    instance BitwiseShift(Int16);
+    instance BitwiseShift(Nat32);
+    instance BitwiseShift(Int32);
+    instance BitwiseShift(Nat64);
+    instance BitwiseShift(Int64);
+    instance BitwiseShift(Index);
+    instance BitwiseShift(ByteSize);
+
+    -- A fallible result (Warm): Ok with the value, or Err with why not.
+    union Result[T: Type, E: Type]: Type is
+        case Ok is
+            value: T;
+        case Err is
+            error: E;
+    end;
 end module.

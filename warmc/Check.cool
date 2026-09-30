@@ -158,7 +158,17 @@ CWNode *WArithmetic(CWUnit *u, CWNode *n, CWNode *type, CWNode *fun)
     if (WEq(n->name, "-")) name = "trappingSubtract";
     if (WEq(n->name, "*")) name = "trappingMultiply";
     if (WEq(n->name, "/")) name = "trappingDivide";
+    if (WEq(n->name, "&")) name = "bitwiseAnd";
+    if (WEq(n->name, "|")) name = "bitwiseOr";
+    if (WEq(n->name, "^")) name = "bitwiseXor";
+    if (WEq(n->name, "<<")) name = "bitwiseShiftLeft";
+    if (WEq(n->name, ">>")) name = "bitwiseShiftRight";
+    if (WEq(n->name, "~")) name = "bitwiseNot";
     pervasive = WModule(u, "Austral.Pervasive", "interface"); call->name = name; call->resolved = WLocal(pervasive->scope, name);
+    if (WEq(n->name, "~")) {  // one argument
+        arg = WNode(u, "argument", n->token); WAdd(arg, WClone(u, WChild(n, "value")), "value"); WAdd(call, arg, "argument");
+        call->ty = WCall(u, call, type, fun); n->lowered = call; return call->ty;
+    }
     if (WEq(n->tag, "unary")) {
         left = WNode(u, "literal", n->token); left->name = "0"; left->token = WAlloc(u, sizeof(CWToken)); MemCpy(left->token, n->token, sizeof(CWToken)); left->token->kind = 3;
         right = WChild(n, "value");
@@ -240,13 +250,16 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
         else {a = WInfer(u, left, a, fun); b = WInfer(u, right, a, fun);}
         WRequire(u, n, b, a); ty = a;
         if (!cmp && !WEq(name, "and") && !WEq(name, "or") && !WNumber(a)) WFail(u, n->token, "Type Error", "Arithmetic requires numeric operands");
+        else if ((WEq(name, "&") || WEq(name, "|") || WEq(name, "^") || WEq(name, "<<") || WEq(name, ">>")) && !WIntBits(a->name))
+            WFail(u, n->token, "Type Error", "Bitwise operators require integer operands");
         if (cmp) ty = WTypeNamed(u, scope, "Bool");
         else if (!WEq(name, "and") && !WEq(name, "or") && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
     } else if (WEq(tag, "unary")) {
         a = expected; if (WEq(name, "not")) a = WTypeNamed(u, scope, "Bool");
         ty = WInfer(u, WChild(n, "value"), a, fun);
         if (WEq(name, "-") && !WNumber(ty)) WFail(u, n->token, "Type Error", "Negation requires a number");
-        if (WEq(name, "-") && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
+        if (WEq(name, "~") && (!ty || !WIntBits(ty->name))) WFail(u, n->token, "Type Error", "Bitwise not requires an integer");
+        if ((WEq(name, "-") || WEq(name, "~")) && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
     } else if (WEq(tag, "cast")) {
         ty = WChild(n, "type"); WValidateType(u, ty); v = WChild(n, "value");
         if (WEq(ty->name, "&") && (WEq(v->tag, "variable") || WEq(v->tag, "path"))) a = WInfer(u, v, NULL, fun);
@@ -510,7 +523,9 @@ U0 WDeclarationTypes(CWUnit *u, CWNode *n)
                 if (WEq(p->name, "Foreign_Export")) exports++;
             }
         if (imports && exports) WFail(u, n->token, "Declaration Error", "Function cannot be both imported and exported");
-        if (exports && WChild(n, "type-parameter")) WFail(u, n->token, "Declaration Error", "Cannot export a generic function");
+        // Region parameters are erased, so an export may have them (as span parameters do).
+        for (p = n->first; p; p = p->next) if (exports && WEq(p->role, "type-parameter") && !WEq(WChild(p, "universe")->name, "Region"))
+                WFail(u, n->token, "Declaration Error", "Cannot export a generic function");
         for (p = n->first; p; p = p->next) if (WEq(p->role, "type-parameter")) {
                 I64 used = 0;
                 for (c = n->first; c; c = c->next) {

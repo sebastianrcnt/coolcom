@@ -9,7 +9,7 @@ Bool WPrefix(U8 *s, U8 *p)
 }
 Bool WKeyword(U8 *s)
 {
-    U8 *p = "and or not module is body import as end constant type function generic record union case of when typeclass instance method if then else let var while for do from to borrow return skip Free Linear Type Region pragma sizeof nil true false Span";
+    U8 *p = "and or not module is body import as end constant type function generic record union case of when typeclass instance method if then else let var while for do from to borrow return skip Free Linear Type Region pragma sizeof nil true false Span private";
     I64 n = StrLen(s);
     while (*p) {
         if (WPrefix(p, s) && (p[n] == ' ' || !p[n])) return TRUE;
@@ -90,9 +90,9 @@ CWToken *WLex(CWUnit *u, CWSource *src)
             if (i == src->size) k = -1; else i += quote;
         } else {
             if (WPrefix(s + i, "@embed")) {i += 6;}
-            else if (WPrefix(s + i, "&!") || WPrefix(s + i, "&~") || WPrefix(s + i, "&(") || WPrefix(s + i, "/=") || WPrefix(s + i, "<=") || WPrefix(s + i, ">=") || WPrefix(s + i, "->") || WPrefix(s + i, "=>") || WPrefix(s + i, ":=")) i += 2;
+            else if (WPrefix(s + i, "&!") || WPrefix(s + i, "&~") || WPrefix(s + i, "&(") || WPrefix(s + i, "/=") || WPrefix(s + i, "<=") || WPrefix(s + i, ">=") || WPrefix(s + i, "->") || WPrefix(s + i, "=>") || WPrefix(s + i, ":=") || WPrefix(s + i, "<<") || WPrefix(s + i, ">>")) i += 2;
             else {
-                value = "()[]{}+-*/=<>;&,.:!";
+                value = "()[]{}+-*/=<>;&,.:!|^~";
                 j = 0; while (value[j] && value[j] != c) j++;
                 if (!value[j]) k = -1;
                 i++; value = NULL;

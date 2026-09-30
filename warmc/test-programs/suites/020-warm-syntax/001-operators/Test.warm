@@ -1,0 +1,23 @@
+module body Test is
+    function main(): ExitCode is
+        let a: Nat64 := 1 + 2 * 3;
+        printLn(a);
+        let b: Nat64 := (#x12 << 8) | #x34 & #xFF;
+        printLn(b);
+        let c: Nat8 := #xF0 << 2;
+        printLn(c);
+        let d: Int32 := -16 >> 2;
+        printLn(d);
+        let e: Nat32 := ~(0 : Nat32) ^ #xFFFF;
+        printLn(e);
+        let f: Bool := a < 10 and b > 5 and not (c = 0);
+        printLn(f);
+        let g: Int64 := 10 - 3 - 2;
+        printLn(g);
+        let h: Nat64 := 100 / 5 / 2 + a*2;
+        printLn(h);
+        let i: Nat64 := b >> 4 << 1;
+        printLn(i);
+        return ExitSuccess();
+    end;
+end module body.
