@@ -18,9 +18,10 @@ disk = OUT / 'disk.img'
 with disk.open('wb') as f:
     f.truncate(64 * 1024 * 1024)
 run(['mformat', '-i', disk, '-F', '-v', 'WARMC', '::'], capture_output=True)
+run(['mmd', '-i', disk, '::Warm'], capture_output=True)
 (OUT / 'Bad.warm').write_text('module body Broken is function f(): Unit is return ; end; end module body.\n')
 (OUT / 'Abort.warm').write_text('module body Test is function main(): ExitCode is abort("kernel abort probe"); end; end module body.\n')
-(OUT / 'Init.cool').write_text('''#include "C:/Warm.cool"
+(OUT / 'Init.cool').write_text('''#include "C:/Warm/Warm.cool"
 Print("WARM-KERNEL-LOADED\\n");
 Print("WARM-ABORT:%d\\n",WarmRun("C:/Abort.warm"));
 Print("WARM-FIRST:%d\\n",WarmRun("C:/Test.warm"));
@@ -29,7 +30,7 @@ Print("WARM-SECOND:%d\\n",WarmRun("C:/Test.warm"));
 Print("WARM-KERNEL-DONE\\n");
 Shutdown();
 ''')
-files = [(ROOT / 'build/warmcool/Kernel.cool', 'Warm.cool'),
+files = [(ROOT / 'build/warmcool/Kernel.cool', 'Warm/Warm.cool'),
          (ROOT / 'warmc/test-programs/suites/018-hc-backend/002-record-flow-float/Test.warm', 'Test.warm'),
          (OUT / 'Abort.warm', 'Abort.warm'), (OUT / 'Bad.warm', 'Bad.warm'), (OUT / 'Init.cool', 'Init.cool')]
 for src, name in files:

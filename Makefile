@@ -142,12 +142,12 @@ build/disk.img: | build
 
 # make run only adds files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
-# tools/disk-files.sh copies os/Disk programs/examples, Warm.cool, and kernel sources (C:/Kernel, for Man).
+# tools/disk-files.sh copies os/Disk programs/examples, Warm/Warm.cool, and kernel sources (C:/Kernel, for Man).
 # C:/Kernel.coolh (the shell prelude) declares the kernel for programs compiled
-# with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
-# Cmp("C:/Compiler/Native.cool") in the OS rebuilds coolc/seed/Compiler.BIN.
+# with Cmp; C:/Cool/Compiler holds the compiler sources (tools/native/prepare.sh), so
+# Cmp("C:/Cool/Compiler/Native.cool") in the OS rebuilds coolc/seed/Compiler.BIN.
 # tools/disk-files.sh puts os/Kernel in C:/Kernel and the runtime files it
-# includes as ../../coolc/... in C:/coolc (".." stops at the root), and the
+# includes through a disk-only mapping to C:/Cool, and the
 # prebuilt assembly C:/Kernel/BootStub.BIN, so `MakeKernel` in the OS rebuilds
 # build/kernel.Image (docs/kernel-rebuild.md).
 # Package the Cool implementation of Warm for the kernel shell. disk-files.sh
@@ -188,14 +188,18 @@ disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	tools/native/prepare.sh
-	mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || mmd -i build/disk.img ::Compiler </dev/null
-	mcopy -o -i build/disk.img build/native-src/* ::Compiler/
+	mdir -i build/disk.img ::Cool/Compiler >/dev/null 2>&1 || mmd -i build/disk.img ::Cool/Compiler </dev/null
+	mcopy -o -i build/disk.img build/native-src/* ::Cool/Compiler/
 
 disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img -n
 	@mdir -i build/disk.img ::Kernel.coolh >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
-	@mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
-	  mmd -i build/disk.img ::Compiler && mcopy -i build/disk.img build/native-src/* ::Compiler/; }
+	@mdir -i build/disk.img ::Cool/Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
+	  mmd -i build/disk.img ::Cool/Compiler && mcopy -i build/disk.img build/native-src/* ::Cool/Compiler/; }
+
+.PHONY: disk-layout-test
+disk-layout-test: build/warmcool/Kernel.cool os/Kernel/NetParse.cool build/lua/LuaRuntime.cool
+	tools/disk-layout-test.sh
 
 .PHONY: run-qemu qemu-test
 # QEMU virt uses the same relocatable arm64 Image and modern virtio-MMIO devices.
@@ -269,7 +273,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool

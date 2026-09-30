@@ -258,8 +258,8 @@ def main():
     unicode_file = d / 'Unicode.txt'
     unicode_file.write_bytes(b'abc\n')
     copy(unicode_file, unicode_file.name)
-    run(['mmd', '-i', str(disk), '::coolc/Frontend'])
-    copy(pathlib.Path('coolc/Frontend/KernelA.coolh'), 'coolc/Frontend/KernelA.coolh')
+    run(['mmd', '-i', str(disk), '::Cool/Frontend'])
+    copy(pathlib.Path('coolc/Frontend/KernelA.coolh'), 'Cool/Frontend/KernelA.coolh')
     runner = ['U0 VimTests() {']
     script = BOOT + typed('#include "C:/Run.cool"\n') + wait('> ')
     script += typed('VimTests;\n')
@@ -270,7 +270,7 @@ def main():
         path = d / f'T{i:03}.{suffix}'
         path.write_bytes((source if isinstance(source, bytes) else source.encode()))
         copy(path, path.name)
-        target = 'coolc/Frontend/KernelA.coolh' if name == 'kernel-a-save' else path.name
+        target = 'Cool/Frontend/KernelA.coolh' if name == 'kernel-a-save' else path.name
         runner.append(f'Vim("C:/{target}"); Print("\\nVIMRESULT {i} %d %d %d\\n", vim_pos, vim_top, vim_left);')
         if name == 'gd-kernel-return':
             script += typed('gd') + wait('NORMAL C:/Kernel/KUtils.cool') + typed('\x0f:wq\n') + 'delay 60\n'
@@ -335,7 +335,7 @@ def main():
         suffix = 'S' if name in ('asm-extension', 'asm-block-scroll') else 'txt'
         filename = f'T{i:03}.{suffix}'
         if name == 'kernel-a-save':
-            filename = 'coolc/Frontend/KernelA.coolh'
+            filename = 'Cool/Frontend/KernelA.coolh'
         if name == 'edit-file':
             filename = 'Other.txt'
         if name == 'edit-large-file':

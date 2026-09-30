@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='.generate-', dir=OUT) as tmp:
     subprocess.run([*base, *files, str(stage / 'Lua.cool')], check=True)
     (stage / 'Host.cool').write_text((ROOT / 'tools/lua-support/Host.cool').read_text())
     subprocess.run([*base, '--reserved-from', str(ROOT / 'build/ShellPrelude.coolh'),
-                    '--libc', 'C:/coolc/LibC/LibC.cool', *files,
+                    '--libc', 'C:/Cool/LibC/LibC.cool', *files,
                     str(stage / 'LuaRuntime.cool')], check=True)
     with (stage / 'LuaRuntime.cool').open('a') as f:
         f.write((ROOT / 'tools/lua-support/Kernel.cool').read_text())

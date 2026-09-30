@@ -12,13 +12,14 @@ of what the host build does after `coolc` is ported to Cool.
 | On C: | From the repository |
 |---|---|
 | `C:/Kernel/*` | `os/Kernel/*`, including `NetParse.cool`, which `make` generates from `NetParse.warm` |
-| `C:/coolc/Runtime/*.cool` | `coolc/Runtime/*.cool` |
-| `C:/coolc/Fmt/HCTok.cool` | `coolc/Fmt/HCTok.cool` |
+| `C:/Cool/Runtime/*.cool` | `coolc/Runtime/*.cool` |
+| `C:/Cool/Fmt/HCTok.cool` | `coolc/Fmt/HCTok.cool` |
 | `C:/Kernel/BootStub.BIN` | `build/BootStub.BIN` (the prebuilt assembly, below) |
 
-`Kernel.cool` includes the runtime as `../../coolc/Runtime/...`; `..` stops at
-the root, so from `C:/Kernel` that is `C:/coolc/Runtime`. `Man` searches both
-`C:/Kernel` and `C:/coolc`.
+The repository's `Kernel.cool` includes the runtime as `../../coolc/Runtime/...`.
+The installer maps those includes (and the tokenizer include) to `C:/Cool/...`
+in the disk copy, leaving host sources unchanged. `Man` searches both
+`C:/Kernel` and `C:/Cool`.
 
 `Cmp("C:/Kernel/Kernel.cool", "C:/Kernel.BIN")` in the shell takes about one
 second and writes a BIN equal to the host's `build/Kernel.BIN` byte for byte.

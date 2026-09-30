@@ -1,6 +1,6 @@
 #!/bin/sh
 # The OS compiles its own compiler: boot the kernel Image with the compiler
-# sources on C:/Compiler (staged by tools/native/prepare.sh, as `make seed`
+# sources on C:/Cool/Compiler (staged by tools/native/prepare.sh, as `make seed`
 # compiles them) and C:/Kernel.coolh (the shell prelude), let the legacy C:/Init.HC (the
 # disk has no Init.cool) run Cmp in the shell, and require the BIN it writes to equal coolc/seed/Compiler.BIN
 # byte for byte. Before that the shell AOT-compiles and Loads a small program
@@ -16,8 +16,8 @@ dir=$(mktemp -d build/selfhost-test.XXXXXX)
 disk=$dir/disk.img
 mkfile -n 64m "$disk"
 mformat -i "$disk" -F -v SELFHOST ::
-mmd -i "$disk" ::Compiler
-mcopy -i "$disk" build/native-src/* ::Compiler/
+mmd -i "$disk" ::Cool ::Cool/Compiler
+mcopy -i "$disk" build/native-src/* ::Cool/Compiler/
 mcopy -i "$disk" build/ShellPrelude.coolh ::Kernel.coolh
 cat >"$dir/Hello.cool" <<'EOF'
 #include "Kernel.coolh"
@@ -66,7 +66,7 @@ ExeFile("BadJit", TRUE);
 Print("forgot %d\n", Cmp("Forgot"));
 Print("compat %d\n", Cmp("Forgot", NULL, TRUE));
 Print("vet %d\n", Vet("VetMe"));
-Print("self %d\n", Cmp("C:/Compiler/Native.cool", "C:/Self.BIN"));
+Print("self %d\n", Cmp("C:/Cool/Compiler/Native.cool", "C:/Self.BIN"));
 Shutdown;
 EOF
 mcopy -i "$disk" "$dir/Hello.cool" "$dir/Ex.cool" "$dir/Init.HC" "$dir/Old.HC" "$dir/Both.cool" "$dir/Both.HC" "$dir/Inc.cool" "$dir/Bad.cool" "$dir/BadPtr.cool" "$dir/BadJit.cool" "$dir/Forgot.cool" "$dir/VetMe.cool" ::
