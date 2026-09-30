@@ -26,4 +26,4 @@ vet: [unneeded-no-warn] no_warn on 'x' in fun 'Others', which is used
   Vet.cool,65
 vet: [arg-name] Function 'Renamed': argument 1 is named 'b' here but 'a' in the declaration (declared at Vet.cool,71)
   Vet.cool,73
-Vet: assign-cond=2 empty-stmt=3 unreachable=4 unused-arg=2 unneeded-no-warn=1 dup-type=0 unused-extern=0 u0-ptr=1 arg-name=1 Errs:0
+Vet: assign-cond=2 empty-stmt=3 unreachable=4 unused-arg=2 unneeded-no-warn=1 dup-type=0 unused-extern=0 u0-ptr=1 arg-name=1 strict=0 Errs:0

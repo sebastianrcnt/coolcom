@@ -14,11 +14,13 @@ U8 *ShellCmpFun(U8 *name)
     return f;
 }
 
-I64 Cmp(U8 *src, U8 *bin = NULL)
+I64 Cmp(U8 *src, U8 *bin = NULL, Bool compat = FALSE)
 {//AOT-compile src (.cool by default) to the BIN file bin (default src with
     //.BIN). #include names are relative to src's directory, as with coolc on the
     //host. Returns the error count. TempleOS's is Cmp(filename, map, out_name).
-    I64 (*cmp)(U8 *filename, U8 *map_name, U8 *out_name, I64 drv_let);
+    //compat: the compiler's strict errors (unused locals, a definition against its
+    //declaration, ...) are only Vet findings, as they always are in .HC/.HH files.
+    I64 (*cmp)(U8 *filename, U8 *map_name, U8 *out_name, I64 drv_let, I64 compat);
     U8 *s, *b, *dir, *old;
     I64 res;
     if (!(cmp = ShellCmpFun("Cmp")))
@@ -40,7 +42,7 @@ I64 Cmp(U8 *src, U8 *bin = NULL)
     dir = StrNew(s);
     StrLastRem(dir, "/");
     Cd(dir);
-    res = (*cmp)(s, NULL, b, 0);
+    res = (*cmp)(s, NULL, b, 0, compat);
     Cd(old);
     Free(old);
     Free(dir);
@@ -49,11 +51,11 @@ I64 Cmp(U8 *src, U8 *bin = NULL)
     return res;
 }
 
-I64 Vet(U8 *src)
+I64 Vet(U8 *src, Bool compat = FALSE)
 {//Check src (.cool by default) for style problems without writing a BIN: an assignment used as a
     //condition ([assign-cond]), an empty statement after if/for/while ([empty-stmt]), code right after
     //return, break or goto ([unreachable]). Prints each finding and a count per check; returns the total.
-    I64 (*vet)(U8 *filename);
+    I64 (*vet)(U8 *filename, I64 compat);
     U8 *s, *dir, *old;
     I64 res;
     if (!(vet = ShellCmpFun("Vet")))
@@ -69,7 +71,7 @@ I64 Vet(U8 *src)
     dir = StrNew(s);
     StrLastRem(dir, "/");
     Cd(dir);
-    res = (*vet)(s);
+    res = (*vet)(s, compat);
     Cd(old);
     Free(old);
     Free(dir);
@@ -77,11 +79,11 @@ I64 Vet(U8 *src)
     return res;
 }
 
-I64 ExeFile(U8 *name)
+I64 ExeFile(U8 *name, Bool compat = FALSE)
 {//JIT-compile and run the file name (.cool by default) in this shell; returns the
     //value of its last statement. Its statements nest inside the caller's.
     I64 (*exe)(U8 *name, I64 ccf_flags);
-    I64 res, ctx[32], daif;
+    I64 res, ctx[32], daif, flags;
     U8 *file, *cleanup;
     Bool in_stmt;
     if (!(exe = ShellCmpFun("ExeFile")))
@@ -93,7 +95,10 @@ I64 ExeFile(U8 *name)
     cleanup = ShellCur->stmt_cleanup;
     ShellCur->stmt_cleanup = NULL;
     file = RtCoolExt(name);
-    res = (*exe)(file, 0);
+    flags = 0;
+    if (compat)
+        flags = CCF_COMPAT; //the strict errors are only Vet findings (always so in .HC/.HH files)
+    res = (*exe)(file, flags);
     Free(file);
     MemCpy(ShellCur->fault_ctx, ctx, sizeof(ctx));
     ShellCur->fault_daif = daif;

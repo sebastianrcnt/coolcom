@@ -12,7 +12,7 @@ T=coolc/tests/checks
 
 # The message and position of each finding: ERROR/vet lines with the "file,line" line after them.
 findings() {
-    grep -A1 -e '^ERROR' -e '^vet:' "$1" | grep -v '^--' | sed 's|[^ ()]*/\([A-Za-z]*\.cool\)|\1|g' | grep -v '^Vet:' || true
+    grep -A1 -e '^ERROR' -e '^vet:' "$1" | grep -v '^--' | sed -E 's|[^ ()]*/([A-Za-z]+\.(cool\|HC\|HH))|\1|g' | grep -v '^Vet:' || true
 }
 compare() {
     if [ "${UPDATE:-}" = 1 ]; then
@@ -45,3 +45,15 @@ compare Vet "$OUT/Vet.actual"
 gtimeout 60 build/coolc $T/Vet.cool "$OUT/Vet.BIN" > "$OUT/VetPlain.log" 2>&1
 ! grep -q '^vet:' "$OUT/VetPlain.log" || { echo "FAIL Vet: findings without --vet" >&2; exit 1; }
 echo "PASS Vet (off by default)"
+
+# Compat: the strict errors are only vet findings in .HC/.HH files and with --compat
+sed "s|\"../../../os|\"$ROOT/os|" $T/Legacy.HC > "$OUT/Strict.cool"
+gtimeout 60 build/coolc $T/Legacy.HC "$OUT/Legacy.BIN" > "$OUT/Legacy.log" 2>&1 || { cat "$OUT/Legacy.log"; echo "FAIL Legacy.HC" >&2; exit 1; }
+grep -q 'Errs:0 ' "$OUT/Legacy.log" || { cat "$OUT/Legacy.log"; echo "FAIL Legacy.HC" >&2; exit 1; }
+! gtimeout 60 build/coolc "$OUT/Strict.cool" "$OUT/Strict.BIN" > "$OUT/Strict.log" 2>&1 || { echo "FAIL Strict.cool compiled" >&2; exit 1; }
+gtimeout 60 build/coolc --compat "$OUT/Strict.cool" "$OUT/Strict.BIN" > "$OUT/Compat.log" 2>&1 || { cat "$OUT/Compat.log"; echo "FAIL --compat" >&2; exit 1; }
+grep -q 'Errs:0 ' "$OUT/Compat.log" || { echo "FAIL --compat" >&2; exit 1; }
+gtimeout 60 build/coolc --vet $T/Legacy.HC > "$OUT/LegacyVet.log" 2>&1
+findings "$OUT/LegacyVet.log" > "$OUT/Legacy.actual"
+grep '^Vet:' "$OUT/LegacyVet.log" >> "$OUT/Legacy.actual"
+compare Legacy "$OUT/Legacy.actual"

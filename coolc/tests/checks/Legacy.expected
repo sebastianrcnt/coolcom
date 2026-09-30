@@ -1,0 +1,13 @@
+vet: [strict] Unused local variable 'forgotten' in fun 'Unused'
+  Legacy.HC,4
+vet: [strict] A string literal is compared by address (use StrCmp)
+  Legacy.HC,11
+vet: [strict] Integer constant compared with a pointer (cast it)
+  Legacy.HC,12
+vet: [strict] Print: the format takes 2 argument(s) but 1 given
+  Legacy.HC,13
+vet: [strict] Function 'Declared': argument 2 'b' is I64 here but U8i* in the declaration (declared at Legacy.HC,15)
+  Legacy.HC,17
+vet: [strict] Function 'NoReturn' should return a value
+  Legacy.HC,20
+Vet: assign-cond=0 empty-stmt=0 unreachable=0 unused-arg=0 unneeded-no-warn=0 dup-type=0 unused-extern=0 u0-ptr=0 arg-name=0 strict=6 Errs:0
