@@ -547,3 +547,8 @@ expanded generator suite pass. The real renderer executable also passes the
 `otool -L build/coolvm` confirms the default binary has no vendored dependency.
 Detailed local logs: `build/venus-final-test.log`, `build/venus-final-host-test.log`,
 `build/venus-final-gen-test.log`, `build/venus-real-build-stub.log`.
+
+## Milestone 3 work (2026-09-30)
+
+Merged current main (`bbe3b78`, fast-forward) before terminal work.
+Baseline `make -j test` passed without downloads.
