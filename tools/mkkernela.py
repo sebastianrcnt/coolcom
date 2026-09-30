@@ -2,9 +2,10 @@
 """Make os/Kernel/KernelA.coolh, the kernel's TempleOS header, from the compiler's
 copy coolc/Frontend/KernelA.coolh (Aiwnios Src/KernelA.HH, e155e87).
 
-Kept: #defines, unions, classes and the `extern` forward declarations (a
-kernel definition may differ from its TempleOS prototype; an extern nothing
-defines fails at link time only if it is used).
+Kept: #defines, unions, classes and the `extern` declarations. Where the kernel's
+function differs from its TempleOS prototype, KERNEL_DECLS gives the kernel's signature
+instead (the compiler makes a definition that disagrees with its declaration an error;
+an extern nothing defines fails at link time only if it is used).
 Dropped: `import`s (Aiwnios host functions, which don't exist here) and the
 classes the kernel lays out itself (CTask, CCPU, its heap), plus CSysFixedArea
 which embeds them. Kernel-specific additions go in KERNEL_TAIL.
@@ -25,7 +26,45 @@ HEAD = """\
 // domain). No imports; the kernel owns CCPU and its
 // heap (MultiCore.cool, Mem.cool). Do not edit; edit the script.
 extern class CMemBlk;
+extern class CBinMod;
+#define TASK_STACK_SIZE (128*1024) // Sched.cool; Spawn's default
+#define BACKTRACE_MAX 16 // KDbg.cool; CallerRep's default
 """
+
+# The kernel's own signatures of functions whose TempleOS prototype in KernelA.coolh it does not
+# follow (its Cmp, GetKey, BlkRead, ...): they replace the extern declarations, so that a
+# definition disagreeing with its declaration is an error. Copied from the definitions.
+KERNEL_DECLS = {
+    "MemSet": "extern U8 *MemSet(U8 *dst, I64 val, I64 cnt);",
+    "StrLen": "extern I64 StrLen(U8 *s);",
+    "StrPrintFunSeg": "extern U8 *StrPrintFunSeg(U8 *buf, I64 addr, I64 field_len = 0, I64 flags = 0);",
+    "Spawn": "extern CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NULL, I64 target_cpu = -1, CTask *parent = NULL, I64 stk_size = TASK_STACK_SIZE);",
+    "DocPrint": "extern U0 DocPrint(CDoc *doc, U8 *fmt, ...);",
+    "GetKey": "extern I64 GetKey(Bool echo = FALSE);",
+    "GetChar": "extern I64 GetChar(I64 *_ev = NULL, Bool echo = TRUE);",
+    "GetStr": "extern U8 *GetStr(U8 *buf, I64 size, Bool echo = TRUE);",
+    "BlkRead": "extern I64 BlkRead(I64 dev, I64 lba, I64 cnt, U8 *buf);",
+    "BlkWrite": "extern I64 BlkWrite(I64 dev, I64 lba, I64 cnt, U8 *buf);",
+    "FileNameAbs": "extern U8 *FileNameAbs(U8 *_filename);",
+    "DirCur": "extern U8 *DirCur();",
+    "DskCacheHash": "extern CCacheBlk *DskCacheHash(I64 blk);",
+    "DrvFATBlkSet": "extern Bool DrvFATBlkSet(CDrv *dv, I64 c, I64 fat_sel = 3);",
+    "FAT32Init": "extern Bool FAT32Init(CDrv *dv);",
+    "FATFromName": "extern Bool FATFromName(U8 *dst, U8 *src, I64 nt_res = 0);",
+    "FAT32DirFill": "extern Bool FAT32DirFill(CFAT32DirEntry *de, CDirEntry *tmpde, I64 *_de_cnt, CDate _local_time_offset, U8 *short_name = NULL);",
+    "DirFilesSort": "extern U0 DirFilesSort(CDirEntry **_tmpde);",
+    "DirFilesFlatten": "extern CDirEntry **DirFilesFlatten(CDirEntry *tmpde, CDirEntry **_res, I64 fuf_flags);",
+    "FileFind": "extern Bool FileFind(U8 *filename, CDirEntry *_de = NULL, I64 fuf_flags = 0);",
+    "Dir": "extern I64 Dir(U8 *files_find_mask = \"*\", Bool full = FALSE);",
+    "Type": "extern U0 Type(U8 *filename, I64 trailing_new_lines = 1);",
+    "Cmp": "extern I64 Cmp(U8 *src, U8 *bin = NULL);",
+    "ExeFile": "extern I64 ExeFile(U8 *name);",
+    "Load": "extern CBinMod *Load(U8 *filename);",
+    "DisasOpc": "extern U8 *DisasOpc(CDoc *doc, U32 *ptr);",
+    "TaskCaller": "extern U8 *TaskCaller(CTask *task = NULL, I64 num = 0);",
+    "CallerRep": "extern U0 CallerRep(U8 **x29 = NULL, CTask *task = NULL, I64 max = BACKTRACE_MAX);",
+    "KMain": "extern U0 KMain(U8 *image_end, U8 *dt);",
+}
 
 KERNEL_TAIL = """
 // ---- coolcom kernel additions ----
@@ -61,6 +100,12 @@ def main():
     out = [ln.replace("I64 user_data, user_data2, is_single_step;",
                       "I64 user_data, user_data2, is_single_step;\n    U8 *stack_alloc, *stack_guard, *stack_end;") for ln in out]
     out = [re.sub(r"(#define CDIR_FILENAME_LEN)\s+38.*", r"\1 766 //255 UTF-16 units as UTF-8, plus terminator", ln) for ln in out]
+    text = "\n".join(out)
+    for name, decl in KERNEL_DECLS.items():
+        text, n = re.subn(r"^[ \t]*(?:public\s+)?extern\b[^;{}]*?[\s*]" + name + r"\s*\([^;{}]*;", lambda m: decl, text, flags=re.M)
+        if not n:
+            sys.exit("mkkernela: no extern declaration of " + name + " to replace")
+    out = text.split("\n")
     text = re.sub(r"\n\n\n+", "\n\n", HEAD + "\n".join(out) + KERNEL_TAIL)  # (as hcfmt does)
     text = text.replace("I64 user_data, user_data2, is_single_step;", "I64 user_data, user_data2, is_single_step;\n    U8 *terminal, *shell_ctx, *key_history, *bin_module;")
     sys.stdout.buffer.write(text.encode("latin-1"))

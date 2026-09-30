@@ -5,8 +5,6 @@
 // at the saved {x29, x30} pair of the caller. Backtraces print with RawPrint
 // (no heap), so a fault handler can use them.
 
-#define BACKTRACE_MAX 16
-
 Bool ChkOnStk(U8 *ptr, CTask *task = NULL)
 {//Is ptr on task's stack? (A core's first task runs on the boot stack.)
     if (!task)

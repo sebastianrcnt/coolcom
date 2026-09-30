@@ -16,4 +16,14 @@ vet: [unreachable] unreachable code after return, break or goto
   Vet.cool,42
 vet: [unreachable] unreachable code after return, break or goto
   Vet.cool,46
-Vet: assign-cond=2 empty-stmt=3 unreachable=4 Errs:0
+vet: [u0-ptr] use "U8 *" instead of "U0 *"
+  Vet.cool,65
+vet: [unused-arg] argument 'unused_arg' of fun 'Others' is never used
+  Vet.cool,65
+vet: [unused-arg] argument 'p' of fun 'Others' is never used
+  Vet.cool,65
+vet: [unneeded-no-warn] no_warn on 'x' in fun 'Others', which is used
+  Vet.cool,65
+vet: [arg-name] Function 'Renamed': argument 1 is named 'b' here but 'a' in the declaration (declared at Vet.cool,71)
+  Vet.cool,73
+Vet: assign-cond=2 empty-stmt=3 unreachable=4 unused-arg=2 unneeded-no-warn=1 dup-type=0 unused-extern=0 u0-ptr=1 arg-name=1 Errs:0

@@ -107,32 +107,6 @@ U0 LexPutMsg(U8 *str, Bool err)
     Free(m);
 }
 
-U0 LexWarn(CCmpCtrl *cc, U8 *str = NULL)
-{//Print warn msg, then, $LK,"LexPutPos",A="MN:LexPutPos"$().
-    U8 *s, *ptr;
-    if (str) {
-        if (IsRaw)
-            LexPutMsg(str, FALSE);
-        else
-            PrintWarn(str);
-    }
-    if (cc->htc.fun) {
-        "in fun '%s' at ", cc->htc.fun->str;
-        if (IsRaw) {
-            if (!MemCmp(s = cc->htc.fun->src_link, "FL:", 3))
-                StrCpy(s, s + 3);
-            if (ptr = StrLastOcc(s, ","))
-                *ptr = 0;
-            "%s\n", cc->htc.fun->src_link;
-        } else {
-            "$$LK,\"%s\"$$\n", cc->htc.fun->src_link;
-            //AdamErr("%s\n",cc->htc.fun->src_link); TODO RESTORE
-        }
-    } else
-        LexPutPos(cc);
-    cc->warning_cnt++;
-}
-
 U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL)
 {//Print err msg, $LK,"LexPutPos",A="MN:LexPutPos"$() and throw exception.
     if (str) {
@@ -162,43 +136,62 @@ U0 LexError(CCmpCtrl *cc, U8 *str)
     cc->error_cnt++;
 }
 
-I64 vet_cnt[3];
+U0 LexErrorAt(CCmpCtrl *cc, U8 *str, U8 *pos)
+{//As LexError for a problem not at the current token (found after the token moved on, maybe out
+    //of an #included file): pos is "file,line".
+    if (!(cc->flags & CCF_AOT_COMPILE))
+        LexExcept(cc, str);
+    if (IsRaw)
+        LexPutMsg(str, TRUE);
+    else
+        PrintErr(str);
+    Print("  %s\n", pos);
+    cc->error_cnt++;
+}
+
+I64 vet_cnt[VET_CHECKS];
 
 U8 *VetName(I64 check)
 {
     switch (check) {
         case VET_ASSIGN_COND: return "assign-cond";
         case VET_EMPTY_STMT: return "empty-stmt";
+        case VET_UNREACHABLE: return "unreachable";
+        case VET_UNUSED_ARG: return "unused-arg";
+        case VET_NO_WARN: return "unneeded-no-warn";
+        case VET_DUP_TYPE: return "dup-type";
+        case VET_UNUSED_EXTERN: return "unused-extern";
+        case VET_U0_PTR: return "u0-ptr";
     }
-    return "unreachable";
+    return "arg-name";
 }
 
-U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str)
-{//A style finding of Vet (off unless OPTf_VET is set): print it, count it, go on.
+U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str, U8 *pos = NULL)
+{//A style finding of Vet (off unless OPTf_VET is set): print it, count it, go on. pos is
+    //"file,line" when the finding is not at the current token.
+    U8 *m;
+    I64 n;
     if (!Bt(&cc->opts, OPTf_VET))
         return;
     vet_cnt[check]++;
-    Print("vet: [%s] %s\n", VetName(check), str);
-    LexPutPos(cc);
+    m = StrNew(str);
+    n = StrLen(m);
+    while (n > 0 && m[n - 1] == CH_SPACE)
+        m[--n] = 0;
+    if (n >= 3 && !StrCmp(m + n - 3, " at"))
+        m[n - 3] = 0;
+    Print("vet: [%s] %s\n", VetName(check), m);
+    Free(m);
+    if (pos)
+        Print("  %s\n", pos);
+    else
+        LexPutPos(cc);
 }
 
 U0 UndefinedExtern()
 {
     PrintErr("Undefined Extern at %P\n", Caller);
     throw('UndefExt');
-}
-
-U0 UnusedExternWarning(CCmpCtrl *cc, CHashClass *tmpc)
-{
-    //PrintWarn("Unused extern '%s'\n",tmpc->str); Nroot doesnt like this
-    cc->warning_cnt++;
-}
-
-U0 ParenWarning(CCmpCtrl *cc)
-{
-    if (Bt(&cc->opts, OPTf_WARN_PAREN) &&
-            !(cc->lex_include_stk->flags & LFSF_DEFINE))
-        LexWarn(cc, "Unnecessary parenthesis ");
 }
 
 U0 ICClassPut(CHashClass *c)

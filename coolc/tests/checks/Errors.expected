@@ -32,5 +32,27 @@ ERROR: Integer constant compared with a pointer (cast it)
   Errors.cool,29
 ERROR: Unused local variable 'forgotten' in fun 'UnusedLocal'
   Errors.cool,31
+ERROR: Print: the format takes 2 argument(s) but 1 given
+  Errors.cool,38
+ERROR: Print: argument 1 is an F64 but the format wants an integer or string
+  Errors.cool,39
+ERROR: Print: argument 1 is an integer but the format wants an F64
+  Errors.cool,40
+ERROR: Function 'Declared': argument 2 'b' is I64 here but U8i* in the declaration (declared at Errors.cool,42)
+  Errors.cool,44
+ERROR: Function 'DeclaredU0' returns I64 but U0 in its declaration (Errors.cool,47)
+  Errors.cool,49
+ERROR: Function 'DeclaredDefault': argument 1 'a' has a different default value than in the declaration (declared at Errors.cool,52)
+  Errors.cool,54
+ERROR: Function returns U0 but this returns a value
+  Errors.cool,59
+ERROR: Function 'NoReturn' should return a value
+  Errors.cool,61
+ERROR: Function should return a value
+  Errors.cool,67
+ERROR: Function 'EmptyReturn' should return a value
+  Errors.cool,65
+ERROR: Function 'NoReturnInIncluded' should return a value
+  ErrorsInc.cool,2
 ERROR: Duplicate case value 1
-  Errors.cool,42
+  Errors.cool,76

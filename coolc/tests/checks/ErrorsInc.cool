@@ -1,0 +1,5 @@
+// Included by Errors.cool: an error found after the last token of this file is reported here, not at the includer.
+I64 NoReturnInIncluded()
+{
+    Print("x\n");
+}

@@ -1,4 +1,7 @@
 // Translated from Aiwnios Src/AIWNIOS_CodeGen.HC (nrootconauto, BSD-3), commit e155e87.
+// With the Cool backend linked in (BACKEND_NATIVE) its own declarations in BackendA.coolh and
+// IRBind.cool are the ones: these untyped copies would disagree with them.
+#ifndef BACKEND_NATIVE
 extern U0 __HC_CmpCtrl_SetAOT(U8 *);
 extern U8 *__HC_ICAdd_RelocUnique(U8 *, U8 *, U64 *, U8 *, I64, I64);
 // NATIVE: declarations also needed when the backend is linked as HolyC.
@@ -10,8 +13,11 @@ extern U8 *__HC_ICAdd_Lock(U8 *);
 extern U0 __HC_ICSetLock(U8 *);
 extern U8 *__HC_ICAdd_ToBool(U8 *);
 extern U8 *__HC_ICAdd_Vargs(U8 *, I64);
+#endif
 #ifdef COOLC_FRONTEND_FIXES
+#ifndef BACKEND_NATIVE
 extern U8 *__HC_ICAdd_ClassEq(U8 *, I64);
+#endif
 // FIX(5): Reserve an IR flag for aggregate address operands.
 #define ICF_NATIVE_CLASS_ADDR 0x200000000
 #endif
@@ -20,6 +26,7 @@ extern U8 *__HC_ICAdd_ClassEq(U8 *, I64);
 //  you write a backend,HolyC will use it too,that way you dont have to re-port
 //  your backend again when you port to another arch
 //
+#ifndef BACKEND_NATIVE
 #ifdef IMPORT_AIWNIOS_SYMS
 import U0 __HC_SetAOTRelocBeforeRIP(U8 *, I64); //See aiwn.h(TAKES number of bytes before current RIP the symbol is located at)
 import U8 *__HC_CmpCtrlDel(U8 *);
@@ -225,6 +232,7 @@ extern U8 *__HC_ICAdd_LBTR(U8 *);
 extern U8 *__HC_ICAdd_LBTS(U8 *);
 extern U8 *__HC_ICAdd_Fs(U8 *);
 extern U8 *__HC_ICAdd_Gs(U8 *)
+#endif
 #endif
         //
         // See arm_backend.c
@@ -1336,7 +1344,7 @@ next_ic:
 // FIX(native): A process-local static counter acquired a stage-zero JIT address.
 I64 native_static_cnt;
 #endif
-U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info, Bool byte_code = FALSE) {
+U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info = NULL, Bool byte_code = FALSE) {
     CRPN *head = &cc->coc.coc_head, *cur, *new;
     CCodeMisc *misc, **table;
     CMemberLst *mlst, *mlst2;
@@ -1701,7 +1709,11 @@ found_offset:;;
         if (cur->type == IC_ASSIGN && cur->t.arg1_class &&
                 !cur->t.arg1_class->ptr_stars_cnt &&
                 cur->t.arg1_class->type & HTT_CLASS &&
-                cur->t.arg1_class->size > 8) {
+                cur->t.arg1_class->size > 8 &&
+                // Aiwnios stores a scalar into a class-typed local (CTask *a, b; b = Fs;): only a
+                // class value on the right is copied whole.
+                cur->t.arg2_class && !cur->t.arg2_class->ptr_stars_cnt &&
+                cur->t.arg2_class->type & HTT_CLASS && cur->t.arg2_class->size > 8) {
             cur->length = cur->t.arg1_class->size;
             cur->t.arg1_tree->ic_flags |= ICF_NATIVE_CLASS_ADDR;
             cur->t.arg2_tree->ic_flags |= ICF_NATIVE_CLASS_ADDR;

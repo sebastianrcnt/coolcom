@@ -1,0 +1,7 @@
+class Pair {I64i x; I64i y;};
+I64i ClassScalarStore() {
+    Pair a;
+    a.x = 1; a.y = 5;
+    a = 7;
+    return a.x * 10 + a.y;
+}

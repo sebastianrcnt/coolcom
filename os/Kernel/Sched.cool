@@ -6,7 +6,6 @@ extern U0 VtTaskGone(CTask *t);
 // Tasks are TempleOS CTasks (KernelA.coolh): next_task/last_task link this core's
 // ring, gs is the core, stk..stack_end the usable stack, and
 // context_save_area[0] the stack pointer saved while switched out.
-#define TASK_STACK_SIZE (128*1024)
 
 // Tickless idle: a core whose tasks all sleep does not tick. IdleWait (the idle loops and
 // Yield's "nothing ready" wait) sets its timer for the nearest wake_jiffy (or console

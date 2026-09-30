@@ -381,7 +381,7 @@ pt_start:
     if (tmpc2->ptr_stars_cnt) {
         tmpc2 -= tmpc2->ptr_stars_cnt;
         if (tmpc2->type & HTT_INTERNAL_TYPE && !tmpc2->size)
-            LexWarn(cc, "use \"U8 *\" instead of \"U0 *\" at ");
+            LexVet(cc, VET_U0_PTR, "use \"U8 *\" instead of \"U0 *\"");
     }
 
     if (_mode) *_mode = mode;
