@@ -255,7 +255,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
+test: gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -316,5 +316,10 @@ warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool build/war
 SCROLL_TEST_SIZES := --size 1024x768 --size 3200x2000 --size 1031x775 --size 1024x775
 .PHONY: scroll-test
 scroll-test: build/kernel.Image coolvm
-	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-fb-scroll --expect-scanout 0
-	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --expect-scanout 1 --compare scroll-test-ref
+	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
+	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
+
+.PHONY: gpu-pixel-test
+gpu-pixel-test: build/kernel.Image coolvm
+	python3 tools/scroll-bench.py gpu-pixel-ref $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-gpu --expect-gpu 0
+	python3 tools/scroll-bench.py gpu-pixel $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --expect-gpu 1 --compare gpu-pixel-ref

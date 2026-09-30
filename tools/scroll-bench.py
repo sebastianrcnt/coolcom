@@ -20,6 +20,7 @@ p.add_argument('image')
 p.add_argument('--vm', default='build/coolvm')
 p.add_argument('--size', action='append', help='WIDTHxHEIGHT; repeat to override default resolutions')
 p.add_argument('--lines', type=int, default=3000)
+p.add_argument('--expect-gpu', type=int, choices=[0, 1])
 p.add_argument('--expect-scanout', type=int, choices=[0, 1])
 p.add_argument('--repeat', type=int, default=3)
 p.add_argument('--extra', action='append', default=[])
@@ -57,6 +58,8 @@ for width, height in sizes:
         probe = ''
         if a.expect_scanout is not None:
             probe = vim.typed('Print("SCAN%d %d\\n",1,fb.scanout!=NULL);\n') + 'wait SCAN1 \n'
+        if a.expect_gpu is not None:
+            probe += vim.typed('Print("GPU%d %d\\n",1,fb.gpu);\n') + 'wait GPU1 \n'
         script = (vim.BOOT + probe + vim.typed(forced+'\n') + 'wait MEASURE1 \n' +
                   vim.typed(burst+'\n') + 'wait BURST1 \n' + vim.typed(pixels+'\n') +
                   f'wait pixel {height//16*3+6:04d}\ndelay 200\nquit\n')
@@ -92,6 +95,9 @@ for width, height in sizes:
             scan = re.search(r'SCAN1 ([01])', log)
             expected = a.expect_scanout if width % 8 == 0 and height % 16 == 0 else 0
             assert scan and int(scan[1]) == expected, f'wrong FDT capability selection: {d}'
+        if a.expect_gpu is not None:
+            mode = re.search(r'GPU1 ([01])', log)
+            assert mode and int(mode[1]) == a.expect_gpu, f'wrong GPU selection: {d}'
         if a.compare:
             vs = importlib.util.spec_from_file_location('verify', ROOT / 'tools/kernel-verify.py')
             verify = importlib.util.module_from_spec(vs)

@@ -129,6 +129,7 @@ int main(int argc, char **argv)
     const char *input_script = NULL;
     const char *disk_paths[MAX_DISKS];
     int ndisks = 0;
+    g.gpu = true;
     g.fb_scroll = true;
     g.fb_width = 1024; g.fb_height = 768;
     bool verbose = false;

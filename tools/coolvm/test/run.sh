@@ -38,7 +38,7 @@ expect_rc() { # actual expected what
 
 # ---- 1. positive test: everything the emulated M1 subset offers ----
 set +e
-gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --headless --cpus 2 --timeout "$TIMEOUT" "$@" "$OUT/guest.Image" </dev/null >"$OUT/out.txt" 2>"$OUT/err.txt"
+gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --no-gpu --headless --cpus 2 --timeout "$TIMEOUT" "$@" "$OUT/guest.Image" </dev/null >"$OUT/out.txt" 2>"$OUT/err.txt"
 RC=$?
 set -e
 cat "$OUT/out.txt"
@@ -65,25 +65,25 @@ done
 
 # A missed quiescent interval must not permanently mask the virtual timer.
 set +e
-gtimeout -k 2 8 "$COOLVM" --headless --cpus 1 --timeout 5 "$OUT/timer-rearm.Image" >"$OUT/out_timer_rearm.txt" 2>"$OUT/err_timer_rearm.txt"
+gtimeout -k 2 8 "$COOLVM" --no-gpu --headless --cpus 1 --timeout 5 "$OUT/timer-rearm.Image" >"$OUT/out_timer_rearm.txt" 2>"$OUT/err_timer_rearm.txt"
 RC=$?
 set -e
 expect_rc "$RC" 0 "timer-rearm.Image"
 expect "$OUT/out_timer_rearm.txt" "^timer rearm PASS"
 
 # ---- 2. UART RX from host stdin ----
-printf 'Q' | gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --headless --cpus 2 --timeout "$TIMEOUT" "$OUT/guest.Image" >"$OUT/out_rx.txt" 2>/dev/null || true
+printf 'Q' | gtimeout -k 2 "$((TIMEOUT + 5))" "$COOLVM" --no-gpu --headless --cpus 2 --timeout "$TIMEOUT" "$OUT/guest.Image" >"$OUT/out_rx.txt" 2>/dev/null || true
 expect "$OUT/out_rx.txt" "^uart rx: Q"
 
 # ---- 3. negative: unknown MMIO is fatal, --lenient makes it RAZ ----
 set +e
-gtimeout -k 2 15 "$COOLVM" --headless --timeout 10 "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_fault.txt"
+gtimeout -k 2 15 "$COOLVM" --no-gpu --headless --timeout 10 "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_fault.txt"
 RC=$?
 set -e
 expect_rc $RC 1 "fault.Image (default)"
 expect "$OUT/err_fault.txt" "unhandled MMIO read of 4 bytes at 0x235300000"
 set +e
-gtimeout -k 2 15 "$COOLVM" --headless --timeout 10 --lenient "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_lenient.txt"
+gtimeout -k 2 15 "$COOLVM" --no-gpu --headless --timeout 10 --lenient "$OUT/fault.Image" </dev/null >/dev/null 2>"$OUT/err_lenient.txt"
 RC=$?
 set -e
 expect_rc $RC 0 "fault.Image --lenient"
@@ -91,7 +91,7 @@ expect "$OUT/err_lenient.txt" "unknown MMIO read32 at 0x235300000"
 
 # ---- 4. negative: --strict turns an unknown sysreg into a fatal error ----
 set +e
-gtimeout -k 2 15 "$COOLVM" --headless --timeout 10 --strict "$OUT/guest.Image" </dev/null >/dev/null 2>"$OUT/err_strict.txt"
+gtimeout -k 2 15 "$COOLVM" --no-gpu --headless --timeout 10 --strict "$OUT/guest.Image" </dev/null >/dev/null 2>"$OUT/err_strict.txt"
 RC=$?
 set -e
 expect_rc $RC 1 "guest.Image --strict"
@@ -108,7 +108,7 @@ out = Path(sys.argv[1])
 (out / "second-disk.img").write_bytes(b"WXYZ" + bytes(4092))
 PY
     set +e
-    gtimeout -k 2 15 "$COOLVM" --headless --cpus 1 --timeout 10 --width 64 --height 32 \
+    gtimeout -k 2 15 "$COOLVM" --no-gpu --headless --cpus 1 --timeout 10 --width 64 --height 32 \
         --input-script "$OUT/input.txt" --disk "$OUT/device-disk.img" --disk "$OUT/second-disk.img" \
         --dump-dtb "$OUT/devices.dtb" --screenshot "$OUT/screen.png" \
         "$OUT/devices.Image" </dev/null >"$OUT/out_devices.txt" 2>"$OUT/err_devices.txt"

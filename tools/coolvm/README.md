@@ -314,7 +314,7 @@ are recorded in `os/Kernel/M1.md`.
 
 ### Virtio GPU 2D
 
-`--gpu` exposes a modern virtio-mmio device (ID 16) at `0x1ff030000`, IRQ 713;
+`--gpu` (the default) exposes a modern virtio-mmio device (ID 16) at `0x1ff030000`, IRQ 713;
 `--no-gpu` omits it. Its split-ring descriptor and guest-memory helpers are shared
 with block/network devices (`src/virtio.h`). The control queue implements display
 info, BGRA/BGRX 2D resources, scatter backing attach/detach, unref, transfer, crop
