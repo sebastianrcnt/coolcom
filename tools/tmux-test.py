@@ -114,25 +114,36 @@ def exit_panes(kernel):
     subprocess.run(['newfs_msdos', '-F', '32', '-S', '512', '-c', '1', '-s', '81920',
                     '-h', '16', '-u', '63', '-v', 'TMUXEXIT', str(disk)], check=True, capture_output=True)
     subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
-    # Closing the last pane returns to the invoking compiler, preserving its definitions.
-    script = vim.BOOT + line('I64 Keep=41;') + line('Tmux;') + 'delay 2500\n'
-    script += line('exit') + 'delay 500\n'
+    # Probe each new shell before sending its next operation. Markers must
+    # differ from their command echo and from earlier compositor repaints.
+    def ready(n):
+        return line(f'Print("READY%d\\n", {n});') + vim.wait(f'READY{n}')
+
+    def full_row(marker):
+        # A split pane is at most 40 columns wide. Only a repaint after its
+        # sibling closes can emit this marker plus 40 contiguous spaces.
+        return vim.wait(marker + ' ' * 40)
+
+    restored = vim.wait('\x1b[?1049l')  # Tmux restored the invoking terminal.
+    single_window = vim.wait(' tmux [1*]  ^B')  # no background window remains
+    script = vim.BOOT + line('I64 Keep=41;') + line('Tmux;') + ready(1)
+    script += line('exit') + restored
     script += line('Print("BACK%d-%d\\n", Keep, tm_session==NULL);') + vim.wait('BACK41-1')
-    # Exit() in the right pane expands the left pane back to the full terminal width.
-    script += line('Tmux;') + 'delay 2500\n' + prefix('%') + 'delay 2500\n'
-    script += line('Exit();') + 'delay 500\n'
+    # Exit() in the right pane expands the left pane to the full terminal width.
+    script += line('Tmux;') + ready(2) + prefix('%') + ready(3)
+    script += line('Exit();') + full_row('READY2')
     script += line('Print("LEFT%d-%d\\n", 2, VtCurrent->cols);') + vim.wait('LEFT2-80')
     # Closing the selected window focuses the surviving window.
-    script += prefix('c') + 'delay 2500\n' + line('exit') + 'delay 500\n'
+    script += prefix('c') + ready(4) + line('exit') + single_window
     script += line('Print("WIN%d\\n", 3);') + vim.wait('WIN3')
-    # A background window and then an inactive pane can end while another has focus.
-    script += prefix('c') + 'delay 2500\n'
-    script += line('Sleep(1000); Exit();') + prefix('n') + 'delay 1500\n'
+    # Wait inside the guest for focus to move away before exiting. A timed
+    # Sleep can finish before the host's next key events under parallel load.
+    background_exit = line('while(vt_focus==VtCurrent) Yield; Exit();')
+    script += prefix('c') + ready(5) + background_exit + prefix('n') + single_window
     script += line('Print("HIDDEN%d\\n", 4);') + vim.wait('HIDDEN4')
-    script += prefix('%') + 'delay 2500\n'
-    script += line('Sleep(1000); Exit();') + prefix('o') + 'delay 1500\n'
+    script += prefix('%') + ready(6) + background_exit + prefix('o') + full_row('HIDDEN4')
     script += line('Print("INACTIVE%d-%d\\n", 5, VtCurrent->cols);') + vim.wait('INACTIVE5-80')
-    script += line('Exit();') + 'delay 500\n'
+    script += line('Exit();') + restored
     script += line('Print("\\x1b[2J\\x1b[HBACK%d-%d\\n", Keep+1, tm_session==NULL);')
     script += vim.finish('BACK42-1', 300)
     (d / 'input.txt').write_text(script)
