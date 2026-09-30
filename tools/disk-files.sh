@@ -13,7 +13,8 @@ FLAG=-o
 [ "${2:-}" = "-n" ] && FLAG=-n
 cd "$ROOT"
 for d in Kernel coolc coolc/Runtime coolc/Fmt; do
-    mmd -i "$IMG" ::$d 2>/dev/null || true
+    # mmd asks on the terminal when the directory exists, so only make missing ones.
+    mdir -i "$IMG" ::$d >/dev/null 2>&1 || mmd -i "$IMG" ::$d </dev/null
 done
 # put DIR SRC...: copy each file into ::DIR; with -n, leave existing files alone.
 # (mcopy -n / -D s exit non-zero when they skip a file, so check first.)
