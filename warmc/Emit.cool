@@ -256,7 +256,11 @@ U8 *WGExpand(CWUnit *u, U8 *text, CWNode *values)
     if (!b->data) return "";
     return b->data;
 }
-U8 *WGKernelFormat(CWUnit *u, U8 *fmt)
+// A C printf format that both Prints accept: a native program's Print is C's printf, the
+// kernel's is Cool's (coolc checks its formats, and there %z takes two arguments). Every
+// integer conversion becomes %ld, %lu or %lx (64 bits in C; l is ignored by Cool), whatever
+// its length modifier (%zu, %lld, %hd), %i becomes %d, and %f gets C's six digits.
+U8 *WGPrintFormat(CWUnit *u, U8 *fmt)
 {
     CWBuffer *out = WAlloc(u, sizeof(CWBuffer)); I64 i = 0; U8 ch[2]; ch[1] = 0;
     Bool precision;
@@ -267,9 +271,10 @@ U8 *WGKernelFormat(CWUnit *u, U8 *fmt)
             if (fmt[i] == '%') {WGPut(u, out, "%"); i++;}
             else {
                 while (fmt[i] && !WAlpha(fmt[i])) {if (fmt[i] == '.') precision = TRUE; ch[0] = fmt[i++]; WGPut(u, out, ch);}
-                while (fmt[i] == 'l' || fmt[i] == 'z' || fmt[i] == 'h') i++;
+                while (fmt[i] == 'l' || fmt[i] == 'z' || fmt[i] == 'h' || fmt[i] == 'j' || fmt[i] == 't' || fmt[i] == 'L' || fmt[i] == 'q') i++;
                 ch[0] = fmt[i]; if (fmt[i]) i++;
                 if (ch[0] == 'i') ch[0] = 'd';
+                if (ch[0] == 'd' || ch[0] == 'u' || ch[0] == 'x' || ch[0] == 'X' || ch[0] == 'o') WGPut(u, out, "l");
                 if (ch[0] == 'f' && !precision) WGPut(u, out, ".6");
                 WGPut(u, out, ch);
             }
@@ -320,7 +325,7 @@ U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
         i = 11;
         while (s[i] && s[i] != '"') {if (s[i] == 92 && s[i + 1]) i++; i++;}
         if (s[i] != '"') {WFail(u, n->token, "Unsupported Feature", "Malformed printf embed"); return "0";}
-        fmt = WText(u, s + 10, (i - 10) + 1); if (!g->native) fmt = WGKernelFormat(u, fmt); tail = s + i + 1;
+        fmt = WText(u, s + 10, (i - 10) + 1); fmt = WGPrintFormat(u, fmt); tail = s + i + 1;
         // Only comma-separated placeholders are accepted after the literal format.
         CWBuffer *expected = WAlloc(u, sizeof(CWBuffer)); j = 1;
         for (bound = args; bound; bound = bound->next) {WGPut(u, expected, ", $"); WGPut(u, expected, WGDec(u, j++));}

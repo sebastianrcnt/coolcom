@@ -95,7 +95,9 @@ classes, so `sizeof` and pointer strides follow that layout. The internal ABI pa
 aggregate arguments by pointer, copies them into callee locals and returns aggregates
 through an output pointer; it is private to the module, not C ABI compatible. Allocation
 calls `CAlloc`, `Free` and `MemCpy`; realloc uses a private size header. Output calls
-`Print`. Abort writes to stderr through `NativeErrPutS` and calls `NativeExit`;
+`Print`. C printf formats in `@embed` are rewritten into ones both Prints read (C's printf
+natively, Cool's in the kernel): every integer conversion becomes `%ld`, `%lu` or `%lx`, whatever
+its length modifier (`%zu`, `%lld`), and `%i` becomes `%d`. Abort writes to stderr through `NativeErrPutS` and calls `NativeExit`;
 `NativeArgCount`/`NativeArg` supply the arguments (argument zero is the BIN path). Inside
 the kernel shell (`WARM_KERNEL`, set by the kernel adapter) they are console output and an
 empty list. Integer narrowing uses masks and explicit sign extension, and checked
