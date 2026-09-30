@@ -76,8 +76,8 @@ What `Gpu.cool` gains, per the virtio-gpu spec:
 - **Capsets:** `GET_CAPSET_INFO` and `GET_CAPSET` for capset 4 (Venus). The capset carries
   the protocol version and the renderer's supported extensions, which the generated layer
   checks.
-- **Contexts:** `CTX_CREATE` with the context-init flag naming the Venus capset and the
-  number of rings (fence timelines). Also `CTX_ATTACH_RESOURCE`, `CTX_DETACH_RESOURCE` and
+- **Contexts:** `CTX_CREATE` with the context-init flag naming the Venus capset;
+  fence timelines are renderer/Vulkan queue state. Also `CTX_ATTACH_RESOURCE`, `CTX_DETACH_RESOURCE` and
   `CTX_DESTROY`.
 - **Blob resources:** `RESOURCE_CREATE_BLOB`, with `BLOB_MEM_GUEST` (guest pages, for the
   ring and reply buffers) or `BLOB_MEM_HOST3D` (host Vulkan memory, for mapped buffers and
@@ -104,21 +104,21 @@ which stays in the kernel.
 
 ## 3. The host side
 
-**coolvm on the Mac.** coolvm links virglrenderer built with Venus, and virglrenderer uses
-MoltenVK through the Vulkan loader.
+**coolvm on the Mac.** coolvm optionally links virglrenderer built with Venus. The pinned krunkit fork
+links MoltenVK directly; a Vulkan loader belongs to the generic upstream route.
 
 - **virtio-gpu gains the 3D path** (`gpu.c`, or a new `gpu3d.c`, about 800 lines):
   - The capset queries and context commands, forwarded to virglrenderer
     (`virgl_renderer_context_create_with_flags`, `virgl_renderer_submit_cmd`,
-    `virgl_renderer_resource_create_blob`, `virgl_renderer_resource_map`).
+    `virgl_renderer_resource_create_blob`, `virgl_renderer_resource_get_map_ptr`).
   - Fence callbacks (`write_context_fence`) that complete the queued requests.
-  - The shared memory window: `virgl_renderer_resource_map` returns a host pointer to the
-    blob's memory (MoltenVK maps an `MTLBuffer`), which coolvm maps into the guest-physical
+  - The shared memory window: `virgl_renderer_resource_get_map_ptr` in the pinned krunkit fork returns a
+    host pointer to the blob's memory (`vkMapMemory` on MoltenVK), which coolvm maps into the guest-physical
     window with `hv_vm_map`. This is how libkrun/krunkit do it on macOS.
   - `SET_SCANOUT_BLOB`: the display reads the scanout blob's pixels for the window and for
     screenshots, as it reads a 2D resource now.
 - **Build.** virglrenderer (MIT) with `-Dvenus=true`, MoltenVK (Apache-2.0), the Vulkan
-  loader and headers (Apache-2.0), and venus-protocol (MIT, only for the generator). All
+  loader and headers (Apache-2.0), and venus-protocol (MIT, for generation and the host spike). All
   are compatible with the repository. Options for getting them:
   - (a) `tools/vendor-venus.sh`, like `vendor-m1n1.sh`: fetch pinned releases into
     `vendor/`, build virglrenderer with meson and ninja, and take MoltenVK from Homebrew
@@ -138,9 +138,9 @@ MoltenVK through the Vulkan loader.
   Vulkan driver.
 
 **QEMU on Linux hosts.** QEMU (9.2 or later, with virglrenderer 1.0 or later) offers Venus
-with `-device virtio-gpu-gl-pci,hostmem=...,blob=true,venus=true`. The documented PCI route uses a host-memory region. A virtio-pci transport on
-arm64 `-M virt` (PCIe
-ECAM from the FDT) would also serve the x86-64 plan ([x86-64.md](x86-64.md)).
+with `-device virtio-gpu-gl-pci,hostmem=...,blob=true,venus=true`. The documented
+PCI route uses a host-memory region. A virtio-pci transport on arm64 `-M virt`
+(PCIe ECAM from the FDT) would also serve the x86-64 plan ([x86-64.md](x86-64.md)).
 
 Can this be tested from this Mac?
 - QEMU on macOS with Venus: not with stock builds, and it would test MoltenVK again rather
@@ -216,8 +216,8 @@ practical, and (c) keeps the rule that everything in the OS can be rebuilt in th
 | 4 | Logos retired | remove the Logos commands, `logos.m` and `Logos.cool`; the terminal uses Vulkan when Venus is there, else the CPU renderer | `make -j test`, `qemu-test`, `venus-test`, `venus-term-test` | about -700 lines |
 
 Milestone 1 is the big one. The riskiest parts are the shared-memory mapping between
-virglrenderer, MoltenVK and `hv_vm_map`, and the virglrenderer build on macOS. Both are
-worth a spike before the generator: a C test program in coolvm that creates a Venus context
+virglrenderer, MoltenVK and `hv_vm_map`, and the virglrenderer build on macOS. Both were
+tested in the host spike recorded below: a C test program in coolvm that creates a Venus context
 and maps one blob.
 
 ## Decisions for you
@@ -279,7 +279,8 @@ build database. The script supports rerunning from its cached sources.
 ### Step 2: guestless C mapping spike
 
 Run `make venus-host-test` after vendoring (Mako 1.3.10 and MarkupSafe 3.0.3
-are installed only in `vendor/venus/python` for the upstream C wire generator).
+are also checksummed source downloads, used without installation for the upstream
+C wire generator).
 The test builds/codesigns `build/venus-spike/spike`, creates an HV VM with **no
 vCPU or guest**, and performs real Venus calls using generated upstream codecs:
 
@@ -325,3 +326,61 @@ require a Venus-enabled virglrenderer >=1.0.0 and show
 is not established and must not be treated as a requirement. The generic Linux
 external-memory requirements do not describe the krunkit macOS pointer patch.
 No QEMU/Linux/lavapipe runtime result is claimed by this host spike.
+
+### Step 3: optional coolvm virtio-gpu transport
+
+Build with `COOLVM_VENUS=1 make coolvm`, or preserve the default executable with
+`COOLVM_VENUS=1 tools/coolvm/build.sh build/coolvm-venus`. Default `make coolvm`
+links no vendored libraries, even when the sources are present. Vendoring is never
+triggered by `make test`. Missing libraries produce an explicit error only when
+the optional build is requested; renderer initialization failure falls back to 2D.
+
+`gpu3d.c` now implements:
+
+- Negotiated VIRGL / RESOURCE_BLOB / CONTEXT_INIT features, Venus capset 4
+  discovery and capset contents, context create/destroy, blob attach/detach.
+  **Correction:** the virtio `context_init` field names the capset (4); it does
+  not encode a number of rings.
+- Bounded SUBMIT_3D (up to 65,504 payload bytes), forwarded in dwords. A flagged
+  submission waits for `write_context_fence` on the requested timeline before
+  returning its fence; CPU timeline 0 is exercised. Missing timelines and failed
+  submissions return an error without claiming fence completion. Waiting is
+  synchronous under the device lock, with a five-second limit; deferred virtqueue
+  completion and GPU timeline stress testing remain future work.
+- Mappable GUEST blobs from checked DRAM scatter lists and HOST3D blobs using
+  the macOS pointer API. HOST3D maps/unmaps into shared-memory region **1** (`VIRTIO_GPU_SHM_ID_HOST_VISIBLE`),
+  advertised by MMIO SHMSel/SHMLen/SHMBase, at `0xa00000000`, size **256 MiB**.
+  This does not overlap coolvm's DRAM or framebuffer.
+- 16 KiB allocation/mapping alignment, aperture range and overlap checks, a
+  256 MiB blob budget, 64 blob slots and 16 contexts, and a shared resource-id
+  namespace with the existing 2D path. Only blob_mem GUEST/HOST3D and the
+  MAPPABLE flag are accepted for now; shareable/cross-device and HOST3D_GUEST
+  resources are rejected. HOST3D resources stay attached to their owner; context
+  destruction requires releasing owned blobs first.
+- Unmapping before resource unref, GPU reset and VM destruction; renderer
+  teardown stops context/ring work before freeing guest iovec storage. The
+  guest must also unmap/unref a Vulkan blob before `vkFreeMemory`.
+
+`make venus-host-test` now additionally drives actual MMIO split queues through
+`gpu.c` and the real renderer, with no vCPU: capsets, context lifecycle, a fenced
+Venus reply (`vkEnumerateInstanceVersion`), blob creation/attachment/mapping,
+invalid headers/ids, unshareable attachment, wrapping/out-of-range/overlapping
+mappings, repeated unmap, and reset cleanup. **PASS**. The guestless Vulkan
+allocation spike also remains **PASS**. Mako (MIT) and MarkupSafe (BSD-3-Clause)
+are now pinned/checksummed source dependencies for generating these test codecs.
+
+Validation: **`make -j test` exited 0**, and the optional `build/coolvm-venus`
+passed `tools/coolvm/test/run.sh` (existing assembly guests, devices, GPU 2D
+queues and scanout). A default executable builds and `otool -L` confirms it has
+no virglrenderer/MoltenVK dependency.
+
+Remaining host milestone work: SET_SCANOUT_BLOB/presentation and triangle pixel
+validation, real guest shared-memory access/coherence, shared-ring operation and
+GPU timeline concurrency. No guest Venus transport, generator in Cool, or Vulkan
+triangle app was added in this host-first work. The existing 2D/Logos path stays
+available.
+
+The transport layout was checked against the [Linux v6.12 virtio-gpu ABI](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/virtio_gpu.h)
+and [MMIO register definitions](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/virtio_mmio.h):
+the header's `ring_idx` byte is at offset 20, and the host-visible region selector
+is 1 (0 is undefined). These values are exercised by the host transport tests.

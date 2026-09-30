@@ -3,6 +3,7 @@
  * See ../README.md for the design, the emulated address map and deviations.
  */
 #include "coolvm.h"
+#include "gpu3d.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -408,6 +409,7 @@ int main(int argc, char **argv)
         if (atomic_load(&g.exit_code) == 0) atomic_store(&g.exit_code, 1);
     }
     for (int i = 0; i < g.ndisks; i++) close(g.disk_fd[i]);
+    gpu3d_cleanup();
     hv_vm_destroy();
     fflush(stdout);
     if (atomic_load(&g.reset)) {
