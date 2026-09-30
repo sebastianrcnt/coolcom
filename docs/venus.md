@@ -778,3 +778,12 @@ terminal regression immediately paints and powers off without a script delay;
 its shutdown screenshot must preserve the painted pixels. Final counters also
 show actual submitted/completed frames and command recordings, rather than
 pretending each forced producer hook completed a GPU frame.
+
+The final guest-side scroll optimization keeps `fb.drawn` in the same physical-row
+ring as the mapped cell grid. Scrolling invalidates only recycled rows instead
+of moving the full comparison cache. The kernel's CPU renderer keeps its
+existing logical cache; this change applies only while the Venus hook owns it.
+The five screens, resize, cell-edit/no-op counters, shell lifecycle and immediate
+shutdown tests passed again (`build/venus-ring-term-test.log`). Row/byte counters
+count canonical cell edits; copies into immutable submitted slot snapshots are
+separate writes, not included in those counters.

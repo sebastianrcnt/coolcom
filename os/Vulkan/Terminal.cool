@@ -271,14 +271,19 @@ U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
     if (all || scrolled >= fb.rows) MemSet(fb.drawn, 0xFF, fb.rows * fb.cols * sizeof(CVtCell));
     else if (scrolled) {
         vterm.first = (vterm.first + scrolled) % vterm.rows;
-        MemCpy(fb.drawn, fb.drawn + scrolled * fb.cols, (fb.rows - scrolled) * fb.cols * sizeof(CVtCell));
-        MemSet(fb.drawn + (fb.rows - scrolled) * fb.cols, 0xFF, scrolled * fb.cols * sizeof(CVtCell));
+        // The comparison cache uses the same physical-row ring as the GPU.
+        // Only recycled rows become unknown; scrolling does not move the cache.
+        for (y = fb.rows - scrolled; y < fb.rows; y++) {
+            physical = (y + vterm.first) % fb.rows;
+            MemSet(fb.drawn + physical * fb.cols, 0xFF, fb.cols * sizeof(CVtCell));
+        }
         if (vterm.overlay_used) for (y = fb.rows - scrolled; y < fb.rows; y++) VenusOverlayClear(y);
     }
     for (y = 0; y < fb.rows; y++) if (fb.snap_row[y]) {
-            fb.snap_row[y] = 0; s = fb.snap + y * fb.cols; d = fb.drawn + y * fb.cols;
+            fb.snap_row[y] = 0; physical = (y + vterm.first) % fb.rows;
+            s = fb.snap + y * fb.cols; d = fb.drawn + physical * fb.cols;
             if (!VenusRowSame(s, d, fb.cols)) {
-                MemCpy(d, s, fb.cols * sizeof(CVtCell)); physical = (y + vterm.first) % vterm.rows;
+                MemCpy(d, s, fb.cols * sizeof(CVtCell));
                 VenusRow(s, (vterm.cells.mapping)(CVenusCell *) + physical * fb.cols, fb.cols);
                 vterm.slot[0].dirty_rows[physical] = vterm.slot[1].dirty_rows[physical] = 1;
                 if (vterm.overlay_used) VenusOverlayClear(y);
