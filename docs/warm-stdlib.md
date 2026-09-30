@@ -289,3 +289,15 @@ a `Datagram` with the sender and source port, including empty datagrams.
 `listenPort`/`udpPort` report dynamically assigned ports. Host sockets use
 nonblocking descriptors with polling; the kernel keeps its existing network
 stack and translates its errors. The kernel UDP payload limit is 1486 bytes.
+
+Stage 4: `OS.Task` moves one typed argument to a named function and returns an
+owned `Task[R]`. Intrinsic structural `Sendable` excludes root capabilities,
+non-static borrows and raw pointers; audited owning Buffer/Box storage remains
+transferable. `join` returns the result or `Aborted`/`Killed`; detach requires
+a Free result. Task abort affects that task only. macOS uses pthreads; CoolOS
+uses kernel tasks and a completion hook for Kill. `spawnOn` is supported on
+CoolOS; macOS returns Other for explicit core affinity. Allocation/startup
+failure and abnormal termination cannot destruct arbitrary moved linear values
+without a destructor protocol: their nested owned resources may leak.
+`OS.Time` exposes UTC calendar conversion and wall/monotonic clocks; `OS.Random`
+is an explicitly seeded, non-cryptographic xorshift64 generator.

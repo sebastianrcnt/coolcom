@@ -318,3 +318,10 @@ Whole-file reads own a detached snapshot; release it exactly once using
 Warm validates required typeclass methods, duplicate methods, and instance method
 signatures. It also corrects the built-in `Printable` instances, fixes Buffer growth after
 `realloc`, and checks `Index` and `ByteSize` literals against the host `size_t` width.
+
+`OS.Task` provides `spawn`/`spawnOn`, `join`, `detach`, `sleep` and `yield`.
+A worker is a named `Fn[T,R]`; arguments and results must satisfy intrinsic
+`Sendable`. RootCapability, non-static borrows and raw pointers cannot cross
+the task boundary. `detach` requires a Free result. `join` reports child abort
+and external kill as `Aborted` and `Killed`. `OS.Time` provides UTC time and
+monotonic milliseconds; `OS.Random.seeded` creates a deterministic xorshift64 RNG.

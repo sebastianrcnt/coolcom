@@ -1,0 +1,89 @@
+import OS.Task (Tasks, Task, TaskError, Aborted, Killed, acquireTasks, releaseTasks, spawn, join, detach, sleep, yield);
+import OS.Error (IoError);
+import OS.Dir (Dir, openRoot, closeDir);
+import OS.File (Filesystem, acquireFilesystem, releaseFilesystem);
+import OS.Time (DateTime, fromUnix, unixNow, monotonicMs);
+import OS.Random (Rng, seeded, next);
+import Standard.String (String, fromLiteral, destroyString, length);
+module body Tasks is
+    private record OwnedJob: Linear is text: String; value: Nat64; end;
+    private function owned(job: OwnedJob): String is let { text: String, value: Nat64 } := job; return text; end;
+    private function expect(ok: Bool): Unit is if not ok then abort("Task assertion failed"); end if; return nil; end;
+    private function increment(n: Nat64): Nat64 is return n + 1; end;
+    private function broken(n: Nat64): Nat64 is abort("child abort marker"); end;
+    private function directory(dir: Dir): Dir is return dir; end;
+    private function exercise(tasks: &![Tasks], number: Nat64): Unit is
+        let result: Result[Task[Nat64], IoError] := spawn(&~tasks, increment, number);
+        case result of
+            when Err(error as e: IoError) do abort("Spawn failed");
+            when Ok(value as task: Task[Nat64]) do
+                case join(task) of
+                    when Ok(value as n: Nat64) do expect(n = number + 1);
+                    when Err(error as e: TaskError) do abort("Join failed");
+                end case;
+        end case;
+        return nil; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var tasks: Tasks := acquireTasks(&!root);
+        var fs: Filesystem := acquireFilesystem(&!root);
+        let dir: Dir := openRoot(&!fs);
+        releaseFilesystem(fs);
+        let moved: Result[Task[Dir], IoError] := spawn(&!tasks, directory, dir);
+        case moved of
+            when Err(error as e: IoError) do abort("Owned spawn failed");
+            when Ok(value as task: Task[Dir]) do
+                case join(task) of
+                    when Ok(value as returned: Dir) do closeDir(returned);
+                    when Err(error as e: TaskError) do abort("Owned join failed");
+                end case;
+        end case;
+        let ownedTask: Result[Task[String], IoError] := spawn(&!tasks, owned, OwnedJob(text => fromLiteral("owned"), value => 42));
+        exercise(&!tasks, 99);
+        case ownedTask of
+            when Err(error as e: IoError) do abort("String task spawn failed");
+            when Ok(value as task: Task[String]) do
+                case join(task) of
+                    when Ok(value as text: String) do expect(length(&text) = 5); destroyString(text);
+                    when Err(error as e: TaskError) do abort("String task join failed");
+                end case;
+        end case;
+        for i from 0 to 15 do exercise(&!tasks, widenToNat64(i)); end for;
+        let failed: Result[Task[Nat64], IoError] := spawn(&!tasks, broken, 0: Nat64);
+        case failed of
+            when Err(error as e: IoError) do abort("Failure worker spawn failed");
+            when Ok(value as task: Task[Nat64]) do
+                case join(task) of
+                    when Ok(value as n: Nat64) do abort("Abort worker succeeded");
+                    when Err(error as e: TaskError) do
+                        case e of
+                            when Aborted(message as text: Span[Nat8, Static]) do expect(spanLength(text) = 18);
+                            when Killed do abort("Abort reported as killed");
+                        end case;
+                end case;
+        end case;
+        -- Both sides of the completion/detach race must release their jobs exactly once.
+        for i from 0 to 31 do
+            let detached: Result[Task[Nat64], IoError] := spawn(&!tasks, increment, 1: Nat64);
+            case detached of
+                when Err(error as e: IoError) do abort("Detach worker spawn failed");
+                when Ok(value as task: Task[Nat64]) do detach(task);
+            end case;
+        end for;
+        let before: Int64 := monotonicMs();
+        sleep(&tasks, 5); yield(&tasks);
+        expect(monotonicMs() >= before + 5);
+        expect(unixNow() > 0);
+        let epoch: DateTime := fromUnix(0);
+        expect(epoch.year = 1970 and epoch.month = 1 and epoch.day = 1);
+        let previous: DateTime := fromUnix(-1);
+        expect(previous.year = 1969 and previous.second = 59);
+        let leap: DateTime := fromUnix(951782400);
+        expect(leap.year = 2000 and leap.month = 2 and leap.day = 29);
+        var a: Rng := seeded(1); var b: Rng := seeded(1);
+        expect(next(&!a) = 1082269761);
+        expect(next(&!b) = 1082269761);
+        for i from 0 to 7 do expect(next(&!a) = next(&!b)); end for;
+        releaseTasks(tasks); surrenderRoot(root);
+        printLn("WARM TASKS PASS"); return ExitSuccess(); end;
+end module body.

@@ -43,7 +43,11 @@ I32 fputc(I32 c, U8 *stream) {
 I32 fgetc(U8 *stream) {return NativeGetChar();}  // the next input byte, or -1 at the end of input
 U32 au_rand_seed;
 U0 srand(U32 seed) {au_rand_seed = seed;}  // C's, for foreign imports; there is no rand
+#ifndef WARM_KERNEL
+extern I64 WtAbort(U8 *message);
+#endif
 U0 wh_abort(U8 *message) {
+    WtAbort(message);
     NativeErrPutS(message);
     NativeErrPutS("\n");
     NativeExit(255);

@@ -1,0 +1,14 @@
+module body OS.Random is
+    record Rng: Free is state: Nat64; end;
+    function seeded(seed: Nat64): Rng is
+        if seed = 0 then return Rng(state => 88172645463325252); end if;
+        return Rng(state => seed); end;
+    -- xorshift64, deterministic and noncryptographic. Zero seeds use a fixed nonzero state.
+    function next(rng: &![Rng]): Nat64 is
+        var x: Nat64 := rng->state;
+        x := x ^ (x << 13);
+        x := x ^ (x >> 7);
+        x := x ^ (x << 17);
+        rng->state := x;
+        return x; end;
+end module body.

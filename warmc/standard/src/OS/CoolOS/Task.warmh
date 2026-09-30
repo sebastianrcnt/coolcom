@@ -1,7 +1,6 @@
-import OS.Raw (Tasks);
+import OS.Task (Tasks);
+import OS.Error (IoError);
 module OS.CoolOS.Task is
-    generic [R: Region]
-    function taskReport(cap: &![Tasks, R]): Int64;
-    generic [R: Region]
-    function isSilent(cap: &![Tasks, R]): Int64;
+    function taskReport(cap: &[Tasks]): Result[Unit, IoError];
+    function isSilent(cap: &[Tasks]): Result[Bool, IoError];
 end module.

@@ -347,6 +347,7 @@ static HostDirEntry *host_dir_list(const char *path, int64_t *error) {
 }
 
 #include "warm_net.h"
+#include "warm_task.h"
 
 static void register_host_symbols(Module *m) {
 #define HOST(name, fn) add_symbol(m, name, (uintptr_t)(fn))
@@ -412,6 +413,18 @@ static void register_host_symbols(Module *m) {
     HOST("NativeNetSourcePort", warm_net_source_port);
     HOST("NativeNetPort", warm_net_port);
     HOST("NativeNetClose", warm_net_close);
+    HOST("NativeTaskSpawn", warm_task_spawn);
+    HOST("NativeTaskWait", warm_task_wait);
+    HOST("NativeTaskResult", warm_task_result);
+    HOST("NativeTaskMessage", warm_task_message);
+    HOST("NativeTaskRelease", warm_task_release);
+    HOST("NativeTaskDetach", warm_task_detach);
+    HOST("NativeTaskAbort", warm_task_abort);
+    HOST("NativeUnixNow", warm_unix_now);
+    HOST("NativeMonotonicMs", warm_monotonic_ms);
+    HOST("NativeSleep", warm_sleep);
+    HOST("NativeYield", warm_yield);
+
 
     HOST("NativeFileDelete", host_file_delete);
     HOST("NativeFileMkdir", host_file_mkdir);

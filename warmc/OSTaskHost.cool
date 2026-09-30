@@ -1,0 +1,23 @@
+import I64 NativeTaskSpawn(U8 *entry, U8 *data, U8 *result, I64 core);
+import I64 NativeTaskWait(I64 handle);
+import U8 *NativeTaskResult(I64 handle);
+import U8 *NativeTaskMessage(I64 handle);
+import U0 NativeTaskRelease(I64 handle);
+import U0 NativeTaskDetach(I64 handle);
+import I64 NativeTaskAbort(U8 *message);
+import I64 NativeUnixNow();
+import I64 NativeMonotonicMs();
+import I64 NativeSleep(I64 ms);
+import I64 NativeYield();
+I64 WtSpawn(U8 *entry, U8 *data, U8 *result, I64 core) {return NativeTaskSpawn(entry, data, result, core);}
+I64 WtWait(I64 handle) {return NativeTaskWait(handle);}
+U8 *WtResult(I64 handle) {return NativeTaskResult(handle);}
+U8 *WtMessage(I64 handle) {return NativeTaskMessage(handle);}
+I64 WtMessageLength(I64 handle) {return StrLen(WtMessage(handle));}
+U0 WtRelease(I64 handle) {NativeTaskRelease(handle);}
+U0 WtDetach(I64 handle) {NativeTaskDetach(handle);}
+I64 WtAbort(U8 *message) {return NativeTaskAbort(message);}
+I64 WtUnixNow() {return NativeUnixNow();}
+I64 WtMonotonicMs() {return NativeMonotonicMs();}
+I64 WtSleep(I64 ms) {return NativeSleep(ms);}
+I64 WtYield() {return NativeYield();}

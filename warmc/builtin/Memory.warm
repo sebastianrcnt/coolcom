@@ -146,4 +146,8 @@ module body Austral.Memory is
     function spanWriteToPointer(sp: Span![T, R]): Pointer[T] is
         return @embed(Pointer[T], "($1).data", sp);
     end;
+    generic [F: Free]
+    function codeAddress(functionValue: F): Address[Nat8] is
+        return @embed(Address[Nat8], "$1", functionValue);
+    end;
 end module body.

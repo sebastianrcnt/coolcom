@@ -9,7 +9,7 @@ all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
 native-host: build/coolc
-build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/except.S | build
+build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/warm_task.h coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $(filter %.c %.S,$^) -o $@
 
 native-kernel: build/Kernel.BIN
@@ -152,7 +152,7 @@ build/disk.img: | build
 WARMSRC := $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
 build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
 	./warmc/build.sh
-build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool warmc/OSNetCommon.cool warmc/OSNetKernel.cool
+build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool warmc/OSNetCommon.cool warmc/OSNetKernel.cool warmc/OSTaskKernel.cool
 	python3 warmc/package_kernel.py
 
 # The network stack's packet parser (docs/networking.md), compiled to os/Kernel/NetParse.cool.
@@ -178,6 +178,7 @@ warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 	python3 warmc/test_cli.py
 	python3 warmc/test_standard.py
 	python3 warmc/test_os.py
+	python3 warmc/test_tasks.py
 	python3 warmc/test_fmt.py
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN

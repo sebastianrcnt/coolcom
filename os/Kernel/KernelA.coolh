@@ -3310,6 +3310,8 @@ public class CTask //The Fs segment reg points to current CTask.
     I64 user_data, user_data2, is_single_step;
     U8 *terminal, *shell_ctx, *key_history, *bin_module;
     U8 *stack_alloc, *stack_guard, *stack_end;
+    U0 (*exit_hook)(U8 *payload);
+    U8 *exit_data;
 };
 
 class CTSS
@@ -5543,7 +5545,7 @@ extern Bool Suspend(CTask *task = NULL, Bool state = TRUE);
 extern Bool IsSuspended(CTask *task = NULL);
 extern I64 TaskInit(CTask *task, I64 stk_size);
 extern U0 CallPooPoo();
-extern CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NULL, I64 target_cpu = -1, CTask *parent = NULL, I64 stk_size = TASK_STACK_SIZE);
+extern CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NULL, I64 target_cpu = -1, CTask *parent = NULL, I64 stk_size = TASK_STACK_SIZE, U0 (*exit_hook)(U8 *payload) = NULL, U8 *exit_data = NULL);
 extern U0 TaskDerivedValsUpdate(CTask *task = NULL, Bool update_z_buf = TRUE);
 extern I64 ExeCmdLine(CCmpCtrl *cc);
 extern U0 SrvTaskCont();

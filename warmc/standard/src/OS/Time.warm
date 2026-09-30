@@ -1,0 +1,34 @@
+module body OS.Time is
+    record Duration: Free is milliseconds: Int64; end;
+    record DateTime: Free is year: Int64; month: Nat8; day: Nat8; hour: Nat8; minute: Nat8; second: Nat8; end;
+    pragma Foreign_Import(External_Name => "WtUnixNow");
+    private function rawUnixNow(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WtMonotonicMs");
+    private function rawMonotonicMs(): Int64 is end;
+    function unixNow(): Int64 is return rawUnixNow(); end;
+    function monotonicMs(): Int64 is return rawMonotonicMs(); end;
+    private function byte(value: Int64): Nat8 is
+        case toNat8(value) of when Some(value as b: Nat8) do return b; when None do abort("Invalid calendar field"); end case; end;
+    -- Proleptic Gregorian calendar, UTC, with Euclidean days for dates before 1970.
+    function fromUnix(seconds: Int64): DateTime is
+        var days: Int64 := seconds / 86400;
+        var within: Int64 := seconds - days * 86400;
+        if within < 0 then days := days - 1; within := within + 86400; end if;
+        let z: Int64 := days + 719468;
+        var era: Int64 := z / 146097;
+        if z < 0 then era := (z - 146096) / 146097; end if;
+        let doe: Int64 := z - era * 146097;
+        let yoe: Int64 := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        var year: Int64 := yoe + era * 400;
+        let doy: Int64 := doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp: Int64 := (5 * doy + 2) / 153;
+        let day: Int64 := doy - (153 * mp + 2) / 5 + 1;
+        var month: Int64 := mp + 3;
+        if mp >= 10 then month := mp - 9; end if;
+        if month <= 2 then year := year + 1; end if;
+        let hour: Int64 := within / 3600;
+        let minute: Int64 := (within - hour * 3600) / 60;
+        let second: Int64 := within - hour * 3600 - minute * 60;
+        return DateTime(year => year, month => byte(month), day => byte(day), hour => byte(hour), minute => byte(minute), second => byte(second)); end;
+    function now(): DateTime is return fromUnix(unixNow()); end;
+end module body.

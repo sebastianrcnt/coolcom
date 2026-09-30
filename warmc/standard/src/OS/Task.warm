@@ -1,0 +1,94 @@
+pragma Unsafe_Module;
+import Austral.Memory (Address, Pointer, allocate, nullCheck, load, store, deallocate, pointerCast, codeAddress);
+import OS.Error (IoError, fromCode, status);
+module body OS.Task is
+    record Tasks: Linear is end;
+    record Task[R: Type(Sendable)]: Linear is handle: Int64; end;
+    private record Job[T: Type, R: Type]: Linear is worker: Fn[T, R]; arg: T; output: Pointer[Option[R]]; end;
+    function acquireTasks(root: &![RootCapability]): Tasks is return Tasks(); end;
+    function releaseTasks(tasks: Tasks): Unit is let {} := tasks; return nil; end;
+    pragma Foreign_Import(External_Name => "WtSpawn");
+    private function rawSpawn(entry: Address[Nat8], job: Pointer[Nat8], output: Pointer[Nat8], core: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WtWait");
+    private function rawWait(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WtResult");
+    private function rawResult(handle: Int64): Address[Nat8] is end;
+    pragma Foreign_Import(External_Name => "WtMessage");
+    private function rawMessage(handle: Int64): Address[Nat8] is end;
+    pragma Foreign_Import(External_Name => "WtMessageLength");
+    private function rawMessageLength(handle: Int64): Index is end;
+    pragma Foreign_Import(External_Name => "WtRelease");
+    private function rawRelease(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WtDetach");
+    private function rawDetach(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WtSleep");
+    private function rawSleep(ms: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WtYield");
+    private function rawYield(): Int64 is end;
+
+    function sleep(tasks: &[Tasks], ms: Int64): Result[Unit, IoError] is return status(rawSleep(ms)); end;
+    function yield(tasks: &[Tasks]): Result[Unit, IoError] is return status(rawYield()); end;
+    generic [T: Type, R: Type]
+    private function trampoline(pointer: Pointer[Job[T, R]]): Unit is
+        let { worker: Fn[T, R], arg: T, output: Pointer[Option[R]] } := load(pointer);
+        deallocate(pointer);
+        let result: R := worker(arg);
+        let finished: Option[R] := Some(value => result);
+        store(output, finished);
+        return nil; end;
+    generic [T: Type(Sendable), R: Type(Sendable)]
+    private function launch(worker: Fn[T, R], arg: T, core: Int64): Result[Task[R], IoError] is
+        let address: Address[Job[T, R]] := allocate();
+        case nullCheck(address) of
+            when None do abort("Task job allocation failed");
+            when Some(value as job: Pointer[Job[T, R]]) do
+                let resultAddress: Address[Option[R]] := allocate();
+                case nullCheck(resultAddress) of
+                    when None do abort("Task result allocation failed");
+                    when Some(value as output: Pointer[Option[R]]) do
+                        let empty: Option[R] := None();
+                        store(output, empty);
+                        let payload: Job[T, R] := Job(worker => worker, arg => arg, output => output);
+                        store(job, payload);
+                        let entry: Fn[Pointer[Job[T, R]], Unit] := trampoline;
+                        let handle: Int64 := rawSpawn(codeAddress(entry), pointerCast(job), pointerCast(output), core);
+                        if handle < 0 then deallocate(job); deallocate(output); return Err(error => fromCode(handle)); end if;
+                        let task: Task[R] := Task(handle => handle);
+                        return Ok(value => task);
+                end case;
+        end case;
+    end;
+    generic [T: Type(Sendable), R: Type(Sendable)]
+    function spawn(tasks: &![Tasks], worker: Fn[T, R], arg: T): Result[Task[R], IoError] is return launch(worker, arg, -1); end;
+    generic [T: Type(Sendable), R: Type(Sendable)]
+    function spawnOn(tasks: &![Tasks], worker: Fn[T, R], arg: T, core: Index): Result[Task[R], IoError] is
+        var target: Int64 := -2;
+        case toInt64(core) of when Some(value as n: Int64) do target := n; when None do skip; end case;
+        return launch(worker, arg, target); end;
+    generic [R: Type(Sendable)]
+    function join(task: Task[R]): Result[R, TaskError] is
+        let { handle: Int64 } := task;
+        let state: Int64 := rawWait(handle);
+        case nullCheck(rawResult(handle)) of
+            when None do abort("Missing task completion slot");
+            when Some(value as pointer: Pointer[Nat8]) do
+                let output: Pointer[Option[R]] := pointerCast(pointer);
+                let result: Option[R] := load(output);
+                if state = 1 then
+                    rawRelease(handle);
+                    case result of when Some(value as value: R) do return Ok(value => value); when None do abort("Task completed without result"); end case;
+                else
+                    case result of
+                        when Some(value as value: R) do
+                            rawRelease(handle); return Ok(value => value);
+                        when None do
+                            if state = 3 then rawRelease(handle); return Err(error => Killed()); end if;
+                            let message: Span[Nat8, Static] := @embed(Span[Nat8, Static], "au_make_span($1, $2)", rawMessage(handle), rawMessageLength(handle));
+                            rawRelease(handle); return Err(error => Aborted(message => message));
+                    end case;
+                end if;
+        end case;
+    end;
+    generic [R: Free(Sendable)]
+    function detach(task: Task[R]): Unit is let { handle: Int64 } := task; rawDetach(handle); return nil; end;
+end module body.
