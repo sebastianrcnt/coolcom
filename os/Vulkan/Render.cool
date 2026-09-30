@@ -1,0 +1,111 @@
+// Vulkan resource helpers shared by the terminal app.
+U32i GfxFloat(I64 value)
+{
+    // Native Cool has binary64 only; construct integral positive binary32 values.
+    I64 n = value, exponent = 0; U64i significand = n;
+    if (!n) return 0;
+    while (significand >= 2) {significand >>= 1; exponent++;}
+    return ((exponent + 127) << 23) | ((n << (23 - exponent)) & 0x7FFFFF);
+}
+U64i GfxShader(U8 *path)
+{
+    I64 size; U8 *code = FileRead(path, &size);
+    U64i shader = GfxId; VkShaderModuleCreateInfo ci;
+    GfxCheck(code && size > 0 && !(size & 3), "SPIR-V file");
+    MemSet(&ci, 0, sizeof(ci)); ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ci.codeSize = size; ci.pCode = code;
+    GfxBegin; vn_encode_vkCreateShaderModule(&gfx.enc, 0, gfx.device, &ci, NULL, &shader); GfxSubmit;
+    GfxResult(vn_decode_vkCreateShaderModule_reply(&gfx.reply, gfx.device, &ci, NULL, &shader), "shader");
+    Free(code); return shader;
+}
+
+class CGfxImage {U64i image, memory, view; I64 w, h, format;};
+U0 GfxImageCreate(CGfxImage *im, I64 w, I64 h, I64 format, I64 usage)
+{
+    VkImageCreateInfo ci; VkImageViewCreateInfo vi; VkMemoryRequirements req;
+    MemSet(im, 0, sizeof(CGfxImage)); im->w = w; im->h = h; im->format = format;
+    MemSet(&ci, 0, sizeof(ci)); ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ci.imageType = VK_IMAGE_TYPE_2D; ci.format = format; ci.extent.width = w; ci.extent.height = h; ci.extent.depth = 1;
+    ci.mipLevels = 1; ci.arrayLayers = 1; ci.samples = VK_SAMPLE_COUNT_1_BIT; ci.usage = usage;
+    im->image = GfxId;
+    GfxBegin; vn_encode_vkCreateImage(&gfx.enc, 0, gfx.device, &ci, NULL, &im->image); GfxSubmit;
+    GfxResult(vn_decode_vkCreateImage_reply(&gfx.reply, gfx.device, &ci, NULL, &im->image), "image");
+    GfxBegin; vn_encode_vkGetImageMemoryRequirements(&gfx.enc, 0, gfx.device, im->image, &req); GfxSubmit;
+    vn_decode_vkGetImageMemoryRequirements_reply(&gfx.reply, gfx.device, im->image, &req); GfxCheck(!gfx.reply.error, "image requirements");
+    im->memory = GfxMemory(&req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    GfxBegin; vn_encode_vkBindImageMemory(&gfx.enc, 0, gfx.device, im->image, im->memory, 0); GfxSubmit;
+    GfxResult(vn_decode_vkBindImageMemory_reply(&gfx.reply, gfx.device, im->image, im->memory, 0), "image bind");
+    MemSet(&vi, 0, sizeof(vi)); vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = im->image; vi.viewType = VK_IMAGE_VIEW_TYPE_2D; vi.format = format;
+    vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; vi.subresourceRange.levelCount = 1; vi.subresourceRange.layerCount = 1;
+    im->view = GfxId;
+    GfxBegin; vn_encode_vkCreateImageView(&gfx.enc, 0, gfx.device, &vi, NULL, &im->view); GfxSubmit;
+    GfxResult(vn_decode_vkCreateImageView_reply(&gfx.reply, gfx.device, &vi, NULL, &im->view), "image view");
+}
+U0 GfxImageDestroy(CGfxImage *im)
+{
+    GfxBegin; vn_encode_vkDestroyImageView(&gfx.enc, 0, gfx.device, im->view, NULL);
+    vn_encode_vkDestroyImage(&gfx.enc, 0, gfx.device, im->image, NULL);
+    vn_encode_vkFreeMemory(&gfx.enc, 0, gfx.device, im->memory, NULL); GfxSubmit;
+}
+U0 GfxImageBarrier(CGfxImage *im, I64 old_layout, I64 new_layout, I64 src_stage, I64 dst_stage, I64 src_access, I64 dst_access)
+{
+    VkImageMemoryBarrier b; MemSet(&b, 0, sizeof(b)); b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b.image = im->image; b.oldLayout = old_layout; b.newLayout = new_layout; b.srcAccessMask = src_access; b.dstAccessMask = dst_access;
+    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; b.subresourceRange.levelCount = 1; b.subresourceRange.layerCount = 1;
+    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &b);
+}
+U0 GfxUpload(CGfxImage *im, CGfxBuffer *staging, I64 bytes, I64 y, I64 h)
+{
+    VkBufferImageCopy copy; MemSet(&copy, 0, sizeof(copy));
+    copy.bufferOffset = y * im->w * bytes; copy.bufferRowLength = im->w;
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; copy.imageSubresource.layerCount = 1;
+    copy.imageOffset.y = y; copy.imageExtent.width = im->w; copy.imageExtent.height = h; copy.imageExtent.depth = 1;
+    vn_encode_vkCmdCopyBufferToImage(&gfx.enc, 0, gfx.cmd, staging->buffer, im->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+}
+U0 GfxPipeline(I64 w, I64 h, U64i set_layout, U64i *shaders, U64i *_layout, U64i *_pipeline)
+{
+    U64i layout = GfxId, pipeline = GfxId; I64 x; I32i format = VK_FORMAT_B8G8R8A8_UNORM;
+    VkPipelineLayoutCreateInfo layout_info; VkGraphicsPipelineCreateInfo pipeline_info;
+    VkPipelineRenderingCreateInfo rendering_pipeline;
+    VkPipelineShaderStageCreateInfo stages[2]; VkPipelineVertexInputStateCreateInfo vertex;
+    VkPipelineInputAssemblyStateCreateInfo assembly; VkPipelineViewportStateCreateInfo viewport_state;
+    VkViewport viewport; VkRect2D scissor; VkPipelineRasterizationStateCreateInfo raster;
+    VkPipelineMultisampleStateCreateInfo multisample; VkPipelineColorBlendAttachmentState blend;
+    VkPipelineColorBlendStateCreateInfo blend_state;
+    MemSet(&layout_info, 0, sizeof(layout_info)); layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkPushConstantRange push; MemSet(&push, 0, sizeof(push)); push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; push.size = 36;
+    layout_info.setLayoutCount = 1; layout_info.pSetLayouts = &set_layout;
+    layout_info.pushConstantRangeCount = 1; layout_info.pPushConstantRanges = &push;
+    GfxBegin; vn_encode_vkCreatePipelineLayout(&gfx.enc, 0, gfx.device, &layout_info, NULL, &layout); GfxSubmit;
+    GfxResult(vn_decode_vkCreatePipelineLayout_reply(&gfx.reply, gfx.device, &layout_info, NULL, &layout), "pipeline layout");
+    MemSet(stages, 0, sizeof(stages));
+    for (x = 0; x < 2; x++) {stages[x].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[x].module = shaders[x]; stages[x].pName = "main";}
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT; stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    MemSet(&vertex, 0, sizeof(vertex)); vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    MemSet(&assembly, 0, sizeof(assembly)); assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    MemSet(&viewport, 0, sizeof(viewport)); viewport.width = GfxFloat(w); viewport.height = GfxFloat(h); viewport.maxDepth = 0x3F800000;
+    MemSet(&scissor, 0, sizeof(scissor)); scissor.extent.width = w; scissor.extent.height = h;
+    MemSet(&viewport_state, 0, sizeof(viewport_state)); viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1; viewport_state.pViewports = &viewport; viewport_state.scissorCount = 1; viewport_state.pScissors = &scissor;
+    MemSet(&raster, 0, sizeof(raster)); raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    raster.lineWidth = 0x3F800000;
+    MemSet(&multisample, 0, sizeof(multisample)); multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MemSet(&blend, 0, sizeof(blend)); blend.colorWriteMask = 15;
+    MemSet(&blend_state, 0, sizeof(blend_state)); blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend_state.attachmentCount = 1; blend_state.pAttachments = &blend;
+    MemSet(&rendering_pipeline, 0, sizeof(rendering_pipeline)); rendering_pipeline.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    rendering_pipeline.colorAttachmentCount = 1; rendering_pipeline.pColorAttachmentFormats = &format;
+    MemSet(&pipeline_info, 0, sizeof(pipeline_info)); pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_info.pNext = &rendering_pipeline; pipeline_info.stageCount = 2; pipeline_info.pStages = stages;
+    pipeline_info.pVertexInputState = &vertex; pipeline_info.pInputAssemblyState = &assembly;
+    pipeline_info.pViewportState = &viewport_state; pipeline_info.pRasterizationState = &raster;
+    pipeline_info.pMultisampleState = &multisample; pipeline_info.pColorBlendState = &blend_state;
+    pipeline_info.layout = layout; pipeline_info.basePipelineIndex = -1;
+    GfxBegin; vn_encode_vkCreateGraphicsPipelines(&gfx.enc, 0, gfx.device, 0, 1, &pipeline_info, NULL, &pipeline); GfxSubmit;
+    GfxResult(vn_decode_vkCreateGraphicsPipelines_reply(&gfx.reply, gfx.device, 0, 1, &pipeline_info, NULL, &pipeline), "graphics pipeline");
+    *_layout = layout; *_pipeline = pipeline;
+}

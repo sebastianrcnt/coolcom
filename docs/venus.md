@@ -552,3 +552,87 @@ Detailed local logs: `build/venus-final-test.log`, `build/venus-final-host-test.
 
 Merged current main (`bbe3b78`, fast-forward) before terminal work.
 Baseline `make -j test` passed without downloads.
+
+
+### Milestone 3: resident Vulkan terminal
+
+`make venus-terminal` builds the generated disk library and the host-glslang
+terminal shaders (SPIR-V Vulkan 1.2). `make venus-disk` installs them on the
+regular disk; `make venus-run` starts the optional Venus coolvm with that disk.
+No vendoring or downloads are implicit in these targets. The kernel starts a
+resident compiler task before `Init.cool` when both Venus and the disk library
+are available. That task owns the compiled app across primary-shell restarts;
+its framebuffer hooks are serialized by `fb.render_lock`. It parks after setup.
+Missing Venus or shader inputs retain Logos, then the CPU renderer; initialization
+exceptions release the lock and partial blob/context resources before fallback.
+
+`os/Vulkan/Terminal.cool` ports the Logos layout directly:
+
+- The 16-byte cells live in a mapped HOST_VISIBLE | HOST_COHERENT storage buffer.
+  The guest writes changed rows directly, without a custom ROWS command or a
+  staging copy of the cell grid. Counters in `fb` measure actual cell bytes/rows.
+- The same Unifont coverage occupies a 4096×2048 **R8 Vulkan atlas image**, with
+  16×16 slots for narrow/wide glyphs, 32,768 slots, no eviction and `?` fallback.
+  New glyphs dirty atlas rows; only those rows are copied from the mapped upload
+  buffer. Unicode slot lookup remains in the guest.
+- Full-screen scroll advances the physical-row ring. The shader indexes cells
+  and overlay rows with that ring; only newly exposed/changed rows are written.
+- The GLSL fragment shader ports Logos's foreground/background, reverse, bold,
+  wide-right-half, underline flag and inverted block cursor. One fullscreen
+  triangle draws the entire grid in one rendering pass; partial-cell margins
+  stay black, with overlay pixels supported there too.
+- `FbFillRect` (including Warm's `OS.CoolOS.Framebuffer`) writes a mapped upload
+  buffer for a **second BGRA Vulkan image**. Changed physical pixel rows upload;
+  the cell shader composites the image and clears row overlays as Logos did.
+- Resize replaces size-dependent cells, overlay, target, readback and pipeline
+  after the last GPU fence, updates descriptors, preserves the atlas and redraws
+  the new terminal grid. No frame races resource destruction.
+
+As in milestone 1, the rendered target is copied to a coherent HOST3D scanout
+buffer. Vulkan barriers and a polled completion fence precede blob presentation.
+A Venus blob scanout takes display priority over the bootstrap Logos grid.
+`Gfx.no_sleep` polls without scheduling while the existing framebuffer/IRQ lock
+is held; no shaders/files are loaded during frames. This is synchronous and
+bounded, with frame latency to improve before a production compositor.
+
+**`make venus-term-test`: PASS.** The five original `logos-test` screens compare
+against the same CPU renderer at the original 0.1% threshold: colors 31 pixels
+(0.0039%), margins 31 (0.0039%), Vim 0, Tmux 0, resize 0. Filled-rectangle probes
+pass exactly. A separate per-screen probe also checks that one changed line
+writes at most two rows, exactly `rows × cols × 16` bytes, and produces one Vulkan
+frame. `make venus-test` and `make venus-memory-test` continue to pass.
+Screenshots/logs live in `build/venus-term-test/<screen>/`.
+
+### Milestone 3 scroll measurements
+
+Apple M6, macOS 27; headless, 3,000 forced-frame lines then 3,000 timer-batched
+lines, averages of three runs at each resolution. CPU, Logos and Venus were run
+sequentially with the same FAT disk/prompt, input and final scroll/fill screen.
+All final scroll/fill screenshots match the CPU **exactly**. These are new
+measurements, separate from the historical M1 figures in `docs/logos.md`.
+
+| Resolution | Backend | Forced render µs/line | 3,000 forced lines ms | Batched lines ms | Whole-run host CPU s |
+|---|---|---:|---:|---:|---:|
+| 1024×768 | CPU (virtio 2D) | 106.7 | 710.5 | 451.1 | 1.67 |
+| 1024×768 | Logos | 45.4 | 530.2 | 417.5 | 1.43 |
+| 1024×768 | Venus | 428.3 | 1673.9 | 434.3 | 3.47 |
+| 3200×2000 | CPU (virtio 2D) | 263.2 | 1232.2 | 640.3 | 2.53 |
+| 3200×2000 | Logos | 135.1 | 852.7 | 500.6 | 1.94 |
+| 3200×2000 | Venus | 1440.7 | 4773.6 | 579.3 | 7.80 |
+
+The forced-frame Venus result includes actual GPU drawing, image-to-buffer copy
+and completion polling for every frame. Headless Logos only updates its cells
+on PRESENT and draws when the screenshot is requested. Thus this is a comparison
+of current end-to-end behavior, not equivalent shader execution timings. Venus
+is slower for forced frames; batching reduces the difference. Future work is
+cached command buffers, asynchronous GPU fences/double buffering and direct
+presentation instead of the full readback copy; these measurements do not claim
+a performance win.
+
+Reproduction before Logos retirement: `tools/scroll-bench.py` labels
+`venus-m3-cpu`, `venus-m3-logos`, `venus-m3-vulkan`, `--repeat 3 --lines 3000
+--size 1024x768 --size 3200x2000 --disk build/venus-test/terminal.img`. CPU adds
+`--extra=--no-logos`; Venus uses `--vm build/coolvm-venus --expect-venus 1`;
+Logos uses the default executable. Use `--compare venus-m3-cpu` for both GPU
+runs. Results are in `build/scroll-bench/venus-m3-*.json`; the prepared test disk
+can also be made with `tools/venus/install.sh` on a formatted FAT32 image.

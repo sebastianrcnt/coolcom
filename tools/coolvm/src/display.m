@@ -4,6 +4,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include "coolvm.h"
 #include "logos.h"
+#include "gpu3d.h"
 #include <math.h>
 
 void fb_snapshot(uint8_t *dst)
@@ -43,7 +44,7 @@ static CGImageRef framebuffer_image(void)
     uint8_t *visible = NULL;
     uint32_t width = g.fb_width, height = g.fb_height;
     bool gpu_image = false;
-    if (g.gpu && logos_active())  /* rendered by Metal (logos.m); takes g.lock itself */
+    if (g.gpu && logos_active() && !gpu3d_scanout_active())  /* rendered by Metal (logos.m); takes g.lock itself */
         gpu_image = logos_snapshot(&visible, &width, &height);
     if (g.gpu && !gpu_image) {
         pthread_mutex_lock(&g.lock);

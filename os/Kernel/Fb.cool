@@ -32,6 +32,7 @@ class CFb
     U8 *scanout;             // optional FDT scanout-y register (pixel rows)
     I64 scan_top;            // offset last committed to the display
     Bool gpu;                // virtio-gpu resource backing, with a mirrored second screen
+    Bool venus;              // resident Vulkan app has installed its render hooks
     Bool logos;              // the GPU draws the cells (Logos.cool): no back buffer, no pixels here
     I64 top;                 // first visible pixel row in the text-area ring
     CVTerm *vt;               // the grid shown (vt_screen)
@@ -48,10 +49,16 @@ class CFb
     Bool cursor_hidden;       // FbCursorHide
     U8 *damage;               // coolvm's damage register, NULL elsewhere
     U32 palette[256];
+    U64i venus_frames, venus_rows, venus_cell_bytes; // actual guest cell writes / draws
     U8 *ascii[128];           // glyphs of ASCII (all one cell wide)
 };
 
 CFb fb;
+// The generated Vulkan layer stays on disk, owned by a resident compiler task.
+U8 *venus_frame_hook;  // U0 (*)(Bool all, I64 scroll, I64 cx, I64 cy, I64 cells)
+U8 *venus_fill_hook;   // U0 (*)(I64 x, I64 y, I64 w, I64 h, I64 rgb)
+U0 FbVenusHooks(U8 *frame, U8 *fill) {venus_frame_hook = frame; venus_fill_hook = fill;}
+I64 venus_console_boot;  // 0 untried, 1 loading, 2 resident or unavailable
 
 extern Bool LogosInit(I64 w, I64 h, I64 cols, I64 rows);
 extern Bool LogosGrid(I64 w, I64 h, I64 cols, I64 rows);
@@ -317,6 +324,12 @@ U0 FbRenderLocked()
     }
     fb.pending = FALSE;
     SpinUnlock(&v->lock);
+    if (fb.venus && venus_frame_hook) {
+        U0 (*frame)(Bool fresh, I64 scroll_rows, I64 col, I64 row, I64 span);
+        frame = venus_frame_hook;
+        (*frame)(all, scrolled, cx, cy, cw / FONT_CELL_W);
+        return;
+    }
     if (fb.logos) {
         LogosFrame(all, scrolled, cx, cy, cw / FONT_CELL_W);
         return;
@@ -529,6 +542,13 @@ U0 FbFillRect(I64 x, I64 y, I64 w, I64 h, I64 color)
         return;
     daif = FbRenderLock;
     FbRenderLocked;
+    if (fb.venus && venus_fill_hook) {
+        U0 (*fill)(I64 rx, I64 ry, I64 rw, I64 rh, I64 rgb);
+        fill = venus_fill_hook;
+        (*fill)(x, y, w, h, color);
+        FbRenderUnlock(daif);
+        return;
+    }
     if (fb.logos) {
         LogosFill(x, y, w, h, color);
         FbRenderUnlock(daif);
@@ -721,7 +741,7 @@ Bool FbResize(I64 w, I64 h)
     I64 daif, n, i, id, old_id;
     U8 *old_back;
     if (!fb.gpu || (w == fb.w && h == fb.h)) return FALSE;
-    if (fb.logos)
+    if (fb.venus || fb.logos)
         return FbResizeLogos(w, h);
     MemSet(&next, 0, sizeof(CFb));
     next.w = w; next.h = h; next.stride = w * 4;

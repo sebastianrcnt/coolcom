@@ -20,6 +20,9 @@ p.add_argument('image')
 p.add_argument('--vm', default='build/coolvm')
 p.add_argument('--size', action='append', help='WIDTHxHEIGHT; repeat to override default resolutions')
 p.add_argument('--lines', type=int, default=3000)
+p.add_argument('--disk', help='disk containing the resident Vulkan terminal app')
+p.add_argument('--expect-venus', type=int, choices=[0,1])
+p.add_argument('--timeout', type=int, default=60)
 p.add_argument('--expect-gpu', type=int, choices=[0, 1])
 p.add_argument('--expect-scanout', type=int, choices=[0, 1])
 p.add_argument('--repeat', type=int, default=3)
@@ -60,6 +63,8 @@ for width, height in sizes:
             probe = vim.typed('Print("SCAN%d %d\\n",1,fb.scanout!=NULL);\n') + 'wait SCAN1 \n'
         if a.expect_gpu is not None:
             probe += vim.typed('Print("GPU%d %d\\n",1,fb.gpu);\n') + 'wait GPU1 \n'
+        if a.expect_venus is not None:
+            probe += vim.typed('Print("VENUS%d %d\\n",1,fb.venus);\n') + 'wait VENUS1 \n'
         script = (vim.BOOT + probe + vim.typed(forced+'\n') + 'wait MEASURE1 \n' +
                   vim.typed(burst+'\n') + 'wait BURST1 \n' + vim.typed(pixels+'\n') +
                   f'wait pixel {height//16*3+6:04d}\ndelay 200\nquit\n')
@@ -67,9 +72,9 @@ for width, height in sizes:
         before = resource.getrusage(resource.RUSAGE_CHILDREN)
         phase_cpu = {}
         with (d/'vm.log').open('wb') as out:
-            proc = subprocess.Popen([a.vm,'--headless','--cpus','2','--mem','1024','--timeout','60',
+            proc = subprocess.Popen([a.vm,'--headless','--cpus','2','--mem','1024','--timeout',str(a.timeout),
                             '--width',str(width),'--height',str(height),'--input-script',str(d/'input.txt'),
-                            '--screenshot',str(d/'screen.png'),*a.extra,a.image],
+                            '--screenshot',str(d/'screen.png'),*(['--disk',a.disk] if a.disk else []),*a.extra,a.image],
                             stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             for raw in proc.stdout:
                 out.write(raw)
@@ -98,6 +103,9 @@ for width, height in sizes:
         if a.expect_gpu is not None:
             mode = re.search(r'GPU1 ([01])', log)
             assert mode and int(mode[1]) == a.expect_gpu, f'wrong GPU selection: {d}'
+        if a.expect_venus is not None:
+            mode = re.search(r'VENUS1 ([01])',log)
+            assert mode and int(mode[1]) == a.expect_venus, f'wrong Vulkan selection: {d}'
         if a.compare:
             vs = importlib.util.spec_from_file_location('verify', ROOT / 'tools/kernel-verify.py')
             verify = importlib.util.module_from_spec(vs)

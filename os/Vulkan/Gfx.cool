@@ -8,11 +8,13 @@ class CGfx
     CGpuBlob *reply_blob;
     U64i instance, physical, device, queue, pool, cmd, fence, next_id;
     U32i family;
+    Bool no_sleep, soft_fail;
     VkPhysicalDeviceMemoryProperties memory;
 };
 CGfx gfx;
 U0 GfxCheck(Bool ok, U8 *label)
 {
+    if (!ok && gfx.soft_fail) throw('Venus');
     if (!ok) {Print("VENUS FAIL %s\n", label); Shutdown;}
 }
 U64i GfxId() {return ++gfx.next_id;}
@@ -162,7 +164,7 @@ U0 GfxExecute()
     while (status == VK_NOT_READY && attempts++ < 10000) {
         GfxBegin; vn_encode_vkGetFenceStatus(&gfx.enc, 0, gfx.device, gfx.fence); GfxSubmit;
         status = vn_decode_vkGetFenceStatus_reply(&gfx.reply, gfx.device, gfx.fence);
-        if (status == VK_NOT_READY) Sleep(1);
+        if (status == VK_NOT_READY && !gfx.no_sleep) Sleep(1);
     }
     GfxResult(status, "GPU fence completion");
     ArchDsb;

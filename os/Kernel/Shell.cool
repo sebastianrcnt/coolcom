@@ -41,7 +41,7 @@ class CShell
     U8 *hash, *lex_stmt2bin, *exe_puts, *hash_add;
     U8 *stmt_cleanup; // UI cleanup belongs to this shell, even while another runs
     I64 fault_ctx[32], line_ctx[32], fault_daif, line_daif;
-    Bool in_stmt, line_active;
+    Bool in_stmt, line_active, resident;
     I64 break_pending; // Ctrl+Alt+C for this line: run no more of it (2: Break printed)
     I64 next_slice;
     U8 line[SHELL_LINE_LEN];
@@ -269,6 +269,7 @@ I64 RtFileWrite(U8 *name, U8 *data, I64 size)
 
 U0 RtExit(I64 status)
 {
+    if (ShellCur && ShellCur->resident) venus_console_boot = 2;
     Print("shell: compiler exited (%d); shell halted\n", status);
     if (!VtCurrent || VtCurrent->direct) shell_state = -1;
     while (TRUE) {  // halted: sleep (breaks and kills still wake it)
@@ -581,6 +582,17 @@ U0 ShellPrompt()
 
 #include "ShellCmd.cool"
 
+U0 VenusConsoleLoad(U8 *data)
+{//A resident task owns the compiled disk library after the primary shell restarts.
+    no_warn data;
+    Fs->parent_task = adam_task;
+    Fs->shell_ctx = CAlloc(sizeof(CShell));
+    ShellCur->resident = TRUE;
+    if (ShellInit) ShellExe("#include \"C:/Vulkan/Terminal.cool\"");
+    venus_console_boot = 2;
+    while (TRUE) {Fs->wake_jiffy = JIFFY_NEVER; Yield;}
+}
+
 U0 ShellTask(U8 *data)
 {//Read, compile and run lines: data of them, or forever if data < 0.
     I64 n = data, cols = 80, rows = 24;
@@ -615,6 +627,11 @@ U0 ShellTask(U8 *data)
         return;
     }
     Print("Cool shell: %d KB compiler loaded\n", ShellCur->cmp->file_size >> 10);
+    if (primary && !venus_console_boot && gpu.venus_features && FileFind("C:/Vulkan/Terminal.cool")) {
+        venus_console_boot = 1;
+        if (!Spawn(&VenusConsoleLoad, NULL, "Vulkan", -1, NULL, SHELL_STACK)) venus_console_boot = 2;
+        while (venus_console_boot == 1) Sleep(1);
+    }
     if (DrvCur && (FileFind("C:/Init.cool") || FileFind("C:/Init.HC"))) {
         init = "C:/Init.cool";  // old disks have C:/Init.HC
         if (!FileFind(init))

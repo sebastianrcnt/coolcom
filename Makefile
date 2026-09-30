@@ -417,3 +417,21 @@ build/venus/triangle.frag.spv: tools/venus/shaders/triangle.frag
 	glslang -V --target-env vulkan1.2 $< -o $@
 venus-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool build/venus/triangle.vert.spv build/venus/triangle.frag.spv
 	python3 tools/venus/run_guest.py --triangle
+
+# Resident terminal library and shaders; explicit opt-in, never downloads.
+.PHONY: venus-terminal venus-term-test
+build/venus/terminal.vert.spv: tools/venus/shaders/terminal.vert
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+build/venus/terminal.frag.spv: tools/venus/shaders/terminal.frag
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+venus-terminal: build/venus/Vulkan.cool build/venus/terminal.vert.spv build/venus/terminal.frag.spv
+venus-term-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal
+	python3 tools/logos-test.py $< --venus
+
+.PHONY: venus-disk venus-run
+venus-disk: disk-install venus-terminal
+	tools/venus/install.sh build/disk.img
+venus-run: build/kernel.Image build/coolvm-venus venus-disk
+	build/coolvm-venus --cpus 2 --mem 1024 --disk build/disk.img $<
