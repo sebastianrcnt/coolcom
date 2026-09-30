@@ -102,7 +102,10 @@ CWNode *WCall(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
     else if (WEq(d->tag, "function") || WEq(d->tag, "method")) result = WChild(d, "result");
     else {
         ty = WDeclType(d);
-        if (!ty || !WEq(ty->name, "Fn")) {WFail(u, n->token, "Type Error", "Value is not callable"); return NULL;}
+        if (!ty) {  // a type, e.g. forging an opaque RootCapability(): no callable by that name
+            WFail(u, n->token, "Generic Error", WConcat(u, "I can't find a callable named ", n->name)); return NULL;
+        }
+        if (!WEq(ty->name, "Fn")) {WFail(u, n->token, "Type Error", "Value is not callable"); return NULL;}
         // Synthesize a signature for a function pointer value.
         params = WNode(u, "function", n->token); params->name = n->name; params->owner = d->owner;
         for (p = ty->first; p; p = p->next) {
