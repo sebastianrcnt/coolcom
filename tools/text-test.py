@@ -55,7 +55,7 @@ def main():
         p = d / name
         p.write_text(text)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
-    script = 'delay 5000\n'
+    script = vim.BOOT
     script += line('Print("\\nSTEP-FIND\\n"); Find("alpha", "*.TXT");')
     script += line('Find("Utf8Width", "C:/Kernel/*");', 1500)
     script += line('Print("\\nSTEP-HEX\\n"); HexDump("C:/A.TXT");')
@@ -73,7 +73,7 @@ def main():
             script += keys(':q\n')
     # Less: paging, search, and (left open for the screenshot) a wide-character line.
     script += line('Print("\\nSTEP-LESS\\n"); Less("C:/L.TXT");', 600)
-    script += keys(' ') + keys('/line 090\n') + keys('g', 600)
+    script += keys(' ') + keys('/line 090\n') + keys('g', 600) + 'quit\n'
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         subprocess.run(['gtimeout', '-k', '2', '90', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',

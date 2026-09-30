@@ -41,6 +41,23 @@ def typed(text):
     return result
 
 
+# Input-script sync (tools/coolvm/README.md): the shell has started (and run C:/Init.HC) and shows its
+# prompt. Waiting for guest output instead of a fixed boot delay keeps the scripts right when
+# the host is loaded (make -j test); QUIT ends the VM instead of idling until --timeout.
+# A wait text must not occur in the echo of the lines typed before it: print numbers with
+# %d (Print("OPEN%d", 2) echoes as OPEN%d but prints OPEN2).
+BOOT = 'wait Cool shell\nwait > \n'
+
+
+def wait(text):
+    return f'wait {text}\n'
+
+
+def finish(text, settle=200):
+    """Wait for text, give the screen settle ms, then stop the VM (the screenshot is saved)."""
+    return wait(text) + f'delay {settle}\nquit\n'
+
+
 def check_init_log(log):
     marker = 'Running C:/Init.HC\n'
     if marker not in log:
@@ -166,8 +183,8 @@ def screen_test(d, disk, kernel):
     source.write_text('I64 count = 42;\n// Cool syntax and Hangul\nU8 *s = "한글";\nif (count) { Print(s); }\n')
     run(['mcopy', '-o', '-i', str(disk), str(source), '::Screen.HC'])
     script = d / 'screen-input.txt'
-    script.write_text('delay 4000\n' + typed('Vim("C:/Screen.HC");\n') +
-                      'delay 300\n' + typed('jj9lv') + 'delay 80\n' + typed('l'))
+    script.write_text(BOOT + typed('Vim("C:/Screen.HC");\n') + wait('NORMAL C:/Screen.HC') +
+                      typed('jj9lv') + wait('VISUAL C:/Screen.HC') + typed('l') + finish('\x1b[3;18H'))
     with (d / 'screen.log').open('wb') as out:
         proc = subprocess.run(['gtimeout', '-k', '2', '12', 'build/coolvm', '--headless',
                         '--cpus', '2', '--mem', '1024', '--width', '640', '--height', '480',
@@ -212,9 +229,11 @@ def main():
     unicode_file.write_bytes(b'abc\n')
     copy(unicode_file, unicode_file.name)
     runner = ['U0 VimTests() {']
-    script = 'delay 4000\n' + typed('#include "C:/Run.HC"\n') + 'delay 500\n'
-    script += typed('VimTests;\n') + 'delay 500\n'
+    script = BOOT + typed('#include "C:/Run.HC"\n') + wait('> ')
+    script += typed('VimTests;\n')
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
+        if i:  # the previous editor has quit; the next one gets these keys
+            script += wait(f'VIMRESULT {i - 1} ')
         path = d / f'T{i:03}.txt'
         path.write_bytes(source.encode())
         copy(path, path.name)
@@ -226,16 +245,17 @@ def main():
     quitfile = d / 'Quit.txt'
     quitfile.write_text('keep\n')
     copy(quitfile, quitfile.name)
-    script += typed('x:q!\n') + 'delay 60\n' + typed(':q\n') + 'delay 150\n'
+    script += wait(f'VIMRESULT {len(CASES) - 1} ')
+    script += typed('x:q!\n') + wait('QUITRESULT') + typed(':q\n') + wait('CLEANQUIT')
     runner += ['U0 VimUart() { Print("VIMUART\\n"); Vim("C:/Unicode.txt"); Print("UARTRESULT %d\\n", vim_pos); Print("VIMDONE\\n"); Shutdown; }']
     # Fault while the editor owns its buffers and alternate screen. The kernel
     # statement recovery must call VimClose, then another Vim session must work.
-    script += typed('{VimOpen("C:/Quit.txt"); I64 *bad=0; *bad=1;}\n') + 'delay 150\n'
-    script += typed('Print("RECOVER %d %d\\n", vim_active, shell_stmt_cleanup);\n')
-    script += typed('Vim("C:/Quit.txt");\n') + 'delay 150\n' + typed(':q\n')
-    script += 'delay 150\n'
-    script += typed('Vim("C:/Quit.txt");\n') + 'delay 150\n'
-    script += '1 29 1\n1 56 1\n' + keys_of(46) + '1 56 0\n1 29 0\n' + 'delay 150\n'
+    script += typed('{VimOpen("C:/Quit.txt"); I64 *bad=0; *bad=1;}\n')
+    script += typed('Print("RECOVER %d %d\\n", vim_active, shell_stmt_cleanup);\n') + wait('RECOVER 0')
+    script += typed('Vim("C:/Quit.txt");\n') + wait('NORMAL C:/Quit.txt') + typed(':q\n')
+    # Ctrl+Alt+C once the second editor is on the screen.
+    script += typed('Print("OPEN%d\\n", 2); Vim("C:/Quit.txt");\n') + wait('OPEN2') + wait('NORMAL C:/Quit.txt')
+    script += '1 29 1\n1 56 1\n' + keys_of(46) + '1 56 0\n1 29 0\n' + wait('Break')
     script += typed('Print("BREAKRECOVER %d %d\\n", vim_active, shell_stmt_cleanup);\n')
     script += typed('VimUart;\n')
     path = d / 'Run.HC'

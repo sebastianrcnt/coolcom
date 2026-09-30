@@ -87,14 +87,17 @@ def main():
         p = d / name
         p.write_text(text)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
-    script = 'delay 5000\n'
+    script = vim.BOOT
     for i, (name, keys, _) in enumerate(CASES):
-        script += line(f'Print("\\nCASE{i}\\n"); Vim("C:/{name}");') + 'delay 400\n'
+        # CASE%d: the wait matches the output, not the echo of the line.
+        script += line(f'Print("\\nCASE%d\\n", {i}); Vim("C:/{name}");')
+        script += vim.wait(f'CASE{i}') + vim.wait(f'NORMAL C:/{name}')
         if keys:
             script += vim.typed(keys) + 'delay 300\n'
         script += vim.typed(':q!\n') + 'delay 300\n'
     # Leave the Warm file open for the screenshot.
-    script += line('Vim("C:/Syn.aum");') + 'delay 800\n'
+    script += line('Print("\\nSHOT%d\\n", 1); Vim("C:/Syn.aum");')
+    script += vim.wait('SHOT1') + vim.finish('NORMAL C:/Syn.aum', 500)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',

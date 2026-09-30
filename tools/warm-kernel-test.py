@@ -67,8 +67,11 @@ def main():
                       hc.read_text())
         run("mcopy", "-o", "-i", disk, hc, "::")
         script = OUT / (name + ".input")
-        script.write_text("delay 2500\n" + kv.typed('#include "C:/' + name + '.HC"') +
-                          ("delay 3500\n" + kv.keys_of(45) if name == "Key" else ""))
+        marker = "WARM " + name.upper().replace("FILES", "FILE") + " PASS"
+        # Type once the shell prompts; stop the VM once the program has passed (coolvm wait/quit).
+        script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/' + name + '.HC"') +
+                          ("wait WARM KEY READY\n" + kv.keys_of(45) if name == "Key" else "") +
+                          "wait " + marker + "\ndelay 200\nquit\n")
         log = OUT / (name + ".log")
         with log.open("wb") as stream:
             proc = subprocess.Popen(["gtimeout", "-k", "2", "22", str(ROOT / "build/coolvm"),
@@ -78,7 +81,7 @@ def main():
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
             proc.wait()
         output = log.read_text(errors="replace")
-        assert "WARM " + name.upper().replace("FILES", "FILE") + " PASS" in output.splitlines(), output[-6000:]
+        assert marker in output.splitlines(), output[-6000:]
         shell_output = output.split('> #include', 1)[-1]
         errors = [line for line in shell_output.splitlines() if "ERROR:" in line]
         expected_errors = ['ERROR: File not found: "C:/Absent.txt".'] if name == "Errors" else []

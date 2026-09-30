@@ -28,6 +28,10 @@ def line(s):
 def prefix(ch):
     return '1 29 1\n' + vim.keys_of(48) + '1 29 0\n' + text(ch)
 
+# Tmux repaints at most 30 times a second, by changed cells: text typed into a pane (its echo)
+# is not contiguous in the output, and text a statement prints is only seen if it stays on the
+# screen until the next repaint. A wait in a pane matches text printed in one piece that stays.
+
 def check_pixels(d, labels):
     px, font = verify.screen_of(d, 'screen.png'), verify.load_font()
     for label, col in labels:
@@ -52,7 +56,7 @@ def vim_panes(kernel):
         p = d / name
         p.write_bytes(contents)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
-    script = 'delay 4500\n' + line('Tmux;') + 'delay 1500\n' + prefix('%') + 'delay 1500\n'
+    script = vim.BOOT + 'delay 2500\n' + line('Tmux;') + 'delay 1500\n' + prefix('%') + 'delay 1500\n'
     script += line('Vim("C:/Right.txt");') + 'delay 300\n' + text('iRIGHT\x1b')
     script += prefix('o') + line('Vim("C:/Left.txt");') + 'delay 300\n' + text('iLEFT\x1b')
     # Finishing the right statement and executing another must leave left Vim alive.
@@ -63,7 +67,7 @@ def vim_panes(kernel):
     script += line('I64 BreakReturned=0,FaultReturned=0;')
     script += line('U0 BreakEditor(){Vim("C:/Left.txt"); BreakReturned=1;}')
     script += line('U0 FaultEditor(){VimOpen("C:/Left.txt"); I64 *bad=0; *bad=1; FaultReturned=1;}')
-    script += 'delay 500\n' + line('BreakEditor;') + 'delay 1000\n'
+    script += 'delay 500\n' + line('Print("BRK%d\\n", 1); Sleep(200); BreakEditor;') + vim.wait('BRK1') + 'delay 1000\n'
     script += '1 29 1\n1 56 1\n' + vim.keys_of(46) + '1 56 0\n1 29 0\n' + 'delay 300\n'
     script += line('I64 Broken=vim_active || shell_stmt_cleanup || BreakReturned;')
     script += line('FaultEditor;') + 'delay 300\n'
@@ -76,6 +80,7 @@ def vim_panes(kernel):
     script += '1 29 1\n' + vim.keys_of(22) + '1 29 0\n'  # Ctrl+U: back 14 rows
     script += text('iPAGE\x1b:wq\n') + 'delay 200\n'
     script += line('Print("\\x1b[2J\\x1b[HRIGHT-CLEAN-%d\\n",vim_active || shell_stmt_cleanup);')
+    script += vim.finish('RIGHT-CLEAN-0', 300)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         proc = subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--cpus', '2',
@@ -112,7 +117,7 @@ def main():
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + p.name], check=True)
     # Same symbol name in both compilers must retain different values. Left
     # sleeps while the right shell compiles and executes, then both are visible.
-    script = 'delay 4500\n' + line('Tmux;') + 'delay 1500\n'
+    script = vim.BOOT + line('Tmux;') + 'delay 1500\n'
     script += line('I64 Value=111;') + prefix('%') + 'delay 1500\n'
     script += line('I64 Value=222;') + prefix('"') + 'delay 1200\n'
     script += line('I64 Value=333;') + line('while (TRUE) {}') + 'delay 300\n'
@@ -124,7 +129,9 @@ def main():
     script += '1 29 1\n' + vim.keys_of(48) + '1 29 0\n' + vim.keys_of(105) + 'delay 300\n'
     script += line('Sleep(1500); Print("\\x1b[2J\\x1b[HLEFT-%d\\n",Value);')
     script += prefix('o') + line('Print("\\x1b[2J\\x1b[HRIGHT-%d\\n",Value);')
-    script += 'delay 2000\n' + prefix('d') + 'delay 300\n' + line('Tmux;')
+    script += vim.wait('LEFT-111') + prefix('d') + 'delay 300\n' + line('Tmux;')
+    # The redraw after reattaching: row 0 holds LEFT-111, then RIGHT-223.
+    script += vim.wait('Tmux;') + vim.wait('LEFT-111') + vim.finish('RIGHT-223', 300)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         subprocess.run(['gtimeout', '-k', '2', '35', 'build/coolvm', '--headless', '--cpus', '2',

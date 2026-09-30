@@ -40,7 +40,7 @@ def main():
     subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     (d / 'H.txt').write_text('\n')
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(d / 'H.txt'), '::H.txt'], check=True)
-    script = 'delay 5000\n'
+    script = vim.BOOT
     # Shell line editor: Print("<Hangul>\n"); typed with the IME on between the quotes.
     script += vim.typed('Print("') + SHIFT_SPACE + vim.typed(WORDS) + SHIFT_SPACE + vim.typed('\\n");\n') + 'delay 600\n'
     # Vim insert mode: composed text is replaced as it grows; Backspace takes jamo off.
@@ -50,7 +50,7 @@ def main():
     script += vim.typed('Print("\\nVIMDONE\\n");\n') + 'delay 300\n'
     # Screen: the shell line again, on a clean screen, for the screenshot.
     script += vim.typed('Print("\\x1b[2J\\x1b[H') + SHIFT_SPACE + vim.typed('gksrmf dkssud') + SHIFT_SPACE + vim.typed('");\n')
-    script += 'delay 600\n'
+    script += 'delay 600\nquit\n'
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         subprocess.run(['gtimeout', '-k', '2', '40', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',

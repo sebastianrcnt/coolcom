@@ -22,6 +22,9 @@ void input_push(uint32_t type, uint32_t code, int32_t value)
         input_q[input_tail].word[2] = (uint32_t)value;
         input_tail = next;
         aic_update_locked();
+    } else {
+        static unsigned dropped;
+        if (!dropped++) LOGE("input FIFO full: dropping records (the guest is not draining it)\n");
     }
     pthread_mutex_unlock(&g.lock);
 }
@@ -29,37 +32,45 @@ void input_push(uint32_t type, uint32_t code, int32_t value)
 /* Records after a "delay MS" line are pushed by a feeder thread, MS
  * milliseconds (cumulative) after the script is loaded, so a script can type at
  * a running program: "delay 2000" then Ctrl+Alt+C. A "wait TEXT" line holds
- * the records after it until the guest has written TEXT to the UART (after the
- * previous wait's match); later delays count from that moment. Host-time
- * delays alone race a slow guest: a Ctrl+Alt+C meant for a running statement
- * can arrive while the kernel is still booting. */
+ * the records after it until the guest has written TEXT to the UART, after the
+ * text of the previous wait; later delays count from that moment. The texts are
+ * matched in order as the output streams, so output that comes before the
+ * feeder reaches its wait still counts. "quit [STATUS]" stops the VM (status 0
+ * by default; --screenshot is still saved). Host-time delays alone race a slow
+ * guest: a Ctrl+Alt+C meant for a running statement can arrive while the kernel
+ * is still booting. */
 // Long modal-editor regressions share one boot; the guest FIFO stays bounded.
 #define SCRIPT_LATE_CAP 16384
-static struct { uint32_t type, code; int32_t value; unsigned ms; char *wait; } late_q[SCRIPT_LATE_CAP];
+#define WAIT_MAX 255
+enum { LATE_KEY, LATE_WAIT, LATE_QUIT };
+static struct { uint32_t type, code; int32_t value; unsigned ms; int kind, arg; } late_q[SCRIPT_LATE_CAP];
 static unsigned late_n;
 
-/* UART output matcher for "wait": the last bytes the guest wrote. */
+/* UART output matcher for "wait" lines: texts in script order. */
 static pthread_mutex_t wait_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t wait_cond = PTHREAD_COND_INITIALIZER;
-static char wait_win[256];
+static char *wait_texts[SCRIPT_LATE_CAP];
+static unsigned wait_count, wait_matched;
+static char wait_win[WAIT_MAX];
 static size_t wait_len;
-static const char *wait_text;
-static bool wait_hit;
 
 void input_uart_out(uint8_t ch)
 {
-    if (!late_n) return;
+    if (!wait_count) return;
     pthread_mutex_lock(&wait_lock);
-    if (wait_len == sizeof wait_win) {
-        memmove(wait_win, wait_win + 1, sizeof wait_win - 1);
-        wait_len--;
-    }
-    wait_win[wait_len++] = (char)ch;
-    size_t n = wait_text ? strlen(wait_text) : 0;
-    if (n && n <= wait_len && !memcmp(wait_win + wait_len - n, wait_text, n)) {
-        wait_hit = true;
-        wait_len = 0;
-        pthread_cond_signal(&wait_cond);
+    if (wait_matched < wait_count) {
+        const char *t = wait_texts[wait_matched];
+        size_t n = strlen(t);
+        if (wait_len == n) {
+            memmove(wait_win, wait_win + 1, n - 1);
+            wait_len--;
+        }
+        wait_win[wait_len++] = (char)ch;
+        if (wait_len == n && !memcmp(wait_win, t, n)) {
+            wait_matched++;
+            wait_len = 0;
+            pthread_cond_broadcast(&wait_cond);
+        }
     }
     pthread_mutex_unlock(&wait_lock);
 }
@@ -68,26 +79,23 @@ static void *late_main(void *arg)
 {
     unsigned now = 0;
     for (unsigned i = 0; i < late_n; i++) {
-        if (late_q[i].wait) {
-            pthread_mutex_lock(&wait_lock);
-            wait_text = late_q[i].wait;
-            /* The text may already be in the window. */
-            size_t n = strlen(wait_text);
-            for (size_t j = 0; j + n <= wait_len && !wait_hit; j++)
-                if (!memcmp(wait_win + j, wait_text, n)) { wait_hit = true; wait_len = 0; }
-            while (!wait_hit)
-                pthread_cond_wait(&wait_cond, &wait_lock);
-            wait_hit = false;
-            wait_text = NULL;
-            pthread_mutex_unlock(&wait_lock);
-            now = late_q[i].ms;  /* later delays count from here */
-            continue;
-        }
         if (late_q[i].ms > now) {
             unsigned d = late_q[i].ms - now;
             struct timespec ts = {d / 1000, (long)(d % 1000) * 1000000L};
             nanosleep(&ts, NULL);
             now = late_q[i].ms;
+        }
+        if (late_q[i].kind == LATE_WAIT) {  /* later delays count from the match */
+            pthread_mutex_lock(&wait_lock);
+            if (getenv("COOLVM_WAIT_DEBUG")) fprintf(stderr, "[wait %d: %s] record %u\n", late_q[i].arg, wait_texts[late_q[i].arg], i);
+            while (wait_matched <= (unsigned)late_q[i].arg)
+                pthread_cond_wait(&wait_cond, &wait_lock);
+            pthread_mutex_unlock(&wait_lock);
+            continue;
+        }
+        if (late_q[i].kind == LATE_QUIT) {
+            vm_stop(late_q[i].arg, "input script quit");
+            return NULL;
         }
         input_push(late_q[i].type, late_q[i].code, late_q[i].value);
         nanosleep(&(struct timespec){0, 200000}, NULL); /* pace them: the guest FIFO holds 255 */
@@ -113,11 +121,24 @@ bool input_load_script(const char *path)
         }
         if (!strncmp(line, "wait ", 5)) {
             line[strcspn(line, "\r\n")] = 0;
-            if (late_n >= SCRIPT_LATE_CAP || !line[5] || strlen(line + 5) >= sizeof wait_win) {
+            if (late_n >= SCRIPT_LATE_CAP || !line[5] || strlen(line + 5) > WAIT_MAX) {
                 LOGE("invalid input script wait at line %d\n", lineno);
                 fclose(f); return false;
             }
-            late_q[late_n].wait = strdup(line + 5);
+            wait_texts[wait_count] = strdup(line + 5);
+            late_q[late_n].kind = LATE_WAIT;
+            late_q[late_n].arg = (int)wait_count++;
+            late_q[late_n++].ms = delay;
+            waited = true;
+            continue;
+        }
+        if (!strncmp(line, "quit", 4) && (line[4] == ' ' || line[4] == '\n' || !line[4])) {
+            if (late_n >= SCRIPT_LATE_CAP) {
+                LOGE("input script exceeds %d delayed records\n", SCRIPT_LATE_CAP);
+                fclose(f); return false;
+            }
+            late_q[late_n].kind = LATE_QUIT;
+            late_q[late_n].arg = atoi(line + 4);
             late_q[late_n++].ms = delay;
             waited = true;
             continue;
@@ -131,6 +152,7 @@ bool input_load_script(const char *path)
                 LOGE("input script exceeds %d delayed records\n", SCRIPT_LATE_CAP);
                 fclose(f); return false;
             }
+            late_q[late_n].kind = LATE_KEY;
             late_q[late_n].type = type;
             late_q[late_n].code = code;
             late_q[late_n].value = value;

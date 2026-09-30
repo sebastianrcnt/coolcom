@@ -33,6 +33,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     # Dns and HttpGet of example.com unless the first boot found the host offline.
     printf 'NetRep;\nPing("10.0.2.2", 1);\n' >"$dir/net.in"
     grep -q 'net: DNS failed' "$log" || printf 'Dns("example.com");\nHttpGet("http://example.com/");\n' >>"$dir/net.in"
+    printf 'Shutdown;\n' >>"$dir/net.in"
     gtimeout -k 2 30 build/coolvm --headless --cpus 2 --mem 1024 --timeout 10 --net "$@" "$image" \
         <"$dir/net.in" >"$dir/net.log" 2>&1 || true
     tr -d '\r' <"$dir/net.log" >"$dir/net.txt"
@@ -46,9 +47,12 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     # Compile the real startup files under the heap canaries as a regression
     # for GraphColor indexing its candidate array with an uncolored (-1) neighbor.
     mcopy -o -i "$dir/fat.img" os/Disk/*.HC ::
-    # The shell never exits: coolvm stops it at --timeout (nonzero status), then the screenshot is saved.
-    gtimeout -k 2 30 build/coolvm --headless --cpus 2 --mem 1024 --timeout 8 --width 640 --height 480 \
-        --disk "$dir/fat.img" --screenshot "$dir/shell.png" "$@" "$image" <"$dir/shell.in" >"$dir/shell.log" 2>&1 || true
+    # coolvm stops the VM once the shell has echoed the Korean line and printed it (an input script of
+    # waits and quit: tools/coolvm/README.md), then the screenshot is saved.
+    printf 'wait 한글 테스트\nwait 한글 테스트\ndelay 300\nquit\n' >"$dir/shell.wait"
+    gtimeout -k 2 30 build/coolvm --headless --cpus 2 --mem 1024 --timeout 20 --width 640 --height 480 \
+        --disk "$dir/fat.img" --screenshot "$dir/shell.png" --input-script "$dir/shell.wait" "$@" "$image" \
+        <"$dir/shell.in" >"$dir/shell.log" 2>&1 || true
     # KTestHeap deliberately reports four corruptions; startup must add none.
     if [ "$(grep -c 'heap overflow block=' "$dir/shell.log")" = 4 ] \
         && grep -q 'Running C:/Init.HC' "$dir/shell.log" \
