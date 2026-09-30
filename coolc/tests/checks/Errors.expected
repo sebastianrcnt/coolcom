@@ -46,11 +46,13 @@ ERROR: Function 'DeclaredDefault': argument 1 'a' has a different default value 
   Errors.cool,54
 ERROR: Function returns U0 but this returns a value
   Errors.cool,59
-ERROR: Function should return a value
-  Errors.cool,65
+ERROR: Function 'NoReturn' should return a value
+  Errors.cool,61
 ERROR: Function should return a value
   Errors.cool,67
-ERROR: Function should return a value
-  Errors.cool,69
+ERROR: Function 'EmptyReturn' should return a value
+  Errors.cool,65
+ERROR: Function 'NoReturnInIncluded' should return a value
+  ErrorsInc.cool,2
 ERROR: Duplicate case value 1
-  Errors.cool,75
+  Errors.cool,76

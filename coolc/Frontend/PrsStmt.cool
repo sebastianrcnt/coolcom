@@ -180,7 +180,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
         cc->max_line = cc->min_line;
 
     if (cc->htc.fun->return_class->size && !(cc->flags & CCF_HAS_RETURN))
-        LexError(cc, "Function should return a value at ");
+        LexErrorAt(cc, MStrPrint("Function '%s' should return a value at ", cc->htc.fun->str), cc->htc.fun->src_link + 3);
     RPNAddNew(cc, IC_LABEL, cc->lb_leave, 0, FALSE);
     cc->lb_leave = saved_leave_label;
     cc->htc.fun->size &= ~7;

@@ -10,6 +10,7 @@ These files document frontend bugs inherited from Aiwnios.
 | 7 | `B07StringDefault.cool` | AOT relocation for `"abc"` | A process heap pointer is embedded in the code; two builds differ in the pointer immediate |
 | 8 | `B08FunctionPointerArray.cool` | Compiles | `PrsType`: `Missing ')'` after `a` |
 | 9 | `B09StringIndex.cool` | `65` | `16961` (`0x4241`) |
+| 10 | `native/B10ClassScalarStore.cool` | `75` | the backend aborts (`Unhandled compiler exception Abrt`, no location) |
 
 The same results for bugs 5 and 6 occur with `b_use_port=FALSE` and `TRUE`.
 
@@ -27,5 +28,8 @@ The same results for bugs 5 and 6 occur with `b_use_port=FALSE` and `TRUE`.
 - **9:** `AIWNIOS_PrsExp.cool:AssignRawTypeToNode` gives `IC_STR_CONST` the
   class of `RT_PTR`, whose element is eight bytes, so `"AB"[0]` loads a word
   (`0x4241`) instead of the byte `'A'`. A string constant is a `U8 *`.
+- **10:** the fix for 5 copies a class-typed assignment whole (`__HC_ICAdd_ClassEq`), which assumes a class value on
+  the right. Aiwnios stores a scalar into a class-typed local (`CTask *task, task1; task1 = Fs;` declares a
+  `CTask` `task1`), so only a class on the right is copied whole and anything else is the scalar store.
 
 Run `tools/native/behavior.sh` to compile and check the corrected cases.

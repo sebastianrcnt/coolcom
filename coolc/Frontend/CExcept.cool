@@ -136,6 +136,19 @@ U0 LexError(CCmpCtrl *cc, U8 *str)
     cc->error_cnt++;
 }
 
+U0 LexErrorAt(CCmpCtrl *cc, U8 *str, U8 *pos)
+{//As LexError for a problem not at the current token (found after the token moved on, maybe out
+    //of an #included file): pos is "file,line".
+    if (!(cc->flags & CCF_AOT_COMPILE))
+        LexExcept(cc, str);
+    if (IsRaw)
+        LexPutMsg(str, TRUE);
+    else
+        PrintErr(str);
+    Print("  %s\n", pos);
+    cc->error_cnt++;
+}
+
 I64 vet_cnt[VET_CHECKS];
 
 U8 *VetName(I64 check)

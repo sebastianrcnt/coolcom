@@ -1709,7 +1709,11 @@ found_offset:;;
         if (cur->type == IC_ASSIGN && cur->t.arg1_class &&
                 !cur->t.arg1_class->ptr_stars_cnt &&
                 cur->t.arg1_class->type & HTT_CLASS &&
-                cur->t.arg1_class->size > 8) {
+                cur->t.arg1_class->size > 8 &&
+                // Aiwnios stores a scalar into a class-typed local (CTask *a, b; b = Fs;): only a
+                // class value on the right is copied whole.
+                cur->t.arg2_class && !cur->t.arg2_class->ptr_stars_cnt &&
+                cur->t.arg2_class->type & HTT_CLASS && cur->t.arg2_class->size > 8) {
             cur->length = cur->t.arg1_class->size;
             cur->t.arg1_tree->ic_flags |= ICF_NATIVE_CLASS_ADDR;
             cur->t.arg2_tree->ic_flags |= ICF_NATIVE_CLASS_ADDR;
