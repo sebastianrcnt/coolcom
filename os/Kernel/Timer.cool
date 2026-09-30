@@ -1,4 +1,6 @@
-// Generic timer: each core's virtual timer ticks at JIFFY_FREQ.
+// Generic timer: each core's virtual timer ticks at JIFFY_FREQ while the core has
+// work. A core with nothing ready is tickless (IdleWait, Sched.cool): its timer is set
+// for the nearest deadline instead, and any interrupt wakes it.
 #define JIFFY_FREQ 1000
 
 I64 cnt_freq, cnts_per_jiffy, cnt_start;
@@ -6,17 +8,40 @@ I64 jiffies;
 
 extern U0 FbTick();
 
+I64 TimerJiffies()
+{//Jiffies now, from the counter (the jiffies variable can be behind while every core sleeps).
+    if (!cnts_per_jiffy)
+        return 0;
+    return (ArchCntVct - cnt_start) / cnts_per_jiffy;
+}
+
+U0 JiffiesUpdate()
+{//Bring jiffies up to date; never backwards when cores race.
+    I64 now = TimerJiffies, old = jiffies;
+    while (old < now) {
+        if (ArchCas(&jiffies, old, now) == old)
+            break;
+        old = jiffies;
+    }
+    cnts.jiffies = jiffies;
+}
+
+U0 TimerArm(I64 j)
+{//This core's timer fires at jiffy j.
+    ArchCntvCvalSet(cnt_start + j * cnts_per_jiffy);
+}
+
 U0 TimerFiq()
 {//Derive jiffies from the counter so late interrupts don't make time drift.
-    cnts.jiffies = jiffies = (ArchCntVct - cnt_start) / cnts_per_jiffy;
-    ArchCntvCvalSet(cnt_start + (jiffies + 1) * cnts_per_jiffy);
+    JiffiesUpdate;
+    TimerArm(TimerJiffies + 1);
     if (!ArchCpuNum)
         FbTick;  // the console's frames (Fb.cool)
 }
 
 U0 TimerCoreInit()
 {//Start this core's timer.
-    ArchCntvCvalSet(cnt_start + ((ArchCntVct - cnt_start) / cnts_per_jiffy + 1) * cnts_per_jiffy);
+    TimerArm(TimerJiffies + 1);
     ArchCntvCtlSet(1);
 }
 

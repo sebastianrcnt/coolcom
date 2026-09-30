@@ -12,6 +12,7 @@ class CCPU
             *dying;       // exited task waiting to be freed
     Bool online;        // (Bool is a U64)
     I64 acct_from;      // counter value since which cur_task has run (CPU time accounting, Yield)
+    I64 tickless;       // in IdleWait with the tick off: another core must send an IPI to wake it
 };
 
 CCPU cpu_structs[CORES_MAX];

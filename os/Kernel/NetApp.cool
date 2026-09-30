@@ -265,14 +265,20 @@ Bool DnsResolve(U8 *host, I64 *_ip)
 // ---- task and init --------------------------------------------------------
 
 U0 NetTask(U8 *data)
-{//Configure by DHCP, then poll the device every millisecond.
+{//Configure by DHCP, then poll the device when frames arrive and every 20 ms.
     U8 a[16];
     if (Dhcp)
         Print("net: DHCP address %s\n", NetIpStr(a, net_ip));
     else
         Print("net: DHCP failed\n");
-    while (TRUE)
-        NetWait;
+    while (TRUE) {  // poll, then sleep until a frame arrives (interrupt) or 20 ms for the timers
+        NetPoll;
+        TaskEventArm(20);
+        if (net_loop_cnt || net_nic && NetDrvRxReady)
+            TaskEventCancel;
+        else
+            TaskEventSleep;
+    }
 }
 
 Bool NetInit()
@@ -282,6 +288,7 @@ Bool NetInit()
         net_nic = NetDrvProbe(fdt_blk[i].base, net_mac);
     if (!net_nic)
         return FALSE;
+    NetDrvIrqOn(fdt_blk[i - 1].irq);
     net_next_port = 49152 + NetRand % 16000;
     net_task = Spawn(&NetTask, NULL, "Net", mp_cnt - 1);
     return TRUE;

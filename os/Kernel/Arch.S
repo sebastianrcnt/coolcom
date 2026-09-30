@@ -186,17 +186,16 @@ ArchIrqOff:
   msr daifset, #3
   ret
 
+// Set I and F as they are in x0 (a DAIF value), in one write: restoring a masked state
+// inside a masked section (a lock taken with IRQs off, an interrupt handler) must not
+// let an interrupt in for a moment.
 .global ArchIntRestore
 ArchIntRestore:
-  msr daifclr, #3
-  tst x0, #0x80
-  b.eq 1f
-  msr daifset, #2
-1:
-  tst x0, #0x40
-  b.eq 2f
-  msr daifset, #1
-2:
+  mrs x1, daif
+  bic x1, x1, #0xC0
+  and x0, x0, #0xC0
+  orr x1, x1, x0
+  msr daif, x1
   ret
 
 .global ArchWfi
