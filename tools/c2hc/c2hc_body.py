@@ -1,5 +1,6 @@
 """c2hc: translating function bodies, initializers and expressions."""
 import re
+import struct
 
 from ctype_model import (CError, CT, VOID, DOUBLE, INT, UINT, LONG, ULONG, BOOL, sizeof, alignof, ptr_to)
 
@@ -175,6 +176,17 @@ class FnTranslator:
         s = 1 << (t.bits - 1)
         return f'((({x} & 0x{m:X}) ^ 0x{s:X}) - 0x{s:X})'
 
+    def round_float(self, x, t):
+        return f'LC_F32Round({x})' if t.kind == 'float' and t.bits == 32 else x
+
+    def load(self, lv, t):
+        return f'LC_F32FromBits({lv})' if t.kind == 'float' and t.bits == 32 else lv
+
+    def store(self, lv, x, t):
+        if t.kind == 'float' and t.bits == 32:
+            return f'LC_F32FromBits(({lv} = LC_F32ToBits({x})))'
+        return f'({lv} = {x})'
+
     def fits(self, src, dst):
         """Every value of int type src is a value of int type dst."""
         if dst.is_bool:
@@ -218,18 +230,20 @@ class FnTranslator:
             return r
         if src.kind == 'int' and dst.kind == 'float':
             if src.bits == 64 and not src.signed:
-                return f'C2HUnsignedToFloat({x})'
+                return f'LC_UIntToF32({x})' if dst.bits == 32 else f'C2HUnsignedToFloat({x})'
+            if dst.bits == 32:
+                return f'LC_IntToF32({x})'
             t = self.temp('F64')
             return f'({t} = {x})'
         if src.kind == 'float' and dst.kind == 'int':
             if dst.is_bool:
-                return f'({x} != 0.0)'
+                return f'((LC_F2Bits({x}) & 0x7FFFFFFFFFFFFFFF) != 0)'
             if dst.bits == 64 and not dst.signed:
                 return f'C2HFloatToUnsigned({x})'
             t = self.temp('I64i')
             return self.norm(f'({t} = {x})', dst)
         if src.kind == 'float' and dst.kind == 'float':
-            return x
+            return self.round_float(x, dst)
         if src.kind == 'ptr' and dst.kind == 'ptr':
             a, b = self.prog.cool(src), self.prog.cool(dst)
             if a == b:
@@ -251,7 +265,7 @@ class FnTranslator:
     def truth(self, x, t):
         """x as a C condition: text that is nonzero when x is true."""
         if t.kind == 'float':
-            return f'({x} != 0.0)'
+            return f'((LC_F2Bits({x}) & 0x7FFFFFFFFFFFFFFF) != 0)'
         return x
 
     # ------------------------------------------------------------ expressions
@@ -288,15 +302,11 @@ class FnTranslator:
 
     def e_FloatingLiteral(self, n):
         v = float(n['value'])
-        if v != v or v in (float('inf'), float('-inf')):
-            raise CError('non-finite float literal')
-        s = repr(v)
-        if 'e' in s and '.' not in s.split('e')[0]:
-            a, b = s.split('e')
-            s = a + '.0e' + b
-        elif '.' not in s and 'e' not in s:
-            s += '.0'
-        return s
+        if self.ct(n).bits == 32:
+            bits = struct.unpack('<I', struct.pack('<f', v))[0]
+            return f'LC_F32FromBits(0x{bits:08X})'
+        bits = struct.unpack('<Q', struct.pack('<d', v))[0]
+        return f'LC_Bits2F(0x{bits:016X})'
 
     def e_StringLiteral(self, n):
         return cool_string(c_string_bytes(n['value']))
@@ -347,6 +357,8 @@ class FnTranslator:
         dst = self.ct(n)
         if kind in ('LValueToRValue', 'NoOp', 'ToVoid', 'BitCast', 'AtomicToNonAtomic', 'NonAtomicToAtomic', 'BuiltinFnToFnPtr'):
             x = self.E(c)
+            if kind == 'LValueToRValue':
+                return self.load(x, dst)
             if kind == 'ToVoid':
                 return x
             return self.conv(x, self.ct(c), dst) if self.ct(c).kind in ('ptr', 'int', 'float') and dst.kind in ('ptr', 'int', 'float') and kind == 'BitCast' else x
@@ -367,7 +379,7 @@ class FnTranslator:
             if kind in ('IntegralToBoolean', 'PointerToBoolean'):
                 return f'({x} != 0)'
             if kind == 'FloatingToBoolean':
-                return f'({x} != 0.0)'
+                return f'((LC_F2Bits({x}) & 0x7FFFFFFFFFFFFFFF) != 0)'
             return self.conv(x, src, dst)
         if kind == 'LValueBitCast':
             self.fail(n, 'lvalue bit cast')
@@ -403,7 +415,7 @@ class FnTranslator:
         if op == '!':
             ct = self.ct(c)
             if ct.kind == 'float':
-                return f'({x} == 0.0)'
+                return f'((LC_F2Bits({x}) & 0x7FFFFFFFFFFFFFFF) == 0)'
             return f'(!{x})'
         if op == '__extension__':
             return x
@@ -423,10 +435,14 @@ class FnTranslator:
         delta = '+' if op == '++' else '-'
         if t.kind == 'float':
             lv = self.stable_lvalue(c)
-            if void or not postfix:
-                return f'({lv} = {lv} {delta} 1.0)'
             tmp = self.temp('F64')
-            return f'(({tmp} = {lv}), ({lv} = {tmp} {delta} 1.0), {tmp})'
+            self.emit(f'{tmp} = {self.load(lv, t)};')
+            value = self.round_float(f'({tmp} {delta} 1.0)', t)
+            if not postfix:
+                self.emit(f'{tmp} = {value};')
+                value = tmp
+            self.emit(self.store(lv, value, t) + ';')
+            return tmp
         if t.kind == 'ptr' or (t.kind == 'int' and (t.bits == 64 or (t.bits == 32 and t.signed))):
             x = self.E(c)
             if self.impure(c):
@@ -495,12 +511,20 @@ class FnTranslator:
         ca, cb = self.ct(a), self.ct(b)
         x, y = self.operands([a, b])
         if op in ('==', '!=', '<', '>', '<=', '>='):
+            if ca.kind == 'float' or cb.kind == 'float':
+                ax, by = self.temp('F64'), self.temp('F64')
+                self.emit(f'{ax} = {x};')
+                self.emit(f'{by} = {y};')
+                unordered = f'(isnan({ax}) || isnan({by}))'
+                if op == '!=':
+                    return f'({unordered} || ({ax} != {by}))'
+                return f'(!{unordered} && ({ax} {op} {by}))'
             return f'({x} {op} {y})'
         if ca.kind == 'ptr' or cb.kind == 'ptr':
             return f'({x} {op} {y})'
         r = f'({x} {op} {y})'
         if t.kind == 'float':
-            return r
+            return self.round_float(r, t)
         if t.kind != 'int':
             self.fail(n, f'binary {op} on {t.kind}')
         if op in ('+', '-', '*'):
@@ -527,7 +551,7 @@ class FnTranslator:
             lv = self.E(a)
         if ta.kind == 'arr':
             self.fail(n, 'assignment to an array')
-        return f'({lv} = {rhs})'
+        return self.store(lv, rhs, ta)
 
     def e_CompoundAssignOperator(self, n, void=False):
         a, b = kids(n)
@@ -540,17 +564,19 @@ class FnTranslator:
         if ta.kind == 'ptr':
             return f'({lv} {op}= {rhs})'
         if ta.kind == 'float':
-            return f'({lv} {op}= {rhs})'
+            cur = self.conv(self.load(lv, ta), ta, tc)
+            r = self.round_float(f'({cur} {op} {rhs})', tc)
+            return self.store(lv, self.conv(r, tc, ta), ta)
         native = tc.kind == 'int' and tc.bits == ta.bits and tc.signed == ta.signed and (ta.bits == 64 or (ta.bits == 32 and ta.signed and op in '+-*/%&|^'))
         if native and op not in ('<<', '>>'):
             return f'({lv} {op}= {rhs})'
         if native and ta.bits == 64:
             return f'({lv} {op}= {rhs})'
-        cur = self.conv(lv, ta, tc)
+        cur = self.conv(self.load(lv, ta), ta, tc)
         r = f'({cur} {op} {rhs})'
         if tc.kind == 'int' and op in ('+', '-', '*', '<<') and not (tc.bits == 32 and tc.signed and op != '<<'):
             r = self.norm(r, tc)
-        return f'({lv} = {self.conv(r, tc, ta)})'
+        return self.store(lv, self.conv(self.round_float(r, tc), tc, ta), ta)
 
     def e_ConditionalOperator(self, n, void=False):
         c, y, z = kids(n)
@@ -652,6 +678,10 @@ class FnTranslator:
             return f'LC_clz({self.E(args[0])}, {bits})'
         if name in ('__builtin_popcount', '__builtin_popcountl', '__builtin_popcountll'):
             return f'LC_popcount({self.E(args[0])})'
+        if name in ('fma', 'fmaf', '__builtin_fma', '__builtin_fmaf'):
+            self.fail(n, 'fma requires single-rounding support')
+        if name == '__builtin_sqrtf':
+            return f'LC_F32Round(Sqrt({self.E(args[0])}))'
         if name and name.startswith('__builtin_'):
             self.fail(n, f'builtin {name}')
         texts = self.operands(args)
@@ -659,7 +689,7 @@ class FnTranslator:
             self.note_ref('f', name)
             fname = self.static_ref(True, name)
             fct = self.prog.ctype(target['referencedDecl']['type']['qualType'])
-            return f'{fname}({", ".join(texts)})'
+            return self.round_float(f'{fname}({", ".join(texts)})', rt)
         # through a pointer
         pct = self.ct(callee)
         if pct.kind == 'arr':
@@ -674,7 +704,7 @@ class FnTranslator:
             self.fail(n, 'call of a variadic function through a pointer')
         thunk = self.prog.thunk(fct)
         fp = self.E(callee)
-        return f'{thunk}({", ".join([fp] + texts)})'
+        return self.round_float(f'{thunk}({", ".join([fp] + texts)})', rt)
 
     def e_InitListExpr(self, n):
         self.fail(n, 'initializer list in an expression')
@@ -734,7 +764,7 @@ class FnTranslator:
         if n['kind'] == 'ImplicitValueInitExpr':
             if not zeroed:
                 if t.is_scalar():
-                    self.emit(f'{lv} = {self.zero_text(t)};')
+                    self.emit(self.store(lv, self.zero_text(t), t) + ';')
                 else:
                     self.emit(f'MemSet(&{lv}, 0, {sizeof(t)});')
             return
@@ -760,7 +790,7 @@ class FnTranslator:
         if t.kind == 'rec':
             self.emit(f'MemCpy(&{lv}, &{self.E(n0)}, {sizeof(t)});')
             return
-        self.emit(f'{lv} = {self.E(n0)};')
+        self.emit(self.store(lv, self.E(n0), t) + ';')
 
     def global_init(self, key, n, init):
         prog = self.prog
@@ -849,7 +879,7 @@ class FnTranslator:
             self.emit('return;')
             return
         x = self.E(c[0])
-        self.emit(f'return {x};')
+        self.emit(f'return {self.round_float(x, self.ret)};')
 
     def expr_stmt(self, n):
         k = n['kind']
@@ -1063,7 +1093,13 @@ class FnTranslator:
             name = self.local_name(base)
             self.locals[p['id']] = self.sentinel_local(name)
             self.uses[p['id']] = 1
-            ptext.append(prog.decl(pt, self.sentinel_local(name)))
+            if pt.kind == 'float' and pt.bits == 32:
+                incoming = self.local_name('_c2hc_arg_' + name)
+                ptext.append(prog.decl(pt, incoming, value=True))
+                self.decls.append((pt, name, p['id']))
+                self.emit(self.store(self.sentinel_local(name), incoming, pt) + ';')
+            else:
+                ptext.append(prog.decl(pt, self.sentinel_local(name), value=True))
         if self.variadic:
             ptext.append('...')
         if ft.to.kind == 'rec':

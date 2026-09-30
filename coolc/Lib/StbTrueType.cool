@@ -2,7 +2,7 @@
 
 #include "../../coolc/LibC/LibC.cool"
 
-F64 C2HUnsignedToFloat(U64i x) {F64 f = x & 0x7FFFFFFFFFFFFFFF; if (x >> 63) f += 9223372036854775808.0; return f;}
+F64 C2HUnsignedToFloat(U64i x) {return LC_UIntToF64(x);}
 
 U64i C2HFloatToUnsigned(F64 x) {I64i n; if (x >= 9223372036854775808.0) {n = x - 9223372036854775808.0; return n(U64i) | 0x8000000000000000;} n = x; return n(U64i);}
 
@@ -55,20 +55,20 @@ class stbtt_bakedchar {
     U16i y0;
     U16i x1;
     U16i y1;
-    F64 xoff;
-    F64 yoff;
-    F64 xadvance;
+    U32i xoff;
+    U32i yoff;
+    U32i xadvance;
 };
 
 class stbtt_aligned_quad {
-    F64 x0;
-    F64 y0;
-    F64 s0;
-    F64 t0;
-    F64 x1;
-    F64 y1;
-    F64 s1;
-    F64 t1;
+    U32i x0;
+    U32i y0;
+    U32i s0;
+    U32i t0;
+    U32i x1;
+    U32i y1;
+    U32i s1;
+    U32i t1;
 };
 
 class stbtt_packedchar {
@@ -76,24 +76,23 @@ class stbtt_packedchar {
     U16i y0;
     U16i x1;
     U16i y1;
-    F64 xoff;
-    F64 yoff;
-    F64 xadvance;
-    F64 xoff2;
-    F64 yoff2;
+    U32i xoff;
+    U32i yoff;
+    U32i xadvance;
+    U32i xoff2;
+    U32i yoff2;
 };
 
 class stbtt_pack_range {
-    F64 font_size;
+    U32i font_size;
     I32i first_unicode_codepoint_in_range;
-    U8i _pad0[4];
     I32i *array_of_unicode_codepoints;
     I32i num_chars;
-    U8i _pad1[4];
+    U8i _pad0[4];
     stbtt_packedchar * chardata_for_range;
     U8i h_oversample;
     U8i v_oversample;
-    U8i _pad2[6];
+    U8i _pad1[6];
 };
 
 class stbtt_pack_context {
@@ -162,10 +161,10 @@ class stbtt__bitmap {
 class stbtt__csctx {
     I32i bounds;
     I32i started;
-    F64 first_x;
-    F64 first_y;
-    F64 x;
-    F64 y;
+    U32i first_x;
+    U32i first_y;
+    U32i x;
+    U32i y;
     I32i min_x;
     I32i max_x;
     I32i min_y;
@@ -187,26 +186,24 @@ class stbtt__hheap {
 };
 
 class stbtt__edge {
-    F64 x0;
-    F64 y0;
-    F64 x1;
-    F64 y1;
+    U32i x0;
+    U32i y0;
+    U32i x1;
+    U32i y1;
     I32i invert;
-    U8i _pad0[4];
 };
 
 class stbtt__active_edge {
     stbtt__active_edge * next;
     I32i x;
     I32i dx;
-    F64 ey;
+    U32i ey;
     I32i direction;
-    U8i _pad0[4];
 };
 
 class stbtt__point {
-    F64 x;
-    F64 y;
+    U32i x;
+    U32i y;
 };
 
 class stbrp_context {
@@ -311,11 +308,11 @@ U32i stbtt_ttf_stbtt__find_table(U8i *data, U32i fontstart, U8i *tag) {
     U32i tabledir;
     I32i i;
     U32i loc;
-    num_tables = stbtt_ttf_ttUSHORT(((data + fontstart) + 4));
-    tabledir = ((fontstart + (12 & 0xFFFFFFFF)) & 0xFFFFFFFF);
+    (num_tables = stbtt_ttf_ttUSHORT(((data + fontstart) + 4)));
+    (tabledir = ((fontstart + (12 & 0xFFFFFFFF)) & 0xFFFFFFFF));
     (i = 0);
     while ((i < num_tables)) {
-        loc = ((tabledir + ((16 * i) & 0xFFFFFFFF)) & 0xFFFFFFFF);
+        (loc = ((tabledir + ((16 * i) & 0xFFFFFFFF)) & 0xFFFFFFFF));
         if ((((((((data + loc) + 0)[0]) == (tag[0])) && ((((data + loc) + 0)[1]) == (tag[1]))) && ((((data + loc) + 0)[2]) == (tag[2]))) && ((((data + loc) + 0)[3]) == (tag[3])))) {
             return stbtt_ttf_ttULONG(((data + loc) + 8));
         }
@@ -358,7 +355,7 @@ I32i stbtt_ttf_stbtt_InitFont_internal(stbtt_fontinfo * info, U8i *data, I32i fo
     ((info->index_map) = 0);
     (i = 0);
     while ((i < numTables)) {
-        encoding_record = ((((cmap + (4 & 0xFFFFFFFF)) & 0xFFFFFFFF) + ((8 * i) & 0xFFFFFFFF)) & 0xFFFFFFFF);
+        (encoding_record = ((((cmap + (4 & 0xFFFFFFFF)) & 0xFFFFFFFF) + ((8 * i) & 0xFFFFFFFF)) & 0xFFFFFFFF));
         switch (stbtt_ttf_ttUSHORT((data + encoding_record))) {
             case 3:
                 switch (stbtt_ttf_ttUSHORT(((data + encoding_record) + 2))) {
@@ -406,19 +403,19 @@ I32i stbtt_FindGlyphIndex(stbtt_fontinfo * info, I32i unicode_codepoint) {
     U32i start_char;
     U32i end_char;
     U32i start_glyph;
-    data = (info->data);
-    index_map = ((info->index_map) & 0xFFFFFFFF);
-    format = stbtt_ttf_ttUSHORT(((data + index_map) + 0));
+    (data = (info->data));
+    (index_map = ((info->index_map) & 0xFFFFFFFF));
+    (format = stbtt_ttf_ttUSHORT(((data + index_map) + 0)));
     if ((format == 0)) {
-        bytes = stbtt_ttf_ttUSHORT(((data + index_map) + 2));
+        (bytes = stbtt_ttf_ttUSHORT(((data + index_map) + 2)));
         if ((unicode_codepoint < (bytes - 6))) {
             return (*(((data + index_map) + 6) + unicode_codepoint));
         }
         return 0;
     } else {
         if ((format == 6)) {
-            first = stbtt_ttf_ttUSHORT(((data + index_map) + 6));
-            count = stbtt_ttf_ttUSHORT(((data + index_map) + 8));
+            (first = stbtt_ttf_ttUSHORT(((data + index_map) + 6)));
+            (count = stbtt_ttf_ttUSHORT(((data + index_map) + 8)));
             if ((((unicode_codepoint & 0xFFFFFFFF) >= first) && ((unicode_codepoint & 0xFFFFFFFF) < ((first + count) & 0xFFFFFFFF)))) {
                 return stbtt_ttf_ttUSHORT((((data + index_map) + 10) + (((((unicode_codepoint & 0xFFFFFFFF) - first) & 0xFFFFFFFF) * (2 & 0xFFFFFFFF)) & 0xFFFFFFFF)));
             }
@@ -428,12 +425,12 @@ I32i stbtt_FindGlyphIndex(stbtt_fontinfo * info, I32i unicode_codepoint) {
                 return 0;
             } else {
                 if ((format == 4)) {
-                    segcount = ((stbtt_ttf_ttUSHORT(((data + index_map) + 6)) >> 1) & 0xFFFF);
-                    searchRange = ((stbtt_ttf_ttUSHORT(((data + index_map) + 8)) >> 1) & 0xFFFF);
-                    entrySelector = stbtt_ttf_ttUSHORT(((data + index_map) + 10));
-                    rangeShift = ((stbtt_ttf_ttUSHORT(((data + index_map) + 12)) >> 1) & 0xFFFF);
-                    endCount = ((index_map + (14 & 0xFFFFFFFF)) & 0xFFFFFFFF);
-                    search = endCount;
+                    (segcount = ((stbtt_ttf_ttUSHORT(((data + index_map) + 6)) >> 1) & 0xFFFF));
+                    (searchRange = ((stbtt_ttf_ttUSHORT(((data + index_map) + 8)) >> 1) & 0xFFFF));
+                    (entrySelector = stbtt_ttf_ttUSHORT(((data + index_map) + 10)));
+                    (rangeShift = ((stbtt_ttf_ttUSHORT(((data + index_map) + 12)) >> 1) & 0xFFFF));
+                    (endCount = ((index_map + (14 & 0xFFFFFFFF)) & 0xFFFFFFFF));
+                    (search = endCount);
                     if ((unicode_codepoint > 65535)) {
                         return 0;
                     }
@@ -450,7 +447,7 @@ I32i stbtt_FindGlyphIndex(stbtt_fontinfo * info, I32i unicode_codepoint) {
                         (entrySelector = ((entrySelector - 1) & 0xFFFF));
                     }
                     (search = ((search + (2 & 0xFFFFFFFF)) & 0xFFFFFFFF));
-                    item = ((((search - endCount) & 0xFFFFFFFF) >> 1) & 0xFFFF);
+                    (item = ((((search - endCount) & 0xFFFFFFFF) >> 1) & 0xFFFF));
                     (c_start = stbtt_ttf_ttUSHORT((((((data + index_map) + 14) + (segcount * 2)) + 2) + (2 * item))));
                     (last = stbtt_ttf_ttUSHORT(((data + endCount) + (2 * item))));
                     if (((unicode_codepoint < c_start) || (unicode_codepoint > last))) {
@@ -463,20 +460,20 @@ I32i stbtt_FindGlyphIndex(stbtt_fontinfo * info, I32i unicode_codepoint) {
                     return stbtt_ttf_ttUSHORT((((((((data + offset) + ((unicode_codepoint - c_start) * 2)) + index_map) + 14) + (segcount * 6)) + 2) + (2 * item)));
                 } else {
                     if (((format == 12) || (format == 13))) {
-                        ngroups = stbtt_ttf_ttULONG(((data + index_map) + 12));
+                        (ngroups = stbtt_ttf_ttULONG(((data + index_map) + 12)));
                         (low = 0);
                         (high = (((ngroups & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
                         while ((low < high)) {
-                            mid = (low + ((high - low) >> 1));
-                            start_char = stbtt_ttf_ttULONG((((data + index_map) + 16) + (mid * 12)));
-                            end_char = stbtt_ttf_ttULONG(((((data + index_map) + 16) + (mid * 12)) + 4));
+                            (mid = (low + ((high - low) >> 1)));
+                            (start_char = stbtt_ttf_ttULONG((((data + index_map) + 16) + (mid * 12))));
+                            (end_char = stbtt_ttf_ttULONG(((((data + index_map) + 16) + (mid * 12)) + 4)));
                             if (((unicode_codepoint & 0xFFFFFFFF) < start_char)) {
                                 (high = mid);
                             } else {
                                 if (((unicode_codepoint & 0xFFFFFFFF) > end_char)) {
                                     (low = (mid + 1));
                                 } else {
-                                    start_glyph = stbtt_ttf_ttULONG(((((data + index_map) + 16) + (mid * 12)) + 8));
+                                    (start_glyph = stbtt_ttf_ttULONG(((((data + index_map) + 16) + (mid * 12)) + 8)));
                                     if ((format == 12)) {
                                         return (((((((start_glyph + (unicode_codepoint & 0xFFFFFFFF)) & 0xFFFFFFFF) - start_char) & 0xFFFFFFFF) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000);
                                     } else {
@@ -530,7 +527,7 @@ I32i stbtt_ttf_stbtt__GetGlyfOffset(stbtt_fontinfo * info, I32i glyph_index) {
 
 I32i stbtt_GetGlyphBox(stbtt_fontinfo * info, I32i glyph_index, I32i *x0, I32i *y0, I32i *x1, I32i *y1) {
     I32i g;
-    g = stbtt_ttf_stbtt__GetGlyfOffset(info, glyph_index);
+    (g = stbtt_ttf_stbtt__GetGlyfOffset(info, glyph_index));
     if ((g < 0)) {
         return 0;
     }
@@ -605,61 +602,34 @@ I32i stbtt_ttf_stbtt__GetGlyphShapeTT(stbtt_fontinfo * info, I32i glyph_index, s
     I32i i_1;
     stbtt_vertex * comp_verts;
     stbtt_vertex * tmp;
-    F64 mtx[6];
-    F64 _c2hc_t5;
-    F64 _c2hc_t6;
-    F64 _c2hc_t7;
-    F64 _c2hc_t8;
-    F64 _c2hc_t9;
-    F64 _c2hc_t10;
-    F64 m_1;
-    F64 n_1;
-    F64 _c2hc_t11;
-    F64 _c2hc_t12;
-    F64 _c2hc_t13;
-    F64 _c2hc_t14;
-    F64 _c2hc_t15;
-    F64 _c2hc_t16;
-    F64 _c2hc_t17;
-    F64 _c2hc_t18;
-    F64 _c2hc_t19;
-    F64 _c2hc_t20;
-    F64 _c2hc_t21;
-    F64 _c2hc_t22;
-    F64 _c2hc_t23;
+    U32i mtx[6];
+    U32i m_1;
+    U32i n_1;
     stbtt_vertex * v;
     I16i x_1;
     I16i y_1;
-    F64 _c2hc_t24;
-    F64 _c2hc_t25;
-    I64i _c2hc_t26;
-    F64 _c2hc_t27;
-    F64 _c2hc_t28;
-    I64i _c2hc_t29;
-    F64 _c2hc_t30;
-    F64 _c2hc_t31;
-    I64i _c2hc_t32;
-    F64 _c2hc_t33;
-    F64 _c2hc_t34;
-    I64i _c2hc_t35;
-    U64i _c2hc_t36;
-    U64i _c2hc_t37;
-    U64i _c2hc_t38;
-    no_warn _c2hc_t2, _c2hc_t3, _c2hc_t4, _c2hc_t5, _c2hc_t6, _c2hc_t7, _c2hc_t8, _c2hc_t9, _c2hc_t10, _c2hc_t11, _c2hc_t12, _c2hc_t13, _c2hc_t14, _c2hc_t15, _c2hc_t16, _c2hc_t17, _c2hc_t18, _c2hc_t19, _c2hc_t20, _c2hc_t21, _c2hc_t22, _c2hc_t23, _c2hc_t24, _c2hc_t25, _c2hc_t26, _c2hc_t27, _c2hc_t28, _c2hc_t29, _c2hc_t30, _c2hc_t31, _c2hc_t32, _c2hc_t33, _c2hc_t34, _c2hc_t35, _c2hc_t36, _c2hc_t37, _c2hc_t38;
-    data = (info->data);
-    vertices = ((0)(stbtt_vertex *));
-    num_vertices = 0;
-    g = stbtt_ttf_stbtt__GetGlyfOffset(info, glyph_index);
+    I64i _c2hc_t5;
+    I64i _c2hc_t6;
+    I64i _c2hc_t7;
+    I64i _c2hc_t8;
+    U64i _c2hc_t9;
+    U64i _c2hc_t10;
+    U64i _c2hc_t11;
+    no_warn _c2hc_t2, _c2hc_t3, _c2hc_t4, _c2hc_t5, _c2hc_t6, _c2hc_t7, _c2hc_t8, _c2hc_t9, _c2hc_t10, _c2hc_t11;
+    (data = (info->data));
+    (vertices = ((0)(stbtt_vertex *)));
+    (num_vertices = 0);
+    (g = stbtt_ttf_stbtt__GetGlyfOffset(info, glyph_index));
     ((*pvertices) = ((0)(stbtt_vertex *)));
     if ((g < 0)) {
         return 0;
     }
     (numberOfContours = stbtt_ttf_ttSHORT((data + g)));
     if ((numberOfContours > 0)) {
-        flags = (0 & 0xFF);
-        j = 0;
-        was_off = 0;
-        start_off = 0;
+        (flags = (0 & 0xFF));
+        (j = 0);
+        (was_off = 0);
+        (start_off = 0);
         (endPtsOfContours = ((data + g) + 10));
         (ins = stbtt_ttf_ttUSHORT((((data + g) + 10) + (numberOfContours * 2))));
         (points = (((((data + g) + 10) + (numberOfContours * 2)) + 2) + ins));
@@ -690,7 +660,7 @@ I32i stbtt_ttf_stbtt__GetGlyphShapeTT(stbtt_fontinfo * info, I32i glyph_index, s
         while ((i < n)) {
             (flags = ((vertices[(off + i)]).type));
             if ((flags & 2)) {
-                dx = (*(points++));
+                (dx = (*(points++)));
                 if ((flags & 16)) {
                     _c2hc_t3 = dx;
                 } else {
@@ -711,7 +681,7 @@ I32i stbtt_ttf_stbtt__GetGlyphShapeTT(stbtt_fontinfo * info, I32i glyph_index, s
         while ((i < n)) {
             (flags = ((vertices[(off + i)]).type));
             if ((flags & 4)) {
-                dy = (*(points++));
+                (dy = (*(points++)));
                 if ((flags & 32)) {
                     _c2hc_t4 = dy;
                 } else {
@@ -780,81 +750,81 @@ I32i stbtt_ttf_stbtt__GetGlyphShapeTT(stbtt_fontinfo * info, I32i glyph_index, s
         (num_vertices = stbtt_ttf_stbtt__close_shape(vertices, num_vertices, was_off, start_off, sx, sy, scx, scy, cx, cy));
     } else {
         if ((numberOfContours < 0)) {
-            more = 1;
-            comp = ((data + g) + 10);
+            (more = 1);
+            (comp = ((data + g) + 10));
             (num_vertices = 0);
             (vertices = ((0)(stbtt_vertex *)));
             while (more) {
-                comp_num_verts = 0;
-                comp_verts = ((0)(stbtt_vertex *));
-                tmp = ((0)(stbtt_vertex *));
-                MemSet(&mtx, 0, 48);
-                mtx[0] = (_c2hc_t5 = 1);
-                mtx[1] = (_c2hc_t6 = 0);
-                mtx[2] = (_c2hc_t7 = 0);
-                mtx[3] = (_c2hc_t8 = 1);
-                mtx[4] = (_c2hc_t9 = 0);
-                mtx[5] = (_c2hc_t10 = 0);
+                (comp_num_verts = 0);
+                (comp_verts = ((0)(stbtt_vertex *)));
+                (tmp = ((0)(stbtt_vertex *)));
+                MemSet(&mtx, 0, 24);
+                LC_F32FromBits((mtx[0] = LC_F32ToBits(LC_IntToF32(1))));
+                LC_F32FromBits((mtx[1] = LC_F32ToBits(LC_IntToF32(0))));
+                LC_F32FromBits((mtx[2] = LC_F32ToBits(LC_IntToF32(0))));
+                LC_F32FromBits((mtx[3] = LC_F32ToBits(LC_IntToF32(1))));
+                LC_F32FromBits((mtx[4] = LC_F32ToBits(LC_IntToF32(0))));
+                LC_F32FromBits((mtx[5] = LC_F32ToBits(LC_IntToF32(0))));
                 (flags_1 = (stbtt_ttf_ttSHORT(comp) & 0xFFFF));
                 (comp += 2);
                 (gidx = (stbtt_ttf_ttSHORT(comp) & 0xFFFF));
                 (comp += 2);
                 if ((flags_1 & 2)) {
                     if ((flags_1 & 1)) {
-                        ((mtx[4]) = (_c2hc_t11 = stbtt_ttf_ttSHORT(comp)));
+                        LC_F32FromBits(((mtx[4]) = LC_F32ToBits(LC_IntToF32(stbtt_ttf_ttSHORT(comp)))));
                         (comp += 2);
-                        ((mtx[5]) = (_c2hc_t12 = stbtt_ttf_ttSHORT(comp)));
+                        LC_F32FromBits(((mtx[5]) = LC_F32ToBits(LC_IntToF32(stbtt_ttf_ttSHORT(comp)))));
                         (comp += 2);
                     } else {
-                        ((mtx[4]) = (_c2hc_t13 = (*((comp)(I8i *)))));
+                        LC_F32FromBits(((mtx[4]) = LC_F32ToBits(LC_IntToF32((*((comp)(I8i *)))))));
                         (comp += 1);
-                        ((mtx[5]) = (_c2hc_t14 = (*((comp)(I8i *)))));
+                        LC_F32FromBits(((mtx[5]) = LC_F32ToBits(LC_IntToF32((*((comp)(I8i *)))))));
                         (comp += 1);
                     }
                 } else {
                 }
                 if ((flags_1 & ((((1 << 3) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000))) {
-                    ((mtx[0]) = ((mtx[3]) = ((_c2hc_t15 = stbtt_ttf_ttSHORT(comp)) / 16384.0)));
+                    LC_F32FromBits(((mtx[0]) = LC_F32ToBits(LC_F32FromBits(((mtx[3]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000)))))))));
                     (comp += 2);
-                    ((mtx[1]) = ((mtx[2]) = (_c2hc_t16 = 0)));
+                    LC_F32FromBits(((mtx[1]) = LC_F32ToBits(LC_F32FromBits(((mtx[2]) = LC_F32ToBits(LC_IntToF32(0)))))));
                 } else {
                     if ((flags_1 & ((((1 << 6) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000))) {
-                        ((mtx[0]) = ((_c2hc_t17 = stbtt_ttf_ttSHORT(comp)) / 16384.0));
+                        LC_F32FromBits(((mtx[0]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000))))));
                         (comp += 2);
-                        ((mtx[1]) = ((mtx[2]) = (_c2hc_t18 = 0)));
-                        ((mtx[3]) = ((_c2hc_t19 = stbtt_ttf_ttSHORT(comp)) / 16384.0));
+                        LC_F32FromBits(((mtx[1]) = LC_F32ToBits(LC_F32FromBits(((mtx[2]) = LC_F32ToBits(LC_IntToF32(0)))))));
+                        LC_F32FromBits(((mtx[3]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000))))));
                         (comp += 2);
                     } else {
                         if ((flags_1 & ((((1 << 7) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000))) {
-                            ((mtx[0]) = ((_c2hc_t20 = stbtt_ttf_ttSHORT(comp)) / 16384.0));
+                            LC_F32FromBits(((mtx[0]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000))))));
                             (comp += 2);
-                            ((mtx[1]) = ((_c2hc_t21 = stbtt_ttf_ttSHORT(comp)) / 16384.0));
+                            LC_F32FromBits(((mtx[1]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000))))));
                             (comp += 2);
-                            ((mtx[2]) = ((_c2hc_t22 = stbtt_ttf_ttSHORT(comp)) / 16384.0));
+                            LC_F32FromBits(((mtx[2]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000))))));
                             (comp += 2);
-                            ((mtx[3]) = ((_c2hc_t23 = stbtt_ttf_ttSHORT(comp)) / 16384.0));
+                            LC_F32FromBits(((mtx[3]) = LC_F32ToBits(LC_F32Round((LC_IntToF32(stbtt_ttf_ttSHORT(comp)) / LC_F32FromBits(0x46800000))))));
                             (comp += 2);
                         }
                     }
                 }
-                (m_1 = sqrt((((mtx[0]) * (mtx[0])) + ((mtx[1]) * (mtx[1])))));
-                (n_1 = sqrt((((mtx[2]) * (mtx[2])) + ((mtx[3]) * (mtx[3])))));
+                LC_F32FromBits((m_1 = LC_F32ToBits(LC_F32Round(sqrt(LC_F32Round((LC_F32Round((LC_F32FromBits((mtx[0])) * LC_F32FromBits((mtx[0])))) + LC_F32Round((LC_F32FromBits((mtx[1])) * LC_F32FromBits((mtx[1])))))))))));
+                LC_F32FromBits((n_1 = LC_F32ToBits(LC_F32Round(sqrt(LC_F32Round((LC_F32Round((LC_F32FromBits((mtx[2])) * LC_F32FromBits((mtx[2])))) + LC_F32Round((LC_F32FromBits((mtx[3])) * LC_F32FromBits((mtx[3])))))))))));
                 (comp_num_verts = stbtt_GetGlyphShape(info, gidx, (&comp_verts)));
                 if ((comp_num_verts > 0)) {
                     (i_1 = 0);
                     while ((i_1 < comp_num_verts)) {
-                        v = (&(comp_verts[i_1]));
+                        (v = (&(comp_verts[i_1])));
                         (x_1 = (v->x));
                         (y_1 = (v->y));
-                        ((v->x) = ((((_c2hc_t26 = (m_1 * ((((mtx[0]) * (_c2hc_t24 = x_1)) + ((mtx[2]) * (_c2hc_t25 = y_1))) + (mtx[4])))) & 0xFFFF) ^ 0x8000) - 0x8000));
-                        ((v->y) = ((((_c2hc_t29 = (n_1 * ((((mtx[1]) * (_c2hc_t27 = x_1)) + ((mtx[3]) * (_c2hc_t28 = y_1))) + (mtx[5])))) & 0xFFFF) ^ 0x8000) - 0x8000));
+                        ((v->x) = ((((_c2hc_t5 = LC_F32Round((LC_F32FromBits(m_1) * LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits((mtx[0])) * LC_IntToF32(x_1))) + LC_F32Round((LC_F32FromBits((mtx[2])) * LC_IntToF32(y_1))))) + LC_F32FromBits((mtx[4]))))))) & 0xFFFF) ^ 0x8000) - 0x8000));
+                        ((v->y) = ((((_c2hc_t6 = LC_F32Round((LC_F32FromBits(n_1) * LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits((mtx[1])) * LC_IntToF32(x_1))) + LC_F32Round((LC_F32FromBits((mtx[3])) * LC_IntToF32(y_1))))) + LC_F32FromBits((mtx[5]))))))) & 0xFFFF) ^ 0x8000) - 0x8000));
                         (x_1 = (v->cx));
                         (y_1 = (v->cy));
-                        ((v->cx) = ((((_c2hc_t32 = (m_1 * ((((mtx[0]) * (_c2hc_t30 = x_1)) + ((mtx[2]) * (_c2hc_t31 = y_1))) + (mtx[4])))) & 0xFFFF) ^ 0x8000) - 0x8000));
-                        ((v->cy) = ((((_c2hc_t35 = (n_1 * ((((mtx[1]) * (_c2hc_t33 = x_1)) + ((mtx[3]) * (_c2hc_t34 = y_1))) + (mtx[5])))) & 0xFFFF) ^ 0x8000) - 0x8000));
+                        ((v->cx) = ((((_c2hc_t7 = LC_F32Round((LC_F32FromBits(m_1) * LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits((mtx[0])) * LC_IntToF32(x_1))) + LC_F32Round((LC_F32FromBits((mtx[2])) * LC_IntToF32(y_1))))) + LC_F32FromBits((mtx[4]))))))) & 0xFFFF) ^ 0x8000) - 0x8000));
+                        ((v->cy) = ((((_c2hc_t8 = LC_F32Round((LC_F32FromBits(n_1) * LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits((mtx[1])) * LC_IntToF32(x_1))) + LC_F32Round((LC_F32FromBits((mtx[3])) * LC_IntToF32(y_1))))) + LC_F32FromBits((mtx[5]))))))) & 0xFFFF) ^ 0x8000) - 0x8000));
                         (++i_1);
                     }
-                    (tmp = ((malloc(((_c2hc_t36 = (num_vertices + comp_num_verts)) * 14)))(stbtt_vertex *)));
+                    (tmp = ((malloc(((_c2hc_t9 = (num_vertices + comp_num_verts)) * 14)))(stbtt_vertex *)));
                     if ((!tmp)) {
                         if (vertices) {
                             free(((vertices)(U8i *)));
@@ -865,9 +835,9 @@ I32i stbtt_ttf_stbtt__GetGlyphShapeTT(stbtt_fontinfo * info, I32i glyph_index, s
                         return 0;
                     }
                     if (((num_vertices > 0) && vertices)) {
-                        memcpy(((tmp)(U8i *)), ((vertices)(U8i *)), ((_c2hc_t37 = num_vertices) * 14));
+                        memcpy(((tmp)(U8i *)), ((vertices)(U8i *)), ((_c2hc_t10 = num_vertices) * 14));
                     }
-                    memcpy((((tmp + num_vertices))(U8i *)), ((comp_verts)(U8i *)), ((_c2hc_t38 = comp_num_verts) * 14));
+                    memcpy((((tmp + num_vertices))(U8i *)), ((comp_verts)(U8i *)), ((_c2hc_t11 = comp_num_verts) * 14));
                     if (vertices) {
                         free(((vertices)(U8i *)));
                     }
@@ -888,22 +858,26 @@ I32i stbtt_GetGlyphShape(stbtt_fontinfo * info, I32i glyph_index, stbtt_vertex *
     return stbtt_ttf_stbtt__GetGlyphShapeTT(info, glyph_index, pvertices);
 }
 
-U0 stbtt_GetGlyphBitmapBoxSubpixel(stbtt_fontinfo * font, I32i glyph, F64 scale_x, F64 scale_y, F64 shift_x, F64 shift_y, I32i *ix0, I32i *iy0, I32i *ix1, I32i *iy1) {
+U0 stbtt_GetGlyphBitmapBoxSubpixel(stbtt_fontinfo * font, I32i glyph, F64 _c2hc_arg_scale_x, F64 _c2hc_arg_scale_y, F64 _c2hc_arg_shift_x, F64 _c2hc_arg_shift_y, I32i *ix0, I32i *iy0, I32i *ix1, I32i *iy1) {
+    U32i scale_x;
+    U32i scale_y;
+    U32i shift_x;
+    U32i shift_y;
     I32i x0;
     I32i y0;
     I32i x1;
     I32i y1;
-    F64 _c2hc_t39;
-    I64i _c2hc_t40;
-    F64 _c2hc_t41;
-    I64i _c2hc_t42;
-    F64 _c2hc_t43;
-    I64i _c2hc_t44;
-    F64 _c2hc_t45;
-    I64i _c2hc_t46;
-    no_warn _c2hc_t39, _c2hc_t40, _c2hc_t41, _c2hc_t42, _c2hc_t43, _c2hc_t44, _c2hc_t45, _c2hc_t46;
-    x0 = 0;
-    y0 = 0;
+    I64i _c2hc_t12;
+    I64i _c2hc_t13;
+    I64i _c2hc_t14;
+    I64i _c2hc_t15;
+    no_warn _c2hc_t12, _c2hc_t13, _c2hc_t14, _c2hc_t15;
+    LC_F32FromBits((scale_x = LC_F32ToBits(_c2hc_arg_scale_x)));
+    LC_F32FromBits((scale_y = LC_F32ToBits(_c2hc_arg_scale_y)));
+    LC_F32FromBits((shift_x = LC_F32ToBits(_c2hc_arg_shift_x)));
+    LC_F32FromBits((shift_y = LC_F32ToBits(_c2hc_arg_shift_y)));
+    (x0 = 0);
+    (y0 = 0);
     if ((!stbtt_GetGlyphBox(font, glyph, (&x0), (&y0), (&x1), (&y1)))) {
         if (ix0) {
             ((*ix0) = 0);
@@ -919,16 +893,16 @@ U0 stbtt_GetGlyphBitmapBoxSubpixel(stbtt_fontinfo * font, I32i glyph, F64 scale_
         }
     } else {
         if (ix0) {
-            ((*ix0) = ((((_c2hc_t40 = floor((((_c2hc_t39 = x0) * scale_x) + shift_x))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
+            ((*ix0) = ((((_c2hc_t12 = floor(LC_F32Round((LC_F32Round((LC_IntToF32(x0) * LC_F32FromBits(scale_x))) + LC_F32FromBits(shift_x))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
         }
         if (iy0) {
-            ((*iy0) = ((((_c2hc_t42 = floor((((_c2hc_t41 = (-y1)) * scale_y) + shift_y))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
+            ((*iy0) = ((((_c2hc_t13 = floor(LC_F32Round((LC_F32Round((LC_IntToF32((-y1)) * LC_F32FromBits(scale_y))) + LC_F32FromBits(shift_y))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
         }
         if (ix1) {
-            ((*ix1) = ((((_c2hc_t44 = ceil((((_c2hc_t43 = x1) * scale_x) + shift_x))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
+            ((*ix1) = ((((_c2hc_t14 = ceil(LC_F32Round((LC_F32Round((LC_IntToF32(x1) * LC_F32FromBits(scale_x))) + LC_F32FromBits(shift_x))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
         }
         if (iy1) {
-            ((*iy1) = ((((_c2hc_t46 = ceil((((_c2hc_t45 = (-y0)) * scale_y) + shift_y))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
+            ((*iy1) = ((((_c2hc_t15 = ceil(LC_F32Round((LC_F32Round((LC_IntToF32((-y0)) * LC_F32FromBits(scale_y))) + LC_F32FromBits(shift_y))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
         }
     }
 }
@@ -936,32 +910,32 @@ U0 stbtt_GetGlyphBitmapBoxSubpixel(stbtt_fontinfo * font, I32i glyph, F64 scale_
 U8i *stbtt_ttf_stbtt__hheap_alloc(stbtt__hheap * hh, U64i size, U8i *userdata) {
     U8i *p;
     I32i count;
-    I32i _c2hc_t47;
-    U64i _c2hc_t48;
-    I32i _c2hc_t49;
-    U64i _c2hc_t50;
+    I32i _c2hc_t16;
+    U64i _c2hc_t17;
+    I32i _c2hc_t18;
+    U64i _c2hc_t19;
     stbtt__hheap_chunk * c;
-    U64i _c2hc_t51;
-    U64i _c2hc_t52;
-    no_warn _c2hc_t47, _c2hc_t48, _c2hc_t49, _c2hc_t50, _c2hc_t51, _c2hc_t52;
+    U64i _c2hc_t20;
+    U64i _c2hc_t21;
+    no_warn _c2hc_t16, _c2hc_t17, _c2hc_t18, _c2hc_t19, _c2hc_t20, _c2hc_t21;
     if ((hh->first_free)) {
-        p = (hh->first_free);
+        (p = (hh->first_free));
         ((hh->first_free) = (*((p)(U8i **))));
         return p;
     } else {
         if (((hh->num_remaining_in_head_chunk) == 0)) {
-            if ((size < (_c2hc_t48 = 32))) {
-                _c2hc_t47 = 2000;
+            if ((size < (_c2hc_t17 = 32))) {
+                _c2hc_t16 = 2000;
             } else {
-                if ((size < (_c2hc_t50 = 128))) {
-                    _c2hc_t49 = 800;
+                if ((size < (_c2hc_t19 = 128))) {
+                    _c2hc_t18 = 800;
                 } else {
-                    _c2hc_t49 = 100;
+                    _c2hc_t18 = 100;
                 }
-                _c2hc_t47 = _c2hc_t49;
+                _c2hc_t16 = _c2hc_t18;
             }
-            count = _c2hc_t47;
-            c = ((malloc((8 + (size * (_c2hc_t51 = count)))))(stbtt__hheap_chunk *));
+            (count = _c2hc_t16);
+            (c = ((malloc((8 + (size * (_c2hc_t20 = count)))))(stbtt__hheap_chunk *)));
             if ((c == ((((0)(U8i *)))(stbtt__hheap_chunk *)))) {
                 return ((0)(U8i *));
             }
@@ -970,7 +944,7 @@ U8i *stbtt_ttf_stbtt__hheap_alloc(stbtt__hheap * hh, U64i size, U8i *userdata) {
             ((hh->num_remaining_in_head_chunk) = count);
         }
         (--(hh->num_remaining_in_head_chunk));
-        return (((((hh->head))(U8i *)) + 8) + (size * (_c2hc_t52 = (hh->num_remaining_in_head_chunk))));
+        return (((((hh->head))(U8i *)) + 8) + (size * (_c2hc_t21 = (hh->num_remaining_in_head_chunk))));
     }
 }
 
@@ -982,47 +956,48 @@ U0 stbtt_ttf_stbtt__hheap_free(stbtt__hheap * hh, U8i *p) {
 U0 stbtt_ttf_stbtt__hheap_cleanup(stbtt__hheap * hh, U8i *userdata) {
     stbtt__hheap_chunk * c;
     stbtt__hheap_chunk * n;
-    c = (hh->head);
+    (c = (hh->head));
     while (c) {
-        n = (c->next);
+        (n = (c->next));
         free(((c)(U8i *)));
         (c = n);
     }
 }
 
-stbtt__active_edge * stbtt_ttf_stbtt__new_active(stbtt__hheap * hh, stbtt__edge * e, I32i off_x, F64 start_point, U8i *userdata) {
+stbtt__active_edge * stbtt_ttf_stbtt__new_active(stbtt__hheap * hh, stbtt__edge * e, I32i off_x, F64 _c2hc_arg_start_point, U8i *userdata) {
+    U32i start_point;
     stbtt__active_edge * z;
-    F64 dxdy;
-    F64 _c2hc_t53;
-    F64 _c2hc_t54;
-    I64i _c2hc_t55;
-    F64 _c2hc_t56;
-    I64i _c2hc_t57;
-    F64 _c2hc_t58;
-    F64 _c2hc_t59;
-    I64i _c2hc_t60;
-    I32i _c2hc_t61;
-    no_warn _c2hc_t53, _c2hc_t54, _c2hc_t55, _c2hc_t56, _c2hc_t57, _c2hc_t58, _c2hc_t59, _c2hc_t60, _c2hc_t61;
-    z = ((stbtt_ttf_stbtt__hheap_alloc(hh, 32, userdata))(stbtt__active_edge *));
-    dxdy = (((e->x1) - (e->x0)) / ((e->y1) - (e->y0)));
+    U32i dxdy;
+    F64 _c2hc_t22;
+    F64 _c2hc_t23;
+    I64i _c2hc_t24;
+    I64i _c2hc_t25;
+    I64i _c2hc_t26;
+    I32i _c2hc_t27;
+    no_warn _c2hc_t22, _c2hc_t23, _c2hc_t24, _c2hc_t25, _c2hc_t26, _c2hc_t27;
+    LC_F32FromBits((start_point = LC_F32ToBits(_c2hc_arg_start_point)));
+    (z = ((stbtt_ttf_stbtt__hheap_alloc(hh, 24, userdata))(stbtt__active_edge *)));
+    LC_F32FromBits((dxdy = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits((e->x1)) - LC_F32FromBits((e->x0)))) / LC_F32Round((LC_F32FromBits((e->y1)) - LC_F32FromBits((e->y0)))))))));
     if ((!z)) {
         return z;
     }
-    if ((dxdy < (_c2hc_t53 = 0))) {
-        ((z->dx) = (-((((_c2hc_t55 = floor(((_c2hc_t54 = ((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)) * (-dxdy)))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)));
+    _c2hc_t22 = LC_F32FromBits(dxdy);
+    _c2hc_t23 = LC_IntToF32(0);
+    if ((!(isnan(_c2hc_t22) || isnan(_c2hc_t23)) && (_c2hc_t22 < _c2hc_t23))) {
+        ((z->dx) = (-((((_c2hc_t24 = floor(LC_F32Round((LC_IntToF32(((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)) * (-LC_F32FromBits(dxdy)))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)));
     } else {
-        ((z->dx) = ((((_c2hc_t57 = floor(((_c2hc_t56 = ((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)) * dxdy))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
+        ((z->dx) = ((((_c2hc_t25 = floor(LC_F32Round((LC_IntToF32(((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)) * LC_F32FromBits(dxdy))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
     }
-    ((z->x) = ((((_c2hc_t60 = floor((((_c2hc_t58 = ((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)) * (e->x0)) + ((_c2hc_t59 = (z->dx)) * (start_point - (e->y0)))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
+    ((z->x) = ((((_c2hc_t26 = floor(LC_F32Round((LC_F32Round((LC_IntToF32(((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)) * LC_F32FromBits((e->x0)))) + LC_F32Round((LC_IntToF32((z->dx)) * LC_F32Round((LC_F32FromBits(start_point) - LC_F32FromBits((e->y0)))))))))) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
     ((z->x) -= (off_x * ((((1 << 10) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000)));
-    ((z->ey) = (e->y1));
+    LC_F32FromBits(((z->ey) = LC_F32ToBits(LC_F32FromBits((e->y1)))));
     ((z->next) = ((0)(stbtt__active_edge *)));
     if ((e->invert)) {
-        _c2hc_t61 = 1;
+        _c2hc_t27 = 1;
     } else {
-        _c2hc_t61 = (-1);
+        _c2hc_t27 = (-1);
     }
-    ((z->direction) = _c2hc_t61);
+    ((z->direction) = _c2hc_t27);
     return z;
 }
 
@@ -1032,18 +1007,18 @@ U0 stbtt_ttf_stbtt__fill_active_edges(U8i *scanline, I32i len, stbtt__active_edg
     I32i x1;
     I32i i;
     I32i j;
-    x0 = 0;
-    w = 0;
+    (x0 = 0);
+    (w = 0);
     while (e) {
         if ((w == 0)) {
             (x0 = (e->x));
             (w += (e->direction));
         } else {
-            x1 = (e->x);
+            (x1 = (e->x));
             (w += (e->direction));
             if ((w == 0)) {
-                i = (x0 >> 10);
-                j = (x1 >> 10);
+                (i = (x0 >> 10));
+                (j = (x1 >> 10));
                 if (((i < len) && (j >= 0))) {
                     if ((i == j)) {
                         ((scanline[i]) = (((scanline[i]) + ((((x1 - x0) * max_weight) >> 10) & 0xFF)) & 0xFF));
@@ -1080,45 +1055,49 @@ U0 stbtt_ttf_stbtt__rasterize_sorted_edges(stbtt__bitmap * result, stbtt__edge *
     I32i s;
     U8i scanline_data[512];
     U8i *scanline;
-    U64i _c2hc_t62;
-    F64 _c2hc_t63;
-    F64 _c2hc_t64;
-    F64 _c2hc_t65;
-    U64i _c2hc_t66;
-    F64 scan_y;
-    F64 _c2hc_t67;
+    U64i _c2hc_t28;
+    U64i _c2hc_t29;
+    U32i scan_y;
     stbtt__active_edge * *step;
     stbtt__active_edge * z;
+    F64 _c2hc_t30;
+    F64 _c2hc_t31;
     I32i changed;
     stbtt__active_edge * t;
     stbtt__active_edge * q;
+    F64 _c2hc_t32;
+    F64 _c2hc_t33;
+    F64 _c2hc_t34;
+    F64 _c2hc_t35;
     stbtt__active_edge * z_1;
     stbtt__active_edge * p;
-    U64i _c2hc_t68;
-    no_warn _c2hc_t62, _c2hc_t63, _c2hc_t64, _c2hc_t65, _c2hc_t66, _c2hc_t67, _c2hc_t68;
+    U64i _c2hc_t36;
+    no_warn _c2hc_t28, _c2hc_t29, _c2hc_t30, _c2hc_t31, _c2hc_t32, _c2hc_t33, _c2hc_t34, _c2hc_t35, _c2hc_t36;
     MemSet(&hh, 0, 24);
-    hh.head = ((0)(stbtt__hheap_chunk *));
-    hh.first_free = ((0)(U8i *));
-    hh.num_remaining_in_head_chunk = 0;
-    active = ((0)(stbtt__active_edge *));
-    j = 0;
-    max_weight = (255 / vsubsample);
+    (hh.head = ((0)(stbtt__hheap_chunk *)));
+    (hh.first_free = ((0)(U8i *)));
+    (hh.num_remaining_in_head_chunk = 0);
+    (active = ((0)(stbtt__active_edge *)));
+    (j = 0);
+    (max_weight = (255 / vsubsample));
     if (((result->w) > 512)) {
-        (scanline = malloc((_c2hc_t62 = (result->w))));
+        (scanline = malloc((_c2hc_t28 = (result->w))));
     } else {
         (scanline = scanline_data);
     }
     (y = (off_y * vsubsample));
-    (((e[n]).y0) = (((_c2hc_t63 = (off_y + (result->h))) * (_c2hc_t64 = vsubsample)) + (_c2hc_t65 = 1)));
+    LC_F32FromBits((((e[n]).y0) = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_IntToF32((off_y + (result->h))) * LC_IntToF32(vsubsample))) + LC_IntToF32(1))))));
     while ((j < (result->h))) {
-        memset(scanline, 0, (_c2hc_t66 = (result->w)));
+        memset(scanline, 0, (_c2hc_t29 = (result->w)));
         (s = 0);
         while ((s < vsubsample)) {
-            scan_y = ((_c2hc_t67 = y) + 0.5);
-            step = (&active);
+            LC_F32FromBits((scan_y = LC_F32ToBits(LC_F32Round((LC_IntToF32(y) + LC_F32FromBits(0x3F000000))))));
+            (step = (&active));
             while ((*step)) {
-                z = (*step);
-                if (((z->ey) <= scan_y)) {
+                (z = (*step));
+                _c2hc_t30 = LC_F32FromBits((z->ey));
+                _c2hc_t31 = LC_F32FromBits(scan_y);
+                if ((!(isnan(_c2hc_t30) || isnan(_c2hc_t31)) && (_c2hc_t30 <= _c2hc_t31))) {
                     ((*step) = (z->next));
                     ((z->direction) = 0);
                     stbtt_ttf_stbtt__hheap_free((&hh), ((z)(U8i *)));
@@ -1128,12 +1107,12 @@ U0 stbtt_ttf_stbtt__rasterize_sorted_edges(stbtt__bitmap * result, stbtt__edge *
                 }
             }
             while (1) {
-                changed = 0;
+                (changed = 0);
                 (step = (&active));
                 while (((*step) && ((*step)->next))) {
                     if ((((*step)->x) > (((*step)->next)->x))) {
-                        t = (*step);
-                        q = (t->next);
+                        (t = (*step));
+                        (q = (t->next));
                         ((t->next) = (q->next));
                         ((q->next) = t);
                         ((*step) = q);
@@ -1145,9 +1124,14 @@ U0 stbtt_ttf_stbtt__rasterize_sorted_edges(stbtt__bitmap * result, stbtt__edge *
                     break;
                 }
             }
-            while (((e->y0) <= scan_y)) {
-                if (((e->y1) > scan_y)) {
-                    z_1 = stbtt_ttf_stbtt__new_active((&hh), e, off_x, scan_y, userdata);
+            while (1) {
+                _c2hc_t32 = LC_F32FromBits((e->y0));
+                _c2hc_t33 = LC_F32FromBits(scan_y);
+                if (!((!(isnan(_c2hc_t32) || isnan(_c2hc_t33)) && (_c2hc_t32 <= _c2hc_t33)))) break;
+                _c2hc_t34 = LC_F32FromBits((e->y1));
+                _c2hc_t35 = LC_F32FromBits(scan_y);
+                if ((!(isnan(_c2hc_t34) || isnan(_c2hc_t35)) && (_c2hc_t34 > _c2hc_t35))) {
+                    (z_1 = stbtt_ttf_stbtt__new_active((&hh), e, off_x, LC_F32FromBits(scan_y), userdata));
                     if ((z_1 != ((((0)(U8i *)))(stbtt__active_edge *)))) {
                         if ((active == ((((0)(U8i *)))(stbtt__active_edge *)))) {
                             (active = z_1);
@@ -1156,7 +1140,7 @@ U0 stbtt_ttf_stbtt__rasterize_sorted_edges(stbtt__bitmap * result, stbtt__edge *
                                 ((z_1->next) = active);
                                 (active = z_1);
                             } else {
-                                p = active;
+                                (p = active);
                                 while (((p->next) && (((p->next)->x) < (z_1->x)))) {
                                     (p = (p->next));
                                 }
@@ -1174,7 +1158,7 @@ U0 stbtt_ttf_stbtt__rasterize_sorted_edges(stbtt__bitmap * result, stbtt__edge *
             (++y);
             (++s);
         }
-        memcpy(((result->pixels) + (j * (result->stride))), scanline, (_c2hc_t68 = (result->w)));
+        memcpy(((result->pixels) + (j * (result->stride))), scanline, (_c2hc_t36 = (result->w)));
         (++j);
     }
     stbtt_ttf_stbtt__hheap_cleanup((&hh), userdata);
@@ -1190,22 +1174,27 @@ U0 stbtt_ttf_stbtt__sort_edges_ins_sort(stbtt__edge * p, I32i n) {
     stbtt__edge * a;
     stbtt__edge * b;
     I32i c;
+    F64 _c2hc_t37;
+    F64 _c2hc_t38;
+    no_warn _c2hc_t37, _c2hc_t38;
     (i = 1);
     while ((i < n)) {
-        MemCpy(&t, &(p[i]), 40);
-        a = (&t);
+        MemCpy(&t, &(p[i]), 20);
+        (a = (&t));
         (j = i);
         while ((j > 0)) {
-            b = (&(p[(j - 1)]));
-            c = ((a->y0) < (b->y0));
+            (b = (&(p[(j - 1)])));
+            _c2hc_t37 = LC_F32FromBits((a->y0));
+            _c2hc_t38 = LC_F32FromBits((b->y0));
+            (c = (!(isnan(_c2hc_t37) || isnan(_c2hc_t38)) && (_c2hc_t37 < _c2hc_t38)));
             if ((!c)) {
                 break;
             }
-            MemCpy(&(p[j]), &(p[(j - 1)]), 40);
+            MemCpy(&(p[j]), &(p[(j - 1)]), 20);
             (--j);
         }
         if ((i != j)) {
-            MemCpy(&(p[j]), &t, 40);
+            MemCpy(&(p[j]), &t, 20);
         }
         (++i);
     }
@@ -1219,39 +1208,59 @@ U0 stbtt_ttf_stbtt__sort_edges_quicksort(stbtt__edge * p, I32i n) {
     I32i m;
     I32i i;
     I32i j;
+    F64 _c2hc_t39;
+    F64 _c2hc_t40;
+    F64 _c2hc_t41;
+    F64 _c2hc_t42;
     I32i z;
-    I32i _c2hc_t69;
-    no_warn _c2hc_t69;
+    F64 _c2hc_t43;
+    F64 _c2hc_t44;
+    I32i _c2hc_t45;
+    F64 _c2hc_t46;
+    F64 _c2hc_t47;
+    F64 _c2hc_t48;
+    F64 _c2hc_t49;
+    no_warn _c2hc_t39, _c2hc_t40, _c2hc_t41, _c2hc_t42, _c2hc_t43, _c2hc_t44, _c2hc_t45, _c2hc_t46, _c2hc_t47, _c2hc_t48, _c2hc_t49;
     while ((n > 12)) {
         (m = (n >> 1));
-        (c01 = (((&(p[0]))->y0) < ((&(p[m]))->y0)));
-        (c12 = (((&(p[m]))->y0) < ((&(p[(n - 1)]))->y0)));
+        _c2hc_t39 = LC_F32FromBits(((&(p[0]))->y0));
+        _c2hc_t40 = LC_F32FromBits(((&(p[m]))->y0));
+        (c01 = (!(isnan(_c2hc_t39) || isnan(_c2hc_t40)) && (_c2hc_t39 < _c2hc_t40)));
+        _c2hc_t41 = LC_F32FromBits(((&(p[m]))->y0));
+        _c2hc_t42 = LC_F32FromBits(((&(p[(n - 1)]))->y0));
+        (c12 = (!(isnan(_c2hc_t41) || isnan(_c2hc_t42)) && (_c2hc_t41 < _c2hc_t42)));
         if ((c01 != c12)) {
-            (c = (((&(p[0]))->y0) < ((&(p[(n - 1)]))->y0)));
+            _c2hc_t43 = LC_F32FromBits(((&(p[0]))->y0));
+            _c2hc_t44 = LC_F32FromBits(((&(p[(n - 1)]))->y0));
+            (c = (!(isnan(_c2hc_t43) || isnan(_c2hc_t44)) && (_c2hc_t43 < _c2hc_t44)));
             if ((c == c12)) {
-                _c2hc_t69 = 0;
+                _c2hc_t45 = 0;
             } else {
-                _c2hc_t69 = (n - 1);
+                _c2hc_t45 = (n - 1);
             }
-            (z = _c2hc_t69);
-            MemCpy(&t, &(p[z]), 40);
-            MemCpy(&(p[z]), &(p[m]), 40);
-            MemCpy(&(p[m]), &t, 40);
+            (z = _c2hc_t45);
+            MemCpy(&t, &(p[z]), 20);
+            MemCpy(&(p[z]), &(p[m]), 20);
+            MemCpy(&(p[m]), &t, 20);
         }
-        MemCpy(&t, &(p[0]), 40);
-        MemCpy(&(p[0]), &(p[m]), 40);
-        MemCpy(&(p[m]), &t, 40);
+        MemCpy(&t, &(p[0]), 20);
+        MemCpy(&(p[0]), &(p[m]), 20);
+        MemCpy(&(p[m]), &t, 20);
         (i = 1);
         (j = (n - 1));
         while (1) {
             while (1) {
-                if ((!(((&(p[i]))->y0) < ((&(p[0]))->y0)))) {
+                _c2hc_t46 = LC_F32FromBits(((&(p[i]))->y0));
+                _c2hc_t47 = LC_F32FromBits(((&(p[0]))->y0));
+                if ((!(!(isnan(_c2hc_t46) || isnan(_c2hc_t47)) && (_c2hc_t46 < _c2hc_t47)))) {
                     break;
                 }
                 (++i);
             }
             while (1) {
-                if ((!(((&(p[0]))->y0) < ((&(p[j]))->y0)))) {
+                _c2hc_t48 = LC_F32FromBits(((&(p[0]))->y0));
+                _c2hc_t49 = LC_F32FromBits(((&(p[j]))->y0));
+                if ((!(!(isnan(_c2hc_t48) || isnan(_c2hc_t49)) && (_c2hc_t48 < _c2hc_t49)))) {
                     break;
                 }
                 (--j);
@@ -1259,9 +1268,9 @@ U0 stbtt_ttf_stbtt__sort_edges_quicksort(stbtt__edge * p, I32i n) {
             if ((i >= j)) {
                 break;
             }
-            MemCpy(&t, &(p[i]), 40);
-            MemCpy(&(p[i]), &(p[j]), 40);
-            MemCpy(&(p[j]), &t, 40);
+            MemCpy(&t, &(p[i]), 20);
+            MemCpy(&(p[i]), &(p[j]), 20);
+            MemCpy(&(p[j]), &t, 20);
             (++i);
             (--j);
         }
@@ -1281,9 +1290,13 @@ U0 stbtt_ttf_stbtt__sort_edges(stbtt__edge * p, I32i n) {
     stbtt_ttf_stbtt__sort_edges_ins_sort(p, n);
 }
 
-U0 stbtt_ttf_stbtt__rasterize(stbtt__bitmap * result, stbtt__point * pts, I32i *wcount, I32i windings, F64 scale_x, F64 scale_y, F64 shift_x, F64 shift_y, I32i off_x, I32i off_y, I32i invert, U8i *userdata) {
-    F64 y_scale_inv;
-    F64 _c2hc_t70;
+U0 stbtt_ttf_stbtt__rasterize(stbtt__bitmap * result, stbtt__point * pts, I32i *wcount, I32i windings, F64 _c2hc_arg_scale_x, F64 _c2hc_arg_scale_y, F64 _c2hc_arg_shift_x, F64 _c2hc_arg_shift_y, I32i off_x, I32i off_y, I32i invert, U8i *userdata) {
+    U32i scale_x;
+    U32i scale_y;
+    U32i shift_x;
+    U32i shift_y;
+    U32i y_scale_inv;
+    F64 _c2hc_t50;
     stbtt__edge * e;
     I32i n;
     I32i i;
@@ -1291,34 +1304,42 @@ U0 stbtt_ttf_stbtt__rasterize(stbtt__bitmap * result, stbtt__point * pts, I32i *
     I32i k;
     I32i m;
     I32i vsubsample;
-    I32i _c2hc_t71;
-    U64i _c2hc_t72;
+    I32i _c2hc_t51;
+    U64i _c2hc_t52;
     stbtt__point * p;
     I32i a;
     I32i b;
-    I32i _c2hc_t73;
-    F64 _c2hc_t74;
-    F64 _c2hc_t75;
-    no_warn _c2hc_t70, _c2hc_t71, _c2hc_t72, _c2hc_t73, _c2hc_t74, _c2hc_t75;
+    F64 _c2hc_t53;
+    F64 _c2hc_t54;
+    I32i _c2hc_t55;
+    F64 _c2hc_t56;
+    F64 _c2hc_t57;
+    F64 _c2hc_t58;
+    F64 _c2hc_t59;
+    no_warn _c2hc_t50, _c2hc_t51, _c2hc_t52, _c2hc_t53, _c2hc_t54, _c2hc_t55, _c2hc_t56, _c2hc_t57, _c2hc_t58, _c2hc_t59;
+    LC_F32FromBits((scale_x = LC_F32ToBits(_c2hc_arg_scale_x)));
+    LC_F32FromBits((scale_y = LC_F32ToBits(_c2hc_arg_scale_y)));
+    LC_F32FromBits((shift_x = LC_F32ToBits(_c2hc_arg_shift_x)));
+    LC_F32FromBits((shift_y = LC_F32ToBits(_c2hc_arg_shift_y)));
     if (invert) {
-        _c2hc_t70 = (-scale_y);
+        _c2hc_t50 = (-LC_F32FromBits(scale_y));
     } else {
-        _c2hc_t70 = scale_y;
+        _c2hc_t50 = LC_F32FromBits(scale_y);
     }
-    y_scale_inv = _c2hc_t70;
+    LC_F32FromBits((y_scale_inv = LC_F32ToBits(_c2hc_t50)));
     if (((result->h) < 8)) {
-        _c2hc_t71 = 15;
+        _c2hc_t51 = 15;
     } else {
-        _c2hc_t71 = 5;
+        _c2hc_t51 = 5;
     }
-    vsubsample = _c2hc_t71;
+    (vsubsample = _c2hc_t51);
     (n = 0);
     (i = 0);
     while ((i < windings)) {
         (n += (wcount[i]));
         (++i);
     }
-    (e = ((malloc((40 * (_c2hc_t72 = (n + 1)))))(stbtt__edge *)));
+    (e = ((malloc((20 * (_c2hc_t52 = (n + 1)))))(stbtt__edge *)));
     if ((e == ((0)(stbtt__edge *)))) {
         return;
     }
@@ -1326,31 +1347,37 @@ U0 stbtt_ttf_stbtt__rasterize(stbtt__bitmap * result, stbtt__point * pts, I32i *
     (m = 0);
     (i = 0);
     while ((i < windings)) {
-        p = (pts + m);
+        (p = (pts + m));
         (m += (wcount[i]));
         (j = ((wcount[i]) - 1));
         (k = 0);
         while ((k < (wcount[i]))) {
-            a = k;
-            b = j;
-            if ((((p[j]).y) == ((p[k]).y))) {
+            (a = k);
+            (b = j);
+            _c2hc_t53 = LC_F32FromBits(((p[j]).y));
+            _c2hc_t54 = LC_F32FromBits(((p[k]).y));
+            if ((!(isnan(_c2hc_t53) || isnan(_c2hc_t54)) && (_c2hc_t53 == _c2hc_t54))) {
                 goto _c2hc_continue_29;
             }
             (((e[n]).invert) = 0);
             if (invert) {
-                _c2hc_t73 = (((p[j]).y) > ((p[k]).y));
+                _c2hc_t56 = LC_F32FromBits(((p[j]).y));
+                _c2hc_t57 = LC_F32FromBits(((p[k]).y));
+                _c2hc_t55 = (!(isnan(_c2hc_t56) || isnan(_c2hc_t57)) && (_c2hc_t56 > _c2hc_t57));
             } else {
-                _c2hc_t73 = (((p[j]).y) < ((p[k]).y));
+                _c2hc_t58 = LC_F32FromBits(((p[j]).y));
+                _c2hc_t59 = LC_F32FromBits(((p[k]).y));
+                _c2hc_t55 = (!(isnan(_c2hc_t58) || isnan(_c2hc_t59)) && (_c2hc_t58 < _c2hc_t59));
             }
-            if (_c2hc_t73) {
+            if (_c2hc_t55) {
                 (((e[n]).invert) = 1);
                 (a = j);
                 (b = k);
             }
-            (((e[n]).x0) = ((((p[a]).x) * scale_x) + shift_x));
-            (((e[n]).y0) = (((((p[a]).y) * y_scale_inv) + shift_y) * (_c2hc_t74 = vsubsample)));
-            (((e[n]).x1) = ((((p[b]).x) * scale_x) + shift_x));
-            (((e[n]).y1) = (((((p[b]).y) * y_scale_inv) + shift_y) * (_c2hc_t75 = vsubsample)));
+            LC_F32FromBits((((e[n]).x0) = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(((p[a]).x)) * LC_F32FromBits(scale_x))) + LC_F32FromBits(shift_x))))));
+            LC_F32FromBits((((e[n]).y0) = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits(((p[a]).y)) * LC_F32FromBits(y_scale_inv))) + LC_F32FromBits(shift_y))) * LC_IntToF32(vsubsample))))));
+            LC_F32FromBits((((e[n]).x1) = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(((p[b]).x)) * LC_F32FromBits(scale_x))) + LC_F32FromBits(shift_x))))));
+            LC_F32FromBits((((e[n]).y1) = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits(((p[b]).y)) * LC_F32FromBits(y_scale_inv))) + LC_F32FromBits(shift_y))) * LC_IntToF32(vsubsample))))));
             (++n);
 _c2hc_continue_29:;
             (j = (k++));
@@ -1362,153 +1389,161 @@ _c2hc_continue_29:;
     free(((e)(U8i *)));
 }
 
-U0 stbtt_ttf_stbtt__add_point(stbtt__point * points, I32i n, F64 x, F64 y) {
+U0 stbtt_ttf_stbtt__add_point(stbtt__point * points, I32i n, F64 _c2hc_arg_x, F64 _c2hc_arg_y) {
+    U32i x;
+    U32i y;
+    LC_F32FromBits((x = LC_F32ToBits(_c2hc_arg_x)));
+    LC_F32FromBits((y = LC_F32ToBits(_c2hc_arg_y)));
     if ((!points)) {
         return;
     }
-    (((points[n]).x) = x);
-    (((points[n]).y) = y);
+    LC_F32FromBits((((points[n]).x) = LC_F32ToBits(LC_F32FromBits(x))));
+    LC_F32FromBits((((points[n]).y) = LC_F32ToBits(LC_F32FromBits(y))));
 }
 
-I32i stbtt_ttf_stbtt__tesselate_curve(stbtt__point * points, I32i *num_points, F64 x0, F64 y0, F64 x1, F64 y1, F64 x2, F64 y2, F64 objspace_flatness_squared, I32i n) {
-    F64 mx;
-    F64 _c2hc_t76;
-    F64 _c2hc_t77;
-    F64 my;
-    F64 _c2hc_t78;
-    F64 _c2hc_t79;
-    F64 dx;
-    F64 _c2hc_t80;
-    F64 dy;
-    F64 _c2hc_t81;
-    no_warn _c2hc_t76, _c2hc_t77, _c2hc_t78, _c2hc_t79, _c2hc_t80, _c2hc_t81;
-    mx = (((x0 + ((_c2hc_t76 = 2) * x1)) + x2) / (_c2hc_t77 = 4));
-    my = (((y0 + ((_c2hc_t78 = 2) * y1)) + y2) / (_c2hc_t79 = 4));
-    dx = (((x0 + x2) / (_c2hc_t80 = 2)) - mx);
-    dy = (((y0 + y2) / (_c2hc_t81 = 2)) - my);
+I32i stbtt_ttf_stbtt__tesselate_curve(stbtt__point * points, I32i *num_points, F64 _c2hc_arg_x0, F64 _c2hc_arg_y0, F64 _c2hc_arg_x1, F64 _c2hc_arg_y1, F64 _c2hc_arg_x2, F64 _c2hc_arg_y2, F64 _c2hc_arg_objspace_flatness_squared, I32i n) {
+    U32i x0;
+    U32i y0;
+    U32i x1;
+    U32i y1;
+    U32i x2;
+    U32i y2;
+    U32i objspace_flatness_squared;
+    U32i mx;
+    U32i my;
+    U32i dx;
+    U32i dy;
+    F64 _c2hc_t60;
+    F64 _c2hc_t61;
+    no_warn _c2hc_t60, _c2hc_t61;
+    LC_F32FromBits((x0 = LC_F32ToBits(_c2hc_arg_x0)));
+    LC_F32FromBits((y0 = LC_F32ToBits(_c2hc_arg_y0)));
+    LC_F32FromBits((x1 = LC_F32ToBits(_c2hc_arg_x1)));
+    LC_F32FromBits((y1 = LC_F32ToBits(_c2hc_arg_y1)));
+    LC_F32FromBits((x2 = LC_F32ToBits(_c2hc_arg_x2)));
+    LC_F32FromBits((y2 = LC_F32ToBits(_c2hc_arg_y2)));
+    LC_F32FromBits((objspace_flatness_squared = LC_F32ToBits(_c2hc_arg_objspace_flatness_squared)));
+    LC_F32FromBits((mx = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits(x0) + LC_F32Round((LC_IntToF32(2) * LC_F32FromBits(x1))))) + LC_F32FromBits(x2))) / LC_IntToF32(4))))));
+    LC_F32FromBits((my = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits(y0) + LC_F32Round((LC_IntToF32(2) * LC_F32FromBits(y1))))) + LC_F32FromBits(y2))) / LC_IntToF32(4))))));
+    LC_F32FromBits((dx = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits(x0) + LC_F32FromBits(x2))) / LC_IntToF32(2))) - LC_F32FromBits(mx))))));
+    LC_F32FromBits((dy = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32Round((LC_F32FromBits(y0) + LC_F32FromBits(y2))) / LC_IntToF32(2))) - LC_F32FromBits(my))))));
     if ((n > 16)) {
         return 1;
     }
-    if ((((dx * dx) + (dy * dy)) > objspace_flatness_squared)) {
-        stbtt_ttf_stbtt__tesselate_curve(points, num_points, x0, y0, ((x0 + x1) / 2.0), ((y0 + y1) / 2.0), mx, my, objspace_flatness_squared, (n + 1));
-        stbtt_ttf_stbtt__tesselate_curve(points, num_points, mx, my, ((x1 + x2) / 2.0), ((y1 + y2) / 2.0), x2, y2, objspace_flatness_squared, (n + 1));
+    _c2hc_t60 = LC_F32Round((LC_F32Round((LC_F32FromBits(dx) * LC_F32FromBits(dx))) + LC_F32Round((LC_F32FromBits(dy) * LC_F32FromBits(dy)))));
+    _c2hc_t61 = LC_F32FromBits(objspace_flatness_squared);
+    if ((!(isnan(_c2hc_t60) || isnan(_c2hc_t61)) && (_c2hc_t60 > _c2hc_t61))) {
+        stbtt_ttf_stbtt__tesselate_curve(points, num_points, LC_F32FromBits(x0), LC_F32FromBits(y0), LC_F32Round((LC_F32Round((LC_F32FromBits(x0) + LC_F32FromBits(x1))) / LC_F32FromBits(0x40000000))), LC_F32Round((LC_F32Round((LC_F32FromBits(y0) + LC_F32FromBits(y1))) / LC_F32FromBits(0x40000000))), LC_F32FromBits(mx), LC_F32FromBits(my), LC_F32FromBits(objspace_flatness_squared), (n + 1));
+        stbtt_ttf_stbtt__tesselate_curve(points, num_points, LC_F32FromBits(mx), LC_F32FromBits(my), LC_F32Round((LC_F32Round((LC_F32FromBits(x1) + LC_F32FromBits(x2))) / LC_F32FromBits(0x40000000))), LC_F32Round((LC_F32Round((LC_F32FromBits(y1) + LC_F32FromBits(y2))) / LC_F32FromBits(0x40000000))), LC_F32FromBits(x2), LC_F32FromBits(y2), LC_F32FromBits(objspace_flatness_squared), (n + 1));
     } else {
-        stbtt_ttf_stbtt__add_point(points, (*num_points), x2, y2);
+        stbtt_ttf_stbtt__add_point(points, (*num_points), LC_F32FromBits(x2), LC_F32FromBits(y2));
         ((*num_points) = ((*num_points) + 1));
     }
     return 1;
 }
 
-U0 stbtt_ttf_stbtt__tesselate_cubic(stbtt__point * points, I32i *num_points, F64 x0, F64 y0, F64 x1, F64 y1, F64 x2, F64 y2, F64 x3, F64 y3, F64 objspace_flatness_squared, I32i n) {
-    F64 dx0;
-    F64 dy0;
-    F64 dx1;
-    F64 dy1;
-    F64 dx2;
-    F64 dy2;
-    F64 dx;
-    F64 dy;
-    F64 longlen;
-    F64 shortlen;
-    F64 flatness_squared;
-    F64 x01;
-    F64 _c2hc_t82;
-    F64 y01;
-    F64 _c2hc_t83;
-    F64 x12;
-    F64 _c2hc_t84;
-    F64 y12;
-    F64 _c2hc_t85;
-    F64 x23;
-    F64 _c2hc_t86;
-    F64 y23;
-    F64 _c2hc_t87;
-    F64 xa;
-    F64 _c2hc_t88;
-    F64 ya;
-    F64 _c2hc_t89;
-    F64 xb;
-    F64 _c2hc_t90;
-    F64 yb;
-    F64 _c2hc_t91;
-    F64 mx;
-    F64 _c2hc_t92;
-    F64 my;
-    F64 _c2hc_t93;
-    no_warn _c2hc_t82, _c2hc_t83, _c2hc_t84, _c2hc_t85, _c2hc_t86, _c2hc_t87, _c2hc_t88, _c2hc_t89, _c2hc_t90, _c2hc_t91, _c2hc_t92, _c2hc_t93;
-    dx0 = (x1 - x0);
-    dy0 = (y1 - y0);
-    dx1 = (x2 - x1);
-    dy1 = (y2 - y1);
-    dx2 = (x3 - x2);
-    dy2 = (y3 - y2);
-    dx = (x3 - x0);
-    dy = (y3 - y0);
-    longlen = ((sqrt(((dx0 * dx0) + (dy0 * dy0))) + sqrt(((dx1 * dx1) + (dy1 * dy1)))) + sqrt(((dx2 * dx2) + (dy2 * dy2))));
-    shortlen = sqrt(((dx * dx) + (dy * dy)));
-    flatness_squared = ((longlen * longlen) - (shortlen * shortlen));
+U0 stbtt_ttf_stbtt__tesselate_cubic(stbtt__point * points, I32i *num_points, F64 _c2hc_arg_x0, F64 _c2hc_arg_y0, F64 _c2hc_arg_x1, F64 _c2hc_arg_y1, F64 _c2hc_arg_x2, F64 _c2hc_arg_y2, F64 _c2hc_arg_x3, F64 _c2hc_arg_y3, F64 _c2hc_arg_objspace_flatness_squared, I32i n) {
+    U32i x0;
+    U32i y0;
+    U32i x1;
+    U32i y1;
+    U32i x2;
+    U32i y2;
+    U32i x3;
+    U32i y3;
+    U32i objspace_flatness_squared;
+    U32i dx0;
+    U32i dy0;
+    U32i dx1;
+    U32i dy1;
+    U32i dx2;
+    U32i dy2;
+    U32i dx;
+    U32i dy;
+    U32i longlen;
+    U32i shortlen;
+    U32i flatness_squared;
+    F64 _c2hc_t62;
+    F64 _c2hc_t63;
+    U32i x01;
+    U32i y01;
+    U32i x12;
+    U32i y12;
+    U32i x23;
+    U32i y23;
+    U32i xa;
+    U32i ya;
+    U32i xb;
+    U32i yb;
+    U32i mx;
+    U32i my;
+    no_warn _c2hc_t62, _c2hc_t63;
+    LC_F32FromBits((x0 = LC_F32ToBits(_c2hc_arg_x0)));
+    LC_F32FromBits((y0 = LC_F32ToBits(_c2hc_arg_y0)));
+    LC_F32FromBits((x1 = LC_F32ToBits(_c2hc_arg_x1)));
+    LC_F32FromBits((y1 = LC_F32ToBits(_c2hc_arg_y1)));
+    LC_F32FromBits((x2 = LC_F32ToBits(_c2hc_arg_x2)));
+    LC_F32FromBits((y2 = LC_F32ToBits(_c2hc_arg_y2)));
+    LC_F32FromBits((x3 = LC_F32ToBits(_c2hc_arg_x3)));
+    LC_F32FromBits((y3 = LC_F32ToBits(_c2hc_arg_y3)));
+    LC_F32FromBits((objspace_flatness_squared = LC_F32ToBits(_c2hc_arg_objspace_flatness_squared)));
+    LC_F32FromBits((dx0 = LC_F32ToBits(LC_F32Round((LC_F32FromBits(x1) - LC_F32FromBits(x0))))));
+    LC_F32FromBits((dy0 = LC_F32ToBits(LC_F32Round((LC_F32FromBits(y1) - LC_F32FromBits(y0))))));
+    LC_F32FromBits((dx1 = LC_F32ToBits(LC_F32Round((LC_F32FromBits(x2) - LC_F32FromBits(x1))))));
+    LC_F32FromBits((dy1 = LC_F32ToBits(LC_F32Round((LC_F32FromBits(y2) - LC_F32FromBits(y1))))));
+    LC_F32FromBits((dx2 = LC_F32ToBits(LC_F32Round((LC_F32FromBits(x3) - LC_F32FromBits(x2))))));
+    LC_F32FromBits((dy2 = LC_F32ToBits(LC_F32Round((LC_F32FromBits(y3) - LC_F32FromBits(y2))))));
+    LC_F32FromBits((dx = LC_F32ToBits(LC_F32Round((LC_F32FromBits(x3) - LC_F32FromBits(x0))))));
+    LC_F32FromBits((dy = LC_F32ToBits(LC_F32Round((LC_F32FromBits(y3) - LC_F32FromBits(y0))))));
+    LC_F32FromBits((longlen = LC_F32ToBits(LC_F32Round(((sqrt(LC_F32Round((LC_F32Round((LC_F32FromBits(dx0) * LC_F32FromBits(dx0))) + LC_F32Round((LC_F32FromBits(dy0) * LC_F32FromBits(dy0)))))) + sqrt(LC_F32Round((LC_F32Round((LC_F32FromBits(dx1) * LC_F32FromBits(dx1))) + LC_F32Round((LC_F32FromBits(dy1) * LC_F32FromBits(dy1))))))) + sqrt(LC_F32Round((LC_F32Round((LC_F32FromBits(dx2) * LC_F32FromBits(dx2))) + LC_F32Round((LC_F32FromBits(dy2) * LC_F32FromBits(dy2)))))))))));
+    LC_F32FromBits((shortlen = LC_F32ToBits(LC_F32Round(sqrt(LC_F32Round((LC_F32Round((LC_F32FromBits(dx) * LC_F32FromBits(dx))) + LC_F32Round((LC_F32FromBits(dy) * LC_F32FromBits(dy))))))))));
+    LC_F32FromBits((flatness_squared = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(longlen) * LC_F32FromBits(longlen))) - LC_F32Round((LC_F32FromBits(shortlen) * LC_F32FromBits(shortlen))))))));
     if ((n > 16)) {
         return;
     }
-    if ((flatness_squared > objspace_flatness_squared)) {
-        x01 = ((x0 + x1) / (_c2hc_t82 = 2));
-        y01 = ((y0 + y1) / (_c2hc_t83 = 2));
-        x12 = ((x1 + x2) / (_c2hc_t84 = 2));
-        y12 = ((y1 + y2) / (_c2hc_t85 = 2));
-        x23 = ((x2 + x3) / (_c2hc_t86 = 2));
-        y23 = ((y2 + y3) / (_c2hc_t87 = 2));
-        xa = ((x01 + x12) / (_c2hc_t88 = 2));
-        ya = ((y01 + y12) / (_c2hc_t89 = 2));
-        xb = ((x12 + x23) / (_c2hc_t90 = 2));
-        yb = ((y12 + y23) / (_c2hc_t91 = 2));
-        mx = ((xa + xb) / (_c2hc_t92 = 2));
-        my = ((ya + yb) / (_c2hc_t93 = 2));
-        stbtt_ttf_stbtt__tesselate_cubic(points, num_points, x0, y0, x01, y01, xa, ya, mx, my, objspace_flatness_squared, (n + 1));
-        stbtt_ttf_stbtt__tesselate_cubic(points, num_points, mx, my, xb, yb, x23, y23, x3, y3, objspace_flatness_squared, (n + 1));
+    _c2hc_t62 = LC_F32FromBits(flatness_squared);
+    _c2hc_t63 = LC_F32FromBits(objspace_flatness_squared);
+    if ((!(isnan(_c2hc_t62) || isnan(_c2hc_t63)) && (_c2hc_t62 > _c2hc_t63))) {
+        LC_F32FromBits((x01 = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(x0) + LC_F32FromBits(x1))) / LC_IntToF32(2))))));
+        LC_F32FromBits((y01 = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(y0) + LC_F32FromBits(y1))) / LC_IntToF32(2))))));
+        LC_F32FromBits((x12 = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(x1) + LC_F32FromBits(x2))) / LC_IntToF32(2))))));
+        LC_F32FromBits((y12 = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(y1) + LC_F32FromBits(y2))) / LC_IntToF32(2))))));
+        LC_F32FromBits((x23 = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(x2) + LC_F32FromBits(x3))) / LC_IntToF32(2))))));
+        LC_F32FromBits((y23 = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(y2) + LC_F32FromBits(y3))) / LC_IntToF32(2))))));
+        LC_F32FromBits((xa = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(x01) + LC_F32FromBits(x12))) / LC_IntToF32(2))))));
+        LC_F32FromBits((ya = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(y01) + LC_F32FromBits(y12))) / LC_IntToF32(2))))));
+        LC_F32FromBits((xb = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(x12) + LC_F32FromBits(x23))) / LC_IntToF32(2))))));
+        LC_F32FromBits((yb = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(y12) + LC_F32FromBits(y23))) / LC_IntToF32(2))))));
+        LC_F32FromBits((mx = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(xa) + LC_F32FromBits(xb))) / LC_IntToF32(2))))));
+        LC_F32FromBits((my = LC_F32ToBits(LC_F32Round((LC_F32Round((LC_F32FromBits(ya) + LC_F32FromBits(yb))) / LC_IntToF32(2))))));
+        stbtt_ttf_stbtt__tesselate_cubic(points, num_points, LC_F32FromBits(x0), LC_F32FromBits(y0), LC_F32FromBits(x01), LC_F32FromBits(y01), LC_F32FromBits(xa), LC_F32FromBits(ya), LC_F32FromBits(mx), LC_F32FromBits(my), LC_F32FromBits(objspace_flatness_squared), (n + 1));
+        stbtt_ttf_stbtt__tesselate_cubic(points, num_points, LC_F32FromBits(mx), LC_F32FromBits(my), LC_F32FromBits(xb), LC_F32FromBits(yb), LC_F32FromBits(x23), LC_F32FromBits(y23), LC_F32FromBits(x3), LC_F32FromBits(y3), LC_F32FromBits(objspace_flatness_squared), (n + 1));
     } else {
-        stbtt_ttf_stbtt__add_point(points, (*num_points), x3, y3);
+        stbtt_ttf_stbtt__add_point(points, (*num_points), LC_F32FromBits(x3), LC_F32FromBits(y3));
         ((*num_points) = ((*num_points) + 1));
     }
 }
 
-stbtt__point * stbtt_ttf_stbtt_FlattenCurves(stbtt_vertex * vertices, I32i num_verts, F64 objspace_flatness, I32i **contour_lengths, I32i *num_contours, U8i *userdata) {
+stbtt__point * stbtt_ttf_stbtt_FlattenCurves(stbtt_vertex * vertices, I32i num_verts, F64 _c2hc_arg_objspace_flatness, I32i **contour_lengths, I32i *num_contours, U8i *userdata) {
+    U32i objspace_flatness;
     stbtt__point * points;
     I32i num_points;
-    F64 objspace_flatness_squared;
+    U32i objspace_flatness_squared;
     I32i i;
     I32i n;
     I32i c_start;
     I32i pass;
-    U64i _c2hc_t94;
-    F64 x;
-    F64 _c2hc_t95;
-    F64 y;
-    F64 _c2hc_t96;
-    U64i _c2hc_t97;
-    F64 _c2hc_t98;
-    F64 _c2hc_t99;
-    F64 _c2hc_t100;
-    F64 _c2hc_t101;
-    F64 _c2hc_t102;
-    F64 _c2hc_t103;
-    F64 _c2hc_t104;
-    F64 _c2hc_t105;
-    F64 _c2hc_t106;
-    F64 _c2hc_t107;
-    F64 _c2hc_t108;
-    F64 _c2hc_t109;
-    F64 _c2hc_t110;
-    F64 _c2hc_t111;
-    F64 _c2hc_t112;
-    F64 _c2hc_t113;
-    F64 _c2hc_t114;
-    F64 _c2hc_t115;
-    no_warn _c2hc_t94, _c2hc_t95, _c2hc_t96, _c2hc_t97, _c2hc_t98, _c2hc_t99, _c2hc_t100, _c2hc_t101, _c2hc_t102, _c2hc_t103, _c2hc_t104, _c2hc_t105, _c2hc_t106, _c2hc_t107, _c2hc_t108, _c2hc_t109, _c2hc_t110, _c2hc_t111, _c2hc_t112, _c2hc_t113, _c2hc_t114, _c2hc_t115;
-    points = ((0)(stbtt__point *));
-    num_points = 0;
-    objspace_flatness_squared = (objspace_flatness * objspace_flatness);
-    n = 0;
-    c_start = 0;
+    U64i _c2hc_t64;
+    U32i x;
+    U32i y;
+    U64i _c2hc_t65;
+    no_warn _c2hc_t64, _c2hc_t65;
+    LC_F32FromBits((objspace_flatness = LC_F32ToBits(_c2hc_arg_objspace_flatness)));
+    (points = ((0)(stbtt__point *)));
+    (num_points = 0);
+    LC_F32FromBits((objspace_flatness_squared = LC_F32ToBits(LC_F32Round((LC_F32FromBits(objspace_flatness) * LC_F32FromBits(objspace_flatness))))));
+    (n = 0);
+    (c_start = 0);
     (i = 0);
     while ((i < num_verts)) {
         if ((((vertices[i]).type) == 1)) {
@@ -1520,17 +1555,17 @@ stbtt__point * stbtt_ttf_stbtt_FlattenCurves(stbtt_vertex * vertices, I32i num_v
     if ((n == 0)) {
         return ((0)(stbtt__point *));
     }
-    ((*contour_lengths) = ((malloc((4 * (_c2hc_t94 = n))))(I32i *)));
+    ((*contour_lengths) = ((malloc((4 * (_c2hc_t64 = n))))(I32i *)));
     if (((*contour_lengths) == ((0)(I32i *)))) {
         ((*num_contours) = 0);
         return ((0)(stbtt__point *));
     }
     (pass = 0);
     while ((pass < 2)) {
-        x = (_c2hc_t95 = 0);
-        y = (_c2hc_t96 = 0);
+        LC_F32FromBits((x = LC_F32ToBits(LC_IntToF32(0))));
+        LC_F32FromBits((y = LC_F32ToBits(LC_IntToF32(0))));
         if ((pass == 1)) {
-            (points = ((malloc(((_c2hc_t97 = num_points) * 16)))(stbtt__point *)));
+            (points = ((malloc(((_c2hc_t65 = num_points) * 8)))(stbtt__point *)));
             if ((points == ((((0)(U8i *)))(stbtt__point *)))) {
                 goto _c2hc_label_32;
             }
@@ -1546,24 +1581,24 @@ stbtt__point * stbtt_ttf_stbtt_FlattenCurves(stbtt_vertex * vertices, I32i num_v
                     }
                     (++n);
                     (c_start = num_points);
-                    (x = (_c2hc_t98 = ((vertices[i]).x)));
-                    (y = (_c2hc_t99 = ((vertices[i]).y)));
-                    stbtt_ttf_stbtt__add_point(points, (num_points++), x, y);
+                    LC_F32FromBits((x = LC_F32ToBits(LC_IntToF32(((vertices[i]).x)))));
+                    LC_F32FromBits((y = LC_F32ToBits(LC_IntToF32(((vertices[i]).y)))));
+                    stbtt_ttf_stbtt__add_point(points, (num_points++), LC_F32FromBits(x), LC_F32FromBits(y));
                     break;
                 case 2:
-                    (x = (_c2hc_t100 = ((vertices[i]).x)));
-                    (y = (_c2hc_t101 = ((vertices[i]).y)));
-                    stbtt_ttf_stbtt__add_point(points, (num_points++), x, y);
+                    LC_F32FromBits((x = LC_F32ToBits(LC_IntToF32(((vertices[i]).x)))));
+                    LC_F32FromBits((y = LC_F32ToBits(LC_IntToF32(((vertices[i]).y)))));
+                    stbtt_ttf_stbtt__add_point(points, (num_points++), LC_F32FromBits(x), LC_F32FromBits(y));
                     break;
                 case 3:
-                    stbtt_ttf_stbtt__tesselate_curve(points, (&num_points), x, y, (_c2hc_t102 = ((vertices[i]).cx)), (_c2hc_t103 = ((vertices[i]).cy)), (_c2hc_t104 = ((vertices[i]).x)), (_c2hc_t105 = ((vertices[i]).y)), objspace_flatness_squared, 0);
-                    (x = (_c2hc_t106 = ((vertices[i]).x)));
-                    (y = (_c2hc_t107 = ((vertices[i]).y)));
+                    stbtt_ttf_stbtt__tesselate_curve(points, (&num_points), LC_F32FromBits(x), LC_F32FromBits(y), LC_IntToF32(((vertices[i]).cx)), LC_IntToF32(((vertices[i]).cy)), LC_IntToF32(((vertices[i]).x)), LC_IntToF32(((vertices[i]).y)), LC_F32FromBits(objspace_flatness_squared), 0);
+                    LC_F32FromBits((x = LC_F32ToBits(LC_IntToF32(((vertices[i]).x)))));
+                    LC_F32FromBits((y = LC_F32ToBits(LC_IntToF32(((vertices[i]).y)))));
                     break;
                 case 4:
-                    stbtt_ttf_stbtt__tesselate_cubic(points, (&num_points), x, y, (_c2hc_t108 = ((vertices[i]).cx)), (_c2hc_t109 = ((vertices[i]).cy)), (_c2hc_t110 = ((vertices[i]).cx1)), (_c2hc_t111 = ((vertices[i]).cy1)), (_c2hc_t112 = ((vertices[i]).x)), (_c2hc_t113 = ((vertices[i]).y)), objspace_flatness_squared, 0);
-                    (x = (_c2hc_t114 = ((vertices[i]).x)));
-                    (y = (_c2hc_t115 = ((vertices[i]).y)));
+                    stbtt_ttf_stbtt__tesselate_cubic(points, (&num_points), LC_F32FromBits(x), LC_F32FromBits(y), LC_IntToF32(((vertices[i]).cx)), LC_IntToF32(((vertices[i]).cy)), LC_IntToF32(((vertices[i]).cx1)), LC_IntToF32(((vertices[i]).cy1)), LC_IntToF32(((vertices[i]).x)), LC_IntToF32(((vertices[i]).y)), LC_F32FromBits(objspace_flatness_squared), 0);
+                    LC_F32FromBits((x = LC_F32ToBits(LC_IntToF32(((vertices[i]).x)))));
+                    LC_F32FromBits((y = LC_F32ToBits(LC_IntToF32(((vertices[i]).y)))));
                     break;
             }
             (++i);
@@ -1580,53 +1615,87 @@ _c2hc_label_32:;
     return ((0)(stbtt__point *));
 }
 
-U0 stbtt_Rasterize(stbtt__bitmap * result, F64 flatness_in_pixels, stbtt_vertex * vertices, I32i num_verts, F64 scale_x, F64 scale_y, F64 shift_x, F64 shift_y, I32i x_off, I32i y_off, I32i invert, U8i *userdata) {
-    F64 scale;
-    F64 _c2hc_t116;
+U0 stbtt_Rasterize(stbtt__bitmap * result, F64 _c2hc_arg_flatness_in_pixels, stbtt_vertex * vertices, I32i num_verts, F64 _c2hc_arg_scale_x, F64 _c2hc_arg_scale_y, F64 _c2hc_arg_shift_x, F64 _c2hc_arg_shift_y, I32i x_off, I32i y_off, I32i invert, U8i *userdata) {
+    U32i flatness_in_pixels;
+    U32i scale_x;
+    U32i scale_y;
+    U32i shift_x;
+    U32i shift_y;
+    U32i scale;
+    F64 _c2hc_t66;
+    F64 _c2hc_t67;
+    F64 _c2hc_t68;
     I32i winding_count;
     I32i *winding_lengths;
     stbtt__point * windings;
-    no_warn _c2hc_t116;
-    if ((scale_x > scale_y)) {
-        _c2hc_t116 = scale_y;
+    no_warn _c2hc_t66, _c2hc_t67, _c2hc_t68;
+    LC_F32FromBits((flatness_in_pixels = LC_F32ToBits(_c2hc_arg_flatness_in_pixels)));
+    LC_F32FromBits((scale_x = LC_F32ToBits(_c2hc_arg_scale_x)));
+    LC_F32FromBits((scale_y = LC_F32ToBits(_c2hc_arg_scale_y)));
+    LC_F32FromBits((shift_x = LC_F32ToBits(_c2hc_arg_shift_x)));
+    LC_F32FromBits((shift_y = LC_F32ToBits(_c2hc_arg_shift_y)));
+    _c2hc_t67 = LC_F32FromBits(scale_x);
+    _c2hc_t68 = LC_F32FromBits(scale_y);
+    if ((!(isnan(_c2hc_t67) || isnan(_c2hc_t68)) && (_c2hc_t67 > _c2hc_t68))) {
+        _c2hc_t66 = LC_F32FromBits(scale_y);
     } else {
-        _c2hc_t116 = scale_x;
+        _c2hc_t66 = LC_F32FromBits(scale_x);
     }
-    scale = _c2hc_t116;
-    winding_count = 0;
-    winding_lengths = ((0)(I32i *));
-    windings = stbtt_ttf_stbtt_FlattenCurves(vertices, num_verts, (flatness_in_pixels / scale), (&winding_lengths), (&winding_count), userdata);
+    LC_F32FromBits((scale = LC_F32ToBits(_c2hc_t66)));
+    (winding_count = 0);
+    (winding_lengths = ((0)(I32i *)));
+    (windings = stbtt_ttf_stbtt_FlattenCurves(vertices, num_verts, LC_F32Round((LC_F32FromBits(flatness_in_pixels) / LC_F32FromBits(scale))), (&winding_lengths), (&winding_count), userdata));
     if (windings) {
-        stbtt_ttf_stbtt__rasterize(result, windings, winding_lengths, winding_count, scale_x, scale_y, shift_x, shift_y, x_off, y_off, invert, userdata);
+        stbtt_ttf_stbtt__rasterize(result, windings, winding_lengths, winding_count, LC_F32FromBits(scale_x), LC_F32FromBits(scale_y), LC_F32FromBits(shift_x), LC_F32FromBits(shift_y), x_off, y_off, invert, userdata);
         free(((winding_lengths)(U8i *)));
         free(((windings)(U8i *)));
     }
 }
 
-U0 stbtt_MakeGlyphBitmapSubpixel(stbtt_fontinfo * info, U8i *output, I32i out_w, I32i out_h, I32i out_stride, F64 scale_x, F64 scale_y, F64 shift_x, F64 shift_y, I32i glyph) {
+U0 stbtt_MakeGlyphBitmapSubpixel(stbtt_fontinfo * info, U8i *output, I32i out_w, I32i out_h, I32i out_stride, F64 _c2hc_arg_scale_x, F64 _c2hc_arg_scale_y, F64 _c2hc_arg_shift_x, F64 _c2hc_arg_shift_y, I32i glyph) {
+    U32i scale_x;
+    U32i scale_y;
+    U32i shift_x;
+    U32i shift_y;
     I32i ix0;
     I32i iy0;
     stbtt_vertex * vertices;
     I32i num_verts;
     stbtt__bitmap gbm;
-    num_verts = stbtt_GetGlyphShape(info, glyph, (&vertices));
-    stbtt_GetGlyphBitmapBoxSubpixel(info, glyph, scale_x, scale_y, shift_x, shift_y, (&ix0), (&iy0), ((0)(I32i *)), ((0)(I32i *)));
+    LC_F32FromBits((scale_x = LC_F32ToBits(_c2hc_arg_scale_x)));
+    LC_F32FromBits((scale_y = LC_F32ToBits(_c2hc_arg_scale_y)));
+    LC_F32FromBits((shift_x = LC_F32ToBits(_c2hc_arg_shift_x)));
+    LC_F32FromBits((shift_y = LC_F32ToBits(_c2hc_arg_shift_y)));
+    (num_verts = stbtt_GetGlyphShape(info, glyph, (&vertices)));
+    stbtt_GetGlyphBitmapBoxSubpixel(info, glyph, LC_F32FromBits(scale_x), LC_F32FromBits(scale_y), LC_F32FromBits(shift_x), LC_F32FromBits(shift_y), (&ix0), (&iy0), ((0)(I32i *)), ((0)(I32i *)));
     ((gbm.pixels) = output);
     ((gbm.w) = out_w);
     ((gbm.h) = out_h);
     ((gbm.stride) = out_stride);
     if (((gbm.w) && (gbm.h))) {
-        stbtt_Rasterize((&gbm), 0.349999994, vertices, num_verts, scale_x, scale_y, shift_x, shift_y, ix0, iy0, 1, (info->userdata));
+        stbtt_Rasterize((&gbm), LC_F32FromBits(0x3EB33333), vertices, num_verts, LC_F32FromBits(scale_x), LC_F32FromBits(scale_y), LC_F32FromBits(shift_x), LC_F32FromBits(shift_y), ix0, iy0, 1, (info->userdata));
     }
     free(((vertices)(U8i *)));
 }
 
-U0 stbtt_MakeCodepointBitmapSubpixel(stbtt_fontinfo * info, U8i *output, I32i out_w, I32i out_h, I32i out_stride, F64 scale_x, F64 scale_y, F64 shift_x, F64 shift_y, I32i codepoint) {
-    stbtt_MakeGlyphBitmapSubpixel(info, output, out_w, out_h, out_stride, scale_x, scale_y, shift_x, shift_y, stbtt_FindGlyphIndex(info, codepoint));
+U0 stbtt_MakeCodepointBitmapSubpixel(stbtt_fontinfo * info, U8i *output, I32i out_w, I32i out_h, I32i out_stride, F64 _c2hc_arg_scale_x, F64 _c2hc_arg_scale_y, F64 _c2hc_arg_shift_x, F64 _c2hc_arg_shift_y, I32i codepoint) {
+    U32i scale_x;
+    U32i scale_y;
+    U32i shift_x;
+    U32i shift_y;
+    LC_F32FromBits((scale_x = LC_F32ToBits(_c2hc_arg_scale_x)));
+    LC_F32FromBits((scale_y = LC_F32ToBits(_c2hc_arg_scale_y)));
+    LC_F32FromBits((shift_x = LC_F32ToBits(_c2hc_arg_shift_x)));
+    LC_F32FromBits((shift_y = LC_F32ToBits(_c2hc_arg_shift_y)));
+    stbtt_MakeGlyphBitmapSubpixel(info, output, out_w, out_h, out_stride, LC_F32FromBits(scale_x), LC_F32FromBits(scale_y), LC_F32FromBits(shift_x), LC_F32FromBits(shift_y), stbtt_FindGlyphIndex(info, codepoint));
 }
 
-U0 stbtt_MakeCodepointBitmap(stbtt_fontinfo * info, U8i *output, I32i out_w, I32i out_h, I32i out_stride, F64 scale_x, F64 scale_y, I32i codepoint) {
-    stbtt_MakeCodepointBitmapSubpixel(info, output, out_w, out_h, out_stride, scale_x, scale_y, 0.0, 0.0, codepoint);
+U0 stbtt_MakeCodepointBitmap(stbtt_fontinfo * info, U8i *output, I32i out_w, I32i out_h, I32i out_stride, F64 _c2hc_arg_scale_x, F64 _c2hc_arg_scale_y, I32i codepoint) {
+    U32i scale_x;
+    U32i scale_y;
+    LC_F32FromBits((scale_x = LC_F32ToBits(_c2hc_arg_scale_x)));
+    LC_F32FromBits((scale_y = LC_F32ToBits(_c2hc_arg_scale_y)));
+    stbtt_MakeCodepointBitmapSubpixel(info, output, out_w, out_h, out_stride, LC_F32FromBits(scale_x), LC_F32FromBits(scale_y), LC_F32FromBits(0x00000000), LC_F32FromBits(0x00000000), codepoint);
 }
 
 I32i stbtt_InitFont(stbtt_fontinfo * info, U8i *data, I32i offset) {
