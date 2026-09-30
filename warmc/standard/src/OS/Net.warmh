@@ -5,6 +5,8 @@ module OS.Net is
     type TcpListener: Linear;
     type UdpSocket: Linear;
     record Address: Free is ip: Nat32; end;
+    record Endpoint: Free is address: Address; port: Nat16; end;
+    function narrowNet(network: Network, allowed: Span[Endpoint]): Network;
     record Datagram: Free is count: Index; sender: Address; port: Nat16; end;
     function acquireNetwork(root: &![RootCapability]): Network;
     function releaseNetwork(network: Network): Unit;

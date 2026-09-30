@@ -1,5 +1,14 @@
 import U8 *FileNameAbs(U8 *path, I64 flags = 0);
-import WoEntry * NativeDirList(U8 *path, I64 *error);
-U8 *WoRootPath() {return FileNameAbs(".");}
-I64 WoStat(U8 *path) {return NativeFileStat(path);}
-WoEntry * WoListPath(U8 *path, I64 *error) {return NativeDirList(path, error);}
+import I64 NativeSafeStat(U8 *path);
+import WoEntry * NativeSafeList(U8 *path, I64 *error);
+import WkBuffer * NativeSafeRead(U8 *path);
+import I64 NativeSafeWrite(U8 *path, U8 *data, U64 count, I64 create);
+import I64 NativeSafeDelete(U8 *path);
+import I64 NativeSafeMkdir(U8 *path);
+U8 *WoRootPath() {return FileNameAbs("");}
+I64 WoStat(U8 *path) {return NativeSafeStat(path);}
+WoEntry * WoListPath(U8 *path, I64 *error) {return NativeSafeList(path, error);}
+WkBuffer * WoReadPath(U8 *path) {return NativeSafeRead(path);}
+I64 WoWritePath(U8 *path, U8 *data, U64 count, I64 create) {return NativeSafeWrite(path, data, count, create);}
+I64 WoDeletePath(U8 *path) {return NativeSafeDelete(path);}
+I64 WoMkdirPath(U8 *path) {return NativeSafeMkdir(path);}

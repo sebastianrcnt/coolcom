@@ -23,6 +23,8 @@ extern U0 ShellTaskGone(CTask *t);
 I64 task_num;
 CHashTable *adam_hash;  // every task's hash_table (defines, frame pointers)
 
+CTask *WarmTaskCurrent() {return Gs->cur_task;}
+
 CTask *Fs()
 {//The running task.
     return Gs->cur_task;
@@ -91,6 +93,7 @@ Bool TaskStackFault(CTask *t, CExceptFrame *f)
 
 U0 TaskFree(CTask *t)
 {
+    if (t->exit_hook) {U0 (*hook)(U8 *payload); hook = t->exit_hook; t->exit_hook = NULL; hook(t->exit_data); t->exit_data = NULL;}
     ShellTaskGone(t);
     t->addr = NULL;
     t->task_signature = 0;
@@ -321,7 +324,7 @@ U0 SleepUntil(I64 wake_jiffy)
 I64 spawn_next_cpu;
 
 CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NULL, I64 target_cpu = -1,
-             CTask *parent = NULL, I64 stk_size = TASK_STACK_SIZE)
+             CTask *parent = NULL, I64 stk_size = TASK_STACK_SIZE, U0 (*exit_hook)(U8 *payload) = NULL, U8 *exit_data = NULL)
 {//Start fp_start_addr(data) as a new task on core target_cpu (-1: round robin).
     CTask *t = CAlloc(sizeof(CTask));
     CCtxFrame *f;
@@ -367,6 +370,7 @@ CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NUL
         StrCpy(t->task_name, task_name);
     else
         StrPrint(t->task_name, "Task%d", t->task_num);
+    t->exit_hook = exit_hook; t->exit_data = exit_data;
     daif = SpinLockIrq(&c->lock);
     t->next_task = c->seth_task;  // append at the end of the ring
     t->last_task = c->seth_task->last_task;

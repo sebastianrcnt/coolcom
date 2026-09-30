@@ -1,5 +1,16 @@
-// Network authority and portable argument checks. Policy attenuation is added in stage 5.
-class WnPolicy {I64 kind; I64 ip; I64 port;};
+// Network attenuation is the intersection of endpoint allow lists.
+class WnPeer {WnPeer *next; I64 ip; I64 port;};
+class WnPolicy {I64 kind; WnPeer *peers; WnPolicy *parent;};
 I64 WnAcquire() {return CAlloc(sizeof(WnPolicy))(I64);}
-U0 WnRelease(WnPolicy *p) {Free(p);}
-Bool WnEndpoint(WnPolicy *p, I64 ip, I64 port) {return p && ip >= 0 && ip <= 0xffffffff && port > 0 && port <= 65535;}
+Bool WnEndpoint(WnPolicy *p, I64 ip, I64 port) {
+    if (!p || ip < 0 || ip > 0xffffffff || port <= 0 || port > 65535) return 0;
+    if (!p->kind) return 1;
+    WnPeer *e; for (e = p->peers; e; e = e->next) if (e->ip == ip && e->port == port) return 1;
+    return 0;
+}
+Bool WnHost(WnPolicy *p, I64 ip) {if (!p) return 0; if (!p->kind) return 1; WnPeer *e; for (e = p->peers; e; e = e->next) if (e->ip == ip) return 1; return 0;}
+U0 WnRelease(WnPolicy *p) {if (p) {WnPeer *e, *next; for (e = p->peers; e; e = next) {next = e->next; Free(e);} Free(p);}}
+WnPolicy *WnNarrowStart(WnPolicy *parent) {WnPolicy *p = CAlloc(sizeof(WnPolicy)); if (p) {p->kind = 1; p->parent = parent;} return p;}
+I64 WnAllow(WnPolicy *p, I64 ip, I64 port) {if (!p) return -1; if (!WnEndpoint(p->parent, ip, port)) return 0; WnPeer *e = CAlloc(sizeof(WnPeer)); if (!e) return -1; e->ip = ip; e->port = port; e->next = p->peers; p->peers = e; return 0;}
+U0 WnNarrowFinish(WnPolicy *p) {WnRelease(p->parent); p->parent = 0;}
+WnPolicy *WnClone(WnPolicy *p) {WnPolicy *q = WnNarrowStart(p); if (!q) return 0; WnPeer *e; for (e = p->peers; e; e = e->next) if (WnAllow(q, e->ip, e->port) < 0) {WnRelease(q); return 0;} q->kind = p->kind; q->parent = 0; return q;}

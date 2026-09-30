@@ -35,7 +35,11 @@ I32 au_puts(U8 *s) {Print("%s\n", s); return 0;}
 U8 *au_stdin() {return stdin(U8 *);}
 U8 *au_stdout() {return stdout(U8 *);}
 U8 *au_stderr() {return stderr(U8 *);}
+#ifndef WARM_KERNEL
+extern I64 WtAbort(U8 *message);
+#endif
 U0 wh_abort(U8 *message) {
+    WtAbort(message);
     NativeErrPutS(message);
     NativeErrPutS("\n");
     NativeExit(255);

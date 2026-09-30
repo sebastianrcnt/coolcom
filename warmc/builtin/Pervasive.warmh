@@ -5,6 +5,8 @@
 -- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 --
 module Austral.Pervasive is
+    -- Intrinsic marker: implementations are derived by the compiler.
+    typeclass Sendable(T: Type) is end;
     union Option[T: Type]: Type is
         case None;
         case Some is

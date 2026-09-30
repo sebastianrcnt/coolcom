@@ -2,6 +2,23 @@ pragma Unsafe_Module;
 import Austral.Memory (Pointer, spanToPointer, spanWriteToPointer);
 import OS.Error (IoError, fromCode, status);
 module body OS.Net is
+    pragma Foreign_Import(External_Name => "WnNarrowStart");
+    private function rawNarrow(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnAllow");
+    private function rawAllow(handle: Int64, ip: Nat32, port: Nat16): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnNarrowFinish");
+    private function rawFinish(handle: Int64): Unit is end;
+    function narrowNet(network: Network, allowed: Span[Endpoint]): Network is
+        let { handle: Int64 } := network;
+        let reduced: Int64 := rawNarrow(handle);
+        if reduced = 0 then abort("Network policy allocation failed"); end if;
+        var i: Index := 0;
+        while i < spanLength(allowed) do
+            let peer: Endpoint := allowed[i];
+            if rawAllow(reduced, peer.address.ip, peer.port) < 0 then abort("Network peer allocation failed"); end if;
+            i := i + 1;
+        end while;
+        rawFinish(reduced); return Network(handle => reduced); end;
     record Network: Linear is handle: Int64; end;
     record TcpStream: Linear is handle: Int64; end;
     record TcpListener: Linear is handle: Int64; end;

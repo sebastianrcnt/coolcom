@@ -1,9 +1,1 @@
-import OS.Raw (Buffer, allocate, close);
-module body DoubleClose is
-    function main(): ExitCode is
-        let buffer: Buffer := allocate(8);
-        close(buffer);
-        close(buffer);
-        return ExitSuccess();
-    end;
-end module body.
+import OS.Terminal (Input, acquireInput, releaseInput); module body DoubleClose is function main(initial: RootCapability): ExitCode is var root: RootCapability := initial; let input: Input := acquireInput(&!root); releaseInput(input); releaseInput(input); surrenderRoot(root); return ExitSuccess(); end; end module body.

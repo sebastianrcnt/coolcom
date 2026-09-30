@@ -1,0 +1,25 @@
+import OS.Task (Tasks, Task, TaskError, Killed, Aborted, acquireTasks, releaseTasks, spawn, join, sleep);
+import OS.Error (IoError);
+module body TaskKilled is
+    pragma Foreign_Import(External_Name => "WtTestKill");
+    private function killWorker(): Unit is end;
+    private function worker(cap: Tasks): Unit is
+        sleep(&cap, 10000); releaseTasks(cap); return nil; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var tasks: Tasks := acquireTasks(&!root);
+        let cap: Tasks := acquireTasks(&!root);
+        let result: Result[Task[Unit], IoError] := spawn(&!tasks, worker, cap);
+        case result of
+            when Err(error as e: IoError) do abort("Spawn killed worker failed");
+            when Ok(value as task: Task[Unit]) do
+                killWorker();
+                case join(task) of
+                    when Ok(value as u: Unit) do abort("Killed worker succeeded");
+                    when Err(error as e: TaskError) do
+                        case e of when Killed do skip; when Aborted(message as text: Span[Nat8, Static]) do abort("Killed worker reported abort"); end case;
+                end case;
+        end case;
+        releaseTasks(tasks); surrenderRoot(root);
+        printLn("WARM TASKKILLED PASS"); return ExitSuccess(); end;
+end module body.

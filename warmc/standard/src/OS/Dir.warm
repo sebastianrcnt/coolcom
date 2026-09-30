@@ -5,6 +5,18 @@ import OS.Error (IoError, fromCode);
 import Standard.String (String);
 import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
 module body OS.Dir is
+    pragma Foreign_Import(External_Name => "WoNarrow");
+    private function rawNarrow(handle: Int64, rights: Int64): Unit is end;
+    function readOnly(): Rights is return Rights(read => true, write => false, create => false, delete => false); end;
+    function allRights(): Rights is return Rights(read => true, write => true, create => true, delete => true); end;
+    function narrow(dir: Dir, rights: Rights): Dir is
+        let { handle: Int64 } := dir;
+        var bits: Int64 := 0;
+        if rights.read then bits := bits | 1; end if;
+        if rights.write then bits := bits | 2; end if;
+        if rights.create then bits := bits | 4; end if;
+        if rights.delete then bits := bits | 8; end if;
+        rawNarrow(handle, bits); return Dir(handle => handle); end;
     record Dir: Linear is handle: Int64; end;
     record Entries: Linear is handle: Int64; end;
     pragma Foreign_Import(External_Name => "WoRoot");

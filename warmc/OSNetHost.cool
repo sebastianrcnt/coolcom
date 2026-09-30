@@ -11,25 +11,18 @@ import I64 NativeNetSource(I64 handle);
 import I64 NativeNetSourcePort(I64 handle);
 import I64 NativeNetPort(I64 handle);
 import I64 NativeNetClose(I64 handle);
-I64 WnResolve(WnPolicy * p, U8 *name, U64 n) {
-    if (!p) return -13; U8 *s = WkString(name, n); if (!s) return -12;
-    I64 r = NativeNetResolve(s); Free(s); return r;
-}
-I64 WnConnect(WnPolicy * p, I64 ip, I64 port, I64 timeout) {
-    if (!WnEndpoint(p, ip, port) || timeout < 0) return -12;
-    return NativeNetConnect(ip, port, timeout);
-}
-I64 WnListen(WnPolicy * p, I64 port) {if (!p || port < 0 || port > 65535) return -12; return NativeNetListen(port);}
-I64 WnAccept(I64 handle, I64 timeout) {return NativeNetAccept(handle, timeout);}
-I64 WnSend(I64 handle, U8 *data, U64 n) {if (n > 0x7fffffff) return -12; return NativeNetSend(handle, data, n);}
-I64 WnReceive(I64 handle, U8 *data, U64 n, I64 timeout) {if (n > 0x7fffffff) return -12; return NativeNetReceive(handle, data, n, timeout);}
-I64 WnUdpOpen(WnPolicy * p, I64 port) {if (!p || port < 0 || port > 65535) return -12; return NativeNetUdpOpen(port);}
-I64 WnUdpSend(I64 handle, I64 ip, I64 port, U8 *data, U64 n) {
-    if (ip < 0 || ip > 0xffffffff || port <= 0 || port > 65535 || n > 65507) return -12;
-    return NativeNetUdpSend(handle, ip, port, data, n);
-}
-I64 WnUdpReceive(I64 handle, U8 *data, U64 n, I64 timeout) {if (n > 65535) return -12; return NativeNetUdpReceive(handle, data, n, timeout);}
-I64 WnSource(I64 handle) {return NativeNetSource(handle);}
-I64 WnSourcePort(I64 handle) {return NativeNetSourcePort(handle);}
-I64 WnPort(I64 handle) {return NativeNetPort(handle);}
-I64 WnClose(I64 handle) {return NativeNetClose(handle);}
+class WnSocket {I64 native; WnPolicy * policy;};
+I64 WnWrap(I64 native, WnPolicy * p) {if (native < 0) return native; WnSocket *s = CAlloc(sizeof(WnSocket)); if (!s) {NativeNetClose(native); return -1;} s->native = native; s->policy = WnClone(p); if (!s->policy) {NativeNetClose(native); Free(s); return -1;} return s(I64);}
+I64 WnResolve(WnPolicy * p, U8 *name, U64 n) {if (!p) return -13; U8 *s = WkString(name, n); if (!s) return -12; I64 r = NativeNetResolve(s); Free(s); if (r >= 0 && !WnHost(p, r)) return -13; return r;}
+I64 WnConnect(WnPolicy * p, I64 ip, I64 port, I64 timeout) {if (ip < 0 || ip > 0xffffffff || port <= 0 || port > 65535 || timeout < 0) return -12; if (!WnEndpoint(p, ip, port)) return -13; return WnWrap(NativeNetConnect(ip, port, timeout), p);}
+I64 WnListen(WnPolicy * p, I64 port) {if (!p || port < 0 || port > 65535) return -12; if (p->kind) return -13; return WnWrap(NativeNetListen(port), p);}
+I64 WnAccept(WnSocket *s, I64 timeout) {return WnWrap(NativeNetAccept(s->native, timeout), s->policy);}
+I64 WnSend(WnSocket *s, U8 *data, U64 n) {if (n > 0x7fffffff) return -12; return NativeNetSend(s->native, data, n);}
+I64 WnReceive(WnSocket *s, U8 *data, U64 n, I64 timeout) {if (n > 0x7fffffff) return -12; return NativeNetReceive(s->native, data, n, timeout);}
+I64 WnUdpOpen(WnPolicy * p, I64 port) {if (!p || port < 0 || port > 65535) return -12; if (p->kind && port) return -13; return WnWrap(NativeNetUdpOpen(port), p);}
+I64 WnUdpSend(WnSocket *s, I64 ip, I64 port, U8 *data, U64 n) {if (ip < 0 || ip > 0xffffffff || port <= 0 || port > 65535 || n > 65507) return -12; if (!WnEndpoint(s->policy, ip, port)) return -13; return NativeNetUdpSend(s->native, ip, port, data, n);}
+I64 WnUdpReceive(WnSocket *s, U8 *data, U64 n, I64 timeout) {if (n > 65535) return -12; U8 *scratch = CAlloc(n + 1); if (!scratch) return -1; I64 r = NativeNetUdpReceive(s->native, scratch, n, timeout); if (r >= 0) {if (!WnEndpoint(s->policy, NativeNetSource(s->native), NativeNetSourcePort(s->native))) r = -13; else MemCpy(data, scratch, r);} Free(scratch); return r;}
+I64 WnSource(WnSocket *s) {return NativeNetSource(s->native);}
+I64 WnSourcePort(WnSocket *s) {return NativeNetSourcePort(s->native);}
+I64 WnPort(WnSocket *s) {return NativeNetPort(s->native);}
+I64 WnClose(WnSocket *s) {I64 r = NativeNetClose(s->native); WnRelease(s->policy); Free(s); return r;}
