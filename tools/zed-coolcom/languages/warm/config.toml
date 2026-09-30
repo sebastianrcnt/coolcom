@@ -1,0 +1,15 @@
+name = "Warm"
+grammar = "warm"
+path_suffixes = ["warm", "warmh", "aum", "aui"]
+line_comments = ["-- "]
+autoclose_before = ";:.,=}])>"
+tab_size = 4
+hard_tabs = false
+word_characters = ["_"]
+brackets = [
+  { start = "{", end = "}", close = true, newline = false },
+  { start = "[", end = "]", close = true, newline = false },
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "\"\"\"", end = "\"\"\"", close = true, newline = true, not_in = ["string", "comment"] },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+]

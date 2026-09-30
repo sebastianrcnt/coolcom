@@ -1,12 +1,20 @@
-id = "holyc"
-name = "HolyC"
-description = "HolyC (TempleOS) syntax highlighting, outline, brackets and indents. Grammar only, no language server."
-version = "0.1.0"
+id = "coolcom"
+name = "coolcom"
+description = "Cool (HolyC, .cool/.coolh) and Warm (Austral fork, .warm/.warmh) syntax highlighting, outline, brackets and indents. Grammar only, no language server."
+version = "0.2.0"
 schema_version = 1
 authors = ["coolcom"]
 repository = "https://github.com/project-solomon/zed-holyc"
 
-# Grammar and queries are from project-solomon/tree-sitter-holyc / zed-holyc (MIT).
+# Cool: grammar and queries are from project-solomon/tree-sitter-holyc / zed-holyc (MIT).
 [grammars.holyc]
 repository = "https://github.com/project-solomon/tree-sitter-holyc"
 rev = "c1b84cc02006f4dac84b12721935ef27211975dc"
+
+# Warm: tools/tree-sitter-warm in this repository. Local checkout; `rev` is the commit that
+# added the grammar. tools/zed-coolcom/install.sh builds the wasm from the working tree, so it
+# does not use this entry.
+[grammars.warm]
+repository = "file:///Volumes/t5/coolcom"
+path = "tools/tree-sitter-warm"
+rev = "5066267bbe00f40f883a9323a9be097862af4a8c"
