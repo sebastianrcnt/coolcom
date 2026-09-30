@@ -3,7 +3,7 @@ struct Cell {uint slot; uint fg; uint bg; uint flags;};
 layout(std430,set=0,binding=0) readonly buffer Grid {Cell cells[];};
 layout(set=0,binding=1) uniform sampler2D atlas;
 layout(set=0,binding=2) uniform sampler2D overlay;
-layout(push_constant) uniform Params {uint width,height,cols,rows,first,cx,cy,cw,overlay_used;} u;
+layout(std430,set=0,binding=3) readonly buffer Params {uint width,height,cols,rows,first,cx,cy,cw,overlay_used;} u;
 layout(location=0) out vec4 out_color;
 vec3 rgb(uint c) {return vec3((c>>16)&255,(c>>8)&255,c&255)/255.0;}
 void main() {

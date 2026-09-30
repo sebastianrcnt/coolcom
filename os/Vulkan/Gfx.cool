@@ -150,6 +150,43 @@ U0 GfxRecord()
     GfxResult(vn_decode_vkBeginCommandBuffer_reply(&gfx.reply, gfx.cmd, &bi), "begin command buffer");
     GfxBegin;
 }
+U64i GfxCommandNew()
+{
+    U64i cmd = GfxId; VkCommandBufferAllocateInfo bi;
+    MemSet(&bi, 0, sizeof(bi)); bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    bi.commandPool = gfx.pool; bi.commandBufferCount = 1;
+    GfxBegin; vn_encode_vkAllocateCommandBuffers(&gfx.enc, 0, gfx.device, &bi, &cmd); GfxSubmit;
+    GfxResult(vn_decode_vkAllocateCommandBuffers_reply(&gfx.reply, gfx.device, &bi, &cmd), "command allocation"); return cmd;
+}
+U64i GfxFenceNew()
+{
+    U64i fence = GfxId; VkFenceCreateInfo fi;
+    MemSet(&fi, 0, sizeof(fi)); fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    GfxBegin; vn_encode_vkCreateFence(&gfx.enc, 0, gfx.device, &fi, NULL, &fence); GfxSubmit;
+    GfxResult(vn_decode_vkCreateFence_reply(&gfx.reply, gfx.device, &fi, NULL, &fence), "frame fence"); return fence;
+}
+U0 GfxEndRecord()
+{
+    vn_encode_vkEndCommandBuffer(&gfx.enc, 0, gfx.cmd); GfxSubmit;
+    GfxResult(vn_decode_vkEndCommandBuffer_reply(&gfx.reply, gfx.cmd), "end command buffer");
+}
+U0 GfxQueue(U64i *cmds, I64 count, U64i fence)
+{
+    VkSubmitInfo submit; MemSet(&submit, 0, sizeof(submit));
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO; submit.commandBufferCount = count; submit.pCommandBuffers = cmds;
+    GfxBegin; vn_encode_vkQueueSubmit(&gfx.enc, 0, gfx.queue, 1, &submit, fence); GfxSubmit;
+    GfxResult(vn_decode_vkQueueSubmit_reply(&gfx.reply, gfx.queue, 1, &submit, fence), "queue submit");
+}
+Bool GfxFenceReady(U64i fence)
+{
+    I64 status;
+    GfxBegin; vn_encode_vkGetFenceStatus(&gfx.enc, 0, gfx.device, fence); GfxSubmit;
+    status = vn_decode_vkGetFenceStatus_reply(&gfx.reply, gfx.device, fence);
+    if (status == VK_NOT_READY) return FALSE;
+    GfxResult(status, "frame completion"); ArchDsb;
+    GfxBegin; vn_encode_vkResetFences(&gfx.enc, 0, gfx.device, 1, &fence); GfxSubmit;
+    GfxResult(vn_decode_vkResetFences_reply(&gfx.reply, gfx.device, 1, &fence), "frame fence reset"); return TRUE;
+}
 U0 GfxExecute()
 {
     VkSubmitInfo submit; MemSet(&submit, 0, sizeof(submit));

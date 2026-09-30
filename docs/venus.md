@@ -678,3 +678,30 @@ Latest main (`3d01b29`, including exact binary32 C translation) was merged as
 `3677ba6` before repeating the offline/default and optional Venus checks.
 Logs: `build/venus-retire-main-test.log`, `build/venus-retire-main-optional.log`,
 `build/venus-final-term-test.log`, `build/venus-term-test/lifecycle/`.
+
+
+### Terminal command reuse and asynchronous submission
+
+Draw commands are recorded once per frame slot and rebuilt only on resize.
+Fragment parameters now live in each slot's mapped storage buffer instead of
+changing baked push constants. Each slot owns immutable cells/parameters,
+atlas/overlay staging, a target image, readback and a fence. Guest edits keep
+changed-row dirtiness for both slots; only those rows are copied into a free
+slot. Upload commands are recorded only for dirty images. Scrolling without a
+pixel overlay no longer uploads cleared overlay rows.
+
+Normal rendering polls each pending fence once, publishes completed frames in
+sequence order, and returns immediately when no off-screen slot is available.
+It coalesces the latest console state instead of waiting for GPU completion.
+The framebuffer timer continues completion polling while the console is idle.
+Resize explicitly drains the old slots before replacing resources. Unchanged
+cells, cursor and overlay do not enqueue another frame.
+
+`make venus-term-test` passed all five CPU-reference screens and the one/two-core
+shell lifecycle tests (`build/venus-cache-async-test.log`). Changed-row checks
+allow zero immediate submissions when a frame is coalesced; pixel comparison
+still requires the final state to be rendered. A single preliminary 3200×2000
+run with readback fell from 1440.7 to **132.0 µs/forced line**, and from 7.80 to
+**2.27 s host CPU**. This is a preliminary run, not the final three-run table;
+forced hooks are asynchronous now, so timings measure producer work rather than
+a GPU fence after every line. Final screenshots remain the correctness check.

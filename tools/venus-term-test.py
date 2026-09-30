@@ -65,7 +65,7 @@ def run(d, mode, script, size, disk):
         m=re.search(r'^DIRTY1 (\d+) (\d+) (\d+) (\d+)$',log,re.M)
         assert m, f'{d}: missing cell-write counters'
         rows,byte_count,frames,cols=map(int,m.groups())
-        assert 0<rows<=2 and byte_count==rows*cols*16 and frames==1, (rows,byte_count,frames,cols)
+        assert 0<rows<=2 and byte_count==rows*cols*16 and 0<=frames<=1, (rows,byte_count,frames,cols)
     return verify.read_png(d / f'{mode}.png')
 
 
