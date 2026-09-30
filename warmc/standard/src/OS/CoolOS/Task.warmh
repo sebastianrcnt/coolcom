@@ -1,0 +1,7 @@
+import OS.Raw (Tasks);
+module OS.CoolOS.Task is
+    generic [R: Region]
+    function taskReport(cap: &![Tasks, R]): Int64;
+    generic [R: Region]
+    function isSilent(cap: &![Tasks, R]): Int64;
+end module.

@@ -1,0 +1,86 @@
+pragma Unsafe_Module;
+import Austral.Memory (Pointer, spanToPointer);
+import OS.Error (IoError, fromCode, status);
+import Standard.String (String);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+module body OS.Terminal is
+    record Output: Linear is end;
+    record Input: Linear is end;
+    function acquireOutput(root: &![RootCapability]): Output is return Output(); end;
+    function acquireInput(root: &![RootCapability]): Input is return Input(); end;
+    function releaseOutput(output: Output): Unit is let {} := output; return nil; end;
+    function releaseInput(input: Input): Unit is let {} := input; return nil; end;
+    pragma Foreign_Import(External_Name => "Wkwrite");
+    private function rawWrite(text: Pointer[Nat8], size: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkinputByte");
+    private function inputByte(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkgetKey");
+    private function rawKey(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WksetColor");
+    private function rawColor(fg: Int64, bg: Int64): Int64 is end;
+    function write(output: &![Output], text: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawWrite(spanToPointer(text), spanLength(text))); end;
+    function writeLine(output: &![Output], text: Span[Nat8]): Result[Unit, IoError] is
+        case write(&~output, text) of
+            when Err(error as e: IoError) do return Err(error => e);
+            when Ok(value as u: Unit) do return write(&~output, "\n");
+        end case; end;
+    function readLine(input: &![Input]): Result[String, IoError] is
+        var builder: StringBuilder := makeStringBuilder();
+        var reading: Bool := true;
+        while reading do
+            let c: Int64 := inputByte();
+            if c < 0 then reading := false;
+            else if c = 10 then reading := false;
+            else if c /= 13 then
+                case toNat8(c) of when Some(value as b: Nat8) do writeByte(&!builder, b); when None do skip; end case;
+            end if;
+        end while;
+        return Ok(value => finalize(builder)); end;
+    function readKey(input: &![Input]): Result[Key, IoError] is
+        let event: Int64 := rawKey();
+        if event < 0 then return Err(error => fromCode(event)); end if;
+        let code: Int64 := event & 16777215;
+        if code >= 1114129 and code <= 1114140 then
+            case toNat8(code - 1114128) of
+                when Some(value as n: Nat8) do return Ok(value => FunctionKey(number => n));
+                when None do skip;
+            end case;
+        end if;
+        if code = 8 then return Ok(value => Backspace()); end if;
+        if code = 9 then return Ok(value => Tab()); end if;
+        if code = 10 then return Ok(value => Enter()); end if;
+        if code = 27 then return Ok(value => Escape()); end if;
+        if code = 1114113 then return Ok(value => Up()); end if;
+        if code = 1114114 then return Ok(value => Down()); end if;
+        if code = 1114115 then return Ok(value => Left()); end if;
+        if code = 1114116 then return Ok(value => Right()); end if;
+        if code = 1114117 then return Ok(value => Home()); end if;
+        if code = 1114118 then return Ok(value => End()); end if;
+        if code = 1114119 then return Ok(value => PageUp()); end if;
+        if code = 1114120 then return Ok(value => PageDown()); end if;
+        if code = 1114121 then return Ok(value => Insert()); end if;
+        if code = 1114122 then return Ok(value => Delete()); end if;
+        case toNat32(code) of
+            when Some(value as c: Nat32) do
+                if event & 33554432 /= 0 then return Ok(value => Ctrl(codepoint => c)); end if;
+                if code < 32 then return Ok(value => Ctrl(codepoint => c + 96)); end if;
+                if code < 1114112 then return Ok(value => Char(codepoint => c)); end if;
+            when None do skip;
+        end case;
+        return Ok(value => Unknown(event => event)); end;
+    private function colorCode(color: Color): Int64 is case color of
+            when Black do return 0;
+            when Red do return 11141120;
+            when Green do return 43520;
+            when Yellow do return 11184640;
+            when Blue do return 170;
+            when Magenta do return 11141290;
+            when Cyan do return 43690;
+            when White do return 16777215;
+            when Rgb(value as c: Nat32) do
+                case toInt64(c) of when Some(value as v: Int64) do return v; when None do return 0; end case;
+        end case; end;
+    function setColor(output: &![Output], foreground: Color, background: Color): Result[Unit, IoError] is
+        return status(rawColor(colorCode(foreground), colorCode(background))); end;
+end module body.

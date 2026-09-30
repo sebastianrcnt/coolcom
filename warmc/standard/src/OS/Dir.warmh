@@ -1,0 +1,16 @@
+import OS.File (Filesystem);
+import OS.Error (IoError);
+import Standard.String (String);
+module OS.Dir is
+    type Dir: Linear;
+    type Entries: Linear;
+    record Entry: Linear is name: String; size: Index; isDir: Bool; modified: Int64; end;
+    function openRoot(fs: &![Filesystem]): Dir;
+    function openDir(dir: &[Dir], name: Span[Nat8]): Result[Dir, IoError];
+    function closeDir(dir: Dir): Unit;
+    function entries(dir: &[Dir]): Result[Entries, IoError];
+    function next(iterator: &![Entries]): Option[Entry];
+    function closeEntries(iterator: Entries): Unit;
+    -- Internal scalar adapter access; the address conveys no authority beyond this handle.
+    function adapterHandle(dir: &[Dir]): Int64;
+end module.

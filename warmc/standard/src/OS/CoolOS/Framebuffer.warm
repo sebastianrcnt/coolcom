@@ -1,0 +1,34 @@
+import OS.Raw (Terminal, acquireTerminal, releaseTerminal, clear as rawclear, cursorHide as rawcursorHide, cursorShow as rawcursorShow, fillRect as rawfillRect, scroll as rawscroll, screenCodepoint as rawscreenCodepoint, alternate as rawalternate, ansiColor as rawansiColor);
+module body OS.CoolOS.Framebuffer is
+    generic [R: Region]
+    function clear(cap: &![Terminal, R]): Int64 is
+        return rawclear(&~cap);
+    end;
+    generic [R: Region]
+    function cursorHide(cap: &![Terminal, R]): Int64 is
+        return rawcursorHide(&~cap);
+    end;
+    generic [R: Region]
+    function cursorShow(cap: &![Terminal, R]): Int64 is
+        return rawcursorShow(&~cap);
+    end;
+    generic [R: Region]
+    function fillRect(cap: &![Terminal, R], x: Int64, y: Int64, w: Int64, h: Int64, color: Int64): Int64 is
+        return rawfillRect(&~cap, x, y, w, h, color);
+    end;
+    generic [R: Region]
+    function scroll(cap: &![Terminal, R]): Int64 is
+        return rawscroll(&~cap);
+    end;
+    generic [R: Region]
+    function screenCodepoint(cap: &![Terminal, R], value: Int64): Int64 is
+        return rawscreenCodepoint(&~cap, value);
+    end;
+    generic [R: Region]
+    function alternate(cap: &![Terminal, R], on: Int64): Int64 is
+        return rawalternate(&~cap, on);
+    end;
+    function ansiColor(n: Int64): Int64 is
+        return rawansiColor(n);
+    end;
+end module body.

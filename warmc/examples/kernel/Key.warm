@@ -1,4 +1,5 @@
-import Warm.Kernel (Terminal, acquireTerminal, releaseTerminal, getKey);
+import OS.Raw (Terminal, acquireTerminal, releaseTerminal);
+import OS.CoolOS.Key (getKey);
 module body Key is
     function main(initial: RootCapability): ExitCode is
         var root: RootCapability := initial;

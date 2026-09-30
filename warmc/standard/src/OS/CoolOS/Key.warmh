@@ -1,0 +1,11 @@
+import OS.Raw (Terminal);
+module OS.CoolOS.Key is
+    generic [R: Region]
+    function getKey(cap: &![Terminal, R]): Int64;
+    generic [R: Region]
+    function keyPending(cap: &![Terminal, R]): Int64;
+    generic [R: Region]
+    function keyPop(cap: &![Terminal, R]): Int64;
+    function keyChar(event: Int64): Int64;
+    function utf8Width(cp: Int64): Int64;
+end module.

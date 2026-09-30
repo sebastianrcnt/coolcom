@@ -18,6 +18,7 @@ for line in runtime.splitlines():
 runtime = '\n'.join(lines) + '\n'
 runtime = runtime.replace('// @shared-libc: expanded from coolc/LibC/LibC.cool by the packagers.',
                           (root / 'coolc/LibC/LibC.cool').read_text())
+runtime += ''.join((source / n).read_text() for n in ['OSKernel.cool', 'OSCommon.cool', 'OSDirKernel.cool', 'OSNetCommon.cool', 'OSNetKernel.cool']).replace('#define WARM_KERNEL 1', '')
 for name, adapter in [('NativeExit', 'WKernelExit'), ('NativeErrPutS', 'WKernelErrPutS'),
                       ('NativeArgCount', 'WKernelArgCount'), ('NativeGetChar', 'WKernelGetChar'), ('NativeArg', 'WKernelArg')]:
     runtime = runtime.replace(name, adapter)

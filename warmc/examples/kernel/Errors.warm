@@ -1,4 +1,4 @@
-import Warm.Kernel (
+import OS.Raw (
     Filesystem, Buffer, acquireFilesystem, releaseFilesystem,
     writeFile, readFile, bufferError, bufferSize, readByte, storeByte, close,
     allocate, copyBytes, stringLength, stringCompare
@@ -24,7 +24,7 @@ module body Errors is
         releaseFilesystem(fs);
         surrenderRoot(root);
         let strings: Bool := (stringLength("abc") = 3) and (stringCompare("abc", "abc") = 1);
-        let files: Bool := (thrown = -1) and (absent = -3);
+        let files: Bool := (thrown = -1) and (absent = -10);
         let memory: Bool := ((copied = 0) and (byte = 99)) and ((bounds = -2) and (overflow = -2));
         if (strings and files) and (memory and (invalidSize = -2)) then
             printLn("WARM ERRORS PASS");

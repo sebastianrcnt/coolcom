@@ -2,7 +2,7 @@ pragma Unsafe_Module;
 
 import Austral.Memory (Address, Pointer, spanToPointer);
 
-module body Warm.Kernel is
+module body OS.Raw is
 
     record Filesystem: Linear is
     end;

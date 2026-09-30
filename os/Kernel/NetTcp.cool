@@ -44,6 +44,7 @@
 #define TCP_ERR_RESET   -2
 #define TCP_ERR_TIMEOUT -3
 #define TCP_ERR_CLOSED  -4
+#define TCP_ERR_UNREACHABLE -5
 
 class CTcb
 {
@@ -530,15 +531,17 @@ U0 TcpTimers()
 
 // ---- the socket-like interface ------------------------------------------
 
-CTcb *TcpConnect(I64 ip, I64 port, I64 timeout_ms = 10000)
+CTcb *TcpConnect(I64 ip, I64 port, I64 timeout_ms = 10000, I64 *_error = NULL)
 {//Open a connection; NULL if refused, unreachable or timed out.
     CTcb *t;
     I64 daif, lip, deadline = jiffies + timeout_ms;
+    if (_error) *_error = 0;
     daif = NetLock;
     lip = net_ip;
     if (((ip >> 24) & 0xFF) == 127)
         lip = ip;
     if (!lip) {
+        if (_error) *_error = TCP_ERR_UNREACHABLE;
         NetUnlock(daif);
         return NULL;
     }
@@ -560,6 +563,7 @@ CTcb *TcpConnect(I64 ip, I64 port, I64 timeout_ms = 10000)
         NetWait;
     }
     if (t->state == TCP_CLOSED) {
+        if (_error) *_error = t->err;
         t->user_closed = TRUE;
         NetUnlock(daif);
         return NULL;

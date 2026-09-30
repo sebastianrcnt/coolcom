@@ -1,0 +1,5 @@
+import U8 *FileNameAbs(U8 *path, I64 flags = 0);
+import WoEntry * NativeDirList(U8 *path, I64 *error);
+U8 *WoRootPath() {return FileNameAbs(".");}
+I64 WoStat(U8 *path) {return NativeFileStat(path);}
+WoEntry * WoListPath(U8 *path, I64 *error) {return NativeDirList(path, error);}

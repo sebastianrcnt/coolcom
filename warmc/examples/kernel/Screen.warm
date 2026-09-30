@@ -1,6 +1,7 @@
-import Warm.Kernel (
-    Terminal, acquireTerminal, releaseTerminal, write, fillRect, clear
+import OS.Raw (
+    Terminal, acquireTerminal, releaseTerminal, write
 );
+import OS.CoolOS.Framebuffer (fillRect, clear);
 module body Screen is
     function main(initial: RootCapability): ExitCode is
         var root: RootCapability := initial;

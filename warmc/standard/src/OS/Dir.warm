@@ -1,0 +1,76 @@
+pragma Unsafe_Module;
+import Austral.Memory (Address, Pointer, spanToPointer);
+import OS.File (Filesystem);
+import OS.Error (IoError, fromCode);
+import Standard.String (String);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+module body OS.Dir is
+    record Dir: Linear is handle: Int64; end;
+    record Entries: Linear is handle: Int64; end;
+    pragma Foreign_Import(External_Name => "WoRoot");
+    private function rawRoot(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoOpenDir");
+    private function rawOpen(parent: Int64, name: Pointer[Nat8], length: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoDirError");
+    private function rawError(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoCloseDir");
+    private function rawClose(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WoList");
+    private function rawEntries(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoEntriesError");
+    private function rawEntriesError(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoCloseEntries");
+    private function rawCloseEntries(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WoEntryPop");
+    private function rawPop(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WoEntryNameByte");
+    private function rawByte(handle: Int64, pos: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoEntriesHas");
+    private function rawHas(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoEntrySize");
+    private function rawSize(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoEntryIsDir");
+    private function rawIsDir(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoEntryModified");
+    private function rawModified(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoEntryNameSize");
+    private function rawNameSize(handle: Int64): Int64 is end;
+    function openRoot(fs: &![Filesystem]): Dir is
+        let handle: Int64 := rawRoot();
+        if rawError(handle) < 0 then rawClose(handle); abort("Directory allocation failed"); end if;
+        return Dir(handle => handle); end;
+    function adapterHandle(dir: &[Dir]): Int64 is return dir->handle; end;
+    function openDir(dir: &[Dir], name: Span[Nat8]): Result[Dir, IoError] is
+        let handle: Int64 := rawOpen(dir->handle, spanToPointer(name), spanLength(name));
+        let code: Int64 := rawError(handle);
+        if code < 0 then rawClose(handle); return Err(error => fromCode(code)); end if;
+        return Ok(value => Dir(handle => handle)); end;
+    function closeDir(dir: Dir): Unit is let { handle: Int64 } := dir; rawClose(handle); return nil; end;
+    function entries(dir: &[Dir]): Result[Entries, IoError] is
+        let handle: Int64 := rawEntries(dir->handle);
+        let code: Int64 := rawEntriesError(handle);
+        if code < 0 then rawCloseEntries(handle); return Err(error => fromCode(code)); end if;
+        return Ok(value => Entries(handle => handle)); end;
+    function next(iterator: &![Entries]): Option[Entry] is
+        if rawHas(iterator->handle) = 0 then return None(); end if;
+        var builder: StringBuilder := makeStringBuilder();
+        var pos: Index := 0;
+        case toIndex(rawNameSize(iterator->handle)) of
+            when Some(value as count: Index) do
+                while pos < count do
+                    case toNat8(rawByte(iterator->handle, pos)) of
+                        when Some(value as b: Nat8) do writeByte(&!builder, b);
+                        when None do skip;
+                    end case;
+                    pos := pos + 1;
+                end while;
+            when None do skip;
+        end case;
+        var count: Index := 0;
+        case toIndex(rawSize(iterator->handle)) of when Some(value as n: Index) do count := n; when None do skip; end case;
+        let directory: Bool := rawIsDir(iterator->handle) /= 0;
+        let modified: Int64 := rawModified(iterator->handle);
+        rawPop(iterator->handle);
+        return Some(value => Entry(name => finalize(builder), size => count, isDir => directory, modified => modified)); end;
+    function closeEntries(iterator: Entries): Unit is let { handle: Int64 } := iterator; rawCloseEntries(handle); return nil; end;
+end module body.

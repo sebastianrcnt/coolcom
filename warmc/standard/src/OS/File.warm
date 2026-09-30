@@ -1,0 +1,83 @@
+pragma Unsafe_Module;
+import Austral.Memory (Address, Pointer, spanToPointer, spanWriteToPointer);
+import OS.Dir (Dir, adapterHandle);
+import OS.Error (IoError, fromCode, status);
+module body OS.File is
+    record Filesystem: Linear is end;
+    record Bytes: Linear is handle: Address[Nat8]; end;
+    function acquireFilesystem(root: &![RootCapability]): Filesystem is return Filesystem(); end;
+    function releaseFilesystem(fs: Filesystem): Unit is let {} := fs; return nil; end;
+    pragma Foreign_Import(External_Name => "WoReadAll");
+    private function rawRead(dir: Int64, path: Pointer[Nat8], pathSize: Index): Address[Nat8] is end;
+    pragma Foreign_Import(External_Name => "WoWriteAll");
+    private function rawWrite(dir: Int64, path: Pointer[Nat8], pathSize: Index, data: Pointer[Nat8], count: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkbufferError");
+    private function rawError(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkbufferSize");
+    private function rawSize(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkreadByte");
+    private function rawByte(handle: Address[Nat8], index: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "Wkclose");
+    private function rawClose(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoExists");
+    private function rawExists(dir: Int64, path: Pointer[Nat8], pathSize: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoDelete");
+    private function rawDelete(dir: Int64, path: Pointer[Nat8], pathSize: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoMkdir");
+    private function rawMkdir(dir: Int64, path: Pointer[Nat8], pathSize: Index): Int64 is end;
+    function readAll(dir: &[Dir], name: Span[Nat8]): Result[Bytes, IoError] is
+        let handle: Address[Nat8] := rawRead(adapterHandle(dir), spanToPointer(name), spanLength(name));
+        let code: Int64 := rawError(handle);
+        if code < 0 then rawClose(handle); return Err(error => fromCode(code)); end if;
+        return Ok(value => Bytes(handle => handle)); end;
+    function writeAll(dir: &[Dir], name: Span[Nat8], data: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawWrite(adapterHandle(dir), spanToPointer(name), spanLength(name), spanToPointer(data), spanLength(data))); end;
+    function exists(dir: &[Dir], name: Span[Nat8]): Result[Bool, IoError] is
+        let code: Int64 := rawExists(adapterHandle(dir), spanToPointer(name), spanLength(name));
+        if code < 0 then return Err(error => fromCode(code)); end if;
+        return Ok(value => code /= 0); end;
+    function delete(dir: &[Dir], name: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawDelete(adapterHandle(dir), spanToPointer(name), spanLength(name))); end;
+    function makeDir(dir: &[Dir], name: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawMkdir(adapterHandle(dir), spanToPointer(name), spanLength(name))); end;
+    function byteSize(bytes: &[Bytes]): Index is
+        case toIndex(rawSize(bytes->handle)) of when Some(value as n: Index) do return n; when None do abort("Invalid Bytes size"); end case; end;
+    function nth(bytes: &[Bytes], index: Index): Nat8 is
+        case toNat8(rawByte(bytes->handle, index)) of when Some(value as b: Nat8) do return b; when None do abort("Bytes index out of bounds"); end case; end;
+    function closeBytes(bytes: Bytes): Unit is let { handle: Address[Nat8] } := bytes; rawClose(handle); return nil; end;
+    record File: Linear is handle: Address[Nat8]; end;
+    pragma Foreign_Import(External_Name => "WoOpenFile");
+    private function rawOpenFile(dir: Int64, name: Pointer[Nat8], count: Index, mode: Int64): Address[Nat8] is end;
+    pragma Foreign_Import(External_Name => "WoFileError");
+    private function rawFileError(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoFileClose");
+    private function rawFileClose(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoFileSize");
+    private function rawFileSize(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoFileSeek");
+    private function rawSeek(handle: Address[Nat8], pos: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoFileRead");
+    private function rawFileRead(handle: Address[Nat8], into: Pointer[Nat8], count: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WoFileWrite");
+    private function rawFileWrite(handle: Address[Nat8], data: Pointer[Nat8], count: Index): Int64 is end;
+    private function modeCode(mode: Mode): Int64 is
+        case mode of when Read do return 0; when Write do return 1; when Append do return 2; when ReadWrite do return 3; end case; end;
+    function open(dir: &[Dir], name: Span[Nat8], mode: Mode): Result[File, IoError] is
+        let handle: Address[Nat8] := rawOpenFile(adapterHandle(dir), spanToPointer(name), spanLength(name), modeCode(mode));
+        let code: Int64 := rawFileError(handle);
+        if code < 0 then rawFileClose(handle); return Err(error => fromCode(code)); end if;
+        return Ok(value => File(handle => handle)); end;
+    private function countResult(code: Int64): Result[Index, IoError] is
+        if code < 0 then return Err(error => fromCode(code)); end if;
+        case toIndex(code) of when Some(value as n: Index) do return Ok(value => n); when None do abort("Invalid IO count"); end case; end;
+    function read(file: &![File], into: Span![Nat8]): Result[Index, IoError] is
+        let count: Index := spanWriteLength(into);
+        return countResult(rawFileRead(file->handle, spanWriteToPointer(into), count)); end;
+    function write(file: &![File], data: Span[Nat8]): Result[Index, IoError] is
+        return countResult(rawFileWrite(file->handle, spanToPointer(data), spanLength(data))); end;
+    function seek(file: &![File], position: Index): Result[Unit, IoError] is
+        return status(rawSeek(file->handle, position)); end;
+    function size(file: &[File]): Index is
+        case toIndex(rawFileSize(file->handle)) of when Some(value as n: Index) do return n; when None do abort("Invalid File size"); end case; end;
+    function close(file: File): Result[Unit, IoError] is let { handle: Address[Nat8] } := file; return status(rawFileClose(handle)); end;
+end module body.
