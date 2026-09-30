@@ -3310,6 +3310,7 @@ public class CTask //The Fs segment reg points to current CTask.
     I64 user_data, user_data2, is_single_step;
     U8 *terminal, *shell_ctx, *key_history, *bin_module;
     U8 *stack_alloc, *stack_guard, *stack_end;
+    I64 term_size_seq; // last resize observed by this task
 };
 
 class CTSS

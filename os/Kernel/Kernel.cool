@@ -42,11 +42,12 @@
 #include "KHost.cool"
 #include "Ansi.cool"
 #include "Term.cool"
+#include "Blk.cool"
+#include "Gpu.cool"
 #include "Fb.cool"
 #include "Key.cool"
 #include "Ime.cool"
 #include "Input.cool"
-#include "Blk.cool"
 #include "DskStrA.cool"
 #include "DskCache.cool"
 #include "DskDrv.cool"
@@ -135,6 +136,7 @@ U0 KMain(U8 *image_end, U8 *dt)
     ArchIrqOn;
     "timer: %d Hz counter, %d Hz tick\n", cnt_freq, JIFFY_FREQ;
     MPStart(CORES_MAX);
+    if (fb.gpu) Spawn(&FbDisplayTask, NULL, "Display", 0);
     "%d cores online\n", mp_cnt;
     if (NetInit)
         "network: virtio-net %02X:%02X:%02X:%02X:%02X:%02X\n", net_mac[0], net_mac[1], net_mac[2], net_mac[3], net_mac[4], net_mac[5];

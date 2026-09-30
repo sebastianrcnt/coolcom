@@ -104,6 +104,16 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
     fdt_prop_empty(f, "ranges");
     fdt_prop_empty(f, "nonposted-mmio");
 
+    if (g.gpu) {
+        fdt_begin(f, "virtio-gpu@1ff030000");
+        fdt_prop_str(f, "compatible", "virtio,mmio");
+        uint32_t reg[4] = {GPU_BASE >> 32, (uint32_t)GPU_BASE, 0, GPU_SIZE};
+        uint32_t ints[3] = {AIC_IRQ, GPU_IRQ, IRQ_TYPE_LEVEL_HIGH};
+        fdt_prop_cells(f, "reg", reg, 4);
+        fdt_prop_u32(f, "interrupt-parent", PH_AIC);
+        fdt_prop_cells(f, "interrupts", ints, 3);
+        fdt_end(f);
+    }
     fdt_begin(f, "serial@235200000");
     fdt_prop_str(f, "compatible", "apple,s5l-uart");
     {

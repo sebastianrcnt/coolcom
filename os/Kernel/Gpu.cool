@@ -1,0 +1,169 @@
+// Modern virtio-gpu 2D, Virtio 1.2 section 5.7. Reuses Blk.cool's MMIO,
+// descriptor layout and synchronous split-ring protocol; coherent guest RAM.
+// Every command is fenced. Rendering and display-info polling share the
+// control queue's lock; the cursor queue has its own lock.
+class CGpu
+{
+    CVirtBlk q[2];
+    I64 resource, cursor_id, next_id, fence, scan_id, scan_top;
+    U8 *cursor;
+    Bool active, cursor_on;
+};
+CGpu gpu;
+
+Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL)
+{
+    CVirtBlk *d = &gpu.q[queue];
+    I64 daif, idx, deadline, fence, n;
+    U8 *res = d->qreq + 256;
+    Bool ok;
+    daif = SpinLockIrq(&d->lock);
+    MemSet(d->qreq, 0, 768);
+    *(d->qreq)(U32i *) = type;
+    *(d->qreq + 4)(U32i *) = 1; // VIRTIO_GPU_FLAG_FENCE
+    fence = ArchAdd(&gpu.fence, 1);
+    *(d->qreq + 8)(I64 *) = fence;
+    if (words) MemCpy(d->qreq + 24, data, words * 4);
+    VioDesc(d, 0, d->qreq, 24 + words * 4, VRING_F_NEXT, 1);
+    VioDesc(d, 1, res, 512, VRING_F_WRITE, 0);
+    idx = *(d->qavail + 2)(U16i *);
+    *(d->qavail + 4 + 2 * (idx % VQ_SIZE))(U16i *) = 0;
+    ArchDsb;
+    *(d->qavail + 2)(U16i *) = idx + 1;
+    ArchDsb;
+    VioWr(d, VIO_QNOTIFY, queue);
+    deadline = ArchCntVct + ArchCntFrq * 2;
+    while (*(d->qused + 2)(U16i *) == (d->last_used & 0xFFFF)) {
+        ArchDsb;
+        if (ArchCntVct > deadline) {
+            // Reset before any caller frees backing that could still be in DMA.
+            VioWr(d, VIO_STATUS, 0);
+            gpu.active = FALSE;
+            SpinUnlockIrq(&d->lock, daif);
+            return FALSE;
+        }
+    }
+    ArchDsb;
+    n = *(d->qused + 8 + 8 * (d->last_used % VQ_SIZE))(U32i *);
+    d->last_used++;
+    ok = n >= 24 && *(res + 4)(U32i *) == 1 && *(res + 8)(I64 *) == fence;
+    if (type == 0x100) ok = ok && n == 408 && *res(U32i *) == 0x1101;
+    else ok = ok && n == 24 && *res(U32i *) == 0x1100;
+    if (reply && ok) MemCpy(reply, res, n);
+    VioWr(d, VIO_ISR_ACK, VioRd(d, VIO_ISR) & 1); // do not swallow display-change IRQs
+    SpinUnlockIrq(&d->lock, daif);
+    return ok;
+}
+
+Bool GpuDisplayInfo(I64 *w, I64 *h)
+{
+    U32 info[102];
+    if (!GpuCommand(0, 0x100, NULL, 0, info) || !info[10]) return FALSE;
+    *w = info[8]; *h = info[9];
+    return *w >= 8 && *h >= 32 && *w <= 8192 && *h <= 8192 && *w * *h * 8 <= (256 << 20);
+}
+
+I64 GpuResource(U8 *back, I64 w, I64 h, I64 format)
+{
+    U32 p[6];
+    I64 id = ++gpu.next_id;
+    p[0] = id; p[1] = format; p[2] = w; p[3] = h;
+    if (!GpuCommand(0, 0x101, p, 4)) return 0;
+    p[0] = id; p[1] = 1;
+    p[2] = back(I64) & 0xFFFFFFFF; p[3] = back(I64) >> 32;
+    p[4] = w * h * 4; p[5] = 0;
+    if (!GpuCommand(0, 0x106, p, 6)) {
+        p[0] = id; p[1] = 0;
+        GpuCommand(0, 0x102, p, 2);
+        return 0;
+    }
+    return id;
+}
+
+U0 GpuUnref(I64 id)
+{
+    U32 p[2];
+    p[0] = id; p[1] = 0;
+    GpuCommand(0, 0x102, p, 2);
+}
+
+Bool GpuTransfer(I64 id, I64 stride, I64 x, I64 y, I64 w, I64 h)
+{
+    U32 p[8];
+    I64 offset = y * stride + x * 4;
+    p[0] = x; p[1] = y; p[2] = w; p[3] = h;
+    p[4] = offset & 0xFFFFFFFF; p[5] = offset >> 32; p[6] = id; p[7] = 0;
+    return GpuCommand(0, 0x105, p, 8);
+}
+
+U0 GpuPresent(I64 top, I64 w, I64 h)
+{
+    U32 p[6];
+    p[0] = 0; p[1] = top; p[2] = w; p[3] = h; p[4] = 0; p[5] = gpu.resource;
+    if (gpu.scan_id != gpu.resource || gpu.scan_top != top) {
+        if (!GpuCommand(0, 0x103, p, 6)) return;
+        gpu.scan_id = gpu.resource; gpu.scan_top = top;
+    }
+    p[4] = gpu.resource; p[5] = 0;
+    GpuCommand(0, 0x104, p, 6);
+}
+
+U0 GpuCursor(I64 x, I64 y, I64 w, U8 *back, I64 stride)
+{//Preserve the console's inverted block cursor using a transparent 64x64 resource.
+    U32 p[8], *src, *dst = gpu.cursor;
+    I64 i, j;
+    MemSet(dst, 0, 64 * 64 * 4);
+    for (j = 0; j < FONT_CELL_H; j++) {
+        src = back + j * stride;
+        for (i = 0; i < w; i++) dst[j * 64 + i] = (src[i] ^ 0xFFFFFF) | 0xFF000000;
+    }
+    if (!GpuTransfer(gpu.cursor_id, 64 * 4, 0, 0, 64, 64)) return;
+    MemSet(p, 0, sizeof(p)); p[1] = x; p[2] = y; p[4] = gpu.cursor_id;
+    GpuCommand(1, 0x300, p, 8);
+    gpu.cursor_on = TRUE;
+}
+U0 GpuCursorHide()
+{
+    U32 p[8];
+    if (!gpu.cursor_on) return;
+    MemSet(p, 0, sizeof(p));
+    GpuCommand(1, 0x300, p, 8);
+    gpu.cursor_on = FALSE;
+}
+
+Bool GpuInit(I64 *w, I64 *h)
+{
+    CVirtBlk *d;
+    I64 i, base = 0;
+    for (i = 0; i < fdt_nblk; i++)
+        if (ArchMmioRead32(fdt_blk[i].base) == VIO_MAGIC && ArchMmioRead32(fdt_blk[i].base + VIO_DEVID_OFF) == 16) {
+            base = fdt_blk[i].base;
+            break;
+        }
+    if (!base) return FALSE;
+    d = &gpu.q[0]; d->base = base;
+    VioWr(d, VIO_STATUS, 0); VioWr(d, VIO_STATUS, 3);
+    VioWr(d, VIO_DEVFEAT_SEL, 1);
+    if (!(VioRd(d, VIO_DEVFEAT) & 1)) return FALSE;
+    VioWr(d, VIO_DRVFEAT_SEL, 0); VioWr(d, VIO_DRVFEAT, 0);
+    VioWr(d, VIO_DRVFEAT_SEL, 1); VioWr(d, VIO_DRVFEAT, 1);
+    VioWr(d, VIO_STATUS, 11);
+    if (!(VioRd(d, VIO_STATUS) & 8)) return FALSE;
+    for (i = 0; i < 2; i++) {
+        d = &gpu.q[i]; d->base = base;
+        VioWr(d, VIO_QSEL, i);
+        if (VioRd(d, VIO_QNUM_MAX) < VQ_SIZE) return FALSE;
+        d->qdesc = CAlloc(16 * VQ_SIZE); d->qavail = CAlloc(6 + 2 * VQ_SIZE);
+        d->qused = CAlloc(6 + 8 * VQ_SIZE); d->qreq = CAlloc(768);
+        *d->qavail(U16i *) = 1;
+        VioWr(d, VIO_QNUM, VQ_SIZE); VioWr64(d, VIO_QDESC, d->qdesc(I64));
+        VioWr64(d, VIO_QAVAIL, d->qavail(I64)); VioWr64(d, VIO_QUSED, d->qused(I64));
+        ArchDsb; VioWr(d, VIO_QREADY, 1);
+    }
+    VioWr(d, VIO_STATUS, 15);
+    if (!GpuDisplayInfo(w, h)) return FALSE;
+    gpu.cursor = CAlloc(64 * 64 * 4);
+    gpu.cursor_id = GpuResource(gpu.cursor, 64, 64, 1);
+    gpu.active = gpu.cursor_id != 0;
+    return gpu.active;
+}

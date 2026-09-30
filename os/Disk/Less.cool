@@ -220,6 +220,9 @@ U0 Less(U8 *name, I64 line = 1)
             n = 0;
             pat[0] = 0;
             while (TRUE) {
+                AnsiTermSize(&less_rows, &less_cols);
+                max_top = LessMaxTop;
+                if (less_top > max_top) less_top = max_top;
                 StrPrint(prompt, "%c%s", dir, pat);
                 LessDraw(prompt);
                 ev = GetKey;

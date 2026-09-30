@@ -29,7 +29,12 @@ U0 TmLayout(CTmPane *p, I64 x, I64 y, I64 w, I64 h)
 {
     I64 n;
     p->x = x; p->y = y; p->w = w; p->h = h;
-    if (!p->a) VtResize(p->term, w, h);
+    if (!p->a) {
+        I64 cols = w, rows = h;
+        if (cols < 1) cols = 1;
+        if (rows < 1) rows = 1;
+        VtResize(p->term, cols, rows);
+    }
     else if (p->vertical) {
         n = (w - 1) / 2;
         TmLayout(p->a, x, y, n, h);
@@ -237,7 +242,7 @@ U0 TmRender()
 
 U0 Tmux()
 {
-    I64 key, prefix = FALSE, paint_at = 0, rows, cols;
+    I64 key, prefix = FALSE, paint_at = 0, rows, cols, i;
     CVTerm *old_focus = vt_focus;
     if (!tm_session) {
         tm_session = CAlloc(sizeof(CTmSession));
@@ -248,6 +253,13 @@ U0 Tmux()
     AnsiAltScreen(TRUE);
     TmFocus;
     while (tm_session->panes) {
+        AnsiTermSize(&rows, &cols);
+        if (cols != tm_session->cols || rows != tm_session->rows) {
+            tm_session->cols = cols; tm_session->rows = rows;
+            for (i = 0; i < TM_WINDOWS; i++)
+                if (tm_session->win[i].root) TmLayout(tm_session->win[i].root, 0, 0, cols, rows - 1);
+            tm_session->redraw = TRUE;
+        }
         TmReap;
         if (!tm_session->panes) break;
         // Batch bursts of input/output instead of repainting the entire
@@ -258,6 +270,7 @@ U0 Tmux()
         }
         key = KeyPop;
         if (!key) {Sleep(10); goto tm_again;}
+        if (key == KEY_RESIZE) goto tm_again;
         if (prefix) {
             prefix = FALSE;
             if (key == 'd') break;

@@ -5,6 +5,8 @@
 #include "../src/coolvm.h"
 
 struct vm g;
+bool gpu_snapshot(uint8_t **p, uint32_t *w, uint32_t *h) { return false; }
+void gpu_resize(uint32_t w, uint32_t h) {}
 void input_push(uint32_t type, uint32_t code, int32_t value) {}
 void vm_stop(int code, const char *why) {}
 

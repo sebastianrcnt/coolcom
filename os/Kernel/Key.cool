@@ -28,6 +28,7 @@
 #define KEY_PGDN      0x110008
 #define KEY_INS       0x110009
 #define KEY_DEL       0x11000A
+#define KEY_RESIZE    0x11000B  // size changed; no user key consumed
 #define KEY_F1        0x110011  // KEY_F1 + n - 1 is Fn, up to F12
 
 #define KEY_BUF     256
@@ -199,8 +200,16 @@ U0 KeyUartPoll()
 }
 
 // ---- reading keys ----
+Bool KeyResizePending()
+{
+    CVTerm *v = VtCurrent;
+    if (!v) v = vt_screen;
+    return v && Fs->term_size_seq != v->size_seq;
+}
+
 I64 KeyPending()
 {//Events waiting to be read.
+    if (KeyResizePending) return 1;
     if (VtCurrent && !VtCurrent->direct) return (VtCurrent->tail + 256 - VtCurrent->head) % 256;
     KeyUartPoll;
     return (key_tail + KEY_BUF - key_head) % KEY_BUF;
@@ -209,6 +218,13 @@ I64 KeyPending()
 I64 KeyPop()
 {//The oldest event, or 0 if none.
     I64 ev = 0, daif;
+    CVTerm *v;
+    if (KeyResizePending) {
+        v = VtCurrent;
+        if (!v) v = vt_screen;
+        Fs->term_size_seq = v->size_seq;
+        return KEY_RESIZE;
+    }
     if (VtCurrent && !VtCurrent->direct) return VtKeyPop;
     KeyUartPoll;
     daif = SpinLockIrq(&key_lock);

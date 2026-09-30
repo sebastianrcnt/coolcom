@@ -22,6 +22,7 @@ class CVtCell
 class CVTerm
 {
     I64 cols, rows, cx, cy, fg, bg, bold;
+    I64 size_seq; // coalesced resize notification for every bound task
     I64 esc, csi_n, csi_val[16], csi_private, u8_left, u8_cp;
     I64 saved_cx, saved_cy, saved_fg, saved_bg, saved_bold, alternate;
     I64 sv_cx, sv_cy, sv_fg, sv_bg, sv_bold; // ESC 7 / CSI s
@@ -307,12 +308,17 @@ U0 VtBind(CTask *t, CVTerm *v)
     if (v) ArchAdd(&v->refs, 1);
     VtRelease(t->terminal);
     t->terminal = v;
+    t->term_size_seq = 0;
+    if (v) t->term_size_seq = v->size_seq;
 }
 U0 VtResize(CVTerm *v, I64 cols, I64 rows)
 {
-    CVtCell *old = v->cells, *saved = v->saved;
-    U8 *old_dirty = v->row_dirty;
-    I64 daif = SpinLockIrq(&v->lock);
+    CVtCell *old, *saved;
+    U8 *old_dirty;
+    I64 daif;
+    if (cols < 1 || rows < 1) return;
+    daif = SpinLockIrq(&v->lock);
+    old = v->cells; saved = v->saved; old_dirty = v->row_dirty;
     I64 x, y, oc = v->cols, orows = v->rows;
     if (cols == oc && rows == orows) {SpinUnlockIrq(&v->lock, daif); return;}
     v->cells = CAlloc(cols * rows * sizeof(CVtCell));
@@ -339,7 +345,9 @@ U0 VtResize(CVTerm *v, I64 cols, I64 rows)
     if (v->saved_cx >= cols) v->saved_cx = cols - 1;
     if (v->saved_cy >= rows) v->saved_cy = rows - 1;
     Free(old); Free(saved); Free(old_dirty); v->dirty = TRUE;
+    v->scrolled = 0; v->size_seq++;
     SpinUnlockIrq(&v->lock, daif);
+    TaskEventWake;
 }
 Bool VtKeyPush(CVTerm *v, I64 key)
 {
@@ -430,14 +438,13 @@ U0 VtStop(CVTerm *v)
 
 Bool AnsiTermSize(I64 *rows, I64 *cols)
 {//The size of the current task's terminal. FALSE (and 24x80) if it has none, e.g. UART only.
-    if (VtCurrent) {
-        *rows = VtCurrent->rows;
-        *cols = VtCurrent->cols;
-        return TRUE;
-    }
-    if (vt_screen) {
-        *rows = vt_screen->rows;
-        *cols = vt_screen->cols;
+    CVTerm *v = VtCurrent;
+    I64 daif;
+    if (!v) v = vt_screen;
+    if (v) {
+        daif = SpinLockIrq(&v->lock);
+        *rows = v->rows; *cols = v->cols;
+        SpinUnlockIrq(&v->lock, daif);
         return TRUE;
     }
     *rows = 24;

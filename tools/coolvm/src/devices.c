@@ -1,4 +1,4 @@
-#include "coolvm.h"
+#include "virtio.h"
 #include <errno.h>
 #include <time.h>
 #include <unistd.h>
@@ -42,7 +42,7 @@ void input_push(uint32_t type, uint32_t code, int32_t value)
 // Long modal-editor regressions share one boot; the guest FIFO stays bounded.
 #define SCRIPT_LATE_CAP 16384
 #define WAIT_MAX 255
-enum { LATE_KEY, LATE_WAIT, LATE_QUIT };
+enum { LATE_KEY, LATE_WAIT, LATE_QUIT, LATE_RESIZE };
 static struct { uint32_t type, code; int32_t value; unsigned ms; int kind, arg; } late_q[SCRIPT_LATE_CAP];
 static unsigned late_n;
 
@@ -97,6 +97,10 @@ static void *late_main(void *arg)
             vm_stop(late_q[i].arg, "input script quit");
             return NULL;
         }
+        if (late_q[i].kind == LATE_RESIZE) {
+            gpu_resize(late_q[i].type, late_q[i].code);
+            continue;
+        }
         input_push(late_q[i].type, late_q[i].code, late_q[i].value);
         nanosleep(&(struct timespec){0, 200000}, NULL); /* pace them: the guest FIFO holds 255 */
     }
@@ -117,6 +121,17 @@ bool input_load_script(const char *path)
         if (line[0] == '#' || line[0] == '\n') continue;
         if (sscanf(line, "delay %u", &ms) == 1) {
             delay += ms;
+            continue;
+        }
+        unsigned width, height;
+        if (sscanf(line, "resize %u %u", &width, &height) == 2) {
+            if (late_n >= SCRIPT_LATE_CAP || width < 8 || height < 32 || width > 8192 || height > 8192 ||
+                (uint64_t)width * height * 8 > (256ULL << 20)) {
+                LOGE("invalid resize at script line %d\n", lineno); fclose(f); return false;
+            }
+            late_q[late_n].kind = LATE_RESIZE;
+            late_q[late_n].type = width; late_q[late_n].code = height;
+            late_q[late_n++].ms = delay;
             continue;
         }
         if (!strncmp(line, "wait ", 5)) {
@@ -208,8 +223,7 @@ static struct blk_state bs[MAX_DISKS];
 
 static void *guest_ptr(uint64_t pa, uint64_t len)
 {
-    if (pa < DRAM_BASE || len > g.ram_size || pa - DRAM_BASE > g.ram_size - len) return NULL;
-    return g.ram + (pa - DRAM_BASE);
+    return virtio_guest(pa, len);
 }
 static uint16_t ld16(const void *p) { uint16_t v; memcpy(&v,p,2); return v; }
 static uint32_t ld32(const void *p) { uint32_t v; memcpy(&v,p,4); return v; }
@@ -219,11 +233,8 @@ static void st32(void *p,uint32_t v) { memcpy(p,&v,4); }
 
 static bool descriptor(struct blk_state *b, unsigned id, uint64_t *addr, uint32_t *len, uint16_t *flags, uint16_t *next)
 {
-    if (id >= b->qnum) return false;
-    uint8_t *p = guest_ptr(b->desc + 16ULL * id, 16);
-    if (!p) return false;
-    *addr=ld64(p); *len=ld32(p+8); *flags=ld16(p+12); *next=ld16(p+14);
-    return !(*flags & 4); /* indirect descriptors not negotiated */
+    struct vq q = {.num=b->qnum, .desc=b->desc};
+    return virtio_desc(&q,id,addr,len,flags,next);
 }
 
 static bool process_chain(int disk, uint16_t head, uint32_t *used_len)

@@ -311,3 +311,27 @@ screen dimensions too, so fixed bottom and right margins retain their pixels.
 and checks FDT capability selection. `tools/scroll-bench.py` measures both
 3000-line forced rendering and normal timer-batched output; results and method
 are recorded in `os/Kernel/M1.md`.
+
+### Virtio GPU 2D
+
+`--gpu` (the default) exposes a modern virtio-mmio device (ID 16) at `0x1ff030000`, IRQ 713;
+`--no-gpu` omits it. Its split-ring descriptor and guest-memory helpers are shared
+with block/network devices (`src/virtio.h`). The control queue implements display
+info, BGRA/BGRX 2D resources, scatter backing attach/detach, unref, transfer, crop
+scanout and flush. The cursor queue supports 64×64 ARGB update/move/hide; fenced
+commands complete before their response is published. No 3D features are offered.
+
+The contract follows [Virtio 1.2 §5.7](https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html#x1-2900007).
+`SET_SCANOUT` is a bounded rectangle in a resource, not a wrapping framebuffer.
+Window and backing-scale changes update the preferred pixel dimensions, set
+`VIRTIO_GPU_EVENT_DISPLAY`, advance config generation and assert the config IRQ.
+Input scripts can inject the same event with `resize WIDTH HEIGHT` after a `wait`.
+`gpu-test.c` exercises the real MMIO queues and uses independent pixel oracles.
+
+The OS consumes display events in a task, replaces the resource/backing and
+resizes its existing terminal grid. `VtResize` wakes terminal readers with a
+coalesced `KEY_RESIZE` event; programs query `AnsiTermSize` to reflow. Vim, Less,
+Top and Tmux handle this event, including applications inside Tmux panes.
+`make gpu-resize-test` injects three headless modes and verifies notifications,
+PNG dimensions/content and those programs' status bars at their new rows.
+`make run` uses GPU by default; `--no-gpu` keeps fixed simple-framebuffer mode.
