@@ -281,7 +281,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: venus-transport-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -377,3 +377,8 @@ logos-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 .PHONY: gpu-resize-test
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/gpu-resize-test.py $<
+
+# Kernel Venus wire flow with a deliberately fake, opt-in host backend.
+.PHONY: venus-transport-test
+venus-transport-test: build/kernel.Image coolvm
+	python3 tools/venus-transport-test.py $<
