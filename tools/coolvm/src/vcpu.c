@@ -25,7 +25,12 @@ static void fb_frame_dump(void)
     snprintf(path, sizeof path, "%s/%05u.raw", dir, atomic_fetch_add(&n, 1));
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) return;
-    if (write(fd, g.fb, (size_t)g.fb_width * g.fb_height * 4) < 0) { /* best effort */ }
+    size_t bytes = (size_t)g.fb_width * g.fb_height * 4;
+    uint8_t *visible = malloc(bytes);
+    if (!visible) { close(fd); return; }
+    fb_snapshot(visible);
+    if (write(fd, visible, bytes) < 0) { /* best effort */ }
+    free(visible);
     close(fd);
 }
 
@@ -327,6 +332,13 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
                 *r = (*r & 0xffffffffULL) | (uint64_t)(uint32_t)*val << 32;
             else
                 *r = (*r & ~0xffffffffULL) | (uint32_t)*val;
+        } else if (*offp == FINISHER_FB_SCANOUT_Y && size == 4 && g.fb_scroll) {
+            if (wr) {
+                atomic_store(&g.fb_scanout_y, (uint32_t)*val % g.fb_height);
+                atomic_store(&g.fb_damage_used, true);
+                atomic_store(&g.fb_damage, (uint64_t)g.fb_height << 32);
+            } else
+                *val = atomic_load(&g.fb_scanout_y);
         } else if (wr && *offp == FINISHER_FB_DAMAGE && size == 4) {
             uint64_t start = *val & 0xffff, end = (*val >> 16) & 0xffff, old, merged;
             if (end > g.fb_height) end = g.fb_height;

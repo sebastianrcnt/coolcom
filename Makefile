@@ -255,7 +255,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
+test: scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -310,3 +310,11 @@ stbtt-test: build/coolc build/hcfmt.BIN
 warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool build/warmc
 	mkdir -p build/tmp
 	python3 tools/warm-kernel-test.py
+
+# Compare complete scanout pixels with the software fallback, including ring wraps
+# and fixed margins; assert FDT capability selection rather than only the picture.
+SCROLL_TEST_SIZES := --size 1024x768 --size 3200x2000 --size 1031x775 --size 1024x775
+.PHONY: scroll-test
+scroll-test: build/kernel.Image coolvm
+	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-fb-scroll --expect-scanout 0
+	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --expect-scanout 1 --compare scroll-test-ref

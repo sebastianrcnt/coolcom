@@ -131,5 +131,11 @@ set -e
 cat "$OUT/out_nat.txt"
 if [ "$RC" -eq 77 ]; then echo "nat-test: host offline, external part skipped"; else expect_rc "$RC" 0 "nat-test"; fi
 
+# Window composition and exported pixels must agree even when scanout wraps.
+clang -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter \
+    "$HERE/scanout.m" "$HERE/../src/display.m" -o "$OUT/scanout" \
+    -framework Hypervisor -framework AppKit -framework QuartzCore -framework ImageIO
+"$OUT/scanout" "$OUT/scanout.png"
+
 if [ "$FAIL" -eq 0 ]; then echo "coolvm-test: OK"; else echo "coolvm-test: FAILED"; fi
 exit $FAIL

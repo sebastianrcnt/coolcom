@@ -294,3 +294,20 @@ in `gtimeout -k` and processes exit before the next iteration.
 handling (MMIO, sysregs, HVC, WFI/WFE, vtimer), spin-table polling, poker thread. `src/aic.c`, `src/uart.c`,
 `src/devices.c` device models (all under `g.lock`). `src/net.c` virtio-net and the user-mode NAT (poll thread + DNS threads, also under `g.lock`). `src/display.m` Cocoa window and PNG output on the main
 thread. `src/board.c` device tree. `src/fdt.c` FDT builder. `test/` guests and runner.
+
+### Optional framebuffer scanout ring
+
+coolvm advertises `coolcom,scanout-y` on `/chosen/framebuffer@900000000`:
+a 64-bit FDT address of the 32-bit register at finisher offset `0x1c`.
+Writes select the first visible pixel row, modulo framebuffer height; reads
+return that offset. Scanout reads framebuffer row `(y + offset) % height`.
+Changing the offset marks the whole display dirty. The window (direct slices at native scale, a flattened image for matching
+interpolation when scaled), `--screenshot` and `COOLVM_FRAMES` raw dumps all use this visible order.
+
+`--no-fb-scroll` omits the property and disables the register, exercising a
+kernel's software fallback. The console uses that fallback for partial-cell
+screen dimensions too, so fixed bottom and right margins retain their pixels.
+`make scroll-test` compares hardware and fallback screenshots pixel for pixel
+and checks FDT capability selection. `tools/scroll-bench.py` measures both
+3000-line forced rendering and normal timer-batched output; results and method
+are recorded in `os/Kernel/M1.md`.

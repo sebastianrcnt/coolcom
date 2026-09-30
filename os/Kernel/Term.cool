@@ -30,7 +30,7 @@ class CVTerm
     Bool cursor_off; // CSI ?25l; Tmux shows the host cursor only for a pane without it
     CVtCell *cells, *saved;
     U8 *row_dirty;  // per row: cells changed since the renderer last looked
-    I64 scrolled;   // full-screen scrolls since then (the renderer moves its pixels instead of redrawing)
+    I64 scrolled;   // full-screen scrolls since then (the renderer rotates its pixel ring instead of redrawing)
     I64 keys[256], head, tail;
     I64 dirty, refs, lock;
     Bool direct, closed;
