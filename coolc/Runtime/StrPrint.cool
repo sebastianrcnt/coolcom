@@ -226,7 +226,7 @@ I64 PrtfArgKind(I64 ch)
 {
     switch (ch) {
         case 'F': case 'Q': case 'q': case 'D': case 'T': case 's': case 'S':
-        case 'c': case 'C': case 'p': case 'P': case 'd': case 'u': case 'x':
+        case 'c': case 'C': case 'p': case 'P': case 'd': case 'i': case 'u': case 'x':
         case 'X': case 'b': case 'B':
             return PRTF_ARG_I64;
         case 'z': case 'Z':
@@ -462,6 +462,7 @@ sp_arg:
                     cur_arg++;
                     break;
                 case 'd':
+                case 'i':  // C's %i, the same as %d (Warm and C code use it)
                     if (cur_arg >= argc)
                         throw('StrPrint');
                     m = argv[cur_arg++];
