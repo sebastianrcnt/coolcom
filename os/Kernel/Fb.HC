@@ -14,6 +14,7 @@ class CFb
     I64 esc, csi_n, csi_val[16], csi_private, bold;
     I64 sv_cx, sv_cy, sv_fg, sv_bg, sv_bold; // ESC 7 / CSI s
     Bool cursor_off;                        // CSI ?25l
+    Bool reverse;                           // SGR 7: glyphs drawn with foreground and background swapped
     U8 *saved_pixels, *saved_cw;
     I64 saved_cx, saved_cy, saved_fg, saved_bg, alternate;
     U8 *cw;                    // per cell: 1 = narrow or blank, 2 = left half of a wide glyph, 0 = its right half
@@ -60,7 +61,11 @@ U0 FbFillRect(I64 x, I64 y, I64 w, I64 h, I64 color)
 U0 FbBlit(I64 col, I64 row, U8 *g, I64 cells)
 {//Draw a glyph (16 rows of 1 or 2 bytes, MSB = leftmost pixel) into cells cells at text position col,row.
     U8 *p = fb.base + row * FONT_CELL_H * fb.stride + col * FONT_CELL_W * 4;
-    I64 y, x, bits, n = cells * FONT_CELL_W;
+    I64 y, x, bits, n = cells * FONT_CELL_W, fg = fb.fg, bg = fb.bg;
+    if (fb.reverse) {
+        fg = fb.bg;
+        bg = fb.fg;
+    }
     for (y = 0; y < FONT_CELL_H; y++) {
         if (cells == 2) {
             bits = (g[0] << 8) | g[1];
@@ -69,9 +74,9 @@ U0 FbBlit(I64 col, I64 row, U8 *g, I64 cells)
             bits = *g++;
         for (x = n - 1; x >= 0; x--) {
             if ((bits >> x) & 1)
-                *p(U32i *) = fb.fg;
+                *p(U32i *) = fg;
             else
-                *p(U32i *) = fb.bg;
+                *p(U32i *) = bg;
             p += 4;
         }
         p += fb.stride - n * 4;
@@ -273,8 +278,10 @@ U0 FbCsi(U8 c)
         case 'm':
             for (i = 0; i <= fb.csi_n; i++) {
                 n = fb.csi_val[i];
-                if (!n) {fb.fg = 0xFFFFFF; fb.bg = 0; fb.bold = FALSE;}
+                if (!n) {fb.fg = 0xFFFFFF; fb.bg = 0; fb.bold = FALSE; fb.reverse = FALSE;}
                 else if (n == 1) fb.bold = TRUE;
+                else if (n == 7) fb.reverse = TRUE;
+                else if (n == 27) fb.reverse = FALSE;
                 else if (n == 22) fb.bold = FALSE;
                 else if (n == 39) fb.fg = 0xFFFFFF;
                 else if (n == 49) fb.bg = 0;

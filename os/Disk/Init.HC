@@ -8,6 +8,7 @@
 #include "C:/Less.HC"
 #include "C:/Man.HC"
 #include "C:/Diff.HC"
+#include "C:/Top.HC"
 
 U0 Cls()
 {//TempleOS's clear screen, as ANSI so the screen and the host terminal both clear.

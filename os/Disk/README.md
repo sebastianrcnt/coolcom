@@ -11,6 +11,7 @@
 | `Less.HC` | `Less("file")`: pager with wrapping by terminal columns (UTF-8, wide characters), Space/b/d/u/j/k/g/G, `/text` `?text` `n` `N`, `q`. |
 | `Man.HC` | `Man("Name")`: open Vim (or Less for a file over 128 KiB) at the definition of a function, class, global or `#define`. The shell compiler's symbol table gives the file and line of what the shell compiled; kernel symbols are looked up in `C:/Kernel`. |
 | `Diff.HC` | `Diff("a", "b")`: report differing hunks (port of Aiwnios `Diff.HC`, ANSI colors instead of DolDoc); `Diff("a", "b", TRUE)` merges into `a` one hunk at a time (keys 1 2 a b q Esc). |
+| `Top.HC` | `Top;`: full-screen monitor refreshed every second: a bar per core, heap, FAT32 free space, and the tasks (core, state, CPU share over the last second, switches, stack; the core's first task is its idle task). Up/Down select, `c` `p` `n` `s` sort by CPU/task/name/state, `k` then `y` kills the selected task, `q` quits. |
 | `HexDump.HC` | `HexDump("file", start, count)`. |
 | `Text.HC` | helpers the tools share. |
 | `Init.HC` | includes the above; defines `Cls`. |

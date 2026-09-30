@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test
+.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -169,7 +169,8 @@ syntax-test: build/kernel.Image coolvm
 selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH
 	tools/selfhost-test.sh $<
 
-# The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image.
+# The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image,
+# and a kernel it changed and rebuilt must boot to a shell prompt through Reboot (about 6 s).
 kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm
 	tools/kernel-rebuild-test.sh $<
 
@@ -185,7 +186,11 @@ ime-test: build/kernel.Image coolvm
 net-forward-test: build/kernel.Image coolvm
 	python3 tools/net-forward-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test net-forward-test
+# Top: tasks per core with state and CPU share, heap and FAT32 lines, sort, kill.
+top-test: build/kernel.Image coolvm
+	python3 tools/top-test.py $<
+
+test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test net-forward-test
 	tools/kernel-test.sh $<
 	tools/kernel-test.sh $< --load-offset 0x600000
 

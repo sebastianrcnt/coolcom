@@ -11,6 +11,7 @@ class CCPU
             *cur_task,
             *dying;       // exited task waiting to be freed
     Bool online;        // (Bool is a U64)
+    I64 acct_from;      // counter value since which cur_task has run (CPU time accounting, Yield)
 };
 
 CCPU cpu_structs[CORES_MAX];
@@ -25,6 +26,7 @@ U0 CoreInit(I64 num)
 {//Common per-core init, runs on the core itself.
     CCPU *c = &cpu_structs[num];
     c->num = num;
+    c->acct_from = ArchCntVct;
     ArchTpidrSet(c);
     IntcCpuInit;
 }
