@@ -71,3 +71,12 @@ import F64 Ceil(F64 d);
 import F64 Round(F64 d);                       // to nearest, ties away from zero
 
 import U8 *ArchBootGuard(I64 cpu);
+
+import I64 ArchPsci(I64 func, I64 arg1, I64 arg2, I64 arg3, I64 method);
+import U0 ArchGicCpuInit();
+import I64 ArchGicAck();
+import U0 ArchGicEoi(I64 ack);
+import U0 ArchGicSgi(I64 target);
+
+import I64 ArchMmioRead64(I64 addr);
+import U0 ArchMmioWrite64(I64 addr, I64 val);

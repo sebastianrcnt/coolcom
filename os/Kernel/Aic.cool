@@ -1,12 +1,18 @@
 // Apple AICv1 peripheral IRQs; timer and fast IPI arrive as FIQs.
-#define AIC_IRQS_NUM 896
+#define AIC_IRQS_NUM 1024
 U8 *irq_handlers[AIC_IRQS_NUM];
 I64 irq_unexpected, ipi_count;
 
-U0 IntcInit() {}
+#include "Gic.cool"
+
+U0 IntcInit()
+{
+    if (fdt_gic_version) GicInit;
+}
 U0 IntcCpuInit()
 {
-    ArchFiqSourcesInit;
+    if (fdt_gic_version) GicCpuInit;
+    else ArchFiqSourcesInit;
 }
 
 U0 IrqSet(I64 irq, U0 (*fp)(I64 irq))
@@ -14,12 +20,14 @@ U0 IrqSet(I64 irq, U0 (*fp)(I64 irq))
     if (irq < 0 || irq >= AIC_IRQS_NUM)
         return;
     irq_handlers[irq] = fp;
+    if (fdt_gic_version) {GicIrqSet(irq); return;}
     ArchMmioWrite32(fdt_aic + 0x3000 + irq * 4, 1);  // deliver to core 0
     ArchMmioWrite32(fdt_aic + 0x4180 + (irq / 32) * 4, 1 << (irq & 31));
 }
 
 U0 IrqDispatch()
 {
+    if (fdt_gic_version) {GicDispatch; return;}
     I64 event = ArchMmioRead32(fdt_aic + 0x2004);
     I64 irq = event & 0xFFFF;
     U0 (*fp)(I64 irq);
@@ -34,6 +42,7 @@ U0 IrqDispatch()
 
 U0 FiqDispatch()
 {
+    if (fdt_gic_version) {GicDispatch; return;}
     I64 ipi = ArchIpiStatus;
     if (ipi & 1) {
         ArchIpiAck(1);
@@ -45,5 +54,6 @@ U0 FiqDispatch()
 
 U0 IntcSendIpi(I64 mpidr)
 {
+    if (fdt_gic_version) {GicSendIpi(mpidr); return;}
     ArchIpiSend((mpidr & 0xff) | (((mpidr >> 8) & 0xff) << 16));
 }

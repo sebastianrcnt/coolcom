@@ -1,7 +1,7 @@
 # coolcom user guide
 
-coolcom is a TempleOS-like operating system for the Apple M1. It is written in HolyC ("Cool") and developed on
-coolvm, our Hypervisor.framework VM. Everything below was tried on coolvm. Features that exist only in the VM
+coolcom is a TempleOS-like arm64 operating system for the Apple M1 and QEMU `virt`. It is written in HolyC ("Cool") and developed on
+coolvm, our Hypervisor.framework VM. The QEMU serial console is also tested; the window features below were tried on coolvm. Features that exist only in the VM
 are marked **VM-only** and collected in [the last section](#vm-only). Deeper documents: [M1 kernel
 notes](../os/Kernel/M1.md), [C: programs](../os/Disk/README.md), [Vim](../os/Disk/Vim.md),
 [Tmux](terminal-multiplexer.md), [networking](networking.md), [FAT32 tools](fat32-tools.md),
@@ -16,12 +16,14 @@ On an Apple silicon Mac, install the Homebrew packages `aarch64-elf-gcc`, `aarch
 |---|---|
 | `make` | compiles the kernel with the checked-in compiler seed and writes `build/kernel.Image` |
 | `make run` | boots the Image in a coolvm window with 2 CPUs, 1 GiB and `build/disk.img` as `C:` |
+| `make run-qemu` | boots the same Image with QEMU `virt`, 2 CPUs, 1 GiB, `build/disk.img`, virtio-net and a serial console (install Homebrew `qemu`) |
+| `make qemu-test` | disposable FAT disk; GICv3/HVF when available and GICv2/TCG: shell file read, 2 cores, IPI, network, PSCI reset and shutdown |
 | `make run-net` | the same with a network card and the Mac's ports 2323 and 8080 forwarded to the guest's 23 and 80 |
 | `make -j test` | all checks, side by side (about 40 s; `make test` runs them one after another in about 3 minutes); each part has its own target, e.g. `make vim-test`, `make kernel-rebuild-test` |
 | `make disk-install` | overwrites the programs and sources on `build/disk.img` with the repository's versions |
 | `make m1n1-payload` | `build/m1n1-payload.bin` for real hardware (m1n1 + device tree + the Image; not yet booted on a Mac) |
 
-`make run` creates `build/disk.img` (64 MiB FAT32) the first time. It then adds only the files that are
+`make run` and `make run-qemu` create `build/disk.img` (64 MiB FAT32) the first time. It then adds only the files that are
 missing, so edits made inside the OS are kept. The disk holds the programs of `os/Disk`, the kernel sources
 in `C:/Kernel` and `C:/coolc`, the shell prelude `C:/Kernel.coolh`, and the compiler sources in `C:/Compiler`.
 It also installs the Warm compiler `C:/Warm.cool` and the example `C:/HelloWarm.warm`.
@@ -39,6 +41,14 @@ The VM shows the framebuffer console in a window, and the terminal you started i
 available in the window only (Shift+Space, the Hangul key, or Right Alt alone toggles 2-beolsik). The
 terminal composes Hangul itself and sends UTF-8. coolvm options are listed by `build/coolvm --help`, for
 example `--width/--height`, `--cpus`, `--mem`, `--headless`, `--net` and `--timeout`.
+
+QEMU uses `-kernel build/kernel.Image` and its generated FDT; no firmware or alternate kernel build
+is needed. `QEMU_ACCEL=auto` probes HVF and falls back to TCG; force either with
+`QEMU_ACCEL=hvf make run-qemu` or `QEMU_ACCEL=tcg make run-qemu`. The default GIC is v3;
+`QEMU_ACCEL=tcg QEMU_GIC=2 make run-qemu` selects v2 (HVF requires v3). `QEMU` can override
+the executable. Ctrl+A X exits QEMU; Ctrl+A C switches between its monitor and serial console.
+The launcher uses modern virtio-MMIO block/network devices. It currently uses the serial console;
+virtio-gpu display support is being developed separately. No ramfb setup is required.
 
 ## The shell
 
@@ -248,7 +258,9 @@ The API and the TCP/IP design are in [networking.md](networking.md).
 ## Shutdown and Reboot
 
 `Shutdown;` flushes the disks and powers the VM off. `Reboot;` flushes the disks and restarts coolvm with
-the same options. `Reboot("C:/Kernel.Image");` boots a kernel Image from the disk. On a real M1 both only
+the same options. QEMU uses PSCI `SYSTEM_OFF` / `SYSTEM_RESET` for these commands.
+`Reboot("C:/Kernel.Image");` boots a kernel Image from the disk on coolvm; it reports that this
+finisher feature is unavailable on QEMU. On a real M1 both only
 flush the disks and halt, because the SMC power interface is not implemented.
 
 ## Warm
@@ -281,15 +293,16 @@ compiler, written in Cool (`warmc`), and it runs in two places:
 <a id="vm-only"></a>
 ## What is VM-only
 
-These parts work only under coolvm today. The kernel itself is written for the M1 (AIC interrupts, the
-Apple UART, 16 KiB pages, spin-table SMP, relocation to any 2 MiB base).
+The kernel selects platform drivers from FDT compatibility: Apple AIC/S5L UART/spin-table for M1 and
+coolvm, GICv2/v3/PL011/PSCI for QEMU `virt`. Both use 16 KiB pages and the same relocatable Image.
+The following devices still need real M1 hardware drivers; virtio disks and networking work on both VMs.
 
 | Feature | On a real M1 |
 |---|---|
 | Keyboard and mouse (coolvm input device), so also Ctrl+Alt+C and the Hangul IME | needs USB HID or the SPI keyboard driver |
 | Disks (virtio-blk), so also `C:` and every file command | needs ANS NVMe behind DART |
 | Network (virtio-net, coolvm NAT and port forwarding) | no driver for the Mac's Ethernet or Wi-Fi |
-| `Shutdown`, `Reboot`, `Reboot(image)` (coolvm finisher) | only flush and halt; the SMC power keys are not implemented |
+| `Shutdown`, `Reboot` (coolvm finisher or QEMU PSCI); `Reboot(image)` is coolvm-only | only flush and halt; the SMC power keys are not implemented |
 | Clock (`Now`) from coolvm's device tree | starts at 1970 until the SMC RTC is read |
 
 The framebuffer console (m1n1's `simple-framebuffer`) and the serial console are M1 drivers, but neither has

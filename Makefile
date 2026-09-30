@@ -193,6 +193,15 @@ disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	@mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
 	  mmd -i build/disk.img ::Compiler && mcopy -i build/disk.img build/native-src/* ::Compiler/; }
 
+.PHONY: run-qemu qemu-test
+# QEMU virt uses the same relocatable arm64 Image and modern virtio-MMIO devices.
+# QEMU_ACCEL=auto (default) probes HVF and falls back to TCG; see tools/qemu.py.
+run-qemu: build/kernel.Image disk-seed
+	python3 tools/qemu.py $< build/disk.img
+
+qemu-test: build/kernel.Image
+	python3 tools/qemu-test.py $<
+
 run: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
 
@@ -256,7 +265,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: lua-test lua-kernel-test c2hc-test stbtt-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc scroll-test
+test: qemu-test lua-test lua-kernel-test c2hc-test stbtt-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc scroll-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool

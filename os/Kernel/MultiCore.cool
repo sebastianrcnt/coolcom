@@ -37,10 +37,13 @@ U0 MPStart(I64 cnt)
     I64 i, t;
     CCPU *c;
     for (i = 1; i < cnt && i < fdt_ncpu && i < CORES_MAX; i++) {
-        if (!fdt_cpu[i].release)
+        if (!fdt_cpu[i].release && !(fdt_cpu[i].psci && fdt_psci))
             goto mp_next;
         c = &cpu_structs[i];
-        ArchSpinRelease(fdt_cpu[i].release, ArchApEntry);
+        if (fdt_cpu[i].psci && fdt_psci) {
+            t = ArchPsci(0xC4000003, fdt_cpu[i].mpidr, ArchApEntry(I64), 0, fdt_psci);
+            if (t) {"Core %d: PSCI CPU_ON failed (%d)\n", i, t; goto mp_next;}
+        } else ArchSpinRelease(fdt_cpu[i].release, ArchApEntry);
         t = ArchCntVct + ArchCntFrq;
         while (!c->online && ArchCntVct < t)
             ArchWfe;

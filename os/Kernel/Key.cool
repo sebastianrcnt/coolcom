@@ -268,18 +268,15 @@ I64 KeyChar(I64 ev)
 U0 KeyUartIrq(I64 irq)
 {//UART receive interrupt: decode what arrived, then clear the (Apple) status bits.
     KeyUartPoll;
-    ArchMmioWrite32(fdt_uart + 0x10, (1 << 3) | (1 << 4) | (1 << 9));
+    UartIrqAck;
 }
 
 U0 KeyUartIrqInit()
 {//Receive interrupts, so a core waiting for keys can sleep without ticks. UCON: RX mode
     //interrupt, RX threshold and timeout interrupts on, TX threshold interrupt off.
-    I64 ucon;
     if (!fdt_uart_irq)
         return;
-    ucon = ArchMmioRead32(fdt_uart + 0x04);
-    ucon = (ucon & ~(3 | (1 << 13))) | 1 | (1 << 9) | (1 << 12);
-    ArchMmioWrite32(fdt_uart + 0x04, ucon);
+    UartRxInit;
     IrqSet(fdt_uart_irq, &KeyUartIrq);
 }
 

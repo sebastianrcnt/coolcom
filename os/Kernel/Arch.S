@@ -476,3 +476,41 @@ Ceil:
 Round:
   frinta d0, d0
   ret
+
+// PSCI uses SMCCC argument registers x0..x3; x4 selects the FDT conduit.
+.global ArchPsci
+ArchPsci:
+  cmp x4, #2
+  b.eq 1f
+  hvc #0
+  ret
+1:
+  smc #0
+  ret
+
+.global ArchGicCpuInit
+ArchGicCpuInit:
+  mrs x0, S3_0_C12_C12_5 // ICC_SRE_EL1
+  orr x0, x0, #7
+  msr S3_0_C12_C12_5, x0
+  isb
+  mov x0, #255
+  msr S3_0_C4_C6_0, x0 // ICC_PMR_EL1
+  msr S3_0_C12_C12_4, xzr // ICC_CTLR_EL1, EOImode=0
+  msr S3_0_C12_C12_3, xzr // ICC_BPR1_EL1
+  mov x0, #1
+  msr S3_0_C12_C12_7, x0 // ICC_IGRPEN1_EL1
+  isb
+  ret
+GETTER ArchGicAck, S3_0_C12_C12_0
+SETTER ArchGicEoi, S3_0_C12_C12_1
+SETTER ArchGicSgi, S3_0_C12_C11_5
+
+.global ArchMmioRead64
+ArchMmioRead64:
+  ldr x0, [x0]
+  ret
+.global ArchMmioWrite64
+ArchMmioWrite64:
+  str x1, [x0]
+  ret
