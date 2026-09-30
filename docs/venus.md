@@ -1,12 +1,14 @@
-# Venus: Vulkan for coolcom (design, for review)
+# Venus: Vulkan for coolcom
 
-Status: milestone 1 host work started (2026-09-30); guest transport and rendering
-remain planned. See the host validation log below. The goal is one general GPU API, Vulkan,
+Status: decisions accepted. Kernel transport, the guest subset generator and the
+optional real host renderer are implemented; triangle integration remains in progress.
+See [generator usage](../tools/venus/README.md) and the host validation log below.
+The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
 virtio-gpu **Venus**: under coolvm on the Mac through virglrenderer and MoltenVK to Metal,
 and under QEMU on Linux hosts through virglrenderer to the host's Vulkan driver. Logos
 ([logos.md](logos.md)) stays as it is until the terminal runs on Vulkan; then its custom
-channel retires. Choices that are yours are listed with options and a recommendation
+channel retires. The original choices are listed with options and a recommendation
 (**Rec.**), and collected at the end.
 
 How Venus works, in short. Venus is a Vulkan driver in Mesa (`src/virtio/vulkan`). It does
@@ -76,8 +78,8 @@ What `Gpu.cool` gains, per the virtio-gpu spec:
 - **Capsets:** `GET_CAPSET_INFO` and `GET_CAPSET` for capset 4 (Venus). The capset carries
   the protocol version and the renderer's supported extensions, which the generated layer
   checks.
-- **Contexts:** `CTX_CREATE` with the context-init flag naming the Venus capset;
-  fence timelines are renderer/Vulkan queue state. Also `CTX_ATTACH_RESOURCE`, `CTX_DETACH_RESOURCE` and
+- **Contexts:** `CTX_CREATE` with `context_init` naming the Venus capset. Fence timelines are
+  selected by the request header's `ring_idx`; the wire create command has no ring-count field. Also `CTX_ATTACH_RESOURCE`, `CTX_DETACH_RESOURCE` and
   `CTX_DESTROY`.
 - **Blob resources:** `RESOURCE_CREATE_BLOB`, with `BLOB_MEM_GUEST` (guest pages, for the
   ring and reply buffers) or `BLOB_MEM_HOST3D` (host Vulkan memory, for mapped buffers and
@@ -101,6 +103,56 @@ What `Gpu.cool` gains, per the virtio-gpu spec:
 
 This is a transport of roughly 600 lines in `Gpu.cool` (or a `GpuVenus.cool` beside it),
 which stays in the kernel.
+
+### Implemented kernel transport (2026-09-30)
+
+`os/Kernel/Gpu.cool` negotiates VIRGL, CONTEXT_INIT and RESOURCE_BLOB together when
+all three are offered, independently of Logos. `GpuVenus.cool` provides a lazy,
+single Venus context; boot and the 2D/Logos console do not query capsets or depend on it.
+A missing feature or Venus capset returns false without logging or changing the console.
+This stage uses the existing modern virtio-MMIO transport; PCI is still milestone 2.
+
+- `GpuVenusInit()` enumerates `num_capsets`, selects capset 4, fetches its maximum
+  supported version, and creates context 1. `venus.cap + 24` holds the opaque capability
+  bytes, with `venus.cap_size` and `venus.cap_version`; the future Vulkan layer interprets
+  them. Discovery is bounded to 256 capsets and 64 KiB of capability data.
+- `GpuBlobCreate(size, GPU_BLOB_GUEST/GPU_BLOB_HOST3D, blob_id, flags)` returns a
+  `CGpuBlob` or null. Guest backing is owned by the transport and accessible through
+  `blob->guest`. HOST3D uses the protocol's host allocation `blob_id`. There are at most
+  64 live blobs, each at most 256 MiB. Attach/detach with `GpuContextResource(id, attach)`.
+- `GpuBlobMap(blob)` selects first-fit 16 KiB aligned offsets in shared region 1,
+  including freed holes. It installs identity-mapped, non-executable guest pages using
+  the returned cache policy; existing RAM/MMIO mappings are never overwritten.
+  Missing/invalid shared regions or unavailable offsets return null. `GpuBlobUnmap`
+  waits for the host and removes guest PTEs; `GpuBlobDestroy` unmaps, fences unref and
+  frees guest backing. Empty page tables are retained for reuse.
+- `GpuSubmit3D(stream, bytes, ring)` accepts aligned inline streams up to 1504 bytes,
+  on timelines 0..63. It waits synchronously for the matching virtio fence and context.
+  A larger stream belongs in a Venus shared ring; ring encoding and notifications are
+  the next layer's responsibility. Fence completion means consumption, not Vulkan
+  execution completion. Hosts may omit the ring flag/index from response headers, as
+  [QEMU does](https://github.com/qemu/qemu/blob/master/hw/display/virtio-gpu.c).
+- `GpuScanoutBlob(blob, width, height, stride, offset, format)` sends SET_SCANOUT_BLOB
+  for a single-plane, four-byte pixel buffer on scanout 0, then RESOURCE_FLUSH. It
+  invalidates the 2D scanout cache so a following console frame can restore its resource.
+- `GpuVenusDestroy()` refuses live blobs and destroys the context after cleanup.
+  Callers serialize use and destruction of a blob/context; the transport protects the
+  queue and shared-window allocator with IRQ-safe locks. Device errors, bad responses
+  and invalid arguments return false/null. A two-second queue timeout resets the GPU
+  before backing can be freed and marks it inactive, preserving the driver's existing
+  timeout behavior. Asynchronous fence IRQ handling is deferred.
+
+Wire definitions follow the [Linux virtio-gpu UAPI](https://github.com/torvalds/linux/blob/master/include/uapi/linux/virtio_gpu.h)
+and [virtio-MMIO registers](https://github.com/torvalds/linux/blob/master/include/uapi/linux/virtio_mmio.h).
+
+`make venus-transport-test` boots the real kernel under coolvm with
+`--gpu-3d-stub`, then with ordinary 2D, Logos and no GPU. The opt-in stub offers one
+opaque fake capset, creates contexts/blobs, supplies a 16 MiB host-visible window and
+completes submissions immediately. It does **not** decode Venus or render Vulkan.
+The test verifies capsets, device errors and response lengths, resource lifecycle,
+map/remap and hole reuse, forty submissions across two timelines (queue wrap), fence
+IDs, scanout/flush and silent fallback. It is included in `make -j test`; `qemu-test`
+continues to check the ordinary QEMU transport without Venus dependencies.
 
 ## 3. The host side
 
@@ -243,7 +295,7 @@ Linux VM image for testing) is approved.
 
 ### Step 1: pinned source builds
 
-`tools/vendor-venus.sh` builds into the gitignored `vendor/venus/install` prefix.
+`tools/vendor-venus.sh --host` builds into the gitignored `vendor/venus/install` prefix.
 `tools/venus-deps.json` records every source URL and SHA-256. Run the script with
 Xcode installed; build tools are `meson`, `ninja`, `pkgconf`, `cmake`, and Python 3
 (`brew install meson ninja pkgconf cmake` if missing). No runtime Homebrew packages
@@ -384,3 +436,17 @@ The transport layout was checked against the [Linux v6.12 virtio-gpu ABI](https:
 and [MMIO register definitions](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/virtio_mmio.h):
 the header's `ring_idx` byte is at offset 20, and the host-visible region selector
 is 1 (0 is undefined). These values are exercised by the host transport tests.
+
+## Integration with main (2026-09-30)
+
+Merged the kernel Venus transport and guest generator from main. The vendor
+entrypoint now dispatches `--generator [--test]` (the default) or `--host`.
+`vendor-venus` explicitly builds the host section; `venus-vendor` explicitly
+fetches generator/oracle inputs. Default `make -j test` has no download prerequisite.
+The opt-in stub takes precedence over the real renderer even in a Venus build,
+with separate resources and shared-memory register routing. Recipes for host,
+transport and generator tests are attached to their individual Makefile rules.
+
+Offline merge validation: `make -j test` passed, including the four transport
+configurations and generator offline regression tests. Full generator wire-oracle
+tests reported SKIP because their separate pinned inputs had not yet been fetched.

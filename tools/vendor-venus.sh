@@ -3,6 +3,17 @@
 # in gitignored vendor/venus. Homebrew supplies build tools, never runtime libs.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Separate immutable generator inputs from the macOS renderer stack.
+# Default/--generator [--test] are usable without Xcode or host libraries.
+case "${1:---generator}" in
+    generator|--generator)
+        if [ "$#" -gt 0 ]; then shift; fi
+        exec python3 "$ROOT/tools/venus/vendor.py" "$@" ;;
+    --test|--help|-h) exec python3 "$ROOT/tools/venus/vendor.py" "$@" ;;
+    host|--host) shift ;;
+    *) echo "Unknown Venus section: $1 (use --generator [--test] or --host)" >&2; exit 2 ;;
+esac
+[ "$#" -eq 0 ] || { echo 'Host section takes no options' >&2; exit 2; }
 V=$ROOT/vendor/venus
 P=$V/install
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || { echo 'Venus host build requires Apple Silicon macOS' >&2; exit 1; }

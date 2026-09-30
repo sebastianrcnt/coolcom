@@ -343,6 +343,18 @@ Top and Tmux handle this event, including applications inside Tmux panes.
 PNG dimensions/content and those programs' status bars at their new rows.
 `make run` uses GPU by default; `--no-gpu` keeps fixed simple-framebuffer mode.
 
+### Test-only 3D transport stub
+
+`--gpu-3d-stub` opts into fake Venus transport responses, independently of Logos.
+It offers VIRGL, RESOURCE_BLOB and CONTEXT_INIT, one opaque capset 4, a single
+context and a 16 MiB shared-memory region at `0x400000000`. Submissions complete
+immediately; this mode has no Venus decoding or Vulkan rendering. Requests are
+validated and logged with their context, ring, fence ID and response type.
+
+`make venus-transport-test` drives this backend through the real kernel, then boots
+with ordinary 2D, Logos and no GPU to check silent fallback. The implementation is
+isolated in `src/gpu3d-stub.h`; it is not the production host 3D backend.
+
 ### Logos
 
 The virtio-gpu also offers Logos (`src/logos.m`, [docs/logos.md](../../docs/logos.md)), which
@@ -353,7 +365,7 @@ and `LOGOS_DEBUG=2` logs every command.
 
 ### Optional Venus host transport
 
-`tools/vendor-venus.sh` builds the pinned source dependencies into `vendor/venus`.
+`tools/vendor-venus.sh --host` builds the pinned source dependencies into `vendor/venus`.
 `COOLVM_VENUS=1 tools/coolvm/build.sh build/coolvm-venus` enables the experimental
 capset/context/SUBMIT_3D/blob path. `make venus-host-test` runs real renderer and
 Hypervisor mapping tests without a guest. The default build and `make -j test`

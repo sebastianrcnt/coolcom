@@ -281,7 +281,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: venus-gen-test venus-transport-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -381,6 +381,20 @@ gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Host-only Venus spike; opt-in and independent of the default test suite.
 .PHONY: vendor-venus venus-host-test
 vendor-venus:
-	tools/vendor-venus.sh
+	tools/vendor-venus.sh --host
 venus-host-test:
 	tools/coolvm/test/venus-spike.sh
+
+# Kernel Venus wire flow with a deliberately fake, opt-in host backend.
+.PHONY: venus-transport-test
+venus-transport-test: build/kernel.Image coolvm
+	python3 tools/venus-transport-test.py $<
+# Guest Vulkan generation only: no kernel/coolvm integration or renderer needed.
+.PHONY: venus-vendor venus-gen venus-gen-test
+venus-vendor:
+	tools/vendor-venus.sh --generator --test
+venus-gen: venus-vendor
+	python3 tools/venus/gen.py
+venus-gen-test: build/coolc
+	python3 tools/venus/test_offline.py
+	python3 tools/venus/test.py
