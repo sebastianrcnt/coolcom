@@ -30,6 +30,7 @@ U8 *break_hook;   // U0 (*)(CExceptFrame *f): called with the interrupted frame 
 
 extern Bool TaskStackFault(CTask *t, CExceptFrame *f);
 extern U0 FbFlush();
+extern U0 FbFinish();
 extern U0 TaskEventWake();
 
 U0 StackOverflowExit()
@@ -79,6 +80,6 @@ U0 KExcept(I64 vec, CExceptFrame *f)
     }
     ExceptDump(vec, f);
     "System halted.\n";
-    FbFlush;
+    FbFlush; FbFinish;
     while (TRUE) {}
 }

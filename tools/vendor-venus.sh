@@ -83,6 +83,11 @@ import pathlib,sys
 p=pathlib.Path(sys.argv[1]); s=p.read_text(); s=s.replace("   add_project_arguments('-I/opt/homebrew/opt/molten-vk/libexec/include', language : 'c')", "   # Vulkan headers are supplied by the vendored prefix via CFLAGS.")
 p.write_text(s)
 PY
+# Reproducible host-only Metal image bridge on the pinned renderer source.
+patch_file=$ROOT/tools/venus/virgl-metal.patch
+if ! patch --batch --fuzz=0 --dry-run -R -p1 -d "$V/virglrenderer" < "$patch_file" >/dev/null 2>&1; then
+    patch --batch --fuzz=0 -p1 -d "$V/virglrenderer" < "$patch_file"
+fi
 run virgl-setup meson setup --reconfigure "$V/virglrenderer/build" "$V/virglrenderer" --prefix="$P" --libdir=lib -Dvenus=true -Drender-server=false -Ddrm=disabled -Dplatforms=[]
 run virgl-build meson compile -C "$V/virglrenderer/build"
 run virgl-install meson install -C "$V/virglrenderer/build"

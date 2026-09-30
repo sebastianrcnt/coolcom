@@ -50,6 +50,9 @@ for width, height in sizes:
                   'for(i=0;i<3000;i++){Print("row %04d abcdefghijklmnopqrstuvwxyz\\n",i);'
                   'q=ArchCntVct; FbFlush; r+=ArchCntVct-q;} e=ArchCntVct-t; '
                   'Print("MEASURE%d %d %d %d\\n",1,e,r,cnt_freq);')
+        if a.expect_venus == 1:
+            forced = forced.replace('t=ArchCntVct;', 'I64 sf=fb.venus_frames,sc=fb.venus_completed,sr=fb.venus_records,su=fb.venus_uploads; t=ArchCntVct;')
+            forced += 'Print("SUBMITTED%d %d %d %d %d\\n",1,fb.venus_frames-sf,fb.venus_completed-sc,fb.venus_records-sr,fb.venus_uploads-su);'
         burst = ('Print("START%d\\n",2); t=ArchCntVct; '
                  'for(i=0;i<3000;i++)Print("burst %04d abcdefghijklmnopqrstuvwxyz\\n",i); '
                  'FbFlush; e=ArchCntVct-t; Print("BURST%d %d %d\\n",1,e,cnt_freq);')
@@ -94,6 +97,10 @@ for width, height in sizes:
         row = dict(label=a.label,width=width,height=height,trial=trial,
                    output_ms=elapsed/freq*1000,render_us=render/freq*1e6/a.lines,
                    burst_ms=burst/bf*1000,host_cpu_s=after.ru_utime+after.ru_stime-before.ru_utime-before.ru_stime)
+        if a.expect_venus == 1:
+            counts = re.search(r'SUBMITTED1 (\d+) (\d+) (\d+) (\d+)',log)
+            if not counts: raise RuntimeError('missing asynchronous counters')
+            for key,value in zip(['submitted_frames','completed_frames','recorded_draws','recorded_uploads'], map(int,counts.groups())): row[key]=value
         row['forced_cpu_pct'] = (phase_cpu['MEASURE1']-phase_cpu['START1']) / (elapsed/freq) / 1e7
         row['burst_cpu_pct'] = (phase_cpu['BURST1']-phase_cpu['START2']) / (burst/bf) / 1e7
         if a.expect_scanout is not None:

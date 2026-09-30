@@ -23,6 +23,35 @@ On an Apple silicon Mac, install the Homebrew packages `aarch64-elf-gcc`, `aarch
 | `make disk-install` | overwrites the programs and sources on `build/disk.img` with the repository's versions |
 | `make m1n1-payload` | `build/m1n1-payload.bin` for real hardware (m1n1 + device tree + the Image; not yet booted on a Mac) |
 
+### Vulkan terminal on coolvm
+
+A fresh checkout has no `vendor/` libraries, so `make run` uses the CPU terminal.
+To enable Venus on Apple silicon macOS:
+
+```sh
+brew install meson ninja pkg-config cmake glslang
+make venus-vendor  # downloads/builds pinned generator, virglrenderer and MoltenVK inputs
+make run           # automatically builds the Venus monitor and installs the terminal app/shaders
+```
+
+The first command is the explicit network/build step; it can take several minutes.
+Later `make run` and `make run-net` detect the installed stack, use
+`build/coolvm-venus`, refresh **only `C:/Vulkan`** and compile GLSL with the host's
+`glslang`. Existing programs and edits elsewhere on the disk remain intact.
+The boot log confirms `VENUS TERMINAL READY` and `VENUS PRESENT Metal image`.
+`VENUS=0 make run` forces the ordinary CPU monitor; `VENUS=1 make run` explicitly
+requires the installed stack. `make venus-run` also explicitly selects Venus.
+`make venus-generator-vendor` downloads just the generator inputs.
+
+The guest renders cells/atlas/overlay with Vulkan. Completed images go directly
+to a `CAMetalLayer`; screenshots alone request GPU readback. Old host stacks
+without the image bridge use linear readback, as does `--venus-readback` on
+`build/coolvm-venus`. `--no-venus` forces CPU rendering in that executable.
+`FbFlush` requests an asynchronous display update; `FbFinish` waits for the latest
+frame when a program needs completion. Shutdown/reboot call it automatically.
+`make -j test` always keeps the ordinary monitor and needs no Venus dependencies
+or internet; optional GPU validation is `make venus-term-test venus-test`.
+
 `make run` and `make run-qemu` create `build/disk.img` (64 MiB FAT32) the first time. It then adds only the files that are
 missing, so edits made inside the OS are kept. The disk holds the programs of `os/Disk`, the kernel sources
 in `C:/Kernel` and `C:/Cool/Runtime` (tokenizer in `C:/Cool/Fmt`), the shell prelude `C:/Kernel.coolh`, and the compiler sources in `C:/Cool/Compiler`.

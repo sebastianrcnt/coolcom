@@ -47,6 +47,7 @@ static void usage(void)
             "  --height N      framebuffer height (default 768)\n"
             "  --gpu/--no-gpu enable/disable virtio-gpu 2D\n"
             "  --gpu-3d-stub   test-only Venus transport responses (no Vulkan rendering)\n"
+            "  --venus-readback force linear scanout instead of Metal image export\n"
             "  --no-venus      disable the optional renderer (the guest draws pixels)\n"
             "  --no-fb-scroll  omit FDT scanout-y capability (software fallback)\n"
             "  --screenshot F  save framebuffer to PNG on exit\n"
@@ -147,7 +148,7 @@ int main(int argc, char **argv)
         {"el2", no_argument, 0, 'E'},          {"load-offset", required_argument, 0, 'L'},
         {"headless", no_argument, 0, 'H'}, {"screenshot", required_argument, 0, 'S'},
         {"gpu", no_argument, 0, 1001}, {"no-gpu", no_argument, 0, 1002},
-        {"gpu-3d-stub", no_argument, 0, 1004}, {"no-venus", no_argument, 0, 1005},
+        {"gpu-3d-stub", no_argument, 0, 1004}, {"no-venus", no_argument, 0, 1005}, {"venus-readback", no_argument, 0, 1006},
         {"no-fb-scroll", no_argument, 0, 1000}, {"no-logos", no_argument, 0, 1003},
         {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
@@ -179,6 +180,7 @@ int main(int argc, char **argv)
         case 1004: g.gpu_3d_stub = true; break;
         case 1003: break; /* retired --no-logos, accepted for old scripts */
         case 1005: g.no_venus = true; break;
+        case 1006: g.venus_readback = true; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'I': input_script = optarg; break;

@@ -2,12 +2,14 @@
 """Five established terminal screens rendered through Venus and compared with CPU pixels."""
 import importlib.util
 import pathlib
+import os
 import re
 import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'build/venus-term-test'
+READBACK = '--readback' in sys.argv
 
 
 def module(name, path):
@@ -26,7 +28,8 @@ PROBE = vim.typed('Print("VENUS%d %d\\n",1,fb.venus); FbCursorHide; FbFlush; '
                   'I64 vr=fb.venus_rows,vb=fb.venus_cell_bytes,vf=fb.venus_frames; '
                   'Print("direct cells%d\\n",1); FbFlush; '
                   'Print("DIRTY%d %d %d %d %d\\n",1,fb.venus_rows-vr,fb.venus_cell_bytes-vb,fb.venus_frames-vf,fb.cols); '
-                  'FbCursorShow; ConsClear;\n')
+                  'Sleep(30); FbFlush; Sleep(30); I64 nv=fb.venus_frames; FbFlush; '
+                  'Print("NOOP%d %d\\n",1,fb.venus_frames-nv); FbCursorShow; ConsClear;\n')
 
 def line(s):
     return vim.typed(s + '\n')
@@ -51,6 +54,8 @@ def run(d, mode, script, size, disk):
     args = [str(ROOT / ('build/coolvm-venus' if mode == 'venus' else 'build/coolvm')), '--headless', '--cpus', '2', '--mem', '1024', '--timeout', '120',
             '--width', str(size[0]), '--height', str(size[1]), '--input-script', str(d / 'input.txt'),
             '--screenshot', str(d / f'{mode}.png')]
+    if mode == 'venus' and READBACK:
+        args.append('--venus-readback')
     if mode == 'cpu':
         args.append('--no-venus')
     if disk:
@@ -60,12 +65,14 @@ def run(d, mode, script, size, disk):
     log = (d / f'{mode}.log').read_text(errors='replace')
     marker=f'VENUS1 {int(mode == "venus")}'
     assert marker in log.splitlines(), f'{d}/{mode}.log: wrong renderer'
+    if mode == 'venus' and READBACK: assert 'VENUS PRESENT linear readback' in log
     assert not any(x in log.split('Cool shell:',1)[-1] for x in ['ERROR:','VENUS FAIL','compiler exited','unavailable']), f'{d}/{mode}.log: guest failed'
+    assert 'NOOP1 0' in log.splitlines(), f'{d}: unchanged console submitted another frame'
     if mode == 'venus':
         m=re.search(r'^DIRTY1 (\d+) (\d+) (\d+) (\d+)$',log,re.M)
         assert m, f'{d}: missing cell-write counters'
         rows,byte_count,frames,cols=map(int,m.groups())
-        assert 0<rows<=2 and byte_count==rows*cols*16 and frames==1, (rows,byte_count,frames,cols)
+        assert 0<rows<=2 and byte_count==rows*cols*16 and 0<=frames<=1, (rows,byte_count,frames,cols)
     return verify.read_png(d / f'{mode}.png')
 
 
@@ -106,6 +113,18 @@ def resident_and_fallback():
         assert proc.returncode==0 and text.count('Cool shell:')==3 and text.count('VENUS TERMINAL READY')==1
         assert 'LIFE1 1' in text and not any(x in text for x in ['ERROR:','VENUS FAIL','compiler exited'])
         print(f'venus-term-test: resident across two shell restarts, {cpus} CPU PASS',flush=True)
+    # Shutdown must publish the last coalesced frame without a delay or input quit.
+    inp=d/'shutdown.input'
+    inp.write_text(vim.BOOT+vim.typed('ConsClear; FbFillRect(40,30,90,50,0x3060C0); FbCursorHide; Shutdown;\n'))
+    log=d/'shutdown.log'; png=d/'shutdown.png'
+    with log.open('wb') as f:
+        proc=subprocess.run([str(ROOT/'build/coolvm-venus'),'--headless','--cpus','2','--mem','1024',
+            '--timeout','30','--disk',str(disk),'--input-script',str(inp),'--screenshot',str(png),sys.argv[1]],
+            stdout=f,stderr=subprocess.STDOUT,timeout=35)
+    text=log.read_text(errors='replace'); image=verify.read_png(png)
+    assert proc.returncode==0 and 'Power off.' in text and 'timeout' not in text and 'VENUS FAIL' not in text
+    assert tuple(image[2][30][40*3:40*3+3])==(0x30,0x60,0xC0)
+    print('venus-term-test: final frame drained before shutdown PASS',flush=True)
     # The real renderer remains advertised, but a missing shader must keep CPU.
     subprocess.run(['mdel','-i',str(disk),'::Vulkan/terminal.frag.spv'],check=True)
     inp=d/'fallback.input'
@@ -127,12 +146,27 @@ colors = ('ConsClear; I64 i; for (i = 0; i < 16; i++) Print("\\e[%dm color %d \\
           '\\xe6\\xbc\\xa2\\xe5\\xad\\x97 \\e[1;33m\\xec\\x83\\x89\\e[0m END%d\\n", 1); '
           'FbFillRect(40, 30, 90, 50, 0x3060C0);')
 compare('colors', line(colors) + 'wait END1\n', pixels=[(40, 30, (0x30, 0x60, 0xC0)), (129, 79, (0x30, 0x60, 0xC0))])
-compare('margins', line(colors) + 'wait END1\n', size=(1031, 775))
-compare('vim', line('Vim("C:/Init.cool");') + 'delay 1500\n' + vim.typed('jjjwww') + 'delay 500\n')
-compare('tmux', 'delay 2000\n' + line('Tmux;') + 'delay 1500\n' + prefix('%') + 'delay 1000\n' +
-        line('Print("\\e[32mright pane %d\\e[0m\\n", 42);') + 'delay 300\n' + prefix('o') +
-        line('Print("\\xed\\x95\\x9c\\xea\\xb8\\x80 left %d\\n", 7);') + 'delay 800\n')
-compare('resize', line('ConsClear; Print("before %d\\n", 1);') + 'wait before 1\nresize 800 600\ndelay 800\n' +
-        line('Print("after %d\\n", 2);') + 'wait after 2\n', size=(800, 600))
-resident_and_fallback()
+if '--window-only' not in sys.argv:
+    compare('margins', line(colors) + 'wait END1\n', size=(1031, 775))
+    compare('vim', line('Vim("C:/Init.cool");') + 'delay 1500\n' + vim.typed('jjjwww') + 'delay 500\n')
+    compare('tmux', 'delay 2000\n' + line('Tmux;') + 'delay 1500\n' + prefix('%') + 'delay 1000\n' +
+            line('Print("\\e[32mright pane %d\\e[0m\\n", 42);') + 'delay 300\n' + prefix('o') +
+            line('Print("\\xed\\x95\\x9c\\xea\\xb8\\x80 left %d\\n", 7);') + 'delay 800\n')
+    compare('resize', line('ConsClear; Print("before %d\\n", 1);') + 'wait before 1\nresize 800 600\ndelay 800\n' +
+            line('Print("after %d\\n", 2);') + 'wait after 2\n', size=(800, 600))
+    resident_and_fallback()
+if '--window' in sys.argv or '--window-only' in sys.argv:
+    d=OUT/'colors'; log=d/'window.log'
+    with log.open('wb') as f:
+        proc=subprocess.run([str(ROOT/'build/coolvm-venus'),'--cpus','2','--mem','1024','--timeout','120',
+            '--disk',str(d/'disk.img'),'--input-script',str(d/'input.txt'),'--screenshot',str(d/'window.png'),sys.argv[1]],
+            stdout=f,stderr=subprocess.STDOUT,env={**os.environ,'VENUS_PRESENT_DEBUG':'1'},timeout=125)
+    text=log.read_text(errors='replace')
+    assert proc.returncode==0 and 'Venus CAMetalLayer: GPU blit/present completed (no readback)' in text
+    window=verify.read_png(d/'window.png')
+    # The real window negotiates Retina backing pixels; compare at that size.
+    reference=OUT/'window'; reference.mkdir(parents=True,exist_ok=True)
+    (reference/'input.txt').write_text((d/'input.txt').read_text())
+    assert window==run(reference,'venus','',window[:2],d/'disk.img')
+    print('venus-term-test: CAMetalLayer window matches headless image PASS',flush=True)
 print('venus-term-test: PASS')
