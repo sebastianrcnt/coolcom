@@ -28,3 +28,10 @@ C float is widened by c2hc; Lua's default lua_Number is already double.
 string.format, io.write, errors and REPL). `make lua-kernel-test` boots the OS and
 checks file execution, REPL and repeated invocation. Both are part of make test,
 as are the c2hc and stbtt comparisons.
+
+Lua generation depends on the current shell prelude and shared libc as well as
+Lua/c2hc sources and adapters. All three generated sources (`Lua.cool`,
+`Host.cool`, `LuaRuntime.cool`) can be regenerated if missing. Builders invoked
+by parallel/nested make work in private directories and atomically publish
+complete files, including the OS adapter. Disk installation therefore cannot
+copy a partial runtime, and concurrent generation cannot append `LuaRun` twice.

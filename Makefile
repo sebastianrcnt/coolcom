@@ -326,16 +326,16 @@ warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool build/war
 SCROLL_TEST_SIZES := --size 1024x768 --size 3200x2000 --size 1031x775 --size 1024x775
 .PHONY: scroll-test
 scroll-test: build/kernel.Image coolvm
-	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-fb-scroll --expect-scanout 0
-	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --expect-scanout 1 --compare scroll-test-ref
+	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
+	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
 # Lua is translated source, outside the compiler seed and kernel image.
-LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool
+LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool coolc/LibC/LibC.cool
 build/lua/generated.stamp: $(LUASRC) build/ShellPrelude.coolh
 	python3 tools/lua-support/build.py
 	touch $@
-build/lua/Lua.cool build/lua/LuaRuntime.cool: build/lua/generated.stamp
+build/lua/Lua.cool build/lua/LuaRuntime.cool build/lua/Host.cool: build/lua/generated.stamp
 	@test -f $@ || { rm -f build/lua/generated.stamp; $(MAKE) build/lua/generated.stamp; }
-build/lua/Lua.BIN: build/lua/Lua.cool coolc/LibC/LibC.cool build/coolc coolc/seed/Compiler.BIN
+build/lua/Lua.BIN: build/lua/Lua.cool build/lua/Host.cool coolc/LibC/LibC.cool build/coolc coolc/seed/Compiler.BIN
 	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc build/lua/Host.cool $@ > build/lua/compile.log 2>&1
 	tail -1 build/lua/compile.log
 
@@ -344,8 +344,6 @@ lua-test: build/lua/Lua.BIN
 	python3 tools/lua-support/test.py
 lua-kernel-test: build/lua/LuaRuntime.cool build/kernel.Image coolvm
 	python3 tools/lua-support/kernel_test.py
-	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
-	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
 
 .PHONY: gpu-pixel-test
 gpu-pixel-test: build/kernel.Image coolvm
