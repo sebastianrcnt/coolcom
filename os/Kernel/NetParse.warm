@@ -3,9 +3,10 @@
 -- packet (lengths, versions, checksums, the TCP options) and returns a Packet whose
 -- offsets and lengths all lie inside the input. It never reads outside the span: every
 -- index is checked by Warm, so a mistake here aborts (a dropped packet in the kernel)
--- instead of reading or writing kernel memory. NetParseExport.warm hands it the bytes,
--- and os/Kernel/Net.cool acts on the result (CNetPkt); the build turns both into
--- os/Kernel/NetParse.cool (warmc --kernel-module=NetParse).
+-- instead of reading or writing kernel memory. It is all safe Warm: the two exports take
+-- the frame as a span (a pointer and a length on the Cool side) and return the Packet as
+-- the Cool class CNetPkt (Export_Layout). os/Kernel/Net.cool acts on the result; the build
+-- turns this file into os/Kernel/NetParse.cool (warmc --kernel-module=NetParse).
 module body NetParse is
     -- Packet kinds: what was received, or why it is dropped (NP_* in Net.cool).
     constant kindArp: Nat64 := 1;
@@ -23,9 +24,11 @@ module body NetParse is
     constant dropL4Sum: Nat64 := 22;
 
     """
-    A received packet. Offsets count from the start of the input. For a drop in ICMP,
-    UDP or TCP (dropL4, dropL4Sum) the IPv4 fields are set.
+    A received packet, which Cool sees as class CNetPkt with these fields (U64). Offsets
+    count from the start of the input. For a drop in ICMP, UDP or TCP (dropL4, dropL4Sum)
+    the IPv4 fields are set.
     """
+    pragma Export_Layout(Name => "CNetPkt");
     record Packet: Free is
         kind: Nat64;
         op: Nat64;        -- ARP: the operation
@@ -51,74 +54,68 @@ module body NetParse is
         iseq: Nat64;
     end;
 
-    function blank(kind: Nat64): Packet is
+    private function blank(kind: Nat64): Packet is
         return Packet(kind => kind, op => 0, sha => 0, src => 0, dst => 0, ttl => 0, proto => 0,
             l4 => 0, l4len => 0, sport => 0, dport => 0, data => 0, dlen => 0, seq => 0, ack => 0,
             flags => 0, win => 0, mss => 0, itype => 0, icode => 0, iid => 0, iseq => 0);
     end;
 
-    generic [R: Region]
-    function byte(f: Span[Nat8, R], at: Index): Nat64 is
+    private function byte(f: Span[Nat8], at: Index): Nat64 is
         return widenToNat64(f[at]);
     end;
 
-    generic [R: Region]
-    function get16(f: Span[Nat8, R], at: Index): Nat64 is
-        return (byte(f, at) * 256) + byte(f, at + 1);
+    private function get16(f: Span[Nat8], at: Index): Nat64 is
+        return byte(f, at) << 8 | byte(f, at + 1);
     end;
 
-    generic [R: Region]
-    function get32(f: Span[Nat8, R], at: Index): Nat64 is
-        return (get16(f, at) * 65536) + get16(f, at + 2);
+    private function get32(f: Span[Nat8], at: Index): Nat64 is
+        return get16(f, at) << 16 | get16(f, at + 2);
     end;
 
     """
     The ones'-complement sum of len bytes at off as big-endian 16-bit words, added to
     initial, not folded (NetSum in Net.cool).
     """
-    generic [R: Region]
-    function sum(f: Span[Nat8, R], off: Index, len: Index, initial: Nat64): Nat64 is
-        -- The high and the low bytes are added up apart (no call or multiplication per word).
+    private function sum(f: Span[Nat8], off: Index, len: Index, initial: Nat64): Nat64 is
+        -- The high and the low bytes are added up apart (no call or shift per word).
         var high: Nat64 := 0;
         var low: Nat64 := 0;
         var i: Index := off;
-        let even: Index := off + ((len / 2) * 2);
+        let even: Index := off + (len & ~1);
         while i < even do
             high := high + widenToNat64(f[i]);
             low := low + widenToNat64(f[i + 1]);
             i := i + 2;
         end while;
-        if i < (off + len) then
+        if i < off + len then
             high := high + widenToNat64(f[i]);
         end if;
-        return (initial + (high * 256)) + low;
+        return initial + (high << 8) + low;
     end;
 
     """
     True when a sum over a packet, with its checksum field in it, verifies.
     """
-    function sumOk(initial: Nat64): Bool is
+    private function sumOk(initial: Nat64): Bool is
         var s: Nat64 := initial;
         while s > #xFFFF do
-            s := bitwiseAnd(s, #xFFFF) + (s / 65536);
+            s := (s & #xFFFF) + (s >> 16);
         end while;
         return s = #xFFFF;
     end;
 
-    function pseudo(src: Nat64, dst: Nat64, proto: Nat64, len: Index): Nat64 is
-        return (((src / 65536) + bitwiseAnd(src, #xFFFF)) + ((dst / 65536) + bitwiseAnd(dst, #xFFFF)))
-            + (proto + widenToNat64(len));
+    private function pseudo(src: Nat64, dst: Nat64, proto: Nat64, len: Index): Nat64 is
+        return (src >> 16) + (src & #xFFFF) + (dst >> 16) + (dst & #xFFFF) + proto + widenToNat64(len);
     end;
 
-    generic [R: Region]
-    function parseArp(f: Span[Nat8, R], off: Index, len: Index): Packet is
+    private function parseArp(f: Span[Nat8], off: Index, len: Index): Packet is
         if len < 28 then
             return blank(dropArp);
         end if;
-        if (get16(f, off) /= 1) or (get16(f, off + 2) /= #x0800) then
+        if get16(f, off) /= 1 or get16(f, off + 2) /= #x0800 then
             return blank(dropArp);
         end if;
-        if (byte(f, off + 4) /= 6) or (byte(f, off + 5) /= 4) then
+        if byte(f, off + 4) /= 6 or byte(f, off + 5) /= 4 then
             return blank(dropArp);
         end if;
         var p: Packet := blank(kindArp);
@@ -129,8 +126,7 @@ module body NetParse is
         return p;
     end;
 
-    generic [R: Region, P: Region]
-    function parseIcmp(f: Span[Nat8, R], p: &![Packet, P]): Unit is
+    private function parseIcmp(f: Span[Nat8], p: &![Packet]): Unit is
         let off: Index := widenToIndex(p->l4);
         let len: Index := widenToIndex(p->l4len);
         if len < 8 then
@@ -149,8 +145,7 @@ module body NetParse is
         return nil;
     end;
 
-    generic [R: Region, P: Region]
-    function parseUdp(f: Span[Nat8, R], p: &![Packet, P]): Unit is
+    private function parseUdp(f: Span[Nat8], p: &![Packet]): Unit is
         let off: Index := widenToIndex(p->l4);
         let len: Index := widenToIndex(p->l4len);
         if len < 8 then
@@ -158,7 +153,7 @@ module body NetParse is
             return nil;
         end if;
         let ul: Index := widenToIndex(get16(f, off + 4));
-        if (ul < 8) or (ul > len) then
+        if ul < 8 or ul > len then
             p->kind := dropL4;
             return nil;
         end if;
@@ -180,8 +175,7 @@ module body NetParse is
     """
     The MSS option among the TCP options at off .. off + len - 1; 0 when there is none.
     """
-    generic [R: Region]
-    function tcpMss(f: Span[Nat8, R], off: Index, len: Index): Nat64 is
+    private function tcpMss(f: Span[Nat8], off: Index, len: Index): Nat64 is
         var i: Index := 0;
         while i < len do
             let kind: Nat64 := byte(f, off + i);
@@ -190,15 +184,15 @@ module body NetParse is
             else if kind = 1 then
                 i := i + 1;
             else
-                if (i + 1) >= len then
+                if i + 1 >= len then
                     return 0;
                 end if;
-                let olen: Index := widenToIndex(f[off + (i + 1)]);
+                let olen: Index := widenToIndex(f[off + i + 1]);
                 if olen < 2 then
                     return 0;
                 end if;
-                if ((kind = 2) and (olen = 4)) and ((i + 4) <= len) then
-                    return get16(f, off + (i + 2));
+                if kind = 2 and olen = 4 and i + 4 <= len then
+                    return get16(f, off + i + 2);
                 end if;
                 i := i + olen;
             end if;
@@ -206,8 +200,7 @@ module body NetParse is
         return 0;
     end;
 
-    generic [R: Region, P: Region]
-    function parseTcp(f: Span[Nat8, R], p: &![Packet, P]): Unit is
+    private function parseTcp(f: Span[Nat8], p: &![Packet]): Unit is
         let off: Index := widenToIndex(p->l4);
         let len: Index := widenToIndex(p->l4len);
         if len < 20 then
@@ -218,8 +211,8 @@ module body NetParse is
             p->kind := dropL4Sum;
             return nil;
         end if;
-        let hl: Index := (widenToIndex(f[off + 12]) / 16) * 4;
-        if (hl < 20) or (hl > len) then
+        let hl: Index := (widenToIndex(f[off + 12]) >> 4) * 4;
+        if hl < 20 or hl > len then
             p->kind := dropL4;
             return nil;
         end if;
@@ -232,7 +225,7 @@ module body NetParse is
         p->win := get16(f, off + 14);
         p->data := widenToNat64(off + hl);
         p->dlen := widenToNat64(len - hl);
-        if bitwiseAnd(p->flags, 2) /= 0 then
+        if p->flags & 2 /= 0 then  -- SYN
             p->mss := tcpMss(f, off + 20, hl - 20);
         end if;
         return nil;
@@ -241,24 +234,23 @@ module body NetParse is
     """
     An IPv4 packet of len bytes at off (after the Ethernet header, or a looped-back one).
     """
-    generic [R: Region]
-    function parseIpAt(f: Span[Nat8, R], off: Index, len: Index): Packet is
+    private function parseIpAt(f: Span[Nat8], off: Index, len: Index): Packet is
         if len < 20 then
             return blank(dropIp);
         end if;
         let first: Index := widenToIndex(f[off]);
-        if (first / 16) /= 4 then
+        if first >> 4 /= 4 then
             return blank(dropIp);
         end if;
-        let hl: Index := bitwiseAnd(first, 15) * 4;
+        let hl: Index := (first & 15) * 4;
         let tl: Index := widenToIndex(get16(f, off + 2));
-        if ((hl < 20) or (tl < hl)) or (tl > len) then
+        if hl < 20 or tl < hl or tl > len then
             return blank(dropIp);
         end if;
         if not sumOk(sum(f, off, hl, 0)) then
             return blank(dropIpSum);
         end if;
-        if bitwiseAnd(get16(f, off + 6), #x3FFF) /= 0 then
+        if get16(f, off + 6) & #x3FFF /= 0 then
             return blank(dropFragment);
         end if;
         var p: Packet := blank(kindIp);
@@ -279,27 +271,28 @@ module body NetParse is
     end;
 
     """
-    An IPv4 packet (from the loopback queue).
+    An IPv4 packet (from the loopback queue). In Cool:
+    U0 NetParsePacket(CNetPkt *out, U8 *data, I64 size).
     """
-    generic [R: Region]
-    function parseIp(f: Span[Nat8, R]): Packet is
-        return parseIpAt(f, 0, spanLength(f));
+    pragma Foreign_Export(External_Name => "NetParsePacket");
+    function parseIp(packet: Span[Nat8]): Packet is
+        return parseIpAt(packet, 0, spanLength(packet));
     end;
 
     """
-    An Ethernet frame.
+    An Ethernet frame. In Cool: U0 NetParseFrame(CNetPkt *out, U8 *data, I64 size).
     """
-    generic [R: Region]
-    function parseFrame(f: Span[Nat8, R]): Packet is
-        let n: Index := spanLength(f);
+    pragma Foreign_Export(External_Name => "NetParseFrame");
+    function parseFrame(frame: Span[Nat8]): Packet is
+        let n: Index := spanLength(frame);
         if n < 14 then
             return blank(dropRunt);
         end if;
-        let ethertype: Nat64 := get16(f, 12);
+        let ethertype: Nat64 := get16(frame, 12);
         if ethertype = #x0806 then
-            return parseArp(f, 14, n - 14);
+            return parseArp(frame, 14, n - 14);
         else if ethertype = #x0800 then
-            return parseIpAt(f, 14, n - 14);
+            return parseIpAt(frame, 14, n - 14);
         end if;
         return blank(kindOther);
     end;

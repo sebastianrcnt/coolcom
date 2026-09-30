@@ -1,7 +1,7 @@
 build/
 .DS_Store
 .claude/
-tools/zed-holyc/grammars/
+tools/zed-coolcom/grammars/
 __pycache__/
 vendor/
 # Generated from Warm (Makefile, WARM_KMODS)

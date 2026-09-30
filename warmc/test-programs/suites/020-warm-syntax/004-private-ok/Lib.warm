@@ -1,0 +1,9 @@
+module body Lib is
+    function visible(): Nat64 is
+        return hidden() + 1;
+    end;
+
+    private function hidden(): Nat64 is
+        return 41;
+    end;
+end module body.

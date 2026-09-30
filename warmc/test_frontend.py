@@ -26,7 +26,10 @@ for path in sources:
 
 negative = [
     'module body Test is function f(): Unit is return nil; end; end module body. junk',
-    'module body Test is function f(): Unit is let x: Int64 := 1 + 2 * 3; return nil; end; end module body.',
+    'module body Test is function f(a: Bool, b: Bool): Bool is return a and b or a; end; end module body.',
+    'module body Test is function f(a: Int64): Bool is return 1 < a < 3; end; end module body.',
+    'module body Test is function f(): Unit is let s: Span[Nat8] := "x"; return nil; end; end module body.',
+    'module Test is private function f(): Unit; end module.',
     'module body Test is type Hidden: Free; end module body.',
     'module body Test is function f(): Unit is if true then end if; return nil; end; end module body.',
     'module body Test is constant x: Int64 := #b2; end module body.',
@@ -46,7 +49,14 @@ path.write_text('module body Test is function f(x: Int64): Int64 is return (x + 
 p = run(path, True)
 assert p.returncode == 0, p.stdout
 assert b'value binary *\n     left binary +\n' in p.stdout, p.stdout
-report = dict(sources=len(sources), negative_cases=len(negative), ast_checks=1, failures=failures)
+# Precedence (Warm): * over +, + over <<, << over &, & over ^, ^ over |, | over comparisons.
+path = OUT / 'precedence.warm'
+path.write_text('module body Test is function f(x: Nat64): Bool is return 1 + x * 2 << 3 & 7 ^ 1 | 2 = x and x > 0; end; end module body.')
+p = run(path, True)
+assert p.returncode == 0, p.stdout
+shape = [line.split() for line in p.stdout.decode().splitlines() if 'binary' in line]
+assert [s[-1] for s in shape] == ['and', '=', '|', '^', '&', '<<', '+', '*', '>'], shape
+report = dict(sources=len(sources), negative_cases=len(negative), ast_checks=2, failures=failures)
 (OUT / 'results.json').write_text(json.dumps(report, indent=2))
 print(json.dumps(report, indent=2))
 raise SystemExit(bool(failures))

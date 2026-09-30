@@ -1,0 +1,18 @@
+("(" @open ")" @close)
+("[" @open "]" @close)
+("{" @open "}" @close)
+("\"" @open "\"" @close)
+
+; Keyword blocks: the is/then/do that opens a block pairs with its end.
+(function_declaration "is" @open "end" @close)
+(method_declaration "is" @open "end" @close)
+(instance_declaration "is" @open "end" @close)
+(typeclass_declaration "is" @open "end" @close)
+(record_declaration "is" @open "end" @close)
+(union_declaration "is" @open "end" @close)
+(module_definition "is" @open "end" @close)
+(if_statement "then" @open "end" @close)
+(case_statement "of" @open "end" @close)
+(while_statement "do" @open "end" @close)
+(for_statement "do" @open "end" @close)
+(borrow_statement "do" @open "end" @close)

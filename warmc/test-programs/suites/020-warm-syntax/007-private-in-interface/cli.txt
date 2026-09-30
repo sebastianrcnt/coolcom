@@ -1,0 +1,1 @@
+./austral compile --target-type=c $DIR/Lib.warmh,$DIR/Lib.warm $DIR/Test.warm --entrypoint=Test:main --output=$C_PATH --error-format=json

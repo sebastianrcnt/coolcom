@@ -34,9 +34,21 @@ U8 *WGFresh(CWGen *g, U8 *prefix)
     if (g->unit->prefix) name = WG3(g->unit, g->unit->prefix, "_", name);
     return name;
 }
+U8 *WGPragma(CWNode *decl, U8 *name)
+{//The first argument of decl's pragma name (Foreign_Export, Export_Layout), or NULL.
+    CWNode *p, *arg;
+    if (!decl) return NULL;
+    for (p = decl->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, name)) {
+            arg = WChild(p, "argument"); if (arg && WChild(arg, "value")) return WChild(arg, "value")->name;
+            return "";
+        }
+    return NULL;
+}
 U8 *WGName(CWGen *g, CWNode *d)
 {
     CWNode *n;
+    // The fields of an Export_Layout record keep their names: Cool code reads them.
+    if (d && WEq(d->role, "slot") && d->owner && WGPragma(d->owner, "Export_Layout")) return d->name;
     for (n = g->names; n; n = n->next) if (n->resolved == d) return n->name;
     n = WNode(g->unit, "name", NULL); n->resolved = d; n->name = WGFresh(g, "w"); n->next = g->names; g->names = n; return n->name;
 }
@@ -76,6 +88,19 @@ U8 *WGType(CWGen *g, CWNode *t)
         WFail(u, t->token, "Unsupported Feature", "Cannot emit an unconcretized or opaque type"); return "I64";
     }
     n = WNode(u, "emitted-type", t->token); n->ty = t; n->name = WGFresh(g, "WT"); n->next = g->types; g->types = n;
+    // pragma Export_Layout(Name => "CFoo"): the record is the Cool class CFoo, fields and all.
+    if (WGPragma(d, "Export_Layout")) {
+        n->name = WGPragma(d, "Export_Layout");
+        if (!WEq(d->tag, "record") || WChild(d, "type-parameter") || !*n->name) {
+            WFail(u, d->token, "Unsupported Feature", "Export_Layout needs a non-generic record and a Cool class name"); return "I64";
+        }
+        for (slot = d->first; slot; slot = slot->next) if (WEq(slot->role, "slot")) {
+                fieldty = WChild(slot, "type");
+                if (WGAggregate(fieldty) || WEq(fieldty->name, "Fn") || WEq(fieldty->name, "Float32")) {
+                    WFail(u, slot->token, "Unsupported Feature", "Export_Layout fields must be integers, booleans, Float64 or pointers"); return "I64";
+                }
+            }
+    }
     name = n->name; env = WTypeParameters(u, t); buf = WAlloc(u, sizeof(CWBuffer));
     WGPut(u, buf, WG3(u, "class ", name, " {\n"));
     if (WEq(d->tag, "union")) {
@@ -157,7 +182,13 @@ CWNode *WGRequest(CWGen *g, CWNode *decl, CWNode *env)
     for (f = g->functions; f; f = f->next) if (f->resolved == decl && WTypeEq(f->ty, signature)) return f;
     f = WNode(u, "specialization", decl->token); f->resolved = decl; f->pair = env; f->ty = signature; f->name = WGFresh(g, "wf");
     for (p = decl->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Export")) {
-            CWNode *arg = WChild(p, "argument"); if (arg) f->name = WChild(arg, "value")->name;
+            CWNode *arg = WChild(p, "argument"), *q;
+            Bool spans = FALSE;
+            for (q = decl->first; q; q = q->next) if (WEq(q->role, "parameter") && (WEq(WChild(q, "type")->name, "Span") || WEq(WChild(q, "type")->name, "Span!"))) spans = TRUE;
+            // With span parameters the export is a wrapper that takes each span as a pointer and
+            // a length (WGExportWrapper); otherwise the function itself has the export's name.
+            if (arg && spans) {f->owner = WNode(u, "export", decl->token); f->owner->name = WChild(arg, "value")->name;}
+            else if (arg) f->name = WChild(arg, "value")->name;
         }
     if (g->last_function) g->last_function->next = f; else g->functions = f; g->last_function = f; return f;
 }
@@ -317,7 +348,7 @@ U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
     else if (WEq(s, "*($1)") && a && !b) expr = WG3(u, "(*(", a->name, "))");
     else if (WEq(s, "~ $1") && a && !b) expr = WG3(u, "(~(", a->name, "))");
     else if (WEq(s, "AU_STORE($1, $2)") && b && !c) {WGCopy(g, WG3(u, "(*(", a->name, "))"), b->name, b->ty); return "0";}
-    else if (b && !c && (WEq(s, "$1 + $2") || WEq(s, "$1 - $2") || WEq(s, "$1 * $2") || WEq(s, "$1 / $2") || WEq(s, "$1 & $2") || WEq(s, "$1 | $2") || WEq(s, "$1 ^ $2") || WEq(s, "($1 % $2)"))) {
+    else if (b && !c && (WEq(s, "$1 + $2") || WEq(s, "$1 - $2") || WEq(s, "$1 * $2") || WEq(s, "$1 / $2") || WEq(s, "$1 & $2") || WEq(s, "$1 | $2") || WEq(s, "$1 ^ $2") || WEq(s, "$1 << $2") || WEq(s, "$1 >> $2") || WEq(s, "($1 % $2)"))) {
         if (WEq(ty->name, "Float32")) {a->name = WG3(u, "wc_f32_to_f64(", a->name, ")"); b->name = WG3(u, "wc_f32_to_f64(", b->name, ")");}
         expr = WG3(u, "(", WGExpand(u, s, args), ")"); if (WEq(ty->name, "Float32")) expr = WG3(u, "wc_f64_to_f32(", expr, ")");
     }
@@ -400,6 +431,10 @@ U8 *WGOpenCode(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
     for (n = 0; n < 2; n++) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[n]->name, ty); vals[n]->name = tmp;}
     if (WEq(name, "bitwiseAnd")) op = " & "; else if (WEq(name, "bitwiseOr")) op = " | "; else if (WEq(name, "bitwiseXor")) op = " ^ ";
     max = "0xffffffffffffffff"; if (bits == 8) max = "255"; else if (bits == 16) max = "65535"; else if (bits == 32) max = "4294967295";
+    if (WEq(name, "bitwiseShiftLeft") || WEq(name, "bitwiseShiftRight")) {
+        op = " << "; if (WEq(name, "bitwiseShiftRight")) op = " >> ";
+        WGLine(g, WG3(u, "if (", vals[1]->name, WG3(u, " >= ", WGDec(u, bits), WG3(u, ") wh_abort(\"Shift amount out of range (", ty->name, ")\");"))));
+    }
     if (WEq(name, "trappingAdd")) {op = " + "; check = WG3(u, "(", vals[0]->name, WG3(u, " > (", max, WG3(u, " - ", vals[1]->name, "))")));}
     else if (WEq(name, "trappingSubtract")) {op = " - "; check = WG3(u, "(", vals[0]->name, WG3(u, " < ", vals[1]->name, ")"));}
     else if (WEq(name, "trappingMultiply")) {
@@ -654,6 +689,36 @@ U8 *WGSignature(CWGen *g, CWNode *f)
         }
     WGPut(u, b, ")"); return b->data;
 }
+// The Foreign_Export of f, which has span parameters: each span is two C parameters, NAME_data
+// (a pointer) and NAME_size (an I64 count; negative aborts). Records go by pointer, a record
+// result through an out pointer first, as in the private ABI.
+U0 WGExportWrapper(CWGen *g, CWNode *f, CWBuffer *protos)
+{
+    CWUnit *u = g->unit; CWBuffer *sig = WAlloc(u, sizeof(CWBuffer)), *call = WAlloc(u, sizeof(CWBuffer)), *body = WAlloc(u, sizeof(CWBuffer));
+    CWNode *d = f->resolved, *p, *ty, *rt = WSubst(u, WChild(d, "result"), f->pair);
+    U8 *name;
+    Bool comma = FALSE;
+    if (WGAggregate(rt)) {WGPut(u, sig, WG3(u, "U0 ", f->owner->name, WG3(u, "(", WGType(g, rt), " *wr"))); WGPut(u, call, WGCat(u, f->name, "(wr")); comma = TRUE;}
+    else {WGPut(u, sig, WG3(u, WGType(g, rt), " ", WGCat(u, f->owner->name, "("))); WGPut(u, call, WGCat(u, f->name, "("));}
+    for (p = d->first; p; p = p->next) if (WEq(p->role, "parameter")) {
+            ty = WSubst(u, WChild(p, "type"), f->pair); name = WGName(g, p);
+            if (comma) {WGPut(u, sig, ", "); WGPut(u, call, ", ");} comma = TRUE;
+            if (WEq(ty->name, "Span") || WEq(ty->name, "Span!")) {
+                WGPut(u, sig, WG3(u, WGType(g, ty->first), " *", WG3(u, name, "_data, I64 ", WGCat(u, name, "_size"))));
+                WGPut(u, body, WG3(u, "au_span_t ", name, ";\n"));
+                WGPut(u, body, WG3(u, "if (", name, "_size < 0) wh_abort(\"Negative span length.\");\n"));
+                WGPut(u, body, WG3(u, name, ".wh_data = ", WG3(u, name, "_data; ", WG3(u, name, ".wh_size = ", WGCat(u, name, "_size;\n")))));
+                WGPut(u, call, WGCat(u, "&", name));
+            } else if (WGAggregate(ty)) {WGPut(u, sig, WG3(u, WGType(g, ty), " *", name)); WGPut(u, call, name);}
+            else {WGPut(u, sig, WG3(u, WGType(g, ty), " ", name)); WGPut(u, call, name);}
+        }
+    WGPut(u, sig, ")"); WGPut(u, call, ");");
+    WGPut(u, protos, WG3(u, "extern ", sig->data, ";\n"));
+    if (WGAggregate(rt) || WEq(rt->name, "Unit")) WGPut(u, body, WGCat(u, call->data, "\n"));
+    else WGPut(u, body, WG3(u, "return ", call->data, "\n"));
+    if (WEq(rt->name, "Unit") && !WGAggregate(rt)) WGPut(u, body, "return 0;\n");
+    f->role = WG3(u, f->role, WGCat(u, sig->data, " {\n"), WGCat(u, body->data, "}\n"));
+}
 // A kernel module (--kernel-module=NAME) shares the kernel's global namespace: the
 // runtime's names (au_, wh_, wc_) become NAME_au_... like the generated ones (WGFresh).
 // Identifiers are renamed outside string and character literals and comments.
@@ -715,6 +780,7 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
             }
         WGStmt(g, WChild(f->resolved, "body")); WGLine(g, "}"); f->role = g->body->data;
         WGPut(u, protos, WG3(u, "extern ", sig, ";\n"));
+        if (f->owner && WEq(f->owner->tag, "export")) WGExportWrapper(g, f, protos);
         if (g->serial - u->symbol_base > 100000) WFail(u, f->token, "Unsupported Feature", "Specialization limit exceeded");
     }
     g->body = WAlloc(u, sizeof(CWBuffer));

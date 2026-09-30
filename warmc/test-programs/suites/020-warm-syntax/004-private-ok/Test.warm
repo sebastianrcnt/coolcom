@@ -1,0 +1,7 @@
+import Lib (visible);
+module body Test is
+    function main(): ExitCode is
+        printLn(visible());
+        return ExitSuccess();
+    end;
+end module body.

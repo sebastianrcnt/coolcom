@@ -2206,4 +2206,164 @@ module body Austral.Pervasive is
             return @embed(Index, "((au_index_t)($1))", value);
         end;
     end;
+
+    instance BitwiseShift(Nat8) is
+        method bitwiseShiftLeft(value: Nat8, amount: Nat8): Nat8 is
+            if amount >= 8 then
+                abort("Shift amount out of range (Nat8)");
+            end if;
+            return @embed(Nat8, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Nat8, amount: Nat8): Nat8 is
+            if amount >= 8 then
+                abort("Shift amount out of range (Nat8)");
+            end if;
+            return @embed(Nat8, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Int8) is
+        method bitwiseShiftLeft(value: Int8, amount: Int8): Int8 is
+            if (amount < 0) or (amount >= 8) then
+                abort("Shift amount out of range (Int8)");
+            end if;
+            return @embed(Int8, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Int8, amount: Int8): Int8 is
+            if (amount < 0) or (amount >= 8) then
+                abort("Shift amount out of range (Int8)");
+            end if;
+            return @embed(Int8, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Nat16) is
+        method bitwiseShiftLeft(value: Nat16, amount: Nat16): Nat16 is
+            if amount >= 16 then
+                abort("Shift amount out of range (Nat16)");
+            end if;
+            return @embed(Nat16, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Nat16, amount: Nat16): Nat16 is
+            if amount >= 16 then
+                abort("Shift amount out of range (Nat16)");
+            end if;
+            return @embed(Nat16, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Int16) is
+        method bitwiseShiftLeft(value: Int16, amount: Int16): Int16 is
+            if (amount < 0) or (amount >= 16) then
+                abort("Shift amount out of range (Int16)");
+            end if;
+            return @embed(Int16, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Int16, amount: Int16): Int16 is
+            if (amount < 0) or (amount >= 16) then
+                abort("Shift amount out of range (Int16)");
+            end if;
+            return @embed(Int16, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Nat32) is
+        method bitwiseShiftLeft(value: Nat32, amount: Nat32): Nat32 is
+            if amount >= 32 then
+                abort("Shift amount out of range (Nat32)");
+            end if;
+            return @embed(Nat32, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Nat32, amount: Nat32): Nat32 is
+            if amount >= 32 then
+                abort("Shift amount out of range (Nat32)");
+            end if;
+            return @embed(Nat32, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Int32) is
+        method bitwiseShiftLeft(value: Int32, amount: Int32): Int32 is
+            if (amount < 0) or (amount >= 32) then
+                abort("Shift amount out of range (Int32)");
+            end if;
+            return @embed(Int32, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Int32, amount: Int32): Int32 is
+            if (amount < 0) or (amount >= 32) then
+                abort("Shift amount out of range (Int32)");
+            end if;
+            return @embed(Int32, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Nat64) is
+        method bitwiseShiftLeft(value: Nat64, amount: Nat64): Nat64 is
+            if amount >= 64 then
+                abort("Shift amount out of range (Nat64)");
+            end if;
+            return @embed(Nat64, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Nat64, amount: Nat64): Nat64 is
+            if amount >= 64 then
+                abort("Shift amount out of range (Nat64)");
+            end if;
+            return @embed(Nat64, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Int64) is
+        method bitwiseShiftLeft(value: Int64, amount: Int64): Int64 is
+            if (amount < 0) or (amount >= 64) then
+                abort("Shift amount out of range (Int64)");
+            end if;
+            return @embed(Int64, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Int64, amount: Int64): Int64 is
+            if (amount < 0) or (amount >= 64) then
+                abort("Shift amount out of range (Int64)");
+            end if;
+            return @embed(Int64, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(Index) is
+        method bitwiseShiftLeft(value: Index, amount: Index): Index is
+            if amount >= 64 then
+                abort("Shift amount out of range (Index)");
+            end if;
+            return @embed(Index, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: Index, amount: Index): Index is
+            if amount >= 64 then
+                abort("Shift amount out of range (Index)");
+            end if;
+            return @embed(Index, "$1 >> $2", value, amount);
+        end;
+    end;
+
+    instance BitwiseShift(ByteSize) is
+        method bitwiseShiftLeft(value: ByteSize, amount: ByteSize): ByteSize is
+            if amount >= 64 then
+                abort("Shift amount out of range (ByteSize)");
+            end if;
+            return @embed(ByteSize, "$1 << $2", value, amount);
+        end;
+
+        method bitwiseShiftRight(value: ByteSize, amount: ByteSize): ByteSize is
+            if amount >= 64 then
+                abort("Shift amount out of range (ByteSize)");
+            end if;
+            return @embed(ByteSize, "$1 >> $2", value, amount);
+        end;
+    end;
 end module body.

@@ -1,0 +1,28 @@
+module body Test is
+    union Problem: Free is
+        case TooBig;
+    end;
+
+    function half(n: Nat64): Result[Nat64, Problem] is
+        if n > 100 then
+            return Err(error => TooBig());
+        end if;
+        return Ok(value => n >> 1);
+    end;
+
+    function show(r: Result[Nat64, Problem]): Unit is
+        case r of
+            when Ok(value: Nat64) do
+                printLn(value);
+            when Err(error: Problem) do
+                printLn("too big");
+        end case;
+        return nil;
+    end;
+
+    function main(): ExitCode is
+        show(half(84));
+        show(half(1000));
+        return ExitSuccess();
+    end;
+end module body.

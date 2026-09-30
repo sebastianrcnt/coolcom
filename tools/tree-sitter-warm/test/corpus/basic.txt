@@ -1,0 +1,301 @@
+================================================================================
+interface with docstring, import, record, union, generic function
+================================================================================
+
+"""Module doc."""
+import Standard.Buffer (Buffer, new as newBuffer);
+
+module Example is
+    -- a comment
+    record Point: Free is
+        x: Int32;
+        y: Int32;
+    end;
+
+    union Shape: Free is
+        case Dot;
+        case Circle is
+            radius: Float64;
+    end;
+
+    generic [T: Type(Printable), R: Region]
+    function first(xs: Span[T, R]): Option[T];
+end module.
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (docstring)
+  (import_declaration
+    module: (module_name
+      (identifier)
+      (identifier))
+    (import_symbol
+      name: (identifier))
+    (import_symbol
+      name: (identifier)
+      alias: (identifier)))
+  (module_definition
+    name: (module_name
+      (identifier))
+    (comment)
+    (record_declaration
+      name: (type_identifier)
+      universe: (universe)
+      (slot
+        name: (identifier)
+        type: (type_application
+          name: (type_identifier)))
+      (slot
+        name: (identifier)
+        type: (type_application
+          name: (type_identifier))))
+    (union_declaration
+      name: (type_identifier)
+      universe: (universe)
+      (constructor
+        name: (identifier))
+      (constructor
+        name: (identifier)
+        (slot
+          name: (identifier)
+          type: (type_application
+            name: (type_identifier)))))
+    (function_declaration
+      (generic_prefix
+        (type_parameters
+          (type_parameter
+            name: (type_identifier)
+            universe: (universe)
+            (type_identifier))
+          (type_parameter
+            name: (type_identifier)
+            universe: (universe))))
+      name: (identifier)
+      (parameters
+        (parameter
+          name: (identifier)
+          type: (reference_type
+            (type_application
+              name: (type_identifier))
+            (type_application
+              name: (type_identifier)))))
+      result: (type_application
+        name: (type_identifier)
+        (type_application
+          name: (type_identifier))))))
+
+================================================================================
+statements: if / else if / else, case, loops, borrow
+================================================================================
+
+module body Example is
+    function f(n: Nat64): Nat64 is
+        var i: Nat64 := 0;
+        if n < 2 then
+            return n;
+        else if n = 2 then
+            skip;
+        else
+            i := i + 1;
+        end if;
+        for k from 0 to 9 do
+            while i < #xFF do
+                i := i + 1;
+            end while;
+        end for;
+        case g(n) of
+            when Some(value: Nat64) do
+                return value;
+            when None do
+                skip;
+        end case;
+        borrow r: &[Buf, R] := &b do
+            h(r);
+        end borrow;
+        return i;
+    end;
+end module body.
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (module_definition
+    name: (module_name
+      (identifier))
+    (function_declaration
+      name: (identifier)
+      (parameters
+        (parameter
+          name: (identifier)
+          type: (type_application
+            name: (type_identifier))))
+      result: (type_application
+        name: (type_identifier))
+      (block
+        (let_statement
+          name: (identifier)
+          type: (type_application
+            name: (type_identifier))
+          value: (integer))
+        (if_statement
+          condition: (binary_expression
+            left: (identifier)
+            right: (integer))
+          then: (block
+            (return_statement
+              (identifier)))
+          (else_if_clause
+            condition: (binary_expression
+              left: (identifier)
+              right: (integer))
+            then: (block
+              (skip_statement)))
+          (else_clause
+            (block
+              (assignment_statement
+                target: (identifier)
+                value: (binary_expression
+                  left: (identifier)
+                  right: (integer))))))
+        (for_statement
+          name: (identifier)
+          from: (integer)
+          to: (integer)
+          (block
+            (while_statement
+              condition: (binary_expression
+                left: (identifier)
+                right: (integer))
+              (block
+                (assignment_statement
+                  target: (identifier)
+                  value: (binary_expression
+                    left: (identifier)
+                    right: (integer)))))))
+        (case_statement
+          value: (call_expression
+            function: (identifier)
+            (arguments
+              (argument
+                value: (identifier))))
+          (when_clause
+            name: (identifier)
+            (binding
+              name: (identifier)
+              type: (type_application
+                name: (type_identifier)))
+            (block
+              (return_statement
+                (identifier))))
+          (when_clause
+            name: (identifier)
+            (block
+              (skip_statement))))
+        (borrow_statement
+          name: (identifier)
+          type: (reference_type
+            (type_application
+              name: (type_identifier))
+            (type_application
+              name: (type_identifier)))
+          original: (identifier)
+          (block
+            (expression_statement
+              (call_expression
+                function: (identifier)
+                (arguments
+                  (argument
+                    value: (identifier)))))))
+        (return_statement
+          (identifier))))))
+
+================================================================================
+expressions and literals
+================================================================================
+
+module body Example is
+    constant c: Float64 := -1.5e3;
+    function g(): Unit is
+        let a: Int32 := if x /= 0 then f(a => 1, b => 'x') else -1;
+        let s: Span[Nat8, Static] := "hi \"there\"\n";
+        p->next.value := !q + sizeof(Nat8);
+        let {left as l: Buf, right: Buf} := split(b);
+    end;
+end module body.
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (module_definition
+    name: (module_name
+      (identifier))
+    (constant_declaration
+      name: (identifier)
+      type: (type_application
+        name: (type_identifier))
+      value: (float))
+    (function_declaration
+      name: (identifier)
+      (parameters)
+      result: (type_application
+        name: (type_identifier))
+      (block
+        (let_statement
+          name: (identifier)
+          type: (type_application
+            name: (type_identifier))
+          value: (if_expression
+            condition: (binary_expression
+              left: (identifier)
+              right: (integer))
+            then: (call_expression
+              function: (identifier)
+              (arguments
+                (argument
+                  name: (identifier)
+                  value: (integer))
+                (argument
+                  name: (identifier)
+                  value: (character
+                    (character_content)))))
+            else: (integer)))
+        (let_statement
+          name: (identifier)
+          type: (reference_type
+            (type_application
+              name: (type_identifier))
+            (type_application
+              name: (type_identifier)))
+          value: (string
+            (string_content)
+            (escape_sequence)
+            (string_content)
+            (escape_sequence)
+            (escape_sequence)))
+        (assignment_statement
+          target: (path_expression
+            base: (identifier)
+            field: (identifier)
+            field: (identifier))
+          value: (binary_expression
+            left: (dereference_expression
+              (identifier))
+            right: (sizeof_expression
+              (type_application
+                name: (type_identifier)))))
+        (destructure_statement
+          (binding
+            name: (identifier)
+            rename: (identifier)
+            type: (type_application
+              name: (type_identifier)))
+          (binding
+            name: (identifier)
+            type: (type_application
+              name: (type_identifier)))
+          value: (call_expression
+            function: (identifier)
+            (arguments
+              (argument
+                value: (identifier)))))))))

@@ -1,0 +1,5 @@
+{
+  "module": "Lib",
+  "kind": "Declaration Error",
+  "text": [{"type": "text", "content": "Declared in the interface but marked private"}]
+}
