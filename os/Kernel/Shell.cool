@@ -50,6 +50,8 @@ class CShell
 CShell *ShellCur() {return Fs->shell_ctx;}
 #define shell_stmt_cleanup (ShellCur->stmt_cleanup)
 CTask *shell_foreground;
+CTask *console_shell; // only the endless console shell is restarted
+Bool console_restart;
 I64 shell_state, shell_check; // boot self-test only
 
 // ---- Runtime services the compiler imports (see coolc/Host/native.c) ----
@@ -593,7 +595,10 @@ U0 ShellTask(U8 *data)
         VtBind(Fs, v); VtRelease(v);
         v->owner = Fs;
     }
-    if (primary) {shell_state = 1; shell_foreground = Fs;}
+    if (primary) {
+        shell_state = 1; shell_foreground = Fs;
+        if (n < 0) console_shell = Fs;
+    }
     Fs->shell_ctx = CAlloc(sizeof(CShell));
     except_hook = &ShellFault;
     shell_tick_hook = &ShellTick;
@@ -641,4 +646,23 @@ U0 ShellTask(U8 *data)
 CTask *ShellStart(I64 lines = -1)
 {
     return Spawn(&ShellTask, lines, "Shell", 0, NULL, SHELL_STACK);
+}
+
+U0 ShellTaskGone(CTask *t)
+{//Record console exit before the scheduler frees the task; never inspect a freed CTask.
+    if (shell_foreground == t) shell_foreground = NULL;
+    if (console_shell == t) {
+        console_shell = NULL;
+        console_restart = shell_state >= 0;
+    }
+}
+
+U0 ShellSupervise()
+{//Core 0's idle loop restarts the console with a fresh compiler and Init.cool
+    //so commands such as Vim and Tmux are available again. Pane and remote shells stay ended.
+    if (!console_restart) return;
+    console_restart = FALSE;
+    AnsiAltScreen(FALSE); AnsiReset; AnsiCursorShow;
+    Print("\n");
+    ShellStart;
 }

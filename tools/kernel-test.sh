@@ -57,6 +57,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     if [ "$(grep -c 'heap overflow block=' "$dir/shell.log")" = 4 ] \
         && grep -q 'Running C:/Init.cool' "$dir/shell.log" \
         && python3 tools/kernel-verify.py verify-shell "$dir"; then
+        python3 tools/kernel-exit-test.py "$image" "$dir/fat.img" "$@"
         exit 0
     fi
     cat "$dir/shell.log"
