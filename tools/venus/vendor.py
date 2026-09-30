@@ -7,10 +7,29 @@ import subprocess
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
-VK_REV = '354fab82dbd91d2526a41ee4dbfff1012a623798'  # Vulkan-Headers v1.4.357
+VK_REV = 'e3b1eec08173d6b825cd3ac88c885a63b621504a'  # Vulkan-Headers v1.4.357
 VK_SHA256 = '264d0d7350e37d70c82407fb430d085040fc01a9a961d43dec8c2d6ed1dfd183'
 VN_REV = 'ca19b6358d7cc491bc3e4de76f04c6700876a8fa'  # venus-protocol 1.1.3
 VN_URL = 'https://gitlab.freedesktop.org/virgl/venus-protocol.git'
+ORACLE_VERSIONS = ('from importlib.metadata import version; '
+                   'assert version("Mako")=="1.3.10" and version("MarkupSafe")=="3.0.3"')
+
+
+def oracle_ready():
+    python = ROOT / 'vendor/venus-python/bin/python'
+    return python.is_file() and subprocess.run(
+        [str(python), '-c', ORACLE_VERSIONS], capture_output=True).returncode == 0
+
+
+def missing_test_inputs():
+    # Presence only: check() must still reject modified or wrongly pinned inputs.
+    required = ('vk.xml', 'venus-protocol/.git', 'venus-protocol/vkxml.py',
+                'venus-protocol/vn_protocol.py')
+    missing = [name for name in required if not (ROOT / 'vendor' / name).exists()]
+    if not oracle_ready():
+        missing.append('venus-python (pinned Mako/MarkupSafe)')
+    return missing
+
 
 def check():
     vk = ROOT / 'vendor/vk.xml'
@@ -47,8 +66,7 @@ def main():
         if not env.exists():
             subprocess.run(['python3', '-m', 'venv', str(env)], check=True)
         python = env / 'bin/python'
-        versions = subprocess.run([str(python), '-c', 'import mako, markupsafe; from importlib.metadata import version; assert version("Mako")=="1.3.10" and version("MarkupSafe")=="3.0.3"'], capture_output=True)
-        if versions.returncode:
+        if not oracle_ready():
             subprocess.run([str(python), '-m', 'pip', 'install', 'Mako==1.3.10', 'MarkupSafe==3.0.3'], check=True)
     print(f'Venus 1.1.3 ({VN_REV}); Vulkan-Headers v1.4.357 ({VK_REV})')
 

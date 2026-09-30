@@ -8,7 +8,7 @@ import struct
 import subprocess
 import sys
 from gen import Generator
-from vendor import ROOT, check
+from vendor import ROOT, check, missing_test_inputs
 
 OUT = ROOT / 'build/venus'
 ENV = dict(os.environ, COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
@@ -150,7 +150,14 @@ def frames(data):
 
 
 def main():
+    missing = missing_test_inputs()
+    if missing:
+        print('SKIP venus-gen-test: 건너뜀 (벤더 입력 없음: ' + ', '.join(missing) +
+              '); run make venus-vendor to enable the full checks')
+        return
     vk, vn = check()
+    # Generate only after the offline preflight, even when build/ is empty.
+    run([sys.executable, ROOT / 'tools/venus/gen.py'])
     src, manifest = Generator(vk, vn, ROOT / 'tools/venus/subset.txt').generate()
     assert src == (OUT / 'Vulkan.cool').read_text(), 'generation is not deterministic'
     assert 'vkMapMemory' not in manifest['commands']

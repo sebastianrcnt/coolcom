@@ -385,9 +385,9 @@ venus-transport-test: build/kernel.Image coolvm
 # Guest Vulkan generation only: no kernel/coolvm integration or renderer needed.
 .PHONY: venus-vendor venus-gen venus-gen-test
 venus-vendor:
-	tools/vendor-venus.sh
+	tools/vendor-venus.sh --generator --test
 venus-gen: venus-vendor
 	python3 tools/venus/gen.py
-venus-gen-test: build/coolc venus-gen
-	tools/vendor-venus.sh --test
+venus-gen-test: build/coolc
+	python3 tools/venus/test_offline.py
 	python3 tools/venus/test.py

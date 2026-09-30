@@ -1,12 +1,16 @@
 # Guest Vulkan generator
 
-`make venus-gen` fetches the immutable inputs and writes `build/venus/Vulkan.cool`
+`make venus-vendor` explicitly fetches the immutable generator inputs and C
+oracle dependencies. `make venus-gen` also fetches inputs, then writes `build/venus/Vulkan.cool`
 and `manifest.json`. `make venus-gen-test` compiles the complete generated library
 with `build/coolc`, runs its encoders/decoders on the host, and compares 16 packets
 with the **unmodified upstream Venus C encoders**, generated from their own
 registry/templates. It also runs as part of `make -j test`. No GPU or renderer is
-needed. Downloads go into ignored `vendor/`; all generated/test artifacts go into
-ignored `build/`.
+needed. The test never downloads: when inputs or oracle dependencies are absent,
+it reports `SKIP venus-gen-test` (건너뜀) and succeeds. After `make venus-vendor`,
+it regenerates and runs the full checks, including with an empty `build/venus`.
+Modified or wrongly pinned inputs still fail. Downloads go into ignored `vendor/`;
+all generated/test artifacts go into ignored `build/`.
 
 Inputs are Vulkan-Headers **v1.4.357** and venus-protocol **1.1.3**, locked by full
 Git revision in `vendor.py`; the independently downloaded Khronos `vk.xml` has a
@@ -14,7 +18,10 @@ SHA-256 check. Existing modified inputs are rejected. The generator uses Python'
 standard library and the pinned upstream parser/encoding backend, loaded without
 its Mako template frontend. Only the C test oracle needs Mako **1.3.10** and
 MarkupSafe **3.0.3**, installed by `tools/vendor-venus.sh --test` into an isolated
-`vendor/venus-python` virtual environment. Cached downloads need no network.
+`vendor/venus-python` virtual environment. The download script dispatches sections (`--generator` or `generator`, the default)
+and forwards section options (`--test`); a host section can be added independently.
+The Vulkan pin is the peeled **commit** of the annotated release tag, not its tag
+object SHA. Cached downloads need no network.
 
 `subset.txt` lists commands and extra structs (one name per line, `#` comments).
 Commands pull in parameter/member types transitively. `pNext` nodes are included
