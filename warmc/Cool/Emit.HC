@@ -434,10 +434,21 @@ U8 *WGCallExpr(CWGen *g, CWNode *n)
             q = WChild(p, "argument"); if (q) foreign = WChild(q, "value")->name;
         }
     if (foreign) {
+        // putchar/puts keep their C results; any other symbol is called verbatim and
+        // must be declared by the runtime or an included header (as the OCaml HC backend).
         if (WEq(foreign, "putchar")) WGPut(u, call, "au_putchar(");
         else if (WEq(foreign, "puts")) WGPut(u, call, "au_puts(");
-        else {WFail(u, n->token, "Unsupported Feature", "Unsupported foreign binding"); return "0";}
-        if (args) {WGPut(u, call, args->name); if (WEq(foreign, "puts")) WGPut(u, call, ".wh_data");}
+        else WGPut(u, call, WGCat(u, foreign, "("));
+        comma = FALSE;
+        for (p = d->first; p; p = p->next) if (WEq(p->role, "parameter")) {
+                for (v = args; v; v = v->next) if (v->resolved == p) break;
+                if (!v) {WFail(u, n->token, "Unsupported Feature", "Argument mapping failed"); return "0";}
+                if (comma) WGPut(u, call, ", "); comma = TRUE;
+                WGPut(u, call, v->name); if (WGAggregate(v->ty)) WGPut(u, call, ".wh_data");  // spans decay
+            }
+        if (WEq(ty->name, "Unit")) {  // HolyC U0 has no value; Warm Unit is a dummy byte
+            WGPut(u, call, ");"); WGLine(g, call->data); return "0";
+        }
     } else {
         f = WGRequest(g, d, env); WGPut(u, call, WGCat(u, f->name, "("));
         tmp = NULL;

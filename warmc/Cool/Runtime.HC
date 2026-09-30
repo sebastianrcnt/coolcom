@@ -22,6 +22,8 @@ import I64 StrLen(U8 *text);
 class au_span_t {U8 *wh_data; U64 wh_size;};
 I32 au_putchar(U8 c) {Print("%c", c); return c;}
 I32 au_puts(U8 *s) {Print("%s\n", s); return 0;}
+U32 au_rand_seed;
+U0 srand(U32 seed) {au_rand_seed = seed;}  // C's, for foreign imports; there is no rand
 U0 wh_abort(U8 *message) {
     NativeErrPutS(message);
     NativeErrPutS("\n");

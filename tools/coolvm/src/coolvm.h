@@ -172,6 +172,7 @@ bool input_mmio(uint64_t off, int size, bool wr, uint64_t *val);
 bool input_irq_level(void);
 void input_push(uint32_t type, uint32_t code, int32_t value);
 bool input_load_script(const char *path);
+void input_uart_out(uint8_t ch);  /* UART output, for the script's "wait" lines */
 bool blk_mmio(int disk, uint64_t off, int size, bool wr, uint64_t *val);
 bool blk_irq_level(int disk);
 bool net_mmio(uint64_t off, int size, bool wr, uint64_t *val);
