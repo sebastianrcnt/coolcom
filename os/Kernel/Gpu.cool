@@ -20,11 +20,12 @@ CGpu gpu;
 
 Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL, I64 reply_size = 0, I64 response = 0, I64 ctx = 0, I64 ring = -1)
 {
-    CVirtBlk *d = &gpu.q[queue];
+    CVirtBlk *d;
     I64 daif, idx, deadline, fence, n;
-    U8 *res = d->qreq + GPU_REQ_MAX;
+    U8 *res;
     Bool ok;
-    if (queue < 0 || queue > 1 || words < 0 || words > (GPU_REQ_MAX - 24) / 4 || reply_size < 0 || reply_size > GPU_REPLY_MAX - 24 || ring < -1 || ring > 63) return FALSE;
+    if (queue < 0 || queue > 1 || words < 0 || words > (GPU_REQ_MAX - 24) / 4 || reply_size < 0 || reply_size > GPU_REPLY_MAX - 24 || ring < -1 || ring > 63 || (words && !data)) return FALSE;
+    d = &gpu.q[queue]; res = d->qreq + GPU_REQ_MAX;
     daif = SpinLockIrq(&d->lock);
     MemSet(d->qreq, 0, 24);
     MemSet(res, 0, 24);
@@ -58,7 +59,10 @@ Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL, I64
     n = *(d->qused + 8 + 8 * (d->last_used % VQ_SIZE))(U32i *);
     d->last_used++;
     ok = n >= 24 && n <= GPU_REPLY_MAX && (*(res + 4)(U32i *) & 1) == 1 && *(res + 8)(I64 *) == fence;
-    if (ring >= 0) ok = ok && (*(res + 4)(U32i *) & 2) && res[20] == ring && *(res + 16)(U32i *) == ctx;
+    // Hosts identify completion by fence_id and ctx_id. QEMU does not echo
+    // INFO_RING_IDX; validate ring_idx only when a host includes that flag.
+    if (ring >= 0) ok = ok && *(res + 16)(U32i *) == ctx;
+    if (ring >= 0 && (*(res + 4)(U32i *) & 2)) ok = ok && res[20] == ring;
     if (response) ok = ok && n == 24 + reply_size && *res(U32i *) == response;
     else if (type == 0x100) ok = ok && n == 408 && *res(U32i *) == 0x1101;
     else ok = ok && n == 24 && *res(U32i *) == 0x1100;

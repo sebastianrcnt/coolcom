@@ -38,7 +38,8 @@ static bool stub_command(uint32_t type,const uint8_t *p,size_t len,
         if(len<32 || !ctx || ctx!=gpu.stub_ctx || vio32(p+24)!=len-32 ||
            (vio32(p+24)&3) || (vio32(p+4)&3)!=3 || p[20]>=64)break;
         /* Fence signals consumption immediately; no command stream decoding. */
-        vio_put32(out+4,3);vio_put32(out+16,ctx);out[20]=p[20];*result=0x1100;break;
+        /* Like QEMU, echo ctx/fence without INFO_RING_IDX in the response. */
+        vio_put32(out+16,ctx);*result=0x1100;break;
     case 0x10c: {
         if(len<56 || !ctx || ctx!=gpu.stub_ctx)break;
         uint32_t id=vio32(p+24),mem=vio32(p+28),flags=vio32(p+32),entries=vio32(p+36);
