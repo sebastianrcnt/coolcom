@@ -1,6 +1,7 @@
 // GICv2 MMIO CPU interface and GICv3 system-register CPU interface.
 // SGI 0 wakes idle cores; the virtual timer uses the FDT's third timer PPI.
 I64 gic_irqs;
+I64 gic_ipi_count[FDT_CPUS]; // per-destination SGI 0 completions, after EOI
 
 U0 GicWait(I64 base)
 {
@@ -109,6 +110,10 @@ U0 GicDispatch()
     ArchDsb;
     if (fdt_gic_version == 3) ArchGicEoi(ack);
     else ArchMmioWrite32(fdt_gic_cpu + 0x10, ack);
+    if (!irq) {
+        ArchDsb; // publish completion only after the EOI write
+        ArchAdd(&gic_ipi_count[ArchCpuNum], 1);
+    }
 }
 
 U0 GicSendIpi(I64 mpidr)
