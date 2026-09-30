@@ -1,0 +1,11 @@
+# GitHub (Linguist) highlighting: Cool is HolyC; Warm is closest to Ada (it forks Austral).
+*.cool   linguist-language=HolyC
+*.coolh  linguist-language=HolyC
+*.HC     linguist-language=HolyC
+*.HH     linguist-language=HolyC
+*.warm   linguist-language=Ada
+*.warmh  linguist-language=Ada
+*.aum    linguist-language=Ada
+*.aui    linguist-language=Ada
+vendor/** linguist-vendored
+warmc/test-programs/** linguist-vendored
