@@ -255,7 +255,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
+test: lua-test lua-kernel-test c2hc-test stbtt-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -310,3 +310,20 @@ stbtt-test: build/coolc build/hcfmt.BIN
 warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool build/warmc
 	mkdir -p build/tmp
 	python3 tools/warm-kernel-test.py
+
+# Lua is translated source, outside the compiler seed and kernel image.
+LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool
+build/lua/generated.stamp: $(LUASRC) build/ShellPrelude.coolh
+	python3 tools/lua-support/build.py
+	touch $@
+build/lua/Lua.cool build/lua/LuaRuntime.cool: build/lua/generated.stamp
+	@test -f $@ || { rm -f build/lua/generated.stamp; $(MAKE) build/lua/generated.stamp; }
+build/lua/Lua.BIN: build/lua/Lua.cool coolc/LibC/LibC.cool build/coolc coolc/seed/Compiler.BIN
+	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc build/lua/Host.cool $@ > build/lua/compile.log 2>&1
+	tail -1 build/lua/compile.log
+
+.PHONY: lua-test lua-kernel-test
+lua-test: build/lua/Lua.BIN
+	python3 tools/lua-support/test.py
+lua-kernel-test: build/lua/LuaRuntime.cool build/kernel.Image coolvm
+	python3 tools/lua-support/kernel_test.py

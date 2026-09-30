@@ -1,0 +1,11 @@
+U0 LuaRun()
+{
+    U8i *args[3];
+    args[0] = "lua";
+    args[1] = lua_script_path;
+    args[2] = 0;
+    if (lua_script_path && *lua_script_path) LibCSetArgs(2, args);
+    else LibCSetArgs(1, args);
+    lua_result = LibCRun(&main);
+}
+lua_loaded = TRUE;

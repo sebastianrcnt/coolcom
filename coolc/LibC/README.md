@@ -15,7 +15,8 @@ loader, or signal implementation. Check return values for unsupported operations
 
 setjmp is lowered at its call site to the OS exception context; longjmp preserves
 its nonzero return value (zero becomes one). LibCRun provides a context for C exit
-and abort to return to their caller. Allocations have a private size header for
+and abort to return to their caller. It also closes streams and frees allocations
+made during the invocation, giving the OS the resource lifetime of a C process. Allocations have a private size header for
 realloc; use malloc/free together, not MAlloc/Free across that boundary.
 
 `make c2hc-test` compares library behavior with native C, including memory,

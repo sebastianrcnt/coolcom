@@ -351,7 +351,9 @@ class FnTranslator:
                 return x
             return self.conv(x, self.ct(c), dst) if self.ct(c).kind in ('ptr', 'int', 'float') and dst.kind in ('ptr', 'int', 'float') and kind == 'BitCast' else x
         if kind == 'ArrayToPointerDecay':
-            return self.E(c)
+            base = self.E(c)
+            if self.ct(c).to.kind == 'rec': return f'(&({base})[0])'
+            return base
         if kind == 'FunctionToPointerDecay':
             return self.E(c)
         if kind == 'NullToPointer':

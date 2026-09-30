@@ -112,52 +112,66 @@ I64i lc_exit_status;
 
 // ---------------------------------------------------------------- memory
 
-U8i *malloc(U64i n)
-{//16 bytes of header keep the size for realloc and the 16-byte alignment.
-    if (n > 0x7FFFFFFFFFFFFFEF)
-        return 0;
-    U64i *p = MAlloc(n + 16);
-    if (!p)
-        return 0;
-    *p = n;
-    return p(U8i *) + 16;
+// Allocations made by LibCRun belong to that C invocation. Reclaim them on exit,
+// including a nonlocal exit (the OS has no separate process address space).
+class LC_Alloc {
+    U64i size;
+    LC_Alloc *next;
+    LC_Alloc *previous;
+    I64i scoped;
+};
+LC_Alloc *lc_run_allocs;
+I64i lc_track_allocs;
+
+U8i *LC_AllocMem(U64i n, I64i zero)
+{
+    LC_Alloc *p;
+    if (n > 0x7FFFFFFFFFFFFFDF) return 0;
+    if (zero) p = CAlloc(n + 32);
+    else p = MAlloc(n + 32);
+    if (!p) return 0;
+    p->size = n;
+    p->scoped = lc_track_allocs;
+    if (p->scoped) {
+        p->previous = 0;
+        p->next = lc_run_allocs;
+        if (p->next) p->next->previous = p;
+        lc_run_allocs = p;
+    }
+    return p(U8i *) + 32;
 }
 
+U8i *malloc(U64i n) {return LC_AllocMem(n, 0);}
 U8i *calloc(U64i count, U64i size)
 {
     U64i n = count * size;
-    U64i *p;
-    if (n > 0x7FFFFFFFFFFFFFEF || (size && n / size != count))
-        return 0;
-    p = CAlloc(n + 16);
-    if (!p)
-        return 0;
-    *p = n;
-    return p(U8i *) + 16;
+    if (size && n / size != count) return 0;
+    return LC_AllocMem(n, 1);
 }
 
-U0 free(U8i *p)
+U0 free(U8i *data)
 {
-    if (p)
-        Free(p - 16);
+    LC_Alloc *p;
+    if (!data) return;
+    p = (data - 32)(LC_Alloc *);
+    if (p->scoped) {
+        if (p->previous) p->previous->next = p->next;
+        else lc_run_allocs = p->next;
+        if (p->next) p->next->previous = p->previous;
+    }
+    Free(p);
 }
 
 U8i *realloc(U8i *p, U64i n)
 {
     U8i *q;
     U64i old;
-    if (!p)
-        return malloc(n);
-    if (!n) {
-        free(p);
-        return 0;
-    }
-    old = *(p - 16)(U64i *);
-    if (n <= old)
-        return p;
+    if (!p) return malloc(n);
+    if (!n) {free(p); return 0;}
+    old = (p - 32)(LC_Alloc *)->size;
+    if (n <= old) return p;
     q = malloc(n);
-    if (!q)
-        return 0;
+    if (!q) return 0;
     MemCpy(q, p, old);
     free(p);
     return q;
@@ -1688,7 +1702,7 @@ I32i fclose(LC_FILE *f)
     if (f->data)
         Free(f->data);
     if (f->name)
-        Free(f->name);
+        free(f->name);
     Free(f);
     return r;
 }
@@ -2497,17 +2511,23 @@ U0 LibCHostArgs()
 #endif
 
 I32i LibCRun(U8i *mainfp)
-{//Call main(argc, argv) so that exit() and abort() return here; the exit status.
+{//Call main(argc, argv); exit/abort return here and release invocation resources.
     I32i (*fn)(I64i argc, U8i **argv);
     I32i status = 0;
+    I64i i;
     fn = mainfp;
-    if (AIWNIOS_SetJmp(lc_run_ctx)) {
-        return lc_exit_status;
+    if (AIWNIOS_SetJmp(lc_run_ctx)) status = lc_exit_status;
+    else {
+        lc_run_active = 1;
+        lc_track_allocs = 1;
+        status = (*fn)(lc_argc, lc_argv);
     }
-    lc_run_active = 1;
-    status = (*fn)(lc_argc, lc_argv);
     lc_run_active = 0;
-    fflush(0);
+    lc_track_allocs = 0;
+    for (i = 0; i < 64; i++) {
+        if (lc_file_list[i]) fclose(lc_file_list[i]);
+    }
+    while (lc_run_allocs) free(lc_run_allocs(U8i *) + 32);
     return status;
 }
 
