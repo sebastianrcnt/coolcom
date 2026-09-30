@@ -480,6 +480,73 @@ U64i LC_F2Bits(F64 x)
     return *(&x)(U64i *);
 }
 
+// IEEE binary32 storage, round to nearest with ties to even. Integer-only
+// bit conversion works on ARM64 and x86-64 without an F32 Cool type.
+U64i LC_RoundShift(U64i x, I64i shift)
+{
+    U64i q, rem, half;
+    if (shift <= 0) return x << -shift;
+    if (shift > 64) return 0;
+    if (shift == 64) return x > 0x8000000000000000;
+    q = x >> shift;
+    half = 1 << (shift - 1);
+    rem = x & ((half << 1) - 1);
+    return q + (rem > half || (rem == half && (q & 1)));
+}
+
+U32i LC_F32ToBits(F64 x)
+{
+    U64i b = LC_F2Bits(x), sign = (b >> 32) & 0x80000000;
+    U64i m = b & 0xFFFFFFFFFFFFF, q;
+    I64i e = ((b >> 52) & 0x7FF) - 1023;
+    if (e == 1024) {
+        if (!m) return sign | 0x7F800000;
+        return sign | 0x7FC00000 | (m >> 29);
+    }
+    if (e == -1023) return sign;
+    m |= 0x10000000000000;
+    if (e < -126) return sign | LC_RoundShift(m, -e - 97);
+    if (e > 127) return sign | 0x7F800000;
+    q = LC_RoundShift(m, 29);
+    return sign | (((e + 126) << 23) + q);
+}
+
+F64 LC_F32FromBits(U32i bits)
+{
+    U64i b = bits, sign = (b & 0x80000000) << 32;
+    U64i m = b & 0x7FFFFF;
+    I64i e = (b >> 23) & 255;
+    if (e == 255) return LC_Bits2F(sign | LC_INF | (m << 29));
+    if (!e) {
+        if (!m) return LC_Bits2F(sign);
+        e = -126;
+        while (m < 0x800000) {m <<= 1; e--;}
+        m &= 0x7FFFFF;
+    } else e -= 127;
+    return LC_Bits2F(sign | ((e + 1023) << 52) | (m << 29));
+}
+
+F64 LC_F32Round(F64 x) {return LC_F32FromBits(LC_F32ToBits(x));}
+
+// Convert integers directly to binary32: going through binary64 can double
+// round a 64-bit integer that lies just above a binary32 midpoint.
+F64 LC_UIntToF32(U64i x)
+{
+    U64i top = x, q;
+    I64i e = 0;
+    if (!x) return 0.0;
+    while (top >> 1) {top >>= 1; e++;}
+    q = LC_RoundShift(x, e - 23);
+    return LC_F32FromBits(((e + 126) << 23) + q);
+}
+
+F64 LC_IntToF32(I64i x)
+{
+    U64i magnitude = x;
+    if (x < 0) return -LC_UIntToF32(-magnitude);
+    return LC_UIntToF32(magnitude);
+}
+
 F64 lc_nan_value;
 F64 lc_inf_value;
 
@@ -508,6 +575,7 @@ F64 fabs(F64 x)
 F64 floor(F64 x) {return Floor(x);}
 F64 ceil(F64 x) {return Ceil(x);}
 F64 sqrt(F64 x) {return Sqrt(x);}
+F64 sqrtf(F64 x) {return LC_F32Round(Sqrt(x));}
 F64 exp(F64 x) {return Exp(x);}
 F64 log2(F64 x) {return Log2(x);}
 F64 log10(F64 x) {return Log10(x);}
@@ -1026,10 +1094,11 @@ F64 atof(U8i *s) {return strtod(s, 0);}
 
 class LC_Buf {U8i *p; I64i len; I64i cap;};
 
-U0 LC_BufWrite(LC_Buf *b, U8i *s, I64i n)
+// Keep buffer state in memory across imported calls on the x86 backend.
+U0 LC_BufWrite(noreg LC_Buf *b, noreg U8i *s, noreg I64i n)
 {
-    U8i *q;
-    I64i cap;
+    U8i noreg *q, noreg *old;
+    I64i noreg cap;
     if (n <= 0)
         return;
     if (b->len + n + 1 > b->cap) {
@@ -1037,10 +1106,11 @@ U0 LC_BufWrite(LC_Buf *b, U8i *s, I64i n)
         if (cap < b->len + n + 64)
             cap = b->len + n + 64;
         q = MAlloc(cap);
+        old = b->p;
         if (b->len)
-            MemCpy(q, b->p, b->len);
-        if (b->p)
-            Free(b->p);
+            MemCpy(q, old, b->len);
+        if (old)
+            Free(old);
         b->p = q;
         b->cap = cap;
     }
