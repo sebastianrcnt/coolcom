@@ -3,6 +3,8 @@
 #import <CoreServices/CoreServices.h>
 #import <QuartzCore/QuartzCore.h>
 #include "coolvm.h"
+#include "gpu3d.h"
+#include "venus-metal.h"
 #include <math.h>
 
 void fb_snapshot(uint8_t *dst)
@@ -104,6 +106,15 @@ static const uint16_t keymap[128] = {
     (void)dirtyRect;
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
     if (g.gpu) {
+#ifdef COOLVM_VENUS
+        self.wantsLayer = YES;
+        pthread_mutex_lock(&g.lock);
+        uint32_t w,h; void *texture = gpu3d_display_texture(&w,&h);
+        bool direct = texture && venus_metal_present(texture,self.layer,w,h);
+        pthread_mutex_unlock(&g.lock);
+        if (direct) return;
+        venus_metal_hide();
+#endif
         CGImageRef image = framebuffer_image();
         CGContextDrawImage(ctx, NSRectToCGRect(self.bounds), image);
         CGImageRelease(image);

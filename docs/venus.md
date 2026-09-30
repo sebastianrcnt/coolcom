@@ -705,3 +705,51 @@ run with readback fell from 1440.7 to **132.0 µs/forced line**, and from 7.80 t
 **2.27 s host CPU**. This is a preliminary run, not the final three-run table;
 forced hooks are asynchronous now, so timings measure producer work rather than
 a GPU fence after every line. Final screenshots remain the correctness check.
+
+### Direct Metal image presentation and launcher selection
+
+`tools/venus/virgl-metal.patch` is applied with zero fuzz to the pinned renderer
+by `tools/vendor-venus.sh --host`. It tracks the native image on a successful
+zero-offset `vkBindImageMemory` and exposes a host-only memory-to-MTLTexture
+lookup through MoltenVK's pinned `vkGetMTLTextureMVK` bridge. This adds no cell
+renderer or new guest GPU command. The monitor detects the symbol at runtime;
+only then does its FDT advertise `coolcom,venus-metal-scanout`.
+
+The terminal exports its two target image allocations as **opaque, unmapped
+HOST3D blobs (flags 0)** and publishes them with SET_SCANOUT_BLOB after completion.
+Mapping optimal image memory is deliberately avoided: MoltenVK's coherent
+mapped-image synchronization corrupted the initial image experiment. A window
+blits the completed MTLTexture directly into a CAMetalLayer drawable. Only an
+explicit screenshot/frame dump copies pixels back to a shared Metal buffer.
+The existing linear readback path remains available with `--venus-readback`,
+or automatically when an older vendored renderer has no bridge symbol.
+
+The guest does not reuse the currently published slot. Monitor snapshots,
+publication and the window blit share `g.lock`; the display's GPU blit finishes
+before releasing the lock, so a later guest submission cannot overwrite a
+texture still being read by that blit. This display-only wait happens at window
+refresh, not on every console line. Presentation is a GPU blit, not hardware
+zero-copy scanout. The bridge currently handles the app's original single-image
+bind API; it is not a general Vulkan WSI or multi-planar export implementation.
+
+The direct path passed the five CPU-reference screens, resize, no-op submission,
+and one/two-core shell restart checks. A real Retina window completed the
+CAMetalLayer blit/present without readback and its exported screenshot matched
+a headless render at the actual 2048×1536 backing size exactly. The regular
+offline `make -j test` and triangle/memory/host tests passed as well.
+
+`make venus-vendor` now explicitly prepares both generator and host stack;
+`make venus-generator-vendor` retains generator-only setup. Subsequent `make run`
+and `make run-net` select installed Venus automatically and refresh only the
+Vulkan directory on the disk. `VENUS=0` selects CPU and `VENUS=1` requires Venus.
+A fresh checkout still runs without vendor inputs, and no run/test target
+silently downloads them. See [the user guide](USER-GUIDE.md#vulkan-terminal-on-coolvm).
+
+
+Validation artifacts for this stage: `build/venus-performance-test.log` (offline
+full suite), `build/venus-direct-tests.log` (direct terminal, triangle, memory,
+host), `build/venus-linear-fallback-test.log`, `build/venus-window-test.log`, and
+`build/venus-metal-final-host.log`. `make venus-vendor` was also exercised from
+cached pinned inputs, including idempotent patch application. The optional host
+links Metal; the ordinary coolvm still links neither Metal nor vendor libraries.
+`make venus-window-test` is the opt-in real-window test (it opens/closes its own VM).

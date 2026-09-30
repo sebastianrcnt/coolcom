@@ -130,7 +130,7 @@ struct vm {
     bool gpu;                   /* modern virtio-gpu 2D */
     bool gpu_3d_stub;
     uint8_t *gpu_stub_memory;
-    bool no_venus;              /* runtime CPU fallback even in a renderer build */
+    bool no_venus, venus_readback;              /* runtime CPU fallback even in a renderer build */
     bool fb_scroll;              /* advertise optional scanout-y register */
     _Atomic uint32_t fb_scanout_y;
     _Atomic bool fb_damage_used;  /* the guest reports damage (FINISHER_FB_DAMAGE) */

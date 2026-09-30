@@ -4,6 +4,8 @@
 #include "virtio.h"
 #include "gpu3d.h"
 #include <virglrenderer.h>
+#include <dlfcn.h>
+#include "venus-metal.h"
 #include <time.h>
 #include <sys/uio.h>
 #define NCTX 16
@@ -14,7 +16,8 @@
 #define BAD_RESOURCE 0x1203
 struct blob {
     uint32_t id,owner,mem,flags;
-    uint64_t size,offset;
+    uint64_t size,offset,memory_id;
+    void *metal;
     void *ptr;
     struct iovec *iov;
     bool mapped;
@@ -26,6 +29,8 @@ static struct {
     struct blob blobs[NRES];
     uint32_t scan_id,sx,sy,sw,sh,fullw,fullh,stride,scan_offset;
 } venus;
+static void *(*metal_texture)(uint32_t, uint64_t);
+bool gpu3d_direct_supported(void) { return venus.ready && metal_texture && !g.venus_readback; }
 static pthread_mutex_t fence_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t fence_cv=PTHREAD_COND_INITIALIZER;
 static uint64_t next_fence,done_fence;
@@ -40,12 +45,20 @@ static int context(uint32_t id)
 { for(int i=0;i<NCTX;i++)if(id && venus.ctx[i]==id)return i;return -1; }
 static struct blob *find(uint32_t id)
 { for(unsigned i=0;i<NRES;i++)if(id && venus.blobs[i].id==id)return &venus.blobs[i];return NULL; }
+void *gpu3d_display_texture(uint32_t *w, uint32_t *h)
+{
+    struct blob *b=find(venus.scan_id);
+    if (!b || !b->metal) return NULL;
+    *w=venus.sw;*h=venus.sh;return b->metal;
+}
 bool gpu3d_resource(uint32_t id) { return find(id)!=NULL; }
 void gpu3d_scanout_disable(void) { venus.scan_id=0; }
 bool gpu3d_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
 {
     struct blob *b=find(venus.scan_id);
-    if(!b || !b->ptr)return false;
+    if (!b) return false;
+    if (b->metal) { *width=venus.sw;*height=venus.sh;return venus_metal_snapshot(b->metal,pixels,venus.sw,venus.sh); }
+    if (!b->ptr) return false;
     uint8_t *dst=malloc((size_t)venus.sw*venus.sh*4);
     if(!dst)return false;
     for(uint32_t y=0;y<venus.sh;y++)memcpy(dst+(size_t)y*venus.sw*4,
@@ -61,6 +74,7 @@ bool gpu3d_init(void)
     if(r){LOGE("Venus init failed (%d), using 2D GPU\n",r);return false;}
     virgl_renderer_get_cap_set(4,&venus.capversion,&venus.capsize);
     if(!venus.capsize || venus.capsize>GPU3D_REPLY_MAX-24){virgl_renderer_cleanup(&venus);return false;}
+    metal_texture=dlsym(RTLD_DEFAULT,"virgl_renderer_venus_metal_texture");
     venus.ready=true;return true;
 }
 static void unmap(struct blob *b)
@@ -77,7 +91,7 @@ void gpu3d_cleanup(void)
     for(unsigned i=0;i<NRES;i++)unmap(&venus.blobs[i]);
     /* Stop rings/contexts before releasing any guest backing or blob pointer. */
     virgl_renderer_cleanup(&venus);
-    for(unsigned i=0;i<NRES;i++)free(venus.blobs[i].iov);
+    for(unsigned i=0;i<NRES;i++){free(venus.blobs[i].iov);venus_metal_release(venus.blobs[i].metal);}
     memset(&venus,0,sizeof venus);
 }
 void gpu3d_reset(void) { gpu3d_cleanup();gpu3d_init(); }
@@ -164,7 +178,7 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
         if(len<56 || !vio32(p+24) || b){result=INVALID;break;}
         uint32_t mem=vio32(p+28),bf=vio32(p+32),niov=vio32(p+36);
         uint64_t bytes=vio64(p+48);
-        if(!bytes || bytes>GPU3D_SHM_SIZE || (bytes&0x3fff) || bf!=1 ||
+        if(!bytes || bytes>GPU3D_SHM_SIZE || (bytes&0x3fff) || (bf!=1 && !(bf==0 && mem==2 && gpu3d_direct_supported())) ||
            (mem!=1 && mem!=2) || niov>1024 || len!=56+16ULL*niov ||
            (mem==2 && (ci<0 || niov)) || (mem==1 && ((ctx && ci<0) || !niov || vio64(p+40)))){result=INVALID;break;}
         for(unsigned i=0;i<NRES;i++)if(!venus.blobs[i].id){b=&venus.blobs[i];break;}
@@ -186,11 +200,11 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
             .blob_mem=mem,.blob_flags=bf,.blob_id=vio64(p+40),.size=bytes,.iovecs=iov,.num_iovs=niov};
         if(virgl_renderer_resource_create_blob(&args)){free(iov);result=0x1200;break;}
         if(mem==1 && ci>=0)virgl_renderer_ctx_attach_resource(ctx,args.res_handle);
-        *b=(struct blob){.id=args.res_handle,.owner=ctx,.mem=mem,.flags=bf,.size=bytes,.iov=iov,.attached=ci<0?0:1u<<ci};
+        *b=(struct blob){.id=args.res_handle,.owner=ctx,.mem=mem,.flags=bf,.size=bytes,.memory_id=args.blob_id,.iov=iov,.attached=ci<0?0:1u<<ci};
         break;
     }
     case 0x208: { /* RESOURCE_MAP_BLOB */
-        if(len!=40 || !b || b->mem!=2){result=BAD_RESOURCE;break;}
+        if(len!=40 || !b || b->mem!=2 || !(b->flags&1)){result=BAD_RESOURCE;break;}
         uint64_t offset=vio64(p+32),ptr=0;uint32_t info=0;
         if(b->mapped || (offset&0x3fff) || offset>GPU3D_SHM_SIZE-b->size || cap<32){result=INVALID;break;}
         for(unsigned i=0;i<NRES;i++) {
@@ -220,8 +234,15 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
            vio32(p+68) || vio32(p+72) || vio32(p+76) || vio32(p+84) || vio32(p+88) || vio32(p+92)){
             result=INVALID;break;
         }
+        if (gpu3d_direct_supported() && !b->metal && b->memory_id) {
+            void *texture=metal_texture(b->owner,b->memory_id);
+            if (texture) b->metal=venus_metal_retain(texture);
+        }
+        if (b->metal) {
+            if (x || y || offset || w!=fullw || h!=fullh || !venus_metal_size(b->metal,fullw,fullh)) {result=INVALID;break;}
+        }
         uint64_t ptr=0;
-        if(virgl_renderer_resource_get_map_ptr(b->id,&ptr) || !ptr){result=0x1200;break;}
+        if(!b->metal && (virgl_renderer_resource_get_map_ptr(b->id,&ptr) || !ptr)){result=0x1200;break;}
         b->ptr=(void *)(uintptr_t)ptr;venus.scan_id=b->id;venus.sx=x;venus.sy=y;
         venus.sw=w;venus.sh=h;venus.stride=stride;venus.scan_offset=offset;venus.fullw=fullw;venus.fullh=fullh;
         atomic_store(&g.fb_damage_used,true);atomic_store(&g.fb_damage,1);break;
@@ -234,7 +255,7 @@ bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n
     case 0x102:
         if(len!=32){result=INVALID;break;}
         if(venus.scan_id==b->id)gpu3d_scanout_disable();
-        unmap(b);virgl_renderer_resource_unref(b->id);free(b->iov);memset(b,0,sizeof *b);break;
+        unmap(b);virgl_renderer_resource_unref(b->id);free(b->iov);venus_metal_release(b->metal);memset(b,0,sizeof *b);break;
     default:result=0x1200;break;
     }
 end:

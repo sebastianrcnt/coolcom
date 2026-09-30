@@ -6,6 +6,7 @@
  * and the /chosen + cpu-release-addr fix-ups from m1n1 src/kboot.c.
  */
 #include "coolvm.h"
+#include "gpu3d.h"
 #include <time.h>
 
 /* dt-bindings/interrupt-controller/apple-aic.h and irq.h */
@@ -106,6 +107,7 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
 
     if (g.gpu) {
         fdt_begin(f, "virtio-gpu@1ff030000");
+        if (gpu3d_direct_supported()) fdt_prop(f, "coolcom,venus-metal-scanout", NULL, 0);
         fdt_prop_str(f, "compatible", "virtio,mmio");
         uint32_t reg[4] = {GPU_BASE >> 32, (uint32_t)GPU_BASE, 0, GPU_SIZE};
         uint32_t ints[3] = {AIC_IRQ, GPU_IRQ, IRQ_TYPE_LEVEL_HIGH};

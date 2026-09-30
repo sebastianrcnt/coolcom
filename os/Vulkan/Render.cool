@@ -19,8 +19,8 @@ U64i GfxShader(U8 *path)
     Free(code); return shader;
 }
 
-class CGfxImage {U64i image, memory, view; I64 w, h, format;};
-U0 GfxImageCreate(CGfxImage *im, I64 w, I64 h, I64 format, I64 usage)
+class CGfxImage {U64i image, memory, view; I64 w, h, format, size;};
+U0 GfxImageCreate(CGfxImage *im, I64 w, I64 h, I64 format, I64 usage, I64 memory_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
 {
     VkImageCreateInfo ci; VkImageViewCreateInfo vi; VkMemoryRequirements req;
     MemSet(im, 0, sizeof(CGfxImage)); im->w = w; im->h = h; im->format = format;
@@ -32,7 +32,7 @@ U0 GfxImageCreate(CGfxImage *im, I64 w, I64 h, I64 format, I64 usage)
     GfxResult(vn_decode_vkCreateImage_reply(&gfx.reply, gfx.device, &ci, NULL, &im->image), "image");
     GfxBegin; vn_encode_vkGetImageMemoryRequirements(&gfx.enc, 0, gfx.device, im->image, &req); GfxSubmit;
     vn_decode_vkGetImageMemoryRequirements_reply(&gfx.reply, gfx.device, im->image, &req); GfxCheck(!gfx.reply.error, "image requirements");
-    im->memory = GfxMemory(&req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    im->size = (req.size + 16383) & ~16383; im->memory = GfxMemory(&req, memory_flags);
     GfxBegin; vn_encode_vkBindImageMemory(&gfx.enc, 0, gfx.device, im->image, im->memory, 0); GfxSubmit;
     GfxResult(vn_decode_vkBindImageMemory_reply(&gfx.reply, gfx.device, im->image, im->memory, 0), "image bind");
     MemSet(&vi, 0, sizeof(vi)); vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;

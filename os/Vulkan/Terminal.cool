@@ -9,8 +9,10 @@ class CVenusCell {U32 glyph, fg, bg, flags;};
 class CVenusFrame
 {
     CGfxImage target;
+    CGpuBlob *image_blob;
     CGfxBuffer cells, params, readback, atlas_upload, overlay_upload;
     U64i set, draw_cmd, upload_cmd, fence, sequence;
+    I64 submitted_at;
     U8 *dirty_rows;
     Bool busy;
 };
@@ -19,7 +21,7 @@ class CVenusTerm
     CGfxImage atlas, overlay;
     CGfxBuffer atlas_upload, overlay_upload, cells;
     CVenusFrame slot[2];
-    Bool pending;
+    Bool pending, direct;
     U64i published, skipped, coalesced;
     U32 *glyphs;
     I64 slots, atlas_y0, atlas_y1, overlay_y0, overlay_y1;
@@ -107,16 +109,18 @@ U0 VenusDescriptors(CVenusFrame *f)
 // submitted snapshots let the console continue changing while the GPU runs.
 U0 VenusPoll()
 {
-    I64 i; CVenusFrame *f;
+    I64 i; CVenusFrame *f; CGpuBlob *scanout;
     for (i = 0; i < 2; i++) {
         f = &vterm.slot[i];
         if (f->busy && GfxFenceReady(f->fence)) {
-            f->busy = FALSE;
+            f->busy = FALSE; fb.venus_completed++;
             if (f->sequence > vterm.published) {
-                GfxCheck(GpuScanoutBlob(f->readback.blob, vterm.w, vterm.h, vterm.w * 4), "terminal scanout");
+                scanout = f->readback.blob; if (vterm.direct) scanout = f->image_blob;
+                GfxCheck(GpuScanoutBlob(scanout, vterm.w, vterm.h, vterm.w * 4), "terminal scanout");
                 vterm.published = f->sequence;
             }
         }
+        if (f->busy) GfxCheck(ArchCntVct - f->submitted_at < cnt_freq * 5, "frame completion timeout");
     }
 }
 U0 VenusDrain()
@@ -147,12 +151,16 @@ U0 VenusCache(CVenusFrame *f)
     vn_encode_vkCmdBindPipeline(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vterm.pipeline);
     vn_encode_vkCmdBindDescriptorSets(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vterm.layout, 0, 1, &f->set, 0, NULL);
     vn_encode_vkCmdDraw(&gfx.enc, 0, gfx.cmd, 3, 1, 0, 0); vn_encode_vkCmdEndRendering(&gfx.enc, 0, gfx.cmd);
-    GfxImageBarrier(&f->target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, f->target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, f->readback.buffer, 1, &copy);
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
-    GfxImageBarrier(&f->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_READ_BIT);
-    GfxEndRecord;
+    if (vterm.direct) {
+        GfxImageBarrier(&f->target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT);
+    } else {
+        GfxImageBarrier(&f->target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, f->target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, f->readback.buffer, 1, &copy);
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+        GfxImageBarrier(&f->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_READ_BIT);
+    }
+    GfxEndRecord; fb.venus_records++;
 }
 U0 VenusGrid(I64 w, I64 h)
 {
@@ -165,7 +173,9 @@ U0 VenusGrid(I64 w, I64 h)
         GfxBufferDestroy(&vterm.cells); GfxBufferDestroy(&vterm.overlay_upload); GfxImageDestroy(&vterm.overlay);
         for (i = 0; i < 2; i++) {
             f = &vterm.slot[i];
-            GfxBufferDestroy(&f->cells); GfxBufferDestroy(&f->params); GfxBufferDestroy(&f->readback);
+            GfxBufferDestroy(&f->cells); GfxBufferDestroy(&f->params);
+            if (f->readback.buffer) GfxBufferDestroy(&f->readback);
+            if (f->image_blob) {GfxCheck(GpuBlobDestroy(f->image_blob), "image blob release"); f->image_blob = NULL;}
             GfxBufferDestroy(&f->overlay_upload); GfxImageDestroy(&f->target); Free(f->dirty_rows);
         }
     }
@@ -179,11 +189,12 @@ U0 VenusGrid(I64 w, I64 h)
         f = &vterm.slot[i];
         GfxBufferCreate(&f->cells, vterm.cells.blob->size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         GfxBufferCreate(&f->params, 16384, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        GfxBufferCreate(&f->readback, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        if (!vterm.direct) GfxBufferCreate(&f->readback, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         GfxBufferCreate(&f->overlay_upload, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         if (!f->atlas_upload.buffer) GfxBufferCreate(&f->atlas_upload, 4096 * 2048, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         if (!f->fence) {f->fence = GfxFenceNew; f->draw_cmd = GfxCommandNew; f->upload_cmd = GfxCommandNew;}
-        GfxImageCreate(&f->target, w, h, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+        GfxImageCreate(&f->target, w, h, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (vterm.direct) {f->image_blob = GpuBlobCreate(f->target.size, GPU_BLOB_HOST3D, f->target.memory, 0); GfxCheck(f->image_blob != NULL, "image scanout blob");}
         f->dirty_rows = CAlloc(vterm.rows); MemSet(f->dirty_rows, 1, vterm.rows);
         VenusDescriptors(f);
         gfx.cmd = f->upload_cmd; GfxRecord;
@@ -205,7 +216,7 @@ U0 VenusDraw()
     // Use the last completed/displayed slot only after the other slot completes:
     // the host can still be scanning it until a replacement is published.
     for (i = 0; i < 2; i++) if (!vterm.slot[i].busy && (vterm.slot[i].sequence != vterm.published || !vterm.published)) {f = &vterm.slot[i]; break;}
-    if (!f) {vterm.coalesced++; fb.pending = TRUE; return;}
+    if (!f) {vterm.coalesced++; fb.venus_coalesced++; fb.pending = TRUE; return;}
     for (y = 0; y < vterm.rows; y++) if (f->dirty_rows[y]) {
             MemCpy(f->cells.mapping + y * vterm.cols * 16, vterm.cells.mapping + y * vterm.cols * 16, vterm.cols * 16); f->dirty_rows[y] = 0;
         }
@@ -229,10 +240,10 @@ U0 VenusDraw()
             GfxUpload(&vterm.overlay, &f->overlay_upload, 4, oy, oh);
             GfxImageBarrier(&vterm.overlay, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
         }
-        GfxEndRecord; cmds[count++] = f->upload_cmd;
+        GfxEndRecord; cmds[count++] = f->upload_cmd; fb.venus_uploads++;
     }
     cmds[count++] = f->draw_cmd; ArchDsb; GfxQueue(cmds, count, f->fence);
-    f->busy = TRUE; f->sequence = ++vterm.frames; fb.venus_frames++;
+    f->submitted_at = ArchCntVct; f->busy = TRUE; f->sequence = ++vterm.frames; fb.venus_frames++;
     vterm.pending = FALSE; vterm.atlas_y0 = vterm.atlas_y1 = 0; vterm.overlay_y0 = vterm.overlay_y1 = 0;
     fb.pending = TRUE; // timer polls completion even when the console becomes idle
 }
@@ -265,7 +276,7 @@ U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
     if (cx != vterm.cx || cy != vterm.cy || cells != vterm.cw) changed = TRUE;
     vterm.cx = cx; vterm.cy = cy; vterm.cw = cells;
     if (changed) vterm.pending = TRUE;
-    if (vterm.pending) VenusDraw; else vterm.skipped++;
+    if (vterm.pending) VenusDraw; else {vterm.skipped++; fb.venus_skipped++;}
     if (vterm.slot[0].busy || vterm.slot[1].busy) fb.pending = TRUE;
 }
 U0 VenusFill(I64 x, I64 y, I64 w, I64 h, I64 rgb)
@@ -308,7 +319,7 @@ U0 VenusSetInit() {
 }
 U0 VenusSetup() {
     I64 daif;
-    gfx.no_sleep = TRUE; gfx.soft_fail = TRUE;
+    gfx.no_sleep = TRUE; gfx.soft_fail = TRUE; vterm.direct = fdt_venus_metal;
     GfxInit; vterm.glyphs = CAlloc(0x110000 * 4); vterm.slots = 1;
     GfxBufferCreate(&vterm.atlas_upload, 4096 * 2048, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     MemSet(vterm.atlas_upload.mapping, 0, 4096 * 2048);
@@ -322,6 +333,7 @@ U0 VenusSetup() {
     fb.venus = TRUE; fb.redraw_all = TRUE; FbRenderLocked;
     FbRenderUnlock(daif); vterm.installing = FALSE; gfx.soft_fail = FALSE;
     Print("VENUS TERMINAL READY\n");
+    if (vterm.direct) Print("VENUS PRESENT Metal image\n"); else Print("VENUS PRESENT linear readback\n");
 }
 // Fake capsets deliberately do not qualify. Missing prerequisites keep the CPU renderer.
 if (GpuVenusInit && venus.cap_size >= 156 && FileFind("C:/Vulkan/terminal.vert.spv") && FileFind("C:/Vulkan/terminal.frag.spv")) {

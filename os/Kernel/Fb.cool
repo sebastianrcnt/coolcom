@@ -48,7 +48,8 @@ class CFb
     Bool cursor_hidden;       // FbCursorHide
     U8 *damage;               // coolvm's damage register, NULL elsewhere
     U32 palette[256];
-    U64i venus_frames, venus_rows, venus_cell_bytes; // actual guest cell writes / draws
+    U64i venus_frames, venus_rows, venus_cell_bytes;
+    U64i venus_completed, venus_coalesced, venus_skipped, venus_records, venus_uploads; // actual guest cell writes / draws
     U8 *ascii[128];           // glyphs of ASCII (all one cell wide)
 };
 

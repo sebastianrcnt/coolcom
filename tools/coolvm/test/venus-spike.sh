@@ -25,7 +25,7 @@ codesign --force --sign - --entitlements "$ROOT/tools/coolvm/entitlements.plist"
 
 clang -O2 -g -std=gnu11 -Wall -Wextra -Wno-unused-parameter -DCOOLVM_VENUS=1 \
     -I"$ROOT/tools/coolvm/test" -isystem "$V/protocol-driver" -isystem "$V/venus-protocol/include" -I"$P/include/virgl" -I"$P/include" \
-    "$ROOT/tools/coolvm/test/venus-gpu-test.c" "$ROOT/tools/coolvm/src/gpu.c" "$ROOT/tools/coolvm/src/gpu3d.c" \
-    -L"$P/lib" -Wl,-rpath,"$P/lib" -lvirglrenderer -framework Hypervisor -lpthread -o "$OUT/gpu-test"
+    "$ROOT/tools/coolvm/test/venus-gpu-test.c" "$ROOT/tools/coolvm/src/gpu.c" "$ROOT/tools/coolvm/src/gpu3d.c" "$ROOT/tools/coolvm/src/venus-metal.m" \
+    -L"$P/lib" -Wl,-rpath,"$P/lib" -lvirglrenderer -framework Hypervisor -framework Metal -framework QuartzCore -lpthread -o "$OUT/gpu-test"
 codesign --force --sign - --entitlements "$ROOT/tools/coolvm/entitlements.plist" "$OUT/gpu-test"
 "$OUT/gpu-test"

@@ -14,7 +14,7 @@ I64 fdt_gic, fdt_gic_cpu, fdt_gic_cpu_size, fdt_gic_version, fdt_timer_irq = 27;
 I64 fdt_psci; // 1: HVC, 2: SMC
 I64 fdt_uart_irq;  // its AIC interrupt (0: none known)
 I64 fdt_finisher, fdt_size;
-Bool fdt_vm, fdt_test;
+Bool fdt_vm, fdt_test, fdt_venus_metal;
 I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate.cool)
 
 // VM devices, found by compatible string under /soc and /chosen:
@@ -207,6 +207,7 @@ Bool FdtInit(U8 *dt)
             else if (FdtEqual(name, "width") && len == 4) n->w = Fdt32(data);
             else if (FdtEqual(name, "height") && len == 4) n->h = Fdt32(data);
             else if (FdtEqual(name, "stride") && len == 4) n->stride = Fdt32(data);
+            else if (FdtEqual(name, "coolcom,venus-metal-scanout") && !len) fdt_venus_metal = TRUE;
             else if (FdtEqual(name, "coolcom,scanout-y") && len == 8) n->scanout = Fdt64(data);
             else if (FdtEqual(name, "format")) n->fb32 = FdtEqual(data, "x8r8g8b8") || FdtEqual(data, "a8r8g8b8");
             if (FdtEqual(n->name, "chosen")) {
@@ -215,7 +216,7 @@ Bool FdtInit(U8 *dt)
                 if (FdtEqual(name, "coolcom,utc-offset") && len == 4) fdt_utc_offset = Fdt32(data)(I32);
             }
         } else if (tok == 9) {
-            if (!fdt_vm) fdt_finisher = 0;
+            if (!fdt_vm) {fdt_finisher = 0; fdt_venus_metal = FALSE;}
             if (fdt_gic_version) {
                 fdt_uart_irq += 32;
                 fdt_input.irq += 32;

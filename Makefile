@@ -214,13 +214,24 @@ run-qemu: build/kernel.Image disk-seed
 qemu-test: build/kernel.Image
 	python3 tools/qemu-test.py $<
 
-run: build/kernel.Image coolvm disk-seed
-	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img $<
+# Only interactive launchers auto-select installed Venus; default tests keep the
+# dependency-free CPU monitor. No run target downloads anything.
+VENUS ?= auto
+VENUS_INSTALLED := $(and $(wildcard vendor/venus/install/lib/libvirglrenderer.dylib),$(wildcard vendor/vk.xml),$(wildcard vendor/venus-protocol/vn_protocol.py))
+RUN_VENUS := $(if $(filter 1,$(VENUS)),1,$(if $(filter auto,$(VENUS)),$(if $(VENUS_INSTALLED),1)))
+RUN_VM := $(if $(RUN_VENUS),build/coolvm-venus,build/coolvm)
+.PHONY: run-disk
+run-disk: disk-seed $(if $(RUN_VENUS),venus-terminal)
+ifneq ($(RUN_VENUS),)
+	tools/venus/install.sh build/disk.img
+endif
+run: build/kernel.Image $(if $(RUN_VENUS),build/coolvm-venus,coolvm) run-disk
+	$(RUN_VM) --cpus 2 --mem 1024 --disk build/disk.img $<
 
 # make run with the Mac's ports 2323 and 8080 forwarded to the guest's 23 and 80:
 # ShellServe(23); then tools/rsh.sh; HttpServe(80); then curl localhost:8080/ (docs/networking.md).
-run-net: build/kernel.Image coolvm disk-seed
-	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img --net-forward 2323:23 --net-forward 8080:80 $<
+run-net: build/kernel.Image $(if $(RUN_VENUS),build/coolvm-venus,coolvm) run-disk
+	$(RUN_VM) --cpus 2 --mem 1024 --disk build/disk.img --net-forward 2323:23 --net-forward 8080:80 $<
 
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
 vim-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -383,9 +394,11 @@ venus-transport-test: build/kernel.Image coolvm
 	python3 tools/venus-transport-test.py $<
 # Guest Vulkan generation only: no kernel/coolvm integration or renderer needed.
 .PHONY: venus-vendor venus-gen venus-gen-test
-venus-vendor:
+venus-vendor: venus-generator-vendor vendor-venus
+.PHONY: venus-generator-vendor
+venus-generator-vendor:
 	tools/vendor-venus.sh --generator --test
-venus-gen: venus-vendor
+venus-gen: venus-generator-vendor
 	python3 tools/venus/gen.py
 venus-gen-test: build/coolc
 	python3 tools/venus/test_offline.py
@@ -395,7 +408,7 @@ venus-gen-test: build/coolc
 .PHONY: venus-memory-test
 build/venus/Vulkan.cool: tools/venus/gen.py tools/venus/subset.txt tools/venus/wire.cool
 	python3 tools/venus/gen.py
-build/coolvm-venus: $(wildcard tools/coolvm/src/*.[chm]) tools/coolvm/build.sh
+build/coolvm-venus: $(wildcard tools/coolvm/src/*.[chm]) tools/coolvm/build.sh $(wildcard vendor/venus/install/lib/libvirglrenderer*.dylib)
 	COOLVM_VENUS=1 tools/coolvm/build.sh $@
 venus-memory-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool
 	python3 tools/venus/run_guest.py
@@ -411,7 +424,7 @@ venus-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool build/
 	python3 tools/venus/run_guest.py --triangle
 
 # Resident terminal library and shaders; explicit opt-in, never downloads.
-.PHONY: venus-terminal venus-term-test
+.PHONY: venus-terminal venus-term-test venus-window-test
 build/venus/terminal.vert.spv: tools/venus/shaders/terminal.vert
 	@mkdir -p $(@D)
 	glslang -V --target-env vulkan1.2 $< -o $@
@@ -423,6 +436,9 @@ venus-term-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal
 	python3 tools/venus-term-test.py $<
 
 .PHONY: venus-disk venus-run
+venus-window-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal
+	python3 tools/venus-term-test.py $< --window-only
+
 venus-disk: disk-install venus-terminal
 	tools/venus/install.sh build/disk.img
 venus-run: build/kernel.Image build/coolvm-venus venus-disk

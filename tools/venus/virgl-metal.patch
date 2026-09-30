@@ -1,0 +1,113 @@
+--- a/src/venus/vkr_device_memory.h
++++ b/src/venus/vkr_device_memory.h
+@@ -23,6 +23,8 @@
+    uint64_t allocation_size;
+    uint32_t memory_type_index;
+ 
++   /* Borrowed native image, set by a successful zero-offset image bind. */
++   VkImage metal_image;
+    bool exported;
+ };
+ VKR_DEFINE_OBJECT_CAST(device_memory, VK_OBJECT_TYPE_DEVICE_MEMORY, VkDeviceMemory)
+--- a/src/venus/vkr_device_memory.c
++++ b/src/venus/vkr_device_memory.c
+@@ -386,6 +386,19 @@
+       return false;
+    }
+ 
++#ifdef __APPLE__
++   /* Host-only image scanout is opaque, never CPU-mapped or cross-device. */
++   if (mem->metal_image && !blob_flags) {
++      mem->exported = true;
++      *out_blob = (struct virgl_context_blob){
++         .type = VIRGL_RESOURCE_OPAQUE_HANDLE,
++         .u.fd = -1,
++         .vulkan_info.allocation_size = mem->allocation_size,
++         .vulkan_info.memory_type_index = mem->memory_type_index,
++      };
++      return true;
++   }
++#endif
+    uint32_t map_info = VIRGL_RENDERER_MAP_CACHE_NONE;
+    if (blob_flags & VIRGL_RENDERER_BLOB_FLAG_USE_MAPPABLE) {
+       const bool visible = mem->property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+--- a/src/venus/vkr_image.h
++++ b/src/venus/vkr_image.h
+@@ -10,6 +10,7 @@
+ 
+ struct vkr_image {
+    struct vkr_object base;
++   struct vkr_device_memory *bound_memory;
+ };
+ VKR_DEFINE_OBJECT_CAST(image, VK_OBJECT_TYPE_IMAGE, VkImage)
+ 
+--- a/src/venus/vkr_image.c
++++ b/src/venus/vkr_image.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include "vkr_image.h"
++#include "vkr_device_memory.h"
+ 
+ #include "vkr_image_gen.h"
+ #include "vkr_physical_device.h"
+@@ -38,6 +39,9 @@
+ vkr_dispatch_vkDestroyImage(struct vn_dispatch_context *dispatch,
+                             struct vn_command_vkDestroyImage *args)
+ {
++   struct vkr_image *image = vkr_image_from_handle(args->image);
++   if (image && image->bound_memory)
++      image->bound_memory->metal_image = VK_NULL_HANDLE;
+    vkr_image_destroy_and_remove(dispatch->data, args);
+ }
+ 
+@@ -100,9 +104,15 @@
+    struct vkr_device *dev = vkr_device_from_handle(args->device);
+    struct vn_device_proc_table *vk = &dev->proc_table;
+ 
++   struct vkr_image *image = vkr_image_from_handle(args->image);
++   struct vkr_device_memory *memory = vkr_device_memory_from_handle(args->memory);
+    vn_replace_vkBindImageMemory_args_handle(args);
+    args->ret =
+       vk->BindImageMemory(args->device, args->image, args->memory, args->memoryOffset);
++   if (args->ret == VK_SUCCESS && !args->memoryOffset) {
++      image->bound_memory = memory;
++      memory->metal_image = image->base.handle.image;
++   }
+ }
+ 
+ static void
+--- a/src/venus/vkr_renderer.c
++++ b/src/venus/vkr_renderer.c
+@@ -9,6 +9,7 @@
+ #include "virglrenderer_hw.h"
+ 
+ #include "vkr_context.h"
++#include "vkr_device_memory.h"
+ 
+ struct vkr_renderer_state {
+    const struct vkr_renderer_callbacks *cbs;
+@@ -242,3 +243,23 @@
+    if (ctx)
+       vkr_context_destroy_resource(ctx, res_id);
+ }
++
++#ifdef __APPLE__
++/* Host-only bridge for a pinned MoltenVK backend. No new guest wire command.
++ * Call after the Vulkan completion fence, under the monitor's device lock.
++ * The returned MTLTexture is borrowed; the monitor retains it for the blob.
++ */
++extern void vkGetMTLTextureMVK(VkImage image, void **texture);
++VIRGL_EXPORT void *virgl_renderer_venus_metal_texture(uint32_t ctx_id, uint64_t memory_id);
++VIRGL_EXPORT void *
++virgl_renderer_venus_metal_texture(uint32_t ctx_id, uint64_t memory_id)
++{
++   struct vkr_context *ctx = vkr_renderer_lookup_context(ctx_id);
++   struct vkr_device_memory *mem = ctx ? vkr_context_get_object(ctx, memory_id) : NULL;
++   if (!mem || mem->base.type != VK_OBJECT_TYPE_DEVICE_MEMORY || !mem->metal_image)
++      return NULL;
++   void *texture = NULL;
++   vkGetMTLTextureMVK(mem->metal_image, &texture);
++   return texture;
++}
++#endif
