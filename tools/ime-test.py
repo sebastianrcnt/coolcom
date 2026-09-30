@@ -69,9 +69,9 @@ def main():
         failures.append(f'Vim saved {saved!r}, expected {"한글 갑" + chr(10)!r}')
     px, font = verify.screen_of(d, 'screen.png'), verify.load_font()
     # Row 0 is the text and the prompt (then the cursor block, which is not compared).
-    bits = verify.draw_text(font, '한글 안녕> ', 11)
+    bits = verify.draw_text(font, '한글 안녕C:/> ', 14)  # the prompt follows
     if not all(px(x, y) == ((255, 255, 255) if on else (0, 0, 0)) for y, row in enumerate(bits) for x, on in enumerate(row[:80])):
-        failures.append('screenshot row 0 is not 한글 안녕>')
+        failures.append('screenshot row 0 is not 한글 안녕C:/>')
     if failures:
         raise SystemExit('\n'.join(failures) + f'\nsee {d}/vm.log and screen.png')
     print('ime-test: 2-beolsik composition (syllable moves, clusters, Backspace) in the line editor and Vim, '

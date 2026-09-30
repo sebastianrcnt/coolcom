@@ -63,7 +63,7 @@ def check_init_log(log):
     if marker not in log:
         raise AssertionError('shell did not run C:/Init.HC')
     after_init = log.split(marker, 1)[1]
-    prompt = re.search(r'(?m)^> ', after_init)
+    prompt = re.search(r'(?m)^(?:[A-Z]:\S*)?> ', after_init)  # "C:/> ", or "> " without a drive
     if not prompt:
         raise AssertionError('shell did not reach a prompt after C:/Init.HC')
     diagnostics = re.findall(r'^(?:ERROR|WARNING):.*$', after_init[:prompt.start()], re.MULTILINE)

@@ -79,8 +79,8 @@ def main():
     text = strip(raw).replace('\r', '')
     failures = []
     outputs = text.split('STEP-CMD\n', 1)[-1]
-    # Output lines only (a typed line is echoed after "> ").
-    out_lines = [l for l in outputs.split('\n') if not l.startswith('> ')]
+    # Output lines only (a typed line is echoed after the prompt, "C:/> ").
+    out_lines = [l for l in outputs.split('\n') if not re.match(r'([A-Z]:\S*)?> ', l)]
     for want in ('ZZ[hello][42]', 'ZZ[two words][16]', 'ZZ[a b][-5]', 'QQ[-x]', 'C:/A.TXT,1: alpha one', 'PONG',
                  'Directory of C:/', 'plain', '6', 'ZZ[x][1]', 'ZZ[two][7]', '00000000  2f 2f 20 48',
                  'C:/Kernel/', 'DskBlk.HC', 'DskCache.HC', 'Print  '):
