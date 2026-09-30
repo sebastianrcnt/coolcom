@@ -345,23 +345,15 @@ PNG dimensions/content and those programs' status bars at their new rows.
 
 ### Test-only 3D transport stub
 
-`--gpu-3d-stub` opts into fake Venus transport responses, independently of Logos.
+`--gpu-3d-stub` opts into fake Venus transport responses, independently of the optional real renderer.
 It offers VIRGL, RESOURCE_BLOB and CONTEXT_INIT, one opaque capset 4, a single
 context and a 16 MiB shared-memory region at `0x400000000`. Submissions complete
 immediately; this mode has no Venus decoding or Vulkan rendering. Requests are
 validated and logged with their context, ring, fence ID and response type.
 
 `make venus-transport-test` drives this backend through the real kernel, then boots
-with ordinary 2D, Logos and no GPU to check silent fallback. The implementation is
+with ordinary 2D, default settings and no GPU to check silent fallback. The implementation is
 isolated in `src/gpu3d-stub.h`; it is not the production host 3D backend.
-
-### Logos
-
-The virtio-gpu also offers Logos (`src/logos.m`, [docs/logos.md](../../docs/logos.md)), which
-draws the guest console's cell grid with Metal. It uses feature bit 23, FDT `coolcom,logos`
-and commands `0x4000`-`0x4006` on the control queue. `--no-logos` stops offering it, and the
-guest then draws pixels as before. `LOGOS_DEBUG=1` in the environment logs failed commands,
-and `LOGOS_DEBUG=2` logs every command.
 
 ### Optional Venus host transport
 
@@ -370,4 +362,9 @@ and `LOGOS_DEBUG=2` logs every command.
 capset/context/SUBMIT_3D/blob path. `make venus-host-test` runs real renderer and
 Hypervisor mapping tests without a guest. The default build and `make -j test`
 need no vendored libraries. See [Venus validation](../../docs/venus.md#host-validation-log-2026-09-30)
-for measured results, resource limits and remaining presentation/guest work.
+for measured results and resource limits. `make venus-disk venus-run` installs
+and runs the resident guest Vulkan terminal, and `make venus-term-test` checks
+five CPU-reference screens. The old Logos feature bit/FDT property/custom
+commands and Metal renderer have been removed after those tests passed.
+`--no-venus` forces CPU rendering in a renderer build; retired `--no-logos` is
+accepted as a no-op for existing scripts.

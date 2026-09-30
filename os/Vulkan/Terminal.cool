@@ -1,0 +1,263 @@
+// Resident Vulkan terminal app. The cell/atlas/overlay model matches Logos.
+#include "C:/Vulkan/Gfx.cool"
+#include "C:/Vulkan/Render.cool"
+#define VENUS_BOLD 1
+#define VENUS_REVERSE 2
+#define VENUS_UNDERLINE 4
+#define VENUS_RIGHT 8
+class CVenusCell {U32 glyph, fg, bg, flags;};
+class CVenusTerm
+{
+    CGfxImage atlas, overlay, target;
+    CGfxBuffer atlas_upload, overlay_upload, cells, readback[2];
+    U32 *glyphs;
+    I64 slots, atlas_y0, atlas_y1, overlay_y0, overlay_y1;
+    I64 w, h, cols, rows, first, cx, cy, cw;
+    U64i sampler, set_layout, descriptor_pool, set, layout, pipeline, shaders[2];
+    Bool overlay_used, images_ready, installing;
+    I64 install_daif;
+    U64i frames, changed_rows, cell_bytes;
+};
+CVenusTerm vterm;
+U0 VenusDirty(I64 *y0, I64 *y1, I64 y, I64 h)
+{
+    if (*y0 >= *y1) {*y0 = y; *y1 = y + h;}
+    else {if (y < *y0) *y0 = y; if (y + h > *y1) *y1 = y + h;}
+}
+I64 VenusPixelRow(I64 y) {if (y < vterm.rows * 16) return (y + vterm.first * 16) % (vterm.rows * 16); return y;}
+U0 VenusOverlayClear(I64 row)
+{
+    I64 i;
+    I64 y = VenusPixelRow(row * 16);
+    MemSet(vterm.overlay_upload.mapping + y * vterm.w * 4, 0, vterm.cols * 8 * 4); // remaining 15 scanlines below
+    for (i = 1; i < 16; i++) MemSet(vterm.overlay_upload.mapping + (y + i) * vterm.w * 4, 0, vterm.cols * 8 * 4);
+    VenusDirty(&vterm.overlay_y0, &vterm.overlay_y1, y, 16);
+}
+I64 VenusGlyph(I64 cp, I64 cells)
+{
+    U32 entry; U8 *g, *dst; I64 gc, x, y, bits, w, slot, sx, sy;
+    if (cp < 0 || cp >= 0x110000) return 0;
+    entry = vterm.glyphs[cp];
+    if (entry) {if (entry == 0xFFFFFFFF || ((entry >> 16) & 1) != (cells == 2)) return 0; return entry & 0xFFFF;}
+    g = FbGlyph(cp, &gc);
+    if (!g) {vterm.glyphs[cp] = 0xFFFFFFFF; return 0;}
+    if (gc != cells || vterm.slots >= 32768) return 0;
+    slot = vterm.slots++; sx = slot % 256 * 16; sy = slot / 256 * 16; w = cells * 8;
+    for (y = 0; y < 16; y++) {
+        if (cells == 2) {bits = (g[0] << 8) | g[1]; g += 2;} else bits = *g++;
+        dst = vterm.atlas_upload.mapping + (sy + y) * 4096 + sx;
+        for (x = 0; x < w; x++) dst[x] = ((bits >> (w - 1 - x)) & 1) * 255;
+    }
+    vterm.glyphs[cp] = slot | ((cells == 2) << 16);
+    VenusDirty(&vterm.atlas_y0, &vterm.atlas_y1, sy, 16);
+    return slot;
+}
+U0 VenusCell(CVenusCell *d, CVtCell *c, I64 glyph, I64 flags)
+{
+    d->glyph = glyph; d->fg = FbRgb(c->fg); d->bg = FbRgb(c->bg); d->flags = flags;
+    if (c->attr & VT_ATTR_REVERSE) d->flags |= VENUS_REVERSE;
+    if (c->attr & VT_ATTR_BOLD) d->flags |= VENUS_BOLD;
+}
+U0 VenusRow(CVtCell *p, CVenusCell *d, I64 cols)
+{
+    I64 x, g, q = VenusGlyph('?', 1);
+    for (x = 0; x < cols; x++) {
+        if (p[x].width == 2 && x + 1 < cols) {
+            if ((g = VenusGlyph(p[x].cp, 2))) {VenusCell(&d[x], &p[x], g, 0); VenusCell(&d[x + 1], &p[x], g, VENUS_RIGHT);}
+            else {VenusCell(&d[x], &p[x], q, 0); VenusCell(&d[x + 1], &p[x], q, 0);} x++;
+        } else if (!p[x].width || p[x].cp == ' ') VenusCell(&d[x], &p[x], 0, 0);
+        else {if (!(g = VenusGlyph(p[x].cp, 1))) g = q; VenusCell(&d[x], &p[x], g, 0);}
+    }
+}
+Bool VenusRowSame(I64 *a, I64 *b, I64 cols)
+{
+    I64 i;
+    for (i = 0; i < 2 * cols; i++) if (a[i] != b[i]) return FALSE;
+    return TRUE;
+}
+U0 VenusDescriptors()
+{
+    I64 i;
+    VkDescriptorBufferInfo buffer; VkDescriptorImageInfo images[2]; VkWriteDescriptorSet writes[3];
+    MemSet(&buffer, 0, sizeof(buffer)); buffer.buffer = vterm.cells.buffer; buffer.range = vterm.cols * vterm.rows * 16;
+    MemSet(images, 0, sizeof(images)); MemSet(writes, 0, sizeof(writes));
+    for (i = 0; i < 3; i++) {writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[i].dstSet = vterm.set; writes[i].dstBinding = i; writes[i].descriptorCount = 1;}
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[0].pBufferInfo = &buffer;
+    for (i = 0; i < 2; i++) {
+        images[i].sampler = vterm.sampler; images[i].imageView = vterm.atlas.view; if (i) images[i].imageView = vterm.overlay.view;
+        images[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[i + 1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; writes[i + 1].pImageInfo = &images[i];
+    }
+    GfxBegin; vn_encode_vkUpdateDescriptorSets(&gfx.enc, 0, gfx.device, 3, writes, 0, NULL); GfxSubmit;
+}
+U0 VenusGrid(I64 w, I64 h)
+{
+    if (vterm.w == w && vterm.h == h) return;
+    if (vterm.w) {
+        GfxBegin; vn_encode_vkDestroyPipeline(&gfx.enc, 0, gfx.device, vterm.pipeline, NULL);
+        vn_encode_vkDestroyPipelineLayout(&gfx.enc, 0, gfx.device, vterm.layout, NULL); GfxSubmit;
+        GfxBufferDestroy(&vterm.cells); GfxBufferDestroy(&vterm.readback[0]); GfxBufferDestroy(&vterm.readback[1]); GfxBufferDestroy(&vterm.overlay_upload);
+        GfxImageDestroy(&vterm.target); GfxImageDestroy(&vterm.overlay);
+    }
+    vterm.w = w; vterm.h = h; vterm.cols = w / 8; vterm.rows = h / 16; vterm.first = 0; vterm.cw = 0;
+    GfxBufferCreate(&vterm.cells, ((vterm.cols * vterm.rows * 16 + 16383) & ~16383), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    GfxBufferCreate(&vterm.readback[0], ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    GfxBufferCreate(&vterm.readback[1], ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    GfxBufferCreate(&vterm.overlay_upload, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    MemSet(vterm.overlay_upload.mapping, 0, w * h * 4);
+    GfxImageCreate(&vterm.overlay, w, h, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    GfxImageCreate(&vterm.target, w, h, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    GfxPipeline(w, h, vterm.set_layout, vterm.shaders, &vterm.layout, &vterm.pipeline);
+    VenusDescriptors;
+    vterm.images_ready = FALSE; vterm.overlay_used = FALSE; vterm.overlay_y0 = 0; vterm.overlay_y1 = h;
+}
+U0 VenusDraw()
+{
+    // Draw into the buffer the window is not scanning. Publication happens only
+    // after the GPU fence; host snapshot/publication share the device lock.
+    CGfxBuffer *next = &vterm.readback[vterm.frames & 1];
+    I64 atlas_layout = VK_IMAGE_LAYOUT_UNDEFINED, atlas_access = 0;
+    I64 overlay_layout = VK_IMAGE_LAYOUT_UNDEFINED, overlay_access = 0;
+    I64 target_layout = VK_IMAGE_LAYOUT_UNDEFINED, target_access = 0;
+    if (vterm.frames) {atlas_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; atlas_access = VK_ACCESS_SHADER_READ_BIT;}
+    if (vterm.images_ready) {overlay_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; overlay_access = VK_ACCESS_SHADER_READ_BIT;
+        target_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; target_access = VK_ACCESS_TRANSFER_READ_BIT;}
+    VkMemoryBarrier barrier; VkRenderingAttachmentInfo attachment; VkRenderingInfo rendering;
+    VkBufferImageCopy copy; U32 params[9];
+    MemSet(&barrier, 0, sizeof(barrier)); barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+    MemSet(&attachment, 0, sizeof(attachment)); attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment.imageView = vterm.target.view; attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    MemSet(&rendering, 0, sizeof(rendering)); rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea.extent.width = vterm.w; rendering.renderArea.extent.height = vterm.h;
+    rendering.layerCount = 1; rendering.colorAttachmentCount = 1; rendering.pColorAttachments = &attachment;
+    MemSet(&copy, 0, sizeof(copy)); copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; copy.imageSubresource.layerCount = 1;
+    copy.imageExtent.width = vterm.w; copy.imageExtent.height = vterm.h; copy.imageExtent.depth = 1;
+    params[0] = vterm.w; params[1] = vterm.h; params[2] = vterm.cols; params[3] = vterm.rows; params[4] = vterm.first;
+    params[5] = vterm.cx; params[6] = vterm.cy; params[7] = vterm.cw; params[8] = vterm.overlay_used;
+    ArchDsb; GfxRecord;
+    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+    if (vterm.atlas_y0 < vterm.atlas_y1) {
+        GfxImageBarrier(&vterm.atlas, atlas_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, atlas_access, VK_ACCESS_TRANSFER_WRITE_BIT);
+        GfxUpload(&vterm.atlas, &vterm.atlas_upload, 1, vterm.atlas_y0, vterm.atlas_y1 - vterm.atlas_y0);
+        GfxImageBarrier(&vterm.atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    }
+    if (vterm.overlay_y0 < vterm.overlay_y1) {
+        GfxImageBarrier(&vterm.overlay, overlay_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, overlay_access, VK_ACCESS_TRANSFER_WRITE_BIT);
+        GfxUpload(&vterm.overlay, &vterm.overlay_upload, 4, vterm.overlay_y0, vterm.overlay_y1 - vterm.overlay_y0);
+        GfxImageBarrier(&vterm.overlay, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    }
+    GfxImageBarrier(&vterm.target, target_layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, target_access, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    vn_encode_vkCmdBeginRendering(&gfx.enc, 0, gfx.cmd, &rendering);
+    vn_encode_vkCmdBindPipeline(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vterm.pipeline);
+    vn_encode_vkCmdBindDescriptorSets(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vterm.layout, 0, 1, &vterm.set, 0, NULL);
+    vn_encode_vkCmdPushConstants(&gfx.enc, 0, gfx.cmd, vterm.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 36, params);
+    vn_encode_vkCmdDraw(&gfx.enc, 0, gfx.cmd, 3, 1, 0, 0); vn_encode_vkCmdEndRendering(&gfx.enc, 0, gfx.cmd);
+    GfxImageBarrier(&vterm.target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, vterm.target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, next->buffer, 1, &copy);
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+    GfxExecute;
+    GfxCheck(GpuScanoutBlob(next->blob, vterm.w, vterm.h, vterm.w * 4), "terminal scanout");
+    vterm.images_ready = TRUE; vterm.frames++; fb.venus_frames++; vterm.atlas_y0 = vterm.atlas_y1 = 0; vterm.overlay_y0 = vterm.overlay_y1 = 0;
+}
+U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
+{
+    I64 y, physical; Bool changed = all || scrolled; CVtCell *s, *d;
+    VenusGrid(fb.w, fb.h);
+    if (all) {
+        vterm.first = 0; MemSet(vterm.overlay_upload.mapping, 0, vterm.w * vterm.h * 4);
+        vterm.overlay_y0 = 0; vterm.overlay_y1 = vterm.h; vterm.overlay_used = FALSE;
+    }
+    if (all || scrolled >= fb.rows) MemSet(fb.drawn, 0xFF, fb.rows * fb.cols * sizeof(CVtCell));
+    else if (scrolled) {
+        vterm.first = (vterm.first + scrolled) % vterm.rows;
+        MemCpy(fb.drawn, fb.drawn + scrolled * fb.cols, (fb.rows - scrolled) * fb.cols * sizeof(CVtCell));
+        MemSet(fb.drawn + (fb.rows - scrolled) * fb.cols, 0xFF, scrolled * fb.cols * sizeof(CVtCell));
+        for (y = fb.rows - scrolled; y < fb.rows; y++) VenusOverlayClear(y);
+    }
+    for (y = 0; y < fb.rows; y++) if (fb.snap_row[y]) {
+            fb.snap_row[y] = 0; s = fb.snap + y * fb.cols; d = fb.drawn + y * fb.cols;
+            if (!VenusRowSame(s, d, fb.cols)) {
+                MemCpy(d, s, fb.cols * sizeof(CVtCell)); physical = (y + vterm.first) % vterm.rows;
+                VenusRow(s, (vterm.cells.mapping)(CVenusCell *) + physical * fb.cols, fb.cols);
+                if (vterm.overlay_used) VenusOverlayClear(y);
+                vterm.changed_rows++; vterm.cell_bytes += fb.cols * 16;
+                fb.venus_rows++; fb.venus_cell_bytes += fb.cols * 16; changed = TRUE;
+            }
+        }
+    if (cx != vterm.cx || cy != vterm.cy || cells != vterm.cw) changed = TRUE;
+    vterm.cx = cx; vterm.cy = cy; vterm.cw = cells;
+    if (changed) VenusDraw;
+}
+U0 VenusFill(I64 x, I64 y, I64 w, I64 h, I64 rgb)
+{
+    U32 *p; I64 row, i, j;
+    for (j = 0; j < h; j++) {row = VenusPixelRow(y + j); p = (vterm.overlay_upload.mapping)(U32 *) + row * vterm.w + x;
+        for (i = 0; i < w; i++) p[i] = 0xFF000000 | (rgb & 0xFFFFFF);
+        VenusDirty(&vterm.overlay_y0, &vterm.overlay_y1, row, 1);
+    }
+    vterm.overlay_used = TRUE; VenusDraw;
+}
+U0 VenusSamplerInit() {
+    VkSamplerCreateInfo sampler;
+    MemSet(&sampler, 0, sizeof(sampler)); sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    vterm.sampler = GfxId;
+    GfxBegin; vn_encode_vkCreateSampler(&gfx.enc, 0, gfx.device, &sampler, NULL, &vterm.sampler); GfxSubmit;
+    GfxResult(vn_decode_vkCreateSampler_reply(&gfx.reply, gfx.device, &sampler, NULL, &vterm.sampler), "sampler");
+}
+U0 VenusSetInit() {
+    I64 i; VkDescriptorSetLayoutBinding bindings[3]; VkDescriptorSetLayoutCreateInfo set_info;
+    VkDescriptorPoolSize sizes[2]; VkDescriptorPoolCreateInfo pool_info; VkDescriptorSetAllocateInfo allocate;
+    MemSet(bindings, 0, sizeof(bindings));
+    for (i = 0; i < 3; i++) {bindings[i].binding = i; bindings[i].descriptorCount = 1; bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; if (i) bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;}
+    MemSet(&set_info, 0, sizeof(set_info)); set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    set_info.bindingCount = 3; set_info.pBindings = bindings; vterm.set_layout = GfxId;
+    GfxBegin; vn_encode_vkCreateDescriptorSetLayout(&gfx.enc, 0, gfx.device, &set_info, NULL, &vterm.set_layout); GfxSubmit;
+    GfxResult(vn_decode_vkCreateDescriptorSetLayout_reply(&gfx.reply, gfx.device, &set_info, NULL, &vterm.set_layout), "descriptor layout");
+    MemSet(sizes, 0, sizeof(sizes)); sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; sizes[0].descriptorCount = 1;
+    sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; sizes[1].descriptorCount = 2;
+    MemSet(&pool_info, 0, sizeof(pool_info)); pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.maxSets = 1; pool_info.poolSizeCount = 2; pool_info.pPoolSizes = sizes; vterm.descriptor_pool = GfxId;
+    GfxBegin; vn_encode_vkCreateDescriptorPool(&gfx.enc, 0, gfx.device, &pool_info, NULL, &vterm.descriptor_pool); GfxSubmit;
+    GfxResult(vn_decode_vkCreateDescriptorPool_reply(&gfx.reply, gfx.device, &pool_info, NULL, &vterm.descriptor_pool), "descriptor pool");
+    MemSet(&allocate, 0, sizeof(allocate)); allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocate.descriptorPool = vterm.descriptor_pool; allocate.descriptorSetCount = 1; allocate.pSetLayouts = &vterm.set_layout; vterm.set = GfxId;
+    GfxBegin; vn_encode_vkAllocateDescriptorSets(&gfx.enc, 0, gfx.device, &allocate, &vterm.set); GfxSubmit;
+    GfxResult(vn_decode_vkAllocateDescriptorSets_reply(&gfx.reply, gfx.device, &allocate, &vterm.set), "descriptor set");
+}
+U0 VenusSetup() {
+    I64 daif;
+    gfx.no_sleep = TRUE; gfx.soft_fail = TRUE;
+    GfxInit; vterm.glyphs = CAlloc(0x110000 * 4); vterm.slots = 1;
+    GfxBufferCreate(&vterm.atlas_upload, 4096 * 2048, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    MemSet(vterm.atlas_upload.mapping, 0, 4096 * 2048);
+    GfxImageCreate(&vterm.atlas, 4096, 2048, VK_FORMAT_R8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vterm.atlas_y0 = 0; vterm.atlas_y1 = 2048;
+    vterm.shaders[0] = GfxShader("C:/Vulkan/terminal.vert.spv"); vterm.shaders[1] = GfxShader("C:/Vulkan/terminal.frag.spv");
+    VenusSamplerInit; VenusSetInit;
+    daif = FbRenderLock; vterm.install_daif = daif; vterm.installing = TRUE;
+    VenusGrid(fb.w, fb.h);
+    FbVenusHooks(&VenusFrame, &VenusFill);
+    fb.venus = TRUE; fb.redraw_all = TRUE; FbRenderLocked;
+    FbRenderUnlock(daif); vterm.installing = FALSE; gfx.soft_fail = FALSE;
+    Print("VENUS TERMINAL READY\n");
+}
+// Fake capsets deliberately do not qualify. Missing prerequisites keep the CPU renderer.
+if (GpuVenusInit && venus.cap_size >= 156 && FileFind("C:/Vulkan/terminal.vert.spv") && FileFind("C:/Vulkan/terminal.frag.spv")) {
+    try {VenusSetup;}
+    catch {
+        Fs->catch_except = TRUE;
+        if (vterm.installing) {
+            fb.venus = FALSE; FbVenusHooks(NULL, NULL);
+            FbRenderUnlock(vterm.install_daif); vterm.installing = FALSE;
+        }
+        fb.redraw_all = TRUE; fb.pending = TRUE;
+        // Context teardown destroys partially constructed Vulkan objects too.
+        I64 cleanup_i;
+        for (cleanup_i = 0; cleanup_i < GPU_VENUS_BLOBS; cleanup_i++) if (venus.blobs[cleanup_i].id) GpuBlobDestroy(&venus.blobs[cleanup_i]);
+        GpuVenusDestroy;
+        Print("VENUS TERMINAL unavailable; using fallback\n");
+    }
+}

@@ -6,7 +6,6 @@
  * and the /chosen + cpu-release-addr fix-ups from m1n1 src/kboot.c.
  */
 #include "coolvm.h"
-#include "logos.h"
 #include <time.h>
 
 /* dt-bindings/interrupt-controller/apple-aic.h and irq.h */
@@ -113,7 +112,6 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
         fdt_prop_cells(f, "reg", reg, 4);
         fdt_prop_u32(f, "interrupt-parent", PH_AIC);
         fdt_prop_cells(f, "interrupts", ints, 3);
-        if (g.logos) fdt_prop_u32(f, "coolcom,logos", LOGOS_VERSION); /* docs/logos.md */
         fdt_end(f);
     }
     fdt_begin(f, "serial@235200000");

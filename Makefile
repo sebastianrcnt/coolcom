@@ -281,7 +281,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: venus-gen-test venus-transport-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: venus-gen-test venus-transport-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -364,15 +364,7 @@ lua-kernel-test: build/lua/LuaRuntime.cool build/kernel.Image coolvm
 .PHONY: gpu-pixel-test
 gpu-pixel-test: build/kernel.Image coolvm
 	python3 tools/scroll-bench.py gpu-pixel-ref $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-gpu --expect-gpu 0
-	python3 tools/scroll-bench.py gpu-pixel $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-logos --expect-gpu 1 --compare gpu-pixel-ref
-
-# Logos (docs/logos.md): the GPU cell renderer against the CPU one: a few screens compared
-# within a tolerance (bold differs), and the scroll/fill pixel run exactly equal.
-.PHONY: logos-test
-logos-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
-	python3 tools/logos-test.py $<
-	python3 tools/scroll-bench.py logos-pixel-ref $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-gpu --expect-gpu 0
-	python3 tools/scroll-bench.py logos-pixel $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --expect-gpu 1 --compare logos-pixel-ref
+	python3 tools/scroll-bench.py gpu-pixel $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-venus --expect-gpu 1 --compare gpu-pixel-ref
 
 .PHONY: gpu-resize-test
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -403,7 +395,7 @@ venus-gen-test: build/coolc
 .PHONY: venus-memory-test
 build/venus/Vulkan.cool: tools/venus/gen.py tools/venus/subset.txt tools/venus/wire.cool
 	python3 tools/venus/gen.py
-build/coolvm-venus: $(wildcard tools/coolvm/src/*.[ch]) tools/coolvm/build.sh
+build/coolvm-venus: $(wildcard tools/coolvm/src/*.[chm]) tools/coolvm/build.sh
 	COOLVM_VENUS=1 tools/coolvm/build.sh $@
 venus-memory-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool
 	python3 tools/venus/run_guest.py
@@ -417,3 +409,21 @@ build/venus/triangle.frag.spv: tools/venus/shaders/triangle.frag
 	glslang -V --target-env vulkan1.2 $< -o $@
 venus-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool build/venus/triangle.vert.spv build/venus/triangle.frag.spv
 	python3 tools/venus/run_guest.py --triangle
+
+# Resident terminal library and shaders; explicit opt-in, never downloads.
+.PHONY: venus-terminal venus-term-test
+build/venus/terminal.vert.spv: tools/venus/shaders/terminal.vert
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+build/venus/terminal.frag.spv: tools/venus/shaders/terminal.frag
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+venus-terminal: build/venus/Vulkan.cool build/venus/terminal.vert.spv build/venus/terminal.frag.spv
+venus-term-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal
+	python3 tools/venus-term-test.py $<
+
+.PHONY: venus-disk venus-run
+venus-disk: disk-install venus-terminal
+	tools/venus/install.sh build/disk.img
+venus-run: build/kernel.Image build/coolvm-venus venus-disk
+	build/coolvm-venus --cpus 2 --mem 1024 --disk build/disk.img $<

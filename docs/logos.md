@@ -1,4 +1,9 @@
-# Logos
+# Logos (historical design)
+
+The custom Logos transport was retired after Venus milestone 3 passed. The
+cell/atlas/overlay design below now lives in the guest Vulkan terminal app;
+see [implementation, tests and measurements](venus.md#milestone-3-resident-vulkan-terminal).
+This document preserves the original protocol and M1 measurements for history.
 
 Logos is coolcom's GPU graphics layer, named after John 1:14 ("the Word became flesh"):
 text becoming visible. Its first part draws the console's terminal cells on the GPU in

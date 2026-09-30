@@ -103,7 +103,7 @@ def main():
     script += vim.wait('SHOT1') + vim.finish('NORMAL C:/Syn.warm', 500)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2', '--mem', '1024',
+        subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2', '--mem', '1024',
                         '--timeout', '45', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
                         '--disk', str(disk), '--screenshot', str(d / 'screen.png'), sys.argv[1]],
                        stdout=out, stderr=subprocess.STDOUT)

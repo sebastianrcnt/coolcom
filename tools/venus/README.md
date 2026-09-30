@@ -68,3 +68,11 @@ transport. `make venus-memory-test` verifies GPU buffer copy coherence and
 and checks the headless screenshot. These opt-in targets require the explicit
 host and generator vendor steps and a host `glslang`; they never download.
 See [results and build instructions](../../docs/venus.md#milestone-1-complete-2026-09-30).
+
+
+The resident terminal app is `os/Vulkan/Terminal.cool`; `make venus-terminal`
+builds its shaders, `make venus-disk` installs its library/shaders on the normal
+disk, and `make venus-run` uses it in the optional host. `make venus-term-test`
+compares the five established terminal screens against CPU pixels, including
+wide glyphs, cursor, pixel overlay, scrolling and resize. All remain opt-in and
+never download dependencies.

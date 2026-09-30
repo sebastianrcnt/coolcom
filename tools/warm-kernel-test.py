@@ -74,7 +74,7 @@ def stdin_test(OUT):
     log = OUT / "Stdin.log"
     with log.open("wb") as stream:
         proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
         proc.wait()
@@ -109,7 +109,7 @@ def portable_test(OUT, name):
     log = OUT / (name + "Run.log")
     with log.open("wb") as stream:
         proc = subprocess.run(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
     output = log.read_text(errors="replace")
@@ -134,7 +134,7 @@ def fmt_test(OUT):
     log = OUT / "Fmt.log"
     with log.open("wb") as stream:
         proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
         proc.wait()
@@ -212,7 +212,7 @@ def main():
         log = OUT / (name + ".log")
         with log.open("wb") as stream:
             proc = subprocess.Popen(["gtimeout", "-k", "2", "22", str(ROOT / "build/coolvm"),
-                "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "18",
+                "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "18",
                 "--disk", str(disk), "--input-script", str(script),
                 "--screenshot", str(OUT / (name + ".png")), str(ROOT / "build/kernel.Image")],
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)

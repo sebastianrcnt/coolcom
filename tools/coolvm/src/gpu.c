@@ -1,7 +1,6 @@
 /* Virtio 1.2 section 5.7: synchronous 2D and opt-in Venus, one scanout, two
  * split queues. All device state (including presentation) is under g.lock. */
 #include "virtio.h"
-#include "logos.h"
 #include "gpu3d.h"
 #define GPU_RESOURCES 64
 #define GPU_BYTES (256ULL << 20)
@@ -141,10 +140,6 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
                     if(!backing_read(r,offset+row*stride,r->pixels+((uint64_t)(y+row)*r->w+x)*4,w*4)){result=0x1205;break;}
             }
         }
-    } else if(type>=LOGOS_CMD_GRID && type<=LOGOS_CMD_PRESENT) {
-        /* Logos (logos.m): only for a driver that accepted the feature. */
-        if(!(gpu.v.drvfeat[0]&(1u<<LOGOS_FEATURE)))result=0x1200;
-        else result=logos_command(type,p,len);
     } else result=0x1200;
     vio_put32(out,result);return n;
 }
@@ -182,8 +177,8 @@ static void process(unsigned queue)
     }
     aic_update_locked();
 }
-static void features(void){gpu.v.devfeat0=(g.logos?1u<<LOGOS_FEATURE:0)|((gpu.venus || g.gpu_3d_stub)?GPU3D_FEATURES:0);}
-void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;gpu.venus=g.gpu && !g.gpu_3d_stub && gpu3d_init();features();}
+static void features(void){gpu.v.devfeat0=((gpu.venus || g.gpu_3d_stub)?GPU3D_FEATURES:0);}
+void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;gpu.venus=g.gpu && !g.no_venus && !g.gpu_3d_stub && gpu3d_init();features();}
 bool gpu_irq_level(void){return g.gpu && gpu.v.isr!=0;}
 bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
 {
@@ -210,7 +205,7 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
         for(unsigned i=0;i<GPU_RESOURCES;i++)discard(&gpu.res[i]);
         memset(&gpu.v,0,sizeof gpu.v);gpu.scan_id=0;gpu.cursor_on=false;gpu.active=false;
         if(gpu.venus){gpu3d_reset();gpu.venus=gpu3d_init();}
-        gpu.stub_ctx=0;gpu.shm_sel=0;features();logos_reset();
+        gpu.stub_ctx=0;gpu.shm_sel=0;features();
     } else if(!virtio_regs(&gpu.v,16,off,wr,&x))return false;
     if(!wr)*val=x;aic_update_locked();return true;
 }
