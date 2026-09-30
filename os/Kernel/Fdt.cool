@@ -9,6 +9,7 @@ CFdtRange fdt_mem[FDT_MEMS], fdt_res[FDT_RES];
 CFdtCpu fdt_cpu[FDT_CPUS];
 I64 fdt_nmem, fdt_nres, fdt_ncpu;
 I64 fdt_uart = 0x235200000, fdt_aic = 0x23B100000;
+I64 fdt_uart_irq;  // its AIC interrupt (0: none known)
 I64 fdt_finisher, fdt_size;
 Bool fdt_vm, fdt_test;
 I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate.cool)
@@ -155,6 +156,8 @@ Bool FdtInit(U8 *dt)
         } else if (tok == 2) {
             if (depth == 2 && (kind[1] == 3 || kind[1] == 10))
                 FdtNodeDone;
+            if (depth == 2 && kind[2] == 6 && fdt_nd.irq)
+                fdt_uart_irq = fdt_nd.irq;
             depth--;
         } else if (tok == 3) {
             len = Fdt32(p);

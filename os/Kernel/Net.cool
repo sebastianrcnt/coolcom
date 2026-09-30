@@ -303,6 +303,8 @@ I64 IpSend(I64 proto, I64 dst, U8 *payload, I64 len, I64 src = -1)
         net_loop_len[i] = 20 + len;
         net_loop_cnt++;
         net_stats.loop_pkts++;
+        if (net_task && net_task != Fs)
+            TaskWake(net_task);
         return 0;
     }
     if (!net_nic)

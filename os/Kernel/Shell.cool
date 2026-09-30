@@ -269,9 +269,9 @@ U0 RtExit(I64 status)
 {
     Print("shell: compiler exited (%d); shell halted\n", status);
     if (!VtCurrent || VtCurrent->direct) shell_state = -1;
-    while (TRUE) {
+    while (TRUE) {  // halted: sleep (breaks and kills still wake it)
+        Fs->wake_jiffy = JIFFY_NEVER;
         Yield;
-        ArchWfi;
     }
 }
 
@@ -335,7 +335,7 @@ U0 ShellBreak(CExceptFrame *f)
         f->elr = &ShellBreakNow;
     else {  // the flag first: Sleep checks it after it sees wake_jiffy change
         LBts(&t->task_flags, TASKf_PENDING_BREAK);
-        ArchStoreRel(&t->wake_jiffy, 0);
+        TaskWake(t);
     }
 }
 

@@ -30,6 +30,7 @@ U8 *break_hook;   // U0 (*)(CExceptFrame *f): called with the interrupted frame 
 
 extern Bool TaskStackFault(CTask *t, CExceptFrame *f);
 extern U0 FbFlush();
+extern U0 TaskEventWake();
 
 U0 StackOverflowExit()
 {
@@ -42,7 +43,9 @@ U0 KExcept(I64 vec, CExceptFrame *f)
     I64 (*hook)(I64 vec, CExceptFrame *f);
     U0 (*brk)(CExceptFrame *f);
     if (vec == EXC_CUR_SPX_IRQ) {
+        JiffiesUpdate;  // the core may have slept without ticks (IdleWait)
         IrqDispatch;
+        TaskEventWake;  // input, network, ...: event waits look again
         if (break_req) {
             break_req = 0;
             brk = break_hook;

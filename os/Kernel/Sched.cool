@@ -8,6 +8,13 @@ extern U0 VtTaskGone(CTask *t);
 // context_save_area[0] the stack pointer saved while switched out.
 #define TASK_STACK_SIZE (128*1024)
 
+// Tickless idle: a core whose tasks all sleep does not tick. IdleWait (the idle loops and
+// Yield's "nothing ready" wait) sets its timer for the nearest wake_jiffy (or console
+// frame) and waits for any interrupt. So everything that makes a task ready must wake
+// the core it is on: TaskWake and CoreKick send it an IPI. A task waiting for input
+// uses an event wait (TaskEventArm/TaskEventSleep, GetKey): any device interrupt or key
+// push (TaskEventWake) makes it ready.
+//
 // CPU time: Yield adds the counter ticks a task ran between two switches to its
 // task_ticks (CTask.user_data, which nothing else uses). A core's first task (Adam, Seth)
 // is the idle task: it runs when the others sleep. Top reads these.
@@ -105,6 +112,124 @@ U0 TaskReap(CCPU *c)
     }
 }
 
+#define TASKf_EVENT_WAIT TASKf_AWAITING_MSG  // in an event wait: TaskEventWake makes it ready
+#define JIFFY_NEVER      0x7FFFFFFFFFFFFFFF
+#define IDLE_MAX_JIFFIES 1000  // a tickless core looks at its tasks at least once a second
+
+extern I64 FbNextJiffy();  // Fb.cool: when the console renderer next needs the core-0 tick
+
+U0 CoreKick(CCPU *c)
+{//Make core c look at its tasks now: it may be in IdleWait with its tick off.
+    CCPU *me = Gs;
+    if (me && c != me && (!c->num || c->online))
+        IntcSendIpi(fdt_cpu[c->num].mpidr);
+}
+
+U0 TaskWake(CTask *t)
+{//Make a sleeping task ready now, on whichever core it is.
+    ArchStoreRel(&t->wake_jiffy, 0);
+    CoreKick(t->gs);
+}
+
+U0 TaskEventWake()
+{//An interrupt or a key: every task in an event wait looks again.
+    I64 i, daif;
+    CCPU *c;
+    CTask *t;
+    Bool woke;
+    for (i = 0; i < mp_cnt; i++) {
+        c = &cpu_structs[i];
+        if (c->seth_task) {
+            woke = FALSE;
+            daif = SpinLockIrq(&c->lock);
+            t = c->seth_task;
+            do {
+                if (LBtr(&t->task_flags, TASKf_EVENT_WAIT)) {
+                    t->wake_jiffy = 0;
+                    woke = TRUE;
+                }
+                t = t->next_task;
+            } while (t != c->seth_task);
+            SpinUnlockIrq(&c->lock, daif);
+            if (woke)
+                CoreKick(c);
+        }
+    }
+}
+
+U0 TaskEventArm(I64 ms = -1)
+{//Begin an event wait of at most ms (-1: no limit). Check what you wait for after this
+    //and before TaskEventSleep: an event from now on ends the wait.
+    CTask *t = Fs;
+    I64 wake = JIFFY_NEVER;
+    if (ms >= 0)
+        wake = TimerJiffies + 1 + ms * JIFFY_FREQ / 1000;
+    ArchStoreRel(&t->wake_jiffy, wake);  // before the flag: an event in between is seen by the check
+    LBts(&t->task_flags, TASKf_EVENT_WAIT);
+}
+
+U0 TaskEventCancel()
+{
+    CTask *t = Fs;
+    LBtr(&t->task_flags, TASKf_EVENT_WAIT);
+    t->wake_jiffy = 0;
+}
+
+extern U0 Yield();
+
+U0 TaskEventSleep()
+{//Give the core away until an event (TaskEventWake), the time limit or a break.
+    Yield;
+    TaskEventCancel;
+}
+
+U0 IdleWait()
+{//Wait for an interrupt. With nothing ready on this core the tick stops until the
+    //nearest deadline: the earliest wake_jiffy, the console's next frame, at most
+    //IDLE_MAX_JIFFIES; an interrupt or IPI ends the wait sooner.
+    CCPU *c = Gs;
+    CTask *t, *cur;
+    I64 daif = ArchDaif, now, next, w;
+    Bool busy = FALSE;
+    if (!c || !cnts_per_jiffy) {
+        ArchWfi;
+        return;
+    }
+    ArchIrqOff;
+    ArchXchg(&c->tickless, 1);
+    now = TimerJiffies;
+    next = now + IDLE_MAX_JIFFIES;
+    cur = c->cur_task;
+    SpinLock(&c->lock);
+    t = cur;
+    do {
+        if (!Bt(&t->task_flags, TASKf_SUSPENDED)) {
+            w = t->wake_jiffy;
+            if (w > now) {
+                if (w < next)
+                    next = w;
+            } else if (t != cur || Bt(&t->task_flags, TASKf_KILL_TASK))
+                busy = TRUE;  // ready: keep ticking (the idle task itself does not count)
+        }
+        t = t->next_task;
+    } while (t != cur);
+    SpinUnlock(&c->lock);
+    if (!c->num && (w = FbNextJiffy) < next)
+        next = w;
+    if (busy || next <= now + 1) {
+        c->tickless = 0;
+        ArchWfi;  // until the next tick
+        ArchIntRestore(daif);
+        return;
+    }
+    TimerArm(next);
+    ArchWfi;
+    c->tickless = 0;
+    TimerArm(TimerJiffies + 1);
+    JiffiesUpdate;
+    ArchIntRestore(daif);
+}
+
 U8 *task_break_hook;  // U0 (*)(): runs on a task that returns from Yield with TASKf_PENDING_BREAK set (the shell)
 
 U0 TaskBreakCheck(CTask *t)
@@ -140,7 +265,7 @@ U0 Yield()
         if (t != cur || TaskReady(cur))
             break;
         SpinUnlockIrq(&c->lock, daif);
-        ArchWfi;  // nothing ready: wait for the next tick
+        IdleWait;  // nothing ready: until an interrupt or the nearest deadline
     }
     if (t == cur) {
         SpinUnlockIrq(&c->lock, daif);
@@ -247,6 +372,7 @@ CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NUL
     t->last_task->next_task = t;
     c->seth_task->last_task = t;
     SpinUnlockIrq(&c->lock, daif);
+    CoreKick(c);
     return t;
 }
 
@@ -291,14 +417,14 @@ Bool Kill(CTask *task, Bool wait = TRUE, Bool just_break = FALSE)
     if (TaskValidate(task)) {
         if (just_break) {
             LBts(&task->task_flags, TASKf_PENDING_BREAK);
-            task->wake_jiffy = 0;
+            TaskWake(task);
             return TRUE;
         }
         for (i = 0; i < mp_cnt; i++)
             if (task == cpu_structs[i].seth_task)
                 return FALSE;
         LBts(&task->task_flags, TASKf_KILL_TASK);
-        task->wake_jiffy = 0;
+        TaskWake(task);
         if (task == Fs)
             Yield;  // doesn't return
         if (wait)
@@ -311,13 +437,15 @@ Bool Kill(CTask *task, Bool wait = TRUE, Bool just_break = FALSE)
 
 Bool Suspend(CTask *task = NULL, Bool state = TRUE)
 {//Tell scheduler to skip task.
+    Bool was;
     if (!task)
         task = Fs;
     if (TaskValidate(task)) {
         if (state)
             return LBts(&task->task_flags, TASKf_SUSPENDED);
-        else
-            return LBtr(&task->task_flags, TASKf_SUSPENDED);
+        was = LBtr(&task->task_flags, TASKf_SUSPENDED);
+        CoreKick(task->gs);
+        return was;
     }
     return FALSE;
 }

@@ -333,12 +333,6 @@ U0 FbRenderLocked()
     FbDamage(dy0, dy1);
 }
 
-U0 FbIntRestore(I64 daif)
-{//ArchIntRestore, which unmasks for a moment even when daif is masked: not in the timer interrupt.
-    if ((daif & 0xC0) != 0xC0)
-        ArchIntRestore(daif);
-}
-
 I64 FbRenderLock()
 {//Take the renderer, spinning; returns the DAIF for FbRenderUnlock.
     I64 daif = ArchDaif;
@@ -352,7 +346,7 @@ U0 FbRenderUnlock(I64 daif)
 {
     fb.last_render = jiffies;
     ArchStoreRel(&fb.render_lock, 0);
-    FbIntRestore(daif);
+    ArchIntRestore(daif);
 }
 
 U0 FbRender()
@@ -367,7 +361,7 @@ U0 FbRender()
         FbRenderUnlock(daif);
         return;
     }
-    FbIntRestore(daif);
+    ArchIntRestore(daif);
 }
 
 U0 FbFlush()
@@ -386,25 +380,41 @@ U0 FbTick()
 
 //---- the console
 
+I64 FbNextJiffy()
+{//When the renderer next wants the core-0 tick (IdleWait, Sched.cool); JIFFY_NEVER if not.
+    I64 a, b;
+    if (!fb.base || !fb.pending)
+        return JIFFY_NEVER;
+    a = fb.last_put + FB_IDLE_JIFFIES;
+    b = fb.last_render + FB_FRAME_JIFFIES;
+    if (b < a)
+        return b;
+    return a;
+}
+
 U0 FbPutC(U8 c)
 {//Console output: into the grid; the renderer draws it later.
     CVTerm *v = fb.vt;
     I64 daif, me = ArchCpuNum + 1;
-    Bool nested = v->lock && fb.put_owner == me; // an exception while this core was writing
+    Bool nested = v->lock && fb.put_owner == me, // an exception while this core was writing
+            was_pending;
     if (!nested)
         daif = SpinLockIrq(&v->lock);
     fb.put_owner = me;
     VtPut(v, c);
     v->dirty = TRUE;
     fb.cursor_hidden = FALSE;
+    was_pending = fb.pending;
     fb.pending = TRUE;
-    fb.last_put = jiffies;
+    fb.last_put = TimerJiffies;
     if (!nested) {
         fb.put_owner = 0;
         SpinUnlockIrq(&v->lock, daif);
     }
     if (!fb.ticking && c == '\n')
         FbRender;
+    else if (me != 1 && !was_pending && cpu_structs[0].tickless)
+        CoreKick(&cpu_structs[0]);  // the renderer's tick is on core 0
 }
 
 U0 FbFillRect(I64 x, I64 y, I64 w, I64 h, I64 color)

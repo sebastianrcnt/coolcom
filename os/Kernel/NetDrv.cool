@@ -142,6 +142,26 @@ U0 NetDrvRxDone()
     net_dev.rx_repost = TRUE;
 }
 
+Bool NetDrvRxReady()
+{//A received frame is waiting.
+    ArchDsb;
+    return *(net_dev.rxused + 2)(U16i *) != (net_dev.rx_used & 0xFFFF);
+}
+
+U0 NetDrvIrq(I64 irq)
+{//Acknowledge (InterruptStatus -> InterruptACK); the frames are taken by NetPoll.
+    NetVioWr(0x64, NetVioRd(0x60));
+}
+
+U0 NetDrvIrqOn(I64 irq)
+{//Interrupt on received frames, so the network task can sleep without ticks.
+    if (!irq)
+        return;
+    *(net_dev.rxavail)(U16i *) = 0;  // clear VRING_AVAIL_F_NO_INTERRUPT
+    ArchDsb;
+    IrqSet(irq, &NetDrvIrq);
+}
+
 U0 NetDrvKick()
 {//Tell the device about reposted receive buffers.
     if (net_dev.rx_repost) {

@@ -347,6 +347,7 @@ Bool VtKeyPush(CVTerm *v, I64 key)
     if (next == v->head || v->closed) {SpinUnlockIrq(&v->lock, daif); return FALSE;}
     v->keys[v->tail] = key; v->tail = next;
     SpinUnlockIrq(&v->lock, daif);
+    TaskEventWake;  // a GetKey on this terminal
     return TRUE;
 }
 I64 VtKeyPop()
@@ -423,6 +424,7 @@ U0 VtStop(CVTerm *v)
             t = t->next_task;
         }
         SpinUnlockIrq(&c->lock, daif);
+        CoreKick(c);
     }
 }
 

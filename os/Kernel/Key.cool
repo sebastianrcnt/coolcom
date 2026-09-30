@@ -44,6 +44,7 @@ U0 KeyPush(I64 ev)
         key_tail = next;
     }
     SpinUnlockIrq(&key_lock, daif);
+    TaskEventWake;  // GetKey
 }
 
 // ---- UART decoder ----
@@ -264,13 +265,44 @@ I64 KeyChar(I64 ev)
     return c;
 }
 
+U0 KeyUartIrq(I64 irq)
+{//UART receive interrupt: decode what arrived, then clear the (Apple) status bits.
+    KeyUartPoll;
+    ArchMmioWrite32(fdt_uart + 0x10, (1 << 3) | (1 << 4) | (1 << 9));
+}
+
+U0 KeyUartIrqInit()
+{//Receive interrupts, so a core waiting for keys can sleep without ticks. UCON: RX mode
+    //interrupt, RX threshold and timeout interrupts on, TX threshold interrupt off.
+    I64 ucon;
+    if (!fdt_uart_irq)
+        return;
+    ucon = ArchMmioRead32(fdt_uart + 0x04);
+    ucon = (ucon & ~(3 | (1 << 13))) | 1 | (1 << 9) | (1 << 12);
+    ArchMmioWrite32(fdt_uart + 0x04, ucon);
+    IrqSet(fdt_uart_irq, &KeyUartIrq);
+}
+
+U0 KeyWait()
+{//Sleep until a key could be there: an interrupt, a key push or (after a lone ESC from
+    //the UART, or without a UART interrupt) a short timeout.
+    I64 ms = -1;
+    if (ku_state)
+        ms = KEY_ESC_MS;
+    else if (!fdt_uart_irq)
+        ms = 10;
+    TaskEventArm(ms);
+    if (KeyPending)
+        TaskEventCancel;
+    else
+        TaskEventSleep;
+}
+
 I64 GetKey(Bool echo = FALSE)
 {//Wait for a key event (key code | KF_ flags) from the window or the terminal.
     I64 ev, c;
-    while (!(ev = KeyPop)) {
-        Yield;
-        ArchWfi;
-    }
+    while (!(ev = KeyPop))
+        KeyWait;
     c = KeyChar(ev);
     if (echo && (c >= 32 || c == KEY_ENTER || c == KEY_BACKSPACE || c == KEY_TAB))
         ConsPutCp(c);

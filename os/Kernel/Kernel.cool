@@ -91,7 +91,7 @@ U0 KMainAP(I64 num)
     ArchAdd(&mp_cnt, 1);
     while (TRUE) {
         Yield;
-        ArchWfi;
+        IdleWait;
     }
 }
 
@@ -127,6 +127,7 @@ U0 KMain(U8 *image_end, U8 *dt)
     CoreInit(0);
     TaskInitCur;
     InputInit;
+    KeyUartIrqInit;
     "block devices: %d\n", BlkInit;
     "drives: %d\n", DskInit;
     TimerInit;
@@ -168,6 +169,6 @@ U0 KMain(U8 *image_end, U8 *dt)
         ShellStart;
     while (TRUE) {
         Yield;
-        ArchWfi;
+        IdleWait;
     }
 }

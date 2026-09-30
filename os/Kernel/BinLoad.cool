@@ -120,9 +120,9 @@ U0 BinTrap(U8 *name)
     if (bin_trap_hook)
         (*bin_trap_hook)();  // doesn't return on the shell task
     Print("bin: task halted\n");
-    while (TRUE) {
+    while (TRUE) {  // halted: sleep (breaks and kills still wake it)
+        Fs->wake_jiffy = JIFFY_NEVER;
         Yield;
-        ArchWfi;
     }
 }
 
