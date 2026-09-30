@@ -117,7 +117,7 @@ build/disk.img: | build
 
 # make run only adds files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
-# tools/disk-files.sh copies os/Disk/*.HC and the kernel sources (C:/Kernel, for Man).
+# tools/disk-files.sh copies os/Disk programs/examples, Warm.HC, and kernel sources (C:/Kernel, for Man).
 # C:/Kernel.HH (the shell prelude) declares the kernel for programs compiled
 # with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
 # Cmp("C:/Compiler/Native.HC") in the OS rebuilds coolc/seed/Compiler.BIN.
@@ -125,6 +125,12 @@ build/disk.img: | build
 # includes as ../../coolc/... in C:/coolc (".." stops at the root), and the
 # prebuilt assembly C:/Kernel/BootStub.BIN, so `MakeKernel` in the OS rebuilds
 # build/kernel.Image (docs/kernel-rebuild.md).
+# Package the Cool implementation of Warm for the kernel shell. disk-files.sh
+# also requests this target when populating a test or external disk image.
+build/warmcool/Kernel.HC: $(wildcard warmc/Cool/*.HC warmc/lib/builtin/*.aui warmc/lib/builtin/*.aum) warmc/Cool/build.sh warmc/Cool/embed_builtins.py warmc/Cool/package_kernel.py coolc/seed/Compiler.BIN build/coolc
+	./warmc/Cool/build.sh
+	python3 warmc/Cool/package_kernel.py
+
 disk-install: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
@@ -147,51 +153,51 @@ run-net: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img --net-forward 2323:23 --net-forward 8080:80 $<
 
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
-vim-test: build/kernel.Image coolvm
+vim-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/vim-test.py $<
 
 # Ctrl+B, Up and Esc must give the same key events from the window and the UART.
-key-test: build/kernel.Image coolvm
+key-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/key-test.py $<
 
-tmux-test: build/kernel.Image coolvm
+tmux-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/tmux-test.py $<
 
 # 256-color/truecolor SGR, cursor save/restore and AnsiTermSize (os/Kernel/Ansi.HC), on the console and in Tmux.
-ansi-test: build/kernel.Image coolvm
+ansi-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/ansi-test.py $<
 
 # Vim highlighting by file extension, block-comment state and compiler symbol-table colors (os/Kernel/Syntax.HC).
-syntax-test: build/kernel.Image coolvm
+syntax-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/syntax-test.py $<
 
 # The OS compiles its own compiler: Cmp in the shell must reproduce the seed.
-selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH
+selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH build/warmcool/Kernel.HC
 	tools/selfhost-test.sh $<
 
 # The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image,
 # and a kernel it changed and rebuilt must boot to a shell prompt through Reboot (about 6 s).
-kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm
+kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm build/warmcool/Kernel.HC
 	tools/kernel-rebuild-test.sh $<
 
 # Find, HexDump, Diff, Less and Man on C: (os/Disk); the kernel sources go to C:/Kernel (tools/disk-files.sh).
-text-test: build/kernel.Image coolvm
+text-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/text-test.py $<
 
 # Hangul 2-beolsik input from the window's keyboard (os/Kernel/Ime.HC).
-ime-test: build/kernel.Image coolvm
+ime-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/ime-test.py $<
 
 # coolvm --net-forward into ShellServe (remote shells) and HttpServe, and Wget to C: (os/Kernel/NetShell.HC, NetHttp.HC).
-net-forward-test: build/kernel.Image coolvm
+net-forward-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/net-forward-test.py $<
 
 # Top: tasks per core with state and CPU share, heap and FAT32 lines, sort, kill.
-top-test: build/kernel.Image coolvm
+top-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/top-test.py $<
 
 # Unix-style command lines (vim a.HC, find foo) and Tab completion in the shell (os/Kernel/ShellCmd.HC).
-cmdline-test: build/kernel.Image coolvm
+cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	python3 tools/cmdline-test.py $<
 
 # Every check boots its own VMs with its own disk images and output directory, so
@@ -200,9 +206,9 @@ cmdline-test: build/kernel.Image coolvm
 test: reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
 
 # The device and shell self-tests (DevTest.HC), at the link address and 4 MiB higher.
-kernel-test: build/kernel.Image coolvm
+kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	tools/kernel-test.sh $<
-kernel-test-reloc: build/kernel.Image coolvm
+kernel-test-reloc: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	tools/kernel-test.sh $< --load-offset 0x600000
 
 $(B):
@@ -244,7 +250,7 @@ stbtt-test: build/coolc build/hcfmt.BIN
 	python3 tools/c2hc/stbtt_test.py
 
 .PHONY: warm-kernel-test
-warm-kernel-test: build/kernel.Image coolvm
+warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 	mkdir -p build/tmp
 	TMPDIR="$(CURDIR)/build/tmp" ./warmc/build.sh
 	python3 tools/warm-kernel-test.py

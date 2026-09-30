@@ -217,8 +217,7 @@ def main():
     def copy(path, name):
         run(['mcopy', '-o', '-i', str(disk), str(path), '::' + name])
 
-    for path in sorted(pathlib.Path('os/Disk').glob('*.HC')):
-        copy(path, path.name)
+    run(['tools/disk-files.sh', str(disk)])
     other = d / 'Other.txt'
     other.write_text('other\n')
     copy(other, other.name)

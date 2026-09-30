@@ -12,6 +12,8 @@ IMG=$1
 FLAG=-o
 [ "${2:-}" = "-n" ] && FLAG=-n
 cd "$ROOT"
+# Build once, and refresh only when the compiler or its embedded sources change.
+make build/warmcool/Kernel.HC
 for d in Kernel coolc coolc/Runtime coolc/Fmt; do
     # mmd asks on the terminal when the directory exists, so only make missing ones.
     mdir -i "$IMG" ::$d >/dev/null 2>&1 || mmd -i "$IMG" ::$d </dev/null
@@ -27,7 +29,11 @@ put() {
         mcopy -o -i "$IMG" "$f" "::$dir"
     done
 }
-put "" os/Disk/*.HC
+put "" os/Disk/*.HC os/Disk/*.aum
+# Install the generated package under its public shell name.
+if [ "$FLAG" != -n ] || ! mdir -i "$IMG" ::Warm.HC >/dev/null 2>&1; then
+    mcopy -o -i "$IMG" build/warmcool/Kernel.HC ::Warm.HC
+fi
 put Kernel/ os/Kernel/*
 [ ! -f build/BootStub.BIN ] || put Kernel/ build/BootStub.BIN
 put coolc/Runtime/ coolc/Runtime/*.HC

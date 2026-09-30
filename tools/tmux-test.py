@@ -50,8 +50,7 @@ def vim_panes(kernel):
     with disk.open('wb') as f:
         f.truncate(64 * 1024 * 1024)
     subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'TMUXVIM', '::'], check=True)
-    for p in (ROOT / 'os/Disk').glob('*.HC'):
-        subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + p.name], check=True)
+    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     for name, contents in [('Left.txt', b'abc\n'), ('Right.txt', b'xyz\n'), ('Page.txt', b'x\n' * 60)]:
         p = d / name
         p.write_bytes(contents)
@@ -113,8 +112,7 @@ def main():
         f.truncate(40 * 1024 * 1024)
     subprocess.run(['newfs_msdos', '-F', '32', '-S', '512', '-c', '1', '-s', '81920',
                     '-h', '16', '-u', '63', '-v', 'TMUXTEST', str(disk)], check=True, capture_output=True)
-    for p in (ROOT / 'os/Disk').glob('*.HC'):
-        subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + p.name], check=True)
+    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     # Same symbol name in both compilers must retain different values. Left
     # sleeps while the right shell compiles and executes, then both are visible.
     script = vim.BOOT + line('Tmux;') + 'delay 1500\n'

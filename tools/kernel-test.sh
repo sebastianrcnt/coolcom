@@ -46,7 +46,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     echo "net shell commands: OK"
     # Compile the real startup files under the heap canaries as a regression
     # for GraphColor indexing its candidate array with an uncolored (-1) neighbor.
-    mcopy -o -i "$dir/fat.img" os/Disk/*.HC ::
+    tools/disk-files.sh "$dir/fat.img"
     # coolvm stops the VM once the shell has echoed the Korean line and printed it (an input script of
     # waits and quit: tools/coolvm/README.md), then the screenshot is saved.
     printf 'wait 한글 테스트\nwait 한글 테스트\ndelay 300\nquit\n' >"$dir/shell.wait"
