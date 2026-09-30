@@ -362,7 +362,7 @@ pu_sizeof_member:
               cmp.internal_types[RT_I64],
               );
 }
-extern U0 DumpRPN(CRPN *, I64 x = 0);
+extern CRPN *DumpRPN(CRPN *rpn, I64 indent = 0);
 CRPN *ICNext(CRPN *rpn) {
     CRPN *next = rpn->next;
     I64 cnt;
@@ -1075,7 +1075,7 @@ U0 PrsFmtCheck(CCmpCtrl *cc, U8 *name, I64 kind, U8 *fmt, U8 *vk, I64 nvk)
     if (!name)
         name = "Print";
     if (kind == FMT_BAD) {
-        LexWarn(cc, MStrPrint("%s: the format is not a string at ", name));
+        LexError(cc, MStrPrint("%s: the format is not a string at ", name));
         return;
     }
     if (nvk > FMT_ARGS_MAX)
@@ -1145,7 +1145,7 @@ U0 PrsFmtCheck(CCmpCtrl *cc, U8 *name, I64 kind, U8 *fmt, U8 *vk, I64 nvk)
                 n++;
                 break;
             case PRTF_ARG_BAD:
-                LexWarn(cc, MStrPrint("%s: %%%c is not a conversion (it prints as written) at ", name, ch));
+                LexError(cc, MStrPrint("%s: %%%c is not a conversion (it prints as written) at ", name, ch));
                 return;
         }
 fmt_next:;
@@ -1153,15 +1153,15 @@ fmt_next:;
     if (n > FMT_ARGS_MAX)
         return;
     if (n != nvk) {
-        LexWarn(cc, MStrPrint("%s: the format takes %d argument(s) but %d given at ", name, n, nvk));
+        LexError(cc, MStrPrint("%s: the format takes %d argument(s) but %d given at ", name, n, nvk));
         return;
     }
     for (i = 0; i < n; i++)
         if (want[i] != vk[i]) {
             if (want[i])
-                LexWarn(cc, MStrPrint("%s: argument %d is an integer but the format wants an F64 at ", name, i + 1));
+                LexError(cc, MStrPrint("%s: argument %d is an integer but the format wants an F64 at ", name, i + 1));
             else
-                LexWarn(cc, MStrPrint("%s: argument %d is an F64 but the format wants an integer or string at ", name, i + 1));
+                LexError(cc, MStrPrint("%s: argument %d is an F64 but the format wants an integer or string at ", name, i + 1));
             return;
         }
 }

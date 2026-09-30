@@ -1274,13 +1274,13 @@ extern I64 __builtin_ffsll(I64 x);      // 1+index of the lowest set bit, 0 if x
 extern I64 __builtin_popcountll(I64 x);
 extern I64 __builtin_clzl(I64 x);       // count of leading zero bits, x!=0
 extern I64 __builtin_ctzl(I64 x);       // count of trailing zero bits, x!=0
-extern U0 __builtin___clear_cache(U8 *begin, U8 *end); //INTEGRATION: I-cache flush, stubbed
+extern U0 __builtin___clear_cache(U8 *begin, U8 *_end); //INTEGRATION: I-cache flush, stubbed
 extern U0 sys_icache_invalidate(U8 *begin, I64 len);   //INTEGRATION: I-cache flush, stubbed
 
 // ---- Host runtime used by the port (INTEGRATION: provided by the coolcom kernel, wired up later) ----
 extern CBTask *BFs;                                                    //INTEGRATION: current task
-extern CBHash *BHashFind(U8 *str, CBHashTable *table, I64 type, I64 inst); //INTEGRATION
-extern U0 BHashAdd(CBHash *h, CBHashTable *table);                     //INTEGRATION
+extern CBHash *BHashFind(U8 *str, CBHashTable *t, I64 type, I64 inst = 1); //INTEGRATION
+extern U0 BHashAdd(CBHash *h, CBHashTable *t);                     //INTEGRATION
 extern CBHeapCtrl *BHeapCtrlInit(CBHeapCtrl *ct, CBTask *task, I64 is_code_heap); //INTEGRATION
 extern U0 BHeapCtrlDel(CBHeapCtrl *ct);                                //INTEGRATION
 #ifdef BACKEND_STANDALONE // MSize: kernel provides it
@@ -1296,7 +1296,7 @@ extern U0 BQueDel(CBQue *f);
 extern I64 BQueCnt(CBQue *head);
 #endif
 extern I64 BFFICall2(U8 *fptr, I64 a, I64 b);                    //INTEGRATION
-extern U0 BQSort(U8 *base, I64 cnt, I64 sz, U8 *cmp);                  //INTEGRATION: libc BQSort (cmp takes two element pointers)
+extern U0 BQSort(U8 *base, I64 cnt, I64 size, U8 *cmp);                  //INTEGRATION: libc BQSort (cmp takes two element pointers)
 extern F64 BFMod(F64 a, F64 b);                                        //INTEGRATION: libc
 extern F64 BPow(F64 a, F64 b);                                         //INTEGRATION: libc
 

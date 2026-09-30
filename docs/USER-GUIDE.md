@@ -173,7 +173,7 @@ memory, and `HeapStats;` shows heap use and checks the heap for consistency.
 
 ```
 C:/> Cmp("Lib");                      // Lib.cool starts with #include "Kernel.coolh"
-Errs:0 Warns:9 Code:C0 Size:11E
+Errs:0 Code:C0 Size:11E
 C:/> Load("Lib");
 Lib loaded
 C:/> extern I64 Tri(I64 x);
@@ -188,8 +188,11 @@ OS can also rebuild itself: `Cmp("C:/Compiler/Native.cool")` reproduces the comp
 
 ### What the compiler rejects, and what Vet reports
 
-The compiler stops a program (an error, no BIN, and `Cmp` returns the error count) for constructs that are
-almost certainly bugs; it reports all of them in a file, not only the first:
+The compiler has no warnings. What is almost certainly a bug is an error: the program is not compiled (no BIN,
+`Cmp` returns the error count), and all the errors of a file are reported, not only the first. What is only
+style is reported by `Vet`, and only there.
+
+Errors:
 
 - a string compared with `==` or `!=` against a string literal (`s == "abc"` compares addresses; use `StrCmp`);
 - an integer constant divided by or taken modulo zero (`n / 0`, `n %= 0`; a float divided by 0 is fine) and a
@@ -197,17 +200,28 @@ almost certainly bugs; it reports all of them in a file, not only the first:
 - a duplicate `case` value in a `switch`;
 - a nonzero integer constant assigned to, compared with, or passed as the argument for a pointer (`p = 5`,
   `p == -1`, `Man('Tmux')`; `0`, `NULL` and casts such as `p = 5(U8 *)` are fine);
-- an unused local variable (an unused function argument is only a warning, and `no_warn x;` silences a local).
+- an unused local variable (`no_warn x;` allows one; an unused function argument is fine);
+- a `Print` format that disagrees with its arguments (count, or an integer where `%f` wants a float and back);
+- a function that does not return a value when it should (`I64 F() {}`, `return;` in an `I64` function) or that returns
+  one when it should not (`return 1;` in a `U0` function);
+- a definition whose return type, argument types, argument count or default values differ from its declaration;
+- a failed `#assert`.
 
 `Vet("file");` in the OS (`build/coolc --vet file.cool` on the host, `make vet` for the repository's own
-programs) compiles the file without output and prints style findings, each named by its check, with the
-position; nothing is reported during a normal compile:
+programs) compiles the file without output and prints the style findings, each named by its check, with the
+position; nothing of this is reported during a normal compile:
 
 | Check | Finds |
 |---|---|
 | `[assign-cond]` | an assignment used as a condition, `if (a = b)`; `if ((a = b))` says it is meant |
 | `[empty-stmt]` | an empty statement right after `if (...)`, `for (...)` or `while (...)`, as in `if (x);` |
 | `[unreachable]` | a statement right after `return`, `break` or `goto` in the same block (a label or a `case` is fine, and so is the `break;` habit after a `return`) |
+| `[unused-arg]` | a function argument that is never used |
+| `[arg-name]` | a definition that names an argument differently than its declaration |
+| `[unneeded-no-warn]` | `no_warn` on a variable that is used |
+| `[unused-extern]` | an extern variable that is never used |
+| `[u0-ptr]` | `U0 *` where `U8 *` is meant |
+| `[dup-type]` | with `Option(OPTf_WARN_DUP_TYPES, ON)`: a local declared in its own statement with a type another local has |
 
 ## Networking
 

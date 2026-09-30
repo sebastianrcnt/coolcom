@@ -7,7 +7,7 @@ U0 Fine(U8 *s, I64 n, F64 f)
     if (StrCmp(s, "abc") == 0) Print("a\n");
     if (s == NULL || s != 0) Print("b\n");
     if (*s == 'a') Print("c\n");
-    Print("%d\n", f / 0);      // a float divided by zero is +inf, not a trap
+    Print("%f\n", f / 0);      // a float divided by zero is +inf, not a trap
     Print("%d\n", n << 63);
     Print("%d\n", n >> 1);
     p = 5(U8 *);
@@ -29,4 +29,9 @@ U0 Callback(I64 unused_argument)
 U0 Variadic(U8 *fmt, ...)
 {//argc and argv are declared by the "..."
     Print("%s\n", fmt);
+}
+extern I64 Declared(I64 a, U8 *b = NULL);
+I64 Declared(I64 a, U8 *b = NULL)
+{//the same declaration and definition
+    return a + b;
 }

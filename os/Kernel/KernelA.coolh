@@ -4,6 +4,9 @@
 // domain). No imports; the kernel owns CCPU and its
 // heap (MultiCore.cool, Mem.cool). Do not edit; edit the script.
 extern class CMemBlk;
+extern class CBinMod;
+#define TASK_STACK_SIZE (128*1024) // Sched.cool; Spawn's default
+#define BACKTRACE_MAX 16 // KDbg.cool; CallerRep's default
 // Translated from Aiwnios Src/KernelA.HH (nrootconauto, BSD-3), commit e155e87.
 // Main TempleOS header
 
@@ -3810,7 +3813,7 @@ class CProgress
 
 #define MSize2 MSize
 #ifdef TARGET_BYTECODE
-extern U8 *Caller(I64 c = 0);
+extern U8 *Caller(I64 num = 0);
 #else
 #endif
 #else
@@ -3915,10 +3918,10 @@ extern Bool IsValidPtr(U8 *);
 #define MSize2 MSize
 extern U64 LBtr(U8 *, I64);
 extern U64 LBts(U8 *, I64);
-extern U8 *Caller(I64 c = 0);
+extern U8 *Caller(I64 num = 0);
 //EVIL things from AIWNIOS to be reworked
 extern I64 UnixNow();
-extern U0 VFsFTrunc(U8i *, I64i);
+extern U0 VFsFTrunc(U8 *, I64);
 extern U8i *VFsFOpen(U8i *, Bool);
 extern U0 VFsFClose(U8i *);
 extern I64 VFsFBlkRead(U8i *, I64i, I64i, U8i *);
@@ -3940,18 +3943,18 @@ extern U0 VFsFTrunc(U8 *, I64);
 extern F64 Sqrt(F64);
 #endif
 extern U8 *MemCpy(U8 *, U8 *, I64);
-extern U8 *MemSet(U8i *, U8 ch, I64 sz);
-extern U8 *MemSetU16(U16 *, U16 ch, I64 sz);
-extern U8 *MemSetU32(U32 *, U32 ch, I64 sz);
-extern U8 *MemSetU64(U64 *, U64 ch, I64 sz);
-extern U8 *MemSetI64(I64 *, I64 ch, I64 sz);
-extern I64 StrLen(I64);
+extern U8 *MemSet(U8 *dst, I64 val, I64 cnt);
+extern U8 *MemSetU16(U16 *, U16 val, I64 cnt);
+extern U8 *MemSetU32(U32 *, U32 val, I64 cnt);
+extern U8 *MemSetU64(U64 *, U64 val, I64 cnt);
+extern U8 *MemSetI64(I64 *, I64 val, I64 cnt);
+extern I64 StrLen(U8 *s);
 extern I64 StrCmp(U8 *, U8 *);
 extern U64 ToUpper(U64);
-extern U8 *FileRead(U8 *, I64 *, I64 *attr = NULL);
-extern U0 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0);
+extern U8 *FileRead(U8 *filename, I64 *_size = NULL, I64 *_attr = NULL);
+extern I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0);
 
-extern I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_let = 0);
+extern I64 Cmp(U8 *src, U8 *bin = NULL);
 
 //Forward declarations
 extern Bool DirMk(U8 *filename, I64 entry_cnt = 0);
@@ -3969,13 +3972,13 @@ extern U0 EndCatch();
 extern U0 SysUntry();
 extern CHashTable *HashTableNew(I64 size, CTask *mem_task = NULL);
 extern I64 Str2I64(U8 *st, I64 radix = 10, U8 **_end_ptr = NULL);
-extern U0 StrPrintFunSeg(U8 *buf, I64 addr, I64 field_len, I64 flags);
+extern U8 *StrPrintFunSeg(U8 *buf, I64 addr, I64 field_len = 0, I64 flags = 0);
 extern U8 *Define(U8 *dname);
 extern U8 *DefineSub(I64 sub, U8 *dname);
 extern U0 DrvsRelease();
 extern U0 BlkDevsRelease();
 extern U8 Drv2Let(CDrv *dv = NULL);
-extern Bool FileFind(U8 *filename, CDirEntry *_de = NULL, I64 fuf_flags = FUF_Z_OR_NOT_Z);
+extern Bool FileFind(U8 *filename, CDirEntry *_de = NULL, I64 fuf_flags = 0);
 extern Bool IsDir(U8 *);
 extern Bool _SixtyFPS();
 extern CBlkDev *BlkDevChk(CBlkDev *bd, Bool except = TRUE);
@@ -3991,8 +3994,8 @@ extern U0 FClose(CFile *f);
 extern CDrv *DrvChk(CDrv *dv, Bool except = TRUE);
 extern U8 Let2Let(U8 drv_let = 0);
 extern U0 RedSeaFreeFreeLst(CDrv *dv);
-extern Bool BlkRead(CDrv *dv, U8 *buf, I64 blk, I64 cnt);
-extern Bool BlkWrite(CDrv *dv, U8 *buf, I64 blk, I64 cnt);
+extern I64 BlkRead(I64 dev, I64 lba, I64 cnt, U8 *buf);
+extern I64 BlkWrite(I64 dev, I64 lba, I64 cnt, U8 *buf);
 extern Bool ISOInit(CDrv *dv, I64 blk);
 extern Bool Drv(U8 drv_let);
 extern Bool FBlkRead(CFile *f, U8 *buf, I64 blk = FFB_NEXT_BLK, I64 cnt = 1);
@@ -4008,7 +4011,7 @@ extern Bool RedSeaFileFind(CDrv *dv, I64 cur_dir_clus, U8 *name,
                            CDirEntry *_res, I64 fuf_flags = 0);
 extern Bool FAT32FileFind(CDrv *dv, I64 cur_dir_clus,
                           U8 *name, CDirEntry *_res, I64 fuf_flags = 0);
-extern U0 FAT32Init(CDrv *dv);
+extern Bool FAT32Init(CDrv *dv);
 extern Bool RedSeaDirNew(CDrv *dv, U8 *cur_dir, CDirEntry *tmpde, Bool free_old_chain);
 extern Bool FAT32DirNew(CDrv *dv, U8 *cur_dir, CDirEntry *tmpde, Bool free_old_chain);
 extern Bool DrvTypeSet(U8 drv_let, I64 type = FSt_REDSEA);
@@ -4055,7 +4058,7 @@ extern U0 DocInsEntry(CDoc *doc, CDocEntry *doc_e);
 extern Bool DocLock(CDoc *doc);
 extern I64 DocMax(I64 i = I64_MAX);
 extern CDoc *DocNew(U8 *filename = NULL, CTask *task = NULL);
-extern CDocEntry *DocPrint(CDoc *doc = NULL, U8 *fmt, ...);
+extern U0 DocPrint(CDoc *doc, U8 *fmt, ...);
 extern CDoc *DocPut(CTask *task = NULL);
 extern CDoc *DocRead(U8 *name = NULL, I64 flags = 0);
 extern Bool DocRecalc(CDoc *doc, I64 recalc_flags = RECALCt_NORMAL);
@@ -4118,7 +4121,7 @@ extern I64 WinToTop(CTask *task = NULL, Bool update_z_buf = TRUE);
 extern Bool WinVert(I64 top, I64 bottom, CTask *task = NULL);
 extern CWinMgrGlbls winmgr;
 extern U0 MsHardSet(I64 x, I64 y, I64 z, I64 l, I64 r);
-extern U8 *GetStr(U8 *msg = NULL, U8 *dft = NULL, I64 flags = 0);
+extern U8 *GetStr(U8 *buf, I64 size, Bool echo = TRUE);
 extern U0 UserStartUp();
 extern U0 DocPrintPartial(CDoc *doc = NULL, U8 *fmt, ...);
 extern U0 GetOutOfDollar();
@@ -4148,7 +4151,7 @@ public extern U0 StreamDoc(CDoc *doc);
 extern Bool DocCaptureUndo(CDoc *doc, Bool force = FALSE);
 extern U0 DocUndoRestore(CDoc *doc);
 public extern Bool DocType(CDoc *doc = NULL, U8 *filename, I64 trailing_new_lines = 1);
-public extern Bool Type(U8 *filename, I64 trailing_new_lines = 1);
+extern U0 Type(U8 *filename, I64 trailing_new_lines = 1);
 public extern U8 *DocLineRead(U8 *filename, I64 line, CTask *mem_task = NULL)
         public extern U8 *DocLineWrite(U8 *filename, I64 line, U8 *st);
 public extern Bool DocGoToLine(CDoc *doc, I64 line_num);
@@ -4320,7 +4323,7 @@ public extern I64 PopUpRunFile(U8 *filename, I64 ccf_flags = 0, ...);
 public extern U0 DocPutKey(CDoc *doc, I64 ch = 0, I64 sc = 0);
 extern Bool KDDocPutKey(I64 ch, I64 scan_code);
 extern CDocEntry *DocPutS(CDoc *doc, U8 *st);
-public extern CDocEntry *DocPrint(CDoc *doc = NULL, U8 *fmt, ...);
+extern U0 DocPrint(CDoc *doc, U8 *fmt, ...);
 public extern U0 DocPrintPartial(CDoc *doc = NULL, U8 *fmt, ...);
 extern Bool KDDocPutS(U8 *st);
 public extern U0 DocPrintAtomic(CDoc *doc = NULL, U8 *fmt, ...);
@@ -4675,7 +4678,7 @@ extern U8 *EdSprite(I64 bin_num);
 public extern U0 WinZBufUpdate();
 extern U0 InputFilterTask();
 extern Bool DirMk(U8 *filename, I64 entry_cnt = 0);
-extern I64 Dir(U8 *files_find_mask = ".", Bool full = FALSE);
+extern I64 Dir(U8 *files_find_mask = "*", Bool full = FALSE);
 extern U0 BlkDevLockFwdingSet(CBlkDev *bd);
 extern I64 BlkDevAdd(CBlkDev *bd, I64 prt_num = I64_MIN,
                      Bool whole_drv, Bool make_free);
@@ -4691,11 +4694,11 @@ extern CBlkDev *BlkDevChk(CBlkDev *bd, Bool except = TRUE);
 extern CBlkDev *Let2BlkDev(U8 drv_let = 0, Bool except = TRUE);
 #define ZERO_BUF_SIZE	2048
 extern U0 BlkWriteZero(CDrv *dv, I64 blk, I64 cnt);
-extern Bool BlkRead(CDrv *dv, U8 *buf, I64 blk, I64 cnt);
-extern Bool BlkWrite(CDrv *dv, U8 *buf, I64 blk, I64 cnt);
+extern I64 BlkRead(I64 dev, I64 lba, I64 cnt, U8 *buf);
+extern I64 BlkWrite(I64 dev, I64 lba, I64 cnt, U8 *buf);
 extern Bool ISOInit(CDrv *dv, I64 blk);
 extern U0 DVDImageRead(U8 dvd_drv_let, U8 *out_name);
-extern I64 FSize(CFile *f);
+extern I64 FSize(U8 *);
 extern CFile *FOpen(U8 *filename, U8 *flags, I64 cnt = 0, CTask *mem_task = NULL);
 extern U0 FClose(CFile *f);
 extern I64 FSetClus(CFile *f, I64 c, I64 blk, Bool read);
@@ -4714,8 +4717,8 @@ extern I64 DirEntryCompareName(CDirEntry *e1, CDirEntry *e2);
 extern I64 DirEntryCompareClus(CDirEntry *e1, CDirEntry *e2);
 #define SK_NAME		0
 #define SK_CLUS	1
-extern U0 DirFilesSort(CDirEntry **_tmpde, I64 key);
-extern CDirEntry *DirFilesFlatten(CDirEntry *tmpde, CDirEntry **_res, I64 fuf_flags);
+extern U0 DirFilesSort(CDirEntry **_tmpde);
+extern CDirEntry **DirFilesFlatten(CDirEntry *tmpde, CDirEntry **_res, I64 fuf_flags);
 extern U0 PutFileLink(U8 *filename, U8 *full_name = NULL, I64 line = 0, Bool plain_text = FALSE);
 extern U0 PutDirLink(U8 *dirname, U8 *full_name = NULL);
 extern U0 HomeSet(U8 *dirname);
@@ -4733,7 +4736,7 @@ extern U0 DrvDel(CDrv *dv);
 extern U0 DrvBlkDevDel(CBlkDev *bd);
 extern U0 DrvFATBlkAlloc(CDrv *dv);
 extern U0 DrvFATBlkClean(CDrv *dv, I64 fat_sel = 3);
-extern U0 DrvFATBlkSet(CDrv *dv, I64 c, I64 fat_sel = 3);
+extern Bool DrvFATBlkSet(CDrv *dv, I64 c, I64 fat_sel = 3);
 extern CDrv *DrvChk(CDrv *dv, Bool except = TRUE);
 extern U8 Drv2Let(CDrv *dv = NULL);
 extern U8 Let2Let(U8 drv_let = 0);
@@ -4752,10 +4755,10 @@ extern U8 *FileRead(U8 *filename, I64 *_size = NULL, I64 *_attr = NULL);
 extern I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0);
 extern CDirEntry *FilesFind2(U8 *files_find_mask, I64 fuf_flags);
 extern CDirEntry *FilesFind(U8 *files_find_mask, I64 fuf_flags = 0);
-extern Bool FileFind(U8 *filename, CDirEntry *_de = NULL, I64 fuf_flags = FUF_Z_OR_NOT_Z);
+extern Bool FileFind(U8 *filename, CDirEntry *_de = NULL, I64 fuf_flags = 0);
 extern Bool DrvTypeSet(U8 drv_let, I64 type = FSt_REDSEA);
 extern U0 Fmt(I64 drv_let, Bool quick = TRUE, Bool confirm = TRUE, I64 type = FSt_FAT32);
-extern I64 StrICmp(U8 *a, U8 *b);
+extern I64 StrICmp(U8 *s1, U8 *s2);
 extern U8 MountFile(U8 *filename);
 extern U0 Unmount(U8 drv_let = 0);
 extern U0 In(U8 *fmt, ...);
@@ -4781,7 +4784,7 @@ extern U0 CtrlAltCBSet(U8 ch, U0 (*fp_hndlr)(I64 sc),
                        U8 *no_shift_desc = NULL, U8 *shift_desc = NULL, Bool in_irq = FALSE);
 extern U0 EdLineDown(CDoc *doc, I64 sc = I64_MIN);
 extern CAOT *CmpBuf(U8 *buf, U8 *map_name = NULL,
-                    I64 *error_cnt = NULL, I64 *warning_cnt = NULL, U8 mapfile_drv_let = 0);
+                    I64 *error_cnt = NULL, I64 *warning_cnt = NULL, U8 mapfile_drv_let = 0, Bool vet = FALSE);
 extern I64 PressAKey();
 extern U8 *DocLineRead(U8 *filename, I64 line, CTask *mem_task = NULL);
 extern U8 *DocLineWrite(U8 *filename, I64 line, U8 *st);
@@ -4977,7 +4980,7 @@ extern I64 CopyTree(U8 *src_files_find_mask, U8 *dst_files_find_mask, Bool no_ma
 extern I64 DelTreeDirs(CDirEntry *tmpde1);
 extern I64 DelTreeFiles(CDirEntry *tmpde1);
 extern I64 DelTree(U8 *files_find_mask, U8 *fu_flags = NULL);
-extern U0 AiwniosMakeShortJmps(CCmpCtrl *cc);
+extern U0 AiwniosMakeShortJmps(CCmpCtrl *cc, U8 *cc2);
 extern U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info = NULL, Bool byte_code = FALSE);
 extern U8 *COCCompile(CCmpCtrl *cc, I64 *_code_size, CDbgInfo **_dbg, I64 *_type);
 extern U0 PrsBindCSymbol(U8 *as, U8 *fptr);
@@ -5034,7 +5037,7 @@ extern U0 CmpFillTables();
 extern U0 CMiscInit();
 extern CAOT *CmpJoin(CCmpCtrl *cc, I64 cmp_flags, U8 *map_name = NULL, U8 mapfile_drv_let = 0);
 extern I64 ExePutS(U8 *buf, U8 *filename = NULL, I64 ccf_flags = 0, CLexHashTableContext *htc = NULL);
-extern I64 ExeFile(U8 *name, I64 ccf_flags = 0);
+extern I64 ExeFile(U8 *name);
 extern I64 RunFile(U8 *name, I64 ccf_flags = 0, ...);
 extern I64 ExePutS2(U8 *buf, U8 *filename = NULL, I64 ccf_flags = 0);
 extern I64 ExePrint2(U8 *fmt, ...);
@@ -5117,7 +5120,7 @@ extern U0 EdInsHtml();
 extern U0 DVDImageWriteTask(CDualBuf *d);
 extern U0 DVDImageWrite(U8 dvd_drv_let, U8 *in_name = NULL, I64 media_type = MT_DVD);
 extern U0 DskCacheInit(I64 size_in_U8s);
-extern I64 DskCacheHash(I64 blk);
+extern CCacheBlk *DskCacheHash(I64 blk);
 extern U0 DskCacheQueRem(CCacheBlk *tmpc);
 extern U0 DskCacheQueIns(CCacheBlk *tmpc);
 extern CCacheBlk *DskCacheFind(CDrv *dv, I64 blk);
@@ -5137,7 +5140,7 @@ extern Bool IsDotZ(U8 *filename);
 extern Bool IsDotC(U8 *filename);
 extern Bool FilesFindMatch(U8 *_test_name, U8 *files_find_mask, I64 fuf_flags = 0);
 extern U8 *DirNameAbs(U8 *_dirname);
-extern U8 *FileNameAbs(U8 *_filename, I64 fuf_flags = 0);
+extern U8 *FileNameAbs(U8 *_filename);
 extern U8 *ExtChg(U8 *filename, U8 *extension);
 extern U8 *ExtDft(U8 *filename, U8 *extension);
 extern CDirEntry *Cd2DirEntry(CDirEntry *tmpde, U8 *abs_name);
@@ -5145,7 +5148,7 @@ extern I64 FileAttr(U8 *name, I64 attr = 0);
 extern Bool FileNameChk(U8 *filename);
 extern U8 *ToggleZorNotZ(U8 *name);
 extern U8 *FileNameTmpTxt();
-extern U8 *DirCur(CTask *task = NULL, CTask *mem_task = NULL);
+extern U8 *DirCur();
 extern U8 *DirFile(U8 *dirname, U8 *name = NULL, U8 *_extension = NULL);
 extern I64 Name2DirClus(CDrv *dv, U8 *dirname);
 extern I64 Name2ParentDirClus(CDrv *dv, U8 *dirname);
@@ -5173,14 +5176,14 @@ extern CDate Dos2CDate(U16 t, U16 d);
 extern U0 FAT32Fmt(U8 drv_let, Bool quick = TRUE);
 extern Bool FATNameTo(U8 *dst, U8 *src);
 extern I64 FATNameXSum(U8 *src);
-extern Bool FATFromName(U8 *dst, U8 *src);
+extern Bool FATFromName(U8 *dst, U8 *src, I64 nt_res = 0);
 extern Bool DirLongNameFill(CDirEntry *tmpde, CFAT32DirEntryLong *de, I64 *xsum);
 extern Bool FAT32CDirFill(CDirEntry *tmpde, CFAT32DirEntry *de, CDate _local_time_offset);
-extern Bool FAT32DirFill(CFAT32DirEntry *de, CDirEntry *tmpde, I64 *_de_cnt, CDate _local_time_offset);
+extern Bool FAT32DirFill(CFAT32DirEntry *de, CDirEntry *tmpde, I64 *_de_cnt, CDate _local_time_offset, U8 *short_name = NULL);
 extern U8 *FAT32FileRead(CDrv *dv, U8 *cur_dir, U8 *filename, I64 *_size, I64 *_attr);
 extern Bool FAT32Cd(U8 *name, I64 cur_dir_clus);
 extern U0 FAT32FreeClus(CDrv *dv, I64 c);
-extern I64 FAT32FilesDel(CDrv *dv, U8 *cur_dir, U8 *files_find_mask, I64 fuf_flags, Bool del_dir, Bool print_msg);
+extern I64 FAT32FilesDel(CDrv *dv, U8 *cur_dir, U8 *mask, I64 flags, Bool del_dir, Bool print_msg);
 extern I64 FAT32FileWrite(CDrv *dv, U8 *cur_dir, U8 *name, U8 *buf, I64 size, CDate cdt, I64 attr);
 extern CDirEntry *FAT32FilesFind(U8 *files_find_mask, I64 fuf_flags, CDirEntry *parent = NULL, I64 *_dir_size = NULL);
 extern Bool FAT32MkDir(CDrv *dv, U8 *cur_dir, U8 *name, I64 entry_cnt);
@@ -5462,10 +5465,10 @@ extern U0 LoadOneImport(U8 **_src, U8 *module_base, I64 ld_flags);
 extern U0 SysSymImportsResolve(U8 *st_ptr, I64 ld_flags);
 extern U0 LoadPass1(U8 *src, U8 *module_base, I64 ld_flags);
 extern U0 LoadPass2(U8 *src, U8 *module_base, I64);
-extern CBinFile *Load(U8 *filename, I64 ld_flags = 0, CBinFile *bfh_addr = INVALID_PTR);
+extern CBinMod *Load(U8 *filename);
 extern U0 SysGlblsInit();
 extern U0 SysGrInit();
-extern U0 KMain();
+extern U0 KMain(U8 *image_end, U8 *dt);
 extern F64 Pow10I64(I64 i);
 extern U64 FloorU64(U64 num, U64 to);
 extern U64 CeilU64(U64 num, U64 to);
@@ -5515,7 +5518,7 @@ extern U0 Sleep(I64 mS);
 extern F64 Ona2Freq(I8 ona);
 extern I8 Freq2Ona(F64 freq);
 extern U0 Snd(I8 ona = 0);
-extern Bool ScrnCast(Bool val = ON, Bool just_audio = FALSE, U8 *print_fmt = "B:/Tmp/7FA3FFE3E0.GR");
+extern Bool ScrnCast(Bool val = ON, Bool just_audio = FALSE, U8 *print_fmt = "T:/Video/%X.GR");
 extern U0 SndRst();
 extern U0 Beep(I8 ona = 62, Bool busy = FALSE);
 extern Bool Mute(Bool val);
@@ -5539,7 +5542,7 @@ extern Bool Suspend(CTask *task = NULL, Bool state = TRUE);
 extern Bool IsSuspended(CTask *task = NULL);
 extern I64 TaskInit(CTask *task, I64 stk_size);
 extern U0 CallPooPoo();
-extern CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NULL, I64 target_cpu = -1, CTask *parent = NULL, I64 stk_size = 0, I64 flags = 1 << JOBf_ADD_TO_QUE);
+extern CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NULL, I64 target_cpu = -1, CTask *parent = NULL, I64 stk_size = TASK_STACK_SIZE);
 extern U0 TaskDerivedValsUpdate(CTask *task = NULL, Bool update_z_buf = TRUE);
 extern I64 ExeCmdLine(CCmpCtrl *cc);
 extern U0 SrvTaskCont();
@@ -5619,8 +5622,8 @@ extern I64 ScanMsg(I64 *_arg1 = NULL, I64 *_arg2 = NULL, I64 mask = ~1, CTask *t
 extern I64 GetMsg(I64 *_arg1 = NULL, I64 *_arg2 = NULL, I64 mask = ~1, CTask *task = NULL);
 extern I64 ScanChar();
 extern Bool ScanKey(I64 *_ch = NULL, I64 *_scan_code = NULL, Bool echo = FALSE);
-extern I64 GetKey(I64 *_scan_code = NULL, Bool echo = FALSE, Bool raw_cursor = FALSE);
-extern I64 GetChar(I64 *_scan_code = NULL, Bool echo = TRUE, Bool raw_cursor = FALSE);
+extern I64 GetKey(Bool echo = FALSE);
+extern I64 GetChar(I64 *_ev = NULL, Bool echo = TRUE);
 extern I64 GetS(U8 *buf, I64 size, Bool allow_ext = TRUE);
 extern U0 GridInit();
 extern U0 MsUpdate(I64 x, I64 y, I64 z, Bool l, Bool r);
@@ -5804,11 +5807,11 @@ extern U0 PutHexU64(U64 u);
 extern U0 PutHexU32(U64 u);
 extern U0 PutHexU16(U64 u);
 extern U0 PutHexU18(U64 u);
-extern U8 *StrCpy(U8 *a, U8 *b);
-extern I64 StrNCmp(U8 *a, U8 *b, I64 cnt);
-extern I64 StrNICmp(U8 *a, U8 *b, I64 cnt);
-extern U8 *StrMatch(U8 *needle, U8 *heystack);
-extern U8 *StrIMatch(U8 *needle, U8 *heystack);
+extern U8 *StrCpy(U8 *dst, U8 *src);
+extern I64 StrNCmp(U8 *s1, U8 *s2, I64 n);
+extern I64 StrNICmp(U8 *s1, U8 *s2, I64 n);
+extern U8 *StrMatch(U8 *needle, U8 *haystack);
+extern U8 *StrIMatch(U8 *needle, U8 *haystack);
 extern U8 *LstSub(I64 sub, U8 *lst);
 extern I64 LstMatch(U8 *needle, U8 *haystack_lst, I64 flags = 0);
 extern I64 StrOcc(U8 *src, I64 ch);
@@ -5978,11 +5981,11 @@ extern I64 FF(U8 *files_find_mask, U8 *fu_flags = NULL);
 extern I64 Zip(U8 *files_find_mask = "*", U8 *fu_flags = NULL);
 extern I64 Unzip(U8 *files_find_mask = "*.Z", U8 *fu_flags = NULL);
 extern U0 DbgInfoWrite(CHashTable *h, U8 *name);
-extern U0 DbgInfoRead(U8 *name);
+extern U0 DbgInfoRead(U8 *file);
 extern Bool ChkOnStk(U8 *ptr, CTask *task = NULL);
-extern U8 *TaskCaller(CTask *task = NULL, I64 num = 0, Bool saved_context = FALSE);
+extern U8 *TaskCaller(CTask *task = NULL, I64 num = 0);
 extern CTask *GetDebuggedProcess();
-extern U0 CallerRep(U8 **x29 = NULL, CTask *task = NULL);
+extern U0 CallerRep(U8 **x29 = NULL, CTask *task = NULL, I64 max = BACKTRACE_MAX);
 extern U0 DebuggerSpawn(CTask *debugee);
 extern U0 AiwniosDbgCB(I64 *gps);
 extern CBpt *BptFind(U8 *needle_addr, CTask *haystack_task = NULL, Bool rem = FALSE);
@@ -6714,7 +6717,7 @@ _intern IC_MIN_U64 U64 MinU64(U64, U64);
 #endif
 extern CCmpGlbls cmp;
 //Added by Mr nrootconauto
-extern U8 *DisasOpc(CDoc *doc, U8 *data);
+extern U8 *DisasOpc(CDoc *doc, U32 *ptr);
 extern U0 Uf(U8 *st);
 extern I64 CallExtStr(U8 *, ...);
 extern U8 *PrsAsmBlk(CCmpCtrl *cc, I64 flags = 0);

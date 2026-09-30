@@ -62,3 +62,14 @@ out:
     Print("x\n");
     return;
 }
+U0 Others(I64 unused_arg, U0 *p)
+{
+    I64 x = 1;
+    no_warn x;
+    Print("%d\n", x);
+}
+extern I64 Renamed(I64 a);
+I64 Renamed(I64 b)
+{
+    return b;
+}

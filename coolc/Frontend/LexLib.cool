@@ -121,9 +121,9 @@ U0 MemberAdd(CCmpCtrl *cc, CMemberLst *tmpm, CHashClass *tmpc, I64 mode)
     if (mode == PRS1B_LOCAL_VAR) {
         tmpm->member_class_base =
                 tmpm->member_class - tmpm->member_class->ptr_stars_cnt;
-        if (Bt(&cc->opts, OPTf_WARN_DUP_TYPES) &&
+        if (Bt(&cc->opts, OPTf_VET) && Bt(&cc->opts, OPTf_WARN_DUP_TYPES) &&
                 MemberClassBaseFind(tmpm->member_class_base, tmpc))
-            LexWarn(cc, "Duplicate type at ");
+            LexVet(cc, VET_DUP_TYPE, "a local declared apart from the others of its type (use one declaration)");
         tmpm1 = &tmpc->member_class_base_root;
         while (tmpm2 = *tmpm1) {
             if (tmpm->member_class_base < tmpm2->member_class_base)
@@ -179,6 +179,69 @@ Bool MemberLstCmp(CMemberLst *tmpm1, CMemberLst *tmpm2, I64 cnt = I64_MAX)
         return TRUE;
     else
         return FALSE;
+}
+
+U8 *ClassDiffStr(CHashClass *c)
+{//The name of a type, with its stars, for messages.
+    CHashClass *base;
+    U8 *s, *r;
+    I64 i;
+    if (!c)
+        return StrNew("?");
+    base = c - c->ptr_stars_cnt;
+    if (base->str)
+        s = StrNew(base->str);
+    else
+        s = StrNew("?");
+    for (i = 0; i < c->ptr_stars_cnt; i++) {
+        r = MStrPrint("%s*", s);
+        Free(s);
+        s = r;
+    }
+    return s;
+}
+
+U8 *MemberLstDiff(CMemberLst *tmpm1, CMemberLst *tmpm2, I64 cnt, Bool *_name_only)
+{//How argument list 1 (a definition) differs from list 2 (its declaration), in the terms
+    //of MemberLstCmp: a message (MAlloc'd), or NULL if they agree. *_name_only is set when
+    //only names differ, which is harmless.
+    U8 *a, *b, *res = NULL, *name_diff = NULL;
+    I64 n = 1;
+    while (tmpm1 && tmpm2 && cnt--) {
+        if (tmpm1->member_class != tmpm2->member_class ||
+                tmpm1->member_class_base != tmpm2->member_class_base) {
+            a = ClassDiffStr(tmpm1->member_class);
+            b = ClassDiffStr(tmpm2->member_class);
+            res = MStrPrint("argument %d '%s' is %s here but %s in the declaration", n, tmpm1->str, a, b);
+            Free(a);
+            Free(b);
+            break;
+        }
+        if (tmpm1->flags & MLF_DFT_AVAILABLE || tmpm2->flags & MLF_DFT_AVAILABLE) {
+            if (tmpm1->flags & (MLF_DFT_AVAILABLE | MLF_STR_DFT_AVAILABLE) !=
+                    tmpm2->flags & (MLF_DFT_AVAILABLE | MLF_STR_DFT_AVAILABLE) ||
+                    (tmpm1->flags & MLF_STR_DFT_AVAILABLE && StrCmp(tmpm1->dft_val, tmpm2->dft_val)) ||
+                    (!(tmpm1->flags & MLF_STR_DFT_AVAILABLE) && tmpm1->dft_val != tmpm2->dft_val)) {
+                res = MStrPrint("argument %d '%s' has a different default value than in the declaration", n, tmpm1->str);
+                break;
+            }
+        }
+        if (!name_diff && StrCmp(tmpm1->str, tmpm2->str) && StrCmp(tmpm1->str, "_anon_") && StrCmp(tmpm2->str, "_anon_"))
+            name_diff = MStrPrint("argument %d is named '%s' here but '%s' in the declaration", n, tmpm1->str, tmpm2->str);
+        tmpm1 = tmpm1->next;
+        tmpm2 = tmpm2->next;
+        n++;
+    }
+    if (!res && cnt >= 0 && (tmpm1 || tmpm2))
+        res = StrNew("the number of arguments differs from the declaration");
+    *_name_only = FALSE;
+    if (!res && name_diff) {
+        res = name_diff;
+        name_diff = NULL;
+        *_name_only = TRUE;
+    }
+    Free(name_diff);
+    return res;
 }
 
 U0 MemberLstDel(CMemberLst *tmpm)

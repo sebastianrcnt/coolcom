@@ -20,8 +20,7 @@ CHashClass *PrsClass(CCmpCtrl *cc, I64 keyword, I64 fsp_flags, Bool is_extern)
         if (tmpc) {
             if (!Bt(&tmpc->flags, Cf_EXTERN))
                 tmpc = NULL;
-            else if (tmpc->use_cnt < 3)
-                UnusedExternWarning(cc, tmpc);
+
         }
         if (tmpc) {
             Free(tmpc->src_link);
@@ -68,6 +67,8 @@ CHashFun *PrsFunJoin(CCmpCtrl *cc, CHashClass *tmp_return,
     CHashClass *header_return;
     CHashFun *tmpf;
     I64 header_arg_cnt;
+    U8 *header_link = NULL, *diff, *msg;
+    Bool name_only;
     if (name) {//if not fun_ptr
         if (cc->flags & CCF_AOT_COMPILE) {
             if ((tmpf = HashFind(name, cc->htc.glbl_hash_table, HTT_FUN)) &&
@@ -77,12 +78,14 @@ CHashFun *PrsFunJoin(CCmpCtrl *cc, CHashClass *tmp_return,
         if ((tmpf = HashSingleTableFind(name, cc->htc.glbl_hash_table, HTT_FUN)) &&
                 !Bt(&tmpf->flags, Cf_EXTERN))
             tmpf = NULL;
-        if (tmpf && tmpf->use_cnt < 3)
-            UnusedExternWarning(cc, tmpf);
     } else
         tmpf = NULL;
     if (tmpf) {
         tmpf->used_reg_mask = REGG_CLOBBERED + REGG_SAVED + REGG_STK_TMP;
+        if (tmpf->src_link)
+            header_link = StrNew(tmpf->src_link + 3);
+        else
+            header_link = StrNew("?");
         Free(tmpf->src_link);
         tmpf->src_link = NULL;
         Free(tmpf->idx);
@@ -128,16 +131,25 @@ CHashFun *PrsFunJoin(CCmpCtrl *cc, CHashClass *tmp_return,
     if (header_return) {
         if (GetOption(OPTf_WARN_HEADER_MISMATCH)) {
             if (tmpf->return_class != header_return) {
-                PrintWarn("Fun Header return mismatch '%s'\n", tmpf->str);
-                cc->warning_cnt++;
+                diff = ClassDiffStr(tmpf->return_class);
+                msg = ClassDiffStr(header_return);
+                LexError(cc, MStrPrint("Function '%s' returns %s but %s in its declaration (%s) at ", tmpf->str, diff, msg,
+                                       header_link));
+                Free(diff);
+                Free(msg);
             }
-            if (!MemberLstCmp(tmpf->member_lst_and_root, header_lst, header_arg_cnt)) {
-                PrintWarn("Fun header args mismatch '%s'\n", tmpf->str);
-                cc->warning_cnt++;
+            if (diff = MemberLstDiff(tmpf->member_lst_and_root, header_lst, header_arg_cnt, &name_only)) {
+                msg = MStrPrint("Function '%s': %s (declared at %s) at ", tmpf->str, diff, header_link);
+                if (name_only)
+                    LexVet(cc, VET_ARG_NAME, msg);
+                else
+                    LexError(cc, msg);
+                Free(diff);
             }
         }
         MemberLstDel(header_lst);
     }
+    Free(header_link);
     return tmpf;
 }
 
@@ -148,6 +160,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
     CHashFun *fun;
     I64 i, j, size, *r;
     Bool old_trace, unused_locals = FALSE;
+    U8 *msg;
 
     cc->fun_lex_file = cc->lex_include_stk;
     cc->min_line = cc->max_line = cc->lex_include_stk->line_num;
@@ -167,7 +180,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
         cc->max_line = cc->min_line;
 
     if (cc->htc.fun->return_class->size && !(cc->flags & CCF_HAS_RETURN))
-        LexWarn(cc, "Function should return val ");
+        LexError(cc, "Function should return a value at ");
     RPNAddNew(cc, IC_LABEL, cc->lb_leave, 0, FALSE);
     cc->lb_leave = saved_leave_label;
     cc->htc.fun->size &= ~7;
@@ -210,27 +223,25 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
     while (tmpm) {
         if (tmpm->flags & MLF_NO_UNUSED_WARN) {
             if (tmpm->use_cnt > 1 && StrCmp(tmpm->str, "_anon_")) {
-                if (!IsCmdLineMode) PrintWarn("Unneeded no_warn\n $$LK,\"FL:%s,%d\"$$ '%s' in '%s'\n",
-                                              cc->lex_include_stk->full_name, cc->lex_include_stk->line_num,
-                                              tmpm->str, cc->htc.fun->str);
-                else PrintWarn("Unneeded no_warn '%s' in '%s' at %s\n", tmpm->str, cc->htc.fun->str, cc->lex_include_stk->full_name);
+                msg = MStrPrint("no_warn on '%s' in fun '%s', which is used", tmpm->str, cc->htc.fun->str);
+                LexVet(cc, VET_NO_WARN, msg, cc->htc.fun->src_link + 3);
+                Free(msg);
             }
-#ifdef COOLC_FRONTEND_FIXES
-        } else if (!tmpm->use_cnt && GetOption(OPTf_WARN_UNUSED_VAR) &&
-                   i >= cc->htc.fun->arg_cnt && StrCmp(tmpm->str, "_anon_") &&
-                   !(Bt(&cc->htc.fun->flags, Ff_DOT_DOT_DOT) && (!StrCmp(tmpm->str, "argc") || !StrCmp(tmpm->str, "argv")))) {
-            // An unused local is an error (an unused argument stays a warning: callbacks have them;
-            // so do argc and argv, which "..." declares).
-            PrintErr("Unused local variable '%s' in fun '%s'\n  %s\n", tmpm->str, cc->htc.fun->str,
-                     cc->htc.fun->src_link + 3);
-            cc->error_cnt++;
-            unused_locals = TRUE;
-#endif
-        } else if (!tmpm->use_cnt && GetOption(OPTf_WARN_UNUSED_VAR)) {
-            if (!IsCmdLineMode) PrintWarn("Unused var $$LK,\"FL:%s,%d\"$$ '%s' in '%s'\n",
-                                          cc->lex_include_stk->full_name, cc->lex_include_stk->line_num,
-                                          tmpm->str, cc->htc.fun->str);
-            else PrintWarn("Unused var '%s' in '%s' at %s\n", tmpm->str, cc->htc.fun->str, cc->lex_include_stk->full_name);
+        } else if (!tmpm->use_cnt && GetOption(OPTf_WARN_UNUSED_VAR) && StrCmp(tmpm->str, "_anon_")) {
+            if (i >= cc->htc.fun->arg_cnt) {
+                // An unused local is an error (an unused argument only shows in Vet: callbacks have them;
+                // so do argc and argv, which "..." declares).
+                if (!(Bt(&cc->htc.fun->flags, Ff_DOT_DOT_DOT) && (!StrCmp(tmpm->str, "argc") || !StrCmp(tmpm->str, "argv")))) {
+                    PrintErr("Unused local variable '%s' in fun '%s'\n  %s\n", tmpm->str, cc->htc.fun->str,
+                             cc->htc.fun->src_link + 3);
+                    cc->error_cnt++;
+                    unused_locals = TRUE;
+                }
+            } else {
+                msg = MStrPrint("argument '%s' of fun '%s' is never used", tmpm->str, cc->htc.fun->str);
+                LexVet(cc, VET_UNUSED_ARG, msg, cc->htc.fun->src_link + 3);
+                Free(msg);
+            }
         }
         tmpm = tmpm->next;
         i++;
@@ -246,7 +257,7 @@ U0 PrsGlblVarLst(CCmpCtrl *cc, I64 saved_mode, CHashClass *saved_tmpc,
                  I64 saved_val, I64 fsp_flags)
 {
     I64 i, j, mode, k, val;
-    U8 *st;
+    U8 *st, *msg;
     CHashExport *tmpex;
     CHashGlblVar *tmpg;
     CAOTCtrl *aotc = cc->aotc;
@@ -477,8 +488,9 @@ U0 PrsGlblVarLst(CCmpCtrl *cc, I64 saved_mode, CHashClass *saved_tmpc,
             }
             if (has_alias) {
                 if (tmpex(CHashGlblVar *)->use_cnt < 2) {
-                    PrintWarn("Unused extern '%s'\n", tmpex(CHashGlblVar *)->str);
-                    cc->warning_cnt++;
+                    msg = MStrPrint("extern variable '%s' is never used", tmpex(CHashGlblVar *)->str);
+                    LexVet(cc, VET_UNUSED_EXTERN, msg);
+                    Free(msg);
                 }
                 tmpex(CHashGlblVar *)->flags |= GVF_ALIAS;
                 tmpex(CHashGlblVar *)->data_addr = tmpg->data_addr;
@@ -1344,7 +1356,7 @@ sm_import:
                                     }
                                     if (Lex(cc) != ';') {
                                         if (!cc->htc.fun->return_class->size)
-                                            LexWarn(cc, "Function should NOT return val ");
+                                            LexError(cc, "Function returns U0 but this returns a value at ");
                                         if (!PrsExpression(cc, NULL, FALSE))
                                             LexExcept(cc, "Expected an expression at: ");
                                         //Lunk added by nroot,we will convert the result to the return type(F64 or not F64)
@@ -1366,7 +1378,7 @@ sm_import:
                                         cc->flags |= CCF_HAS_RETURN;
                                     } else {
                                         if (cc->htc.fun->return_class->size)
-                                            LexWarn(cc, "Function should return val ");
+                                            LexError(cc, "Function should return a value at ");
                                         //ICAdd(cc,IC_JMP,cc->lb_leave,0); RETURN's  are handled by AIWNIOS as IC_RET,they do housekeeping for you
                                         RPNAddNew(cc, IC_IMM_I64, 0, cmp.internal_types[RT_I64], FALSE);
                                         RPNAddNew(cc, IC_RET,, cc->htc.fun->return_class, FALSE);

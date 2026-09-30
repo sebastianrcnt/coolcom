@@ -12,7 +12,7 @@ T=coolc/tests/checks
 
 # The message and position of each finding: ERROR/vet lines with the "file,line" line after them.
 findings() {
-    grep -A1 -e '^ERROR' -e '^vet:' "$1" | grep -v '^--' | sed 's|^  .*/\([A-Za-z]*\.cool,[0-9]*\)$|  \1|' | grep -v '^Vet:' || true
+    grep -A1 -e '^ERROR' -e '^vet:' "$1" | grep -v '^--' | sed 's|[^ ()]*/\([A-Za-z]*\.cool\)|\1|g' | grep -v '^Vet:' || true
 }
 compare() {
     if [ "${UPDATE:-}" = 1 ]; then

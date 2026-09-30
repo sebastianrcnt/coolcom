@@ -33,6 +33,39 @@ U0 UnusedLocal()
     I64 forgotten, used = 1;
     Print("%d\n", used);
 }
+U0 PrintFormat(I64 n, F64 f)
+{
+    Print("%d %d\n", n);
+    Print("%d\n", f);
+    Print("%f\n", n);
+}
+extern I64 Declared(I64 a, U8 *b);
+I64 Declared(I64 a, I64 b)
+{
+    return a + b;
+}
+extern U0 DeclaredU0(I64 a);
+I64 DeclaredU0(I64 a)
+{
+    return a;
+}
+extern I64 DeclaredDefault(I64 a = 1);
+I64 DeclaredDefault(I64 a = 2)
+{
+    return a;
+}
+U0 ReturnsValue()
+{
+    return 1;
+}
+I64 NoReturn()
+{
+    Print("x\n");
+}
+I64 EmptyReturn()
+{
+    return;
+}
 U0 DuplicateCase(I64 n)
 {
     switch (n) {

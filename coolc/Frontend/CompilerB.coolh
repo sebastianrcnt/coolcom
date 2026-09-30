@@ -19,12 +19,12 @@ extern I64 StreamExePrint(U8 *fmt, ...);
 extern U0 StreamPrint(U8 *fmt, ...);
 extern Bool Trace(Bool val = ON);
 
-extern U0 ClassMemberLstDel(CHashClass *c);
+extern U0 ClassMemberLstDel(CHashClass *tmpc);
 extern U0 CmpCtrlDel(CCmpCtrl *cc);
 extern CCmpCtrl *CmpCtrlNew(U8 *buf = NULL, I64 flags = 0, U8 *filename = NULL);
 extern I64 CmpCtrlSize(CCmpCtrl *cc);
-extern I64 IsLexExpression2Bin(
-                               CCmpCtrl *cc, U8 **machine_code); //FALSE=no err
+extern Bool IsLexExpression2Bin(
+                                CCmpCtrl *cc, U8 **_machine_code); //FALSE=no err
 extern I64 Lex(CCmpCtrl *cc);
 extern U0 LexAttachDoc(CCmpCtrl *cc, CLexFile *tmpf = NULL,
                        CDoc *doc = NULL, U8 *abs_filename = NULL, CDocEntry *doc_e = NULL, I64 col = 0);
@@ -32,30 +32,29 @@ extern CD2I32 *LexD2I32(CCmpCtrl *cc, CD2I32 *p);
 extern CD3I32 *LexD3I32(CCmpCtrl *cc, CD3I32 *p);
 extern U0 LexError(CCmpCtrl *cc, U8 *str);
 extern U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL);
-extern U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str);
+extern U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str, U8 *pos = NULL);
 extern I64 LexExpression(CCmpCtrl *cc);
 extern U8 *LexExpression2Bin(CCmpCtrl *cc, I64 *_type = NULL);
 extern F64 LexExpressionF64(CCmpCtrl *cc);
 extern I64 LexExpressionI64(CCmpCtrl *cc);
 extern U8 *LexExtStr(CCmpCtrl *cc, I64 *_size = NULL, Bool lex_next = TRUE);
-extern U8 *LexFirstRem(CCmpCtrl *cc, U8 *marker, I64 _len = NULL);
+extern U8 *LexFirstRem(CCmpCtrl *cc, U8 *marker, I64 *_len = NULL);
 extern I64 LexGetChar(CCmpCtrl *cc);
 extern U0 LexPopNoRestore(CCmpCtrl *cc);
 extern U0 LexPopRestore(CCmpCtrl *cc);
 extern U0 LexPush(CCmpCtrl *cc);
-extern U0 LexPutLine(CCmpCtrl *cc, U8 *start);
+extern U8 *LexPutLine(CCmpCtrl *cc, U8 *start);
 extern U0 LexPutPos(CCmpCtrl *cc);
 extern U0 LexPutToken(CCmpCtrl *cc);
 extern U0 LexSkipEol(CCmpCtrl *cc);
 extern U8 *LexStmt2Bin(
-                       CCmpCtrl *cc, I64 *_type, I64 cmp_flags = CMPF_PRS_SEMICOLON);
-extern U0 LexWarn(CCmpCtrl *cc, U8 *str = NULL);
+                       CCmpCtrl *cc, I64 *_type, I64 cmp_flags = 0);
 extern CMemberLst *MemberClassBaseFind(
                                        CHashClass *needle_class, CHashClass *haystack_class);
 extern CMemberLst *MemberFind(U8 *needle_str, CHashClass *haystack_class);
 extern U0 MemberLstDel(CMemberLst *tmpm);
-extern I64 MemberMetaData(U8 *st, CMemberLst *ml);
-extern CMemberLstMeta *MemberMetaFind(U8 *st, CMemberLst *ml);
+extern I64 MemberMetaData(U8 *needle_str, CMemberLst *haystack_member_lst);
+extern CMemberLstMeta *MemberMetaFind(U8 *needle_str, CMemberLst *haystack_member_lst);
 extern CHashClass *OptClassFwd(CHashClass *tmpc);
 extern I64 PrsKeyWord(CCmpCtrl *cc);
 
