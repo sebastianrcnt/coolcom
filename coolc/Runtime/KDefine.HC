@@ -43,7 +43,7 @@ CHashDefineStr *DefineLstLoad(U8 *dname, U8 *lst)
 
 U0 UndefinedDefine(U8 *dname)
 {
-    ST_ERR_ST "Undefined Define: '%s'.\n", dname;
+    PrintErr("Undefined Define: '%s'.\n", dname);
     throw('UndefDef');
 }
 
