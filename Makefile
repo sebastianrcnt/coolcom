@@ -9,7 +9,7 @@ all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
 native-host: build/coolc
-build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/warm_task.h coolc/Host/except.S | build
+build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/warm_task.h coolc/Host/warm_file.h coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $(filter %.c %.S,$^) -o $@
 
 native-kernel: build/Kernel.BIN

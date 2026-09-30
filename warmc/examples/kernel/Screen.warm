@@ -1,15 +1,15 @@
-import OS.Raw (
-    Terminal, acquireTerminal, releaseTerminal, write
+import OS.Terminal (
+    Output, acquireOutput, releaseOutput, write
 );
 import OS.CoolOS.Framebuffer (fillRect, clear);
 module body Screen is
     function main(initial: RootCapability): ExitCode is
         var root: RootCapability := initial;
-        var term: Terminal := acquireTerminal(&!root);
+        var term: Output := acquireOutput(&!root);
         clear(&!term);
         write(&!term, "Warm screen output\n");
-        fillRect(&!term, 10, 400, 40, 20, 65280);
-        releaseTerminal(term);
+        fillRect(&!term, 10, 400, 40, 20, 65280: Nat32);
+        releaseOutput(term);
         surrenderRoot(root);
         printLn("WARM SCREEN PASS");
         return ExitSuccess();

@@ -109,7 +109,7 @@ def fmt_test(OUT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Screen", "Key", "Errors", "Stdin", "Fmt"))
+    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "Stdin", "Fmt"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:
@@ -143,7 +143,7 @@ def main():
     adapter = OUT / "Adapter.cool"
     adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool", "OSNetCommon.cool", "OSNetKernel.cool", "OSTaskKernel.cool"]))
     run("mcopy", "-o", "-i", disk, adapter, "::Adapter.cool")
-    for name in ("Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Screen", "Key", "Errors"):
+    for name in ("Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors"):
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
@@ -190,7 +190,7 @@ def main():
             assert all(row[10*3:50*3] == bytes([0, 255, 0]) * 40
                        for row in rows[400:420]), "Warm framebuffer rectangle missing"
         print("warm-kernel: " + name + " PASS", flush=True)
-    for name in ("Streams", "Sockets", "Tasks"):
+    for name in ("Streams", "Sockets", "Tasks", "Capabilities"):
         if not args.filter or args.filter == name:
             portable_test(OUT, name)
     if not args.filter or args.filter == "Stdin":

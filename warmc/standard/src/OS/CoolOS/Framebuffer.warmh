@@ -1,18 +1,11 @@
-import OS.Raw (Terminal);
+import OS.Terminal (Output);
+import OS.Error (IoError);
 module OS.CoolOS.Framebuffer is
-    generic [R: Region]
-    function clear(cap: &![Terminal, R]): Int64;
-    generic [R: Region]
-    function cursorHide(cap: &![Terminal, R]): Int64;
-    generic [R: Region]
-    function cursorShow(cap: &![Terminal, R]): Int64;
-    generic [R: Region]
-    function fillRect(cap: &![Terminal, R], x: Int64, y: Int64, w: Int64, h: Int64, color: Int64): Int64;
-    generic [R: Region]
-    function scroll(cap: &![Terminal, R]): Int64;
-    generic [R: Region]
-    function screenCodepoint(cap: &![Terminal, R], value: Int64): Int64;
-    generic [R: Region]
-    function alternate(cap: &![Terminal, R], on: Int64): Int64;
-    function ansiColor(n: Int64): Int64;
+    function clear(output: &![Output]): Result[Unit, IoError];
+    function cursorHide(output: &![Output]): Result[Unit, IoError];
+    function cursorShow(output: &![Output]): Result[Unit, IoError];
+    function fillRect(output: &![Output], x: Int64, y: Int64, w: Int64, h: Int64, color: Nat32): Result[Unit, IoError];
+    function scroll(output: &![Output]): Result[Unit, IoError];
+    function screenCodepoint(output: &![Output], value: Nat32): Result[Unit, IoError];
+    function alternate(output: &![Output], on: Bool): Result[Unit, IoError];
 end module.

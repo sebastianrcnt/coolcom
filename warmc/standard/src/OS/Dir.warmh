@@ -2,6 +2,10 @@ import OS.File (Filesystem);
 import OS.Error (IoError);
 import Standard.String (String);
 module OS.Dir is
+    record Rights: Free is read: Bool; write: Bool; create: Bool; delete: Bool; end;
+    function readOnly(): Rights;
+    function allRights(): Rights;
+    function narrow(dir: Dir, rights: Rights): Dir;
     type Dir: Linear;
     type Entries: Linear;
     record Entry: Linear is name: String; size: Index; isDir: Bool; modified: Int64; end;

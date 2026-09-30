@@ -20,3 +20,8 @@ WoEntry * WoListPath(U8 *path, I64 *error) {
     } catch {Fs->catch_except = TRUE; Silent(silent);}
     Free(mask); DirTreeDel(list); return head;
 }
+
+WkBuffer * WoReadPath(U8 *path) {return WkreadFile(path, StrLen(path));}
+I64 WoWritePath(U8 *path, U8 *data, U64 count, I64 create) {I64 st = WoStat(path); if ((!st || st == -10) && !create) return -13; return WkwriteFile(path, StrLen(path), data, count);}
+I64 WoDeletePath(U8 *path) {return Wkdelete(path, StrLen(path));}
+I64 WoMkdirPath(U8 *path) {return Wkmkdir(path, StrLen(path));}

@@ -348,6 +348,7 @@ static HostDirEntry *host_dir_list(const char *path, int64_t *error) {
 
 #include "warm_net.h"
 #include "warm_task.h"
+#include "warm_file.h"
 
 static void register_host_symbols(Module *m) {
 #define HOST(name, fn) add_symbol(m, name, (uintptr_t)(fn))
@@ -399,6 +400,12 @@ static void register_host_symbols(Module *m) {
     HOST("FileRead", host_file_read);
     HOST("FileWrite", host_file_write);
     HOST("NativeFileStat", host_file_stat);
+    HOST("NativeSafeStat", warm_file_stat);
+    HOST("NativeSafeRead", warm_file_read);
+    HOST("NativeSafeWrite", warm_file_write);
+    HOST("NativeSafeDelete", warm_file_delete);
+    HOST("NativeSafeMkdir", warm_file_mkdir);
+    HOST("NativeSafeList", warm_file_list);
     HOST("NativeDirList", host_dir_list);
     HOST("NativeNetResolve", warm_net_resolve);
     HOST("NativeNetConnect", warm_net_connect);

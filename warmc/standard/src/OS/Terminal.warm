@@ -38,7 +38,8 @@ module body OS.Terminal is
         end while;
         return Ok(value => finalize(builder)); end;
     function readKey(input: &![Input]): Result[Key, IoError] is
-        let event: Int64 := rawKey();
+        return decodeKey(rawKey()); end;
+    function decodeKey(event: Int64): Result[Key, IoError] is
         if event < 0 then return Err(error => fromCode(event)); end if;
         let code: Int64 := event & 16777215;
         if code >= 1114129 and code <= 1114140 then
