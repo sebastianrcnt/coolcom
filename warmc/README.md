@@ -107,9 +107,11 @@ Limits:
 - Foreign imports call their Cool symbol verbatim: scalar integers, booleans, Float64,
   Unit/U0, pointers and span inputs (spans decay to pointers; pass the length
   explicitly). The symbol must be declared by the runtime or an included header or
-  adapter. `puts` and `putchar` are supplied. Arbitrary C libraries and stdio handles are
-  not available, so the standard library passes semantic checking, but its terminal
-  input (`Terminal.readLine`, `fgetc`, `stdin`) cannot run yet. Output works.
+  adapter. `puts`, `putchar`, `fputc`, `fgetc` and the `stdin`/`stdout`/`stderr` handles are
+  supplied; arbitrary C libraries and other stdio handles are not available.
+- Standard input (`Terminal.readLine`, `fgetc`) reads the host's real stdin under
+  `build/coolc --run` (`NativeGetChar`, -1 at the end of input). In the kernel shell
+  (`WarmRun`) it reads the shell terminal a line at a time with `GetLine`, and never ends.
 - Parser nesting is limited to 256, instance search to 64 levels and one output unit to
   100,000 specializations; exceeding a bound is a diagnostic.
 

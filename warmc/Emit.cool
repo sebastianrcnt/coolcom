@@ -332,6 +332,7 @@ U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
         WGCopy(g, c->name, WGExpand(u, pattern, args), c->ty); return tmp;
     } else if (WEq(s, "au_abort($1)") && a && !b) expr = WGExpand(u, "au_abort(&$1)", args);
     else if (WEq(s, "au_get_argc()") && !a) expr = s;
+    else if ((WEq(s, "au_stdin()") || WEq(s, "au_stdout()") || WEq(s, "au_stderr()")) && !a) expr = s;
     else if (WEq(s, "au_get_nth_arg($1)") && a && !b) {
         tmp = WGTemp(g, ty); WGLine(g, WG3(u, "au_get_nth_arg(&", tmp, WGCat(u, WGExpand(u, ", $1)", args), ";"))); return tmp;
     } else if (WEq(s, "au_make_span($1, $2)") && b && !c) {

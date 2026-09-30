@@ -18,16 +18,29 @@ import U8 *MemSet(U8 *dst, I64 value, I64 size);
 import U0 NativeExit(I64 status);
 import U0 NativeErrPutS(U8 *text);
 import I64 NativeArgCount();
+import I64 NativeGetChar();
 import U8 *NativeArg(I64 index);
 import I64 StrLen(U8 *text);
 #else
 U0 NativeErrPutS(U8 *text) {PutS(text);}
 I64 NativeArgCount() {return 0;}
+I64 NativeGetChar() {return -1;}
 U8 *NativeArg(I64 index) {return NULL;}
 #endif
 class au_span_t {U8 *wh_data; U64 wh_size;};
 I32 au_putchar(U8 c) {Print("%c", c); return c;}
 I32 au_puts(U8 *s) {Print("%s\n", s); return 0;}
+// C's stdio handles for foreign imports: a stream is 0 (stdin), 1 (stdout) or 2 (stderr).
+U8 *au_stdin() {return 0;}
+U8 *au_stdout() {return 1;}
+U8 *au_stderr() {return 2;}
+I32 fputc(I32 c, U8 *stream) {
+    U8 text[2];
+    if (stream(I64) == 2) {text[0] = c; text[1] = 0; NativeErrPutS(text);}
+    else Print("%c", c);
+    return c;
+}
+I32 fgetc(U8 *stream) {return NativeGetChar();}  // the next input byte, or -1 at the end of input
 U32 au_rand_seed;
 U0 srand(U32 seed) {au_rand_seed = seed;}  // C's, for foreign imports; there is no rand
 U0 wh_abort(U8 *message) {

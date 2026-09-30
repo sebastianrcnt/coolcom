@@ -17,7 +17,7 @@ for line in runtime.splitlines():
         lines.append(line)
 runtime = '\n'.join(lines) + '\n'
 for name, adapter in [('NativeExit', 'WKernelExit'), ('NativeErrPutS', 'WKernelErrPutS'),
-                      ('NativeArgCount', 'WKernelArgCount'), ('NativeArg', 'WKernelArg')]:
+                      ('NativeArgCount', 'WKernelArgCount'), ('NativeGetChar', 'WKernelGetChar'), ('NativeArg', 'WKernelArg')]:
     runtime = runtime.replace(name, adapter)
 # TempleOS Print uses its own length conventions. Preserve numeric meaning.
 runtime = runtime.replace('"%zu"', '"%u"').replace('"%li"', '"%d"')

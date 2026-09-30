@@ -40,6 +40,5 @@ compile memory Memory ""
 compile named-argument NamedArgument ""
 compile record Record ""
 compile union Union ""
-# greet reads standard input (Terminal.readLine), which the Cool backend does not support yet.
-echo "SKIP greet (reads stdin)"
+compile greet Greet "Hello, World!\n" "World\n"
 exit $failed
