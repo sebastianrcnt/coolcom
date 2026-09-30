@@ -244,7 +244,7 @@ U0 VenusSetup() {
     FbRenderUnlock(daif); vterm.installing = FALSE; gfx.soft_fail = FALSE;
     Print("VENUS TERMINAL READY\n");
 }
-// Fake capsets deliberately do not qualify. Missing prerequisites keep Logos/CPU.
+// Fake capsets deliberately do not qualify. Missing prerequisites keep the CPU renderer.
 if (GpuVenusInit && venus.cap_size >= 156 && FileFind("C:/Vulkan/terminal.vert.spv") && FileFind("C:/Vulkan/terminal.frag.spv")) {
     try {VenusSetup;}
     catch {

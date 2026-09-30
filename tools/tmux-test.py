@@ -82,7 +82,7 @@ def vim_panes(kernel):
     script += vim.finish('RIGHT-CLEAN-0', 300)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        proc = subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2',
+        proc = subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2',
                                '--mem', '1024', '--timeout', '25', '--width', '640', '--height', '480',
                                '--input-script', str(d / 'input.txt'), '--disk', str(disk),
                                '--screenshot', str(d / 'screen.png'), kernel], stdout=out, stderr=subprocess.STDOUT)
@@ -148,7 +148,7 @@ def exit_panes(kernel):
     script += vim.finish('BACK42-1', 300)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        proc = subprocess.run(['gtimeout', '-k', '2', '50', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2',
+        proc = subprocess.run(['gtimeout', '-k', '2', '50', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2',
                                '--mem', '1024', '--timeout', '45', '--width', '640', '--height', '480',
                                '--input-script', str(d / 'input.txt'), '--disk', str(disk),
                                '--screenshot', str(d / 'screen.png'), kernel], stdout=out, stderr=subprocess.STDOUT)
@@ -193,7 +193,7 @@ def main():
     script += vim.wait('Tmux;') + vim.wait('LEFT-111') + vim.finish('RIGHT-223', 300)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '35', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2',
+        subprocess.run(['gtimeout', '-k', '2', '35', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2',
                         '--mem', '1024', '--timeout', '23', '--width', '640', '--height', '480',
                         '--input-script', str(d / 'input.txt'), '--disk', str(disk),
                         '--screenshot', str(d / 'screen.png'), sys.argv[1]], stdout=out, stderr=subprocess.STDOUT)

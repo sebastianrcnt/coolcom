@@ -25,7 +25,7 @@ def guest(source, name, screenshot=False):
             run(['mcopy','-o','-i',disk,p,'::Vulkan/'])
     run(['mcopy','-o','-i',disk,source,'::Init.cool'])
     log=OUT/f'{name}.log'
-    command=[ROOT/'build/coolvm-venus','--headless','--no-logos','--cpus','2','--mem','1024','--timeout','120','--disk',disk,ROOT/'build/kernel.Image']
+    command=[ROOT/'build/coolvm-venus','--headless','--cpus','2','--mem','1024','--timeout','120','--disk',disk,ROOT/'build/kernel.Image']
     if screenshot: command[1:1]=['--screenshot',OUT/f'{name}.png']
     with log.open('wb') as out:
         p=subprocess.Popen([str(a) for a in command],cwd=ROOT,stdout=out,stderr=subprocess.STDOUT,

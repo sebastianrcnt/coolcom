@@ -29,7 +29,7 @@ def main():
     script.write_text("wait Cool shell\nwait > \n" + kv.typed(LINE) +
                       f"1 {LCTRL} 1\n" + kv.keys_of(B) + f"1 {LCTRL} 0\n" +
                       kv.keys_of(UP) + kv.keys_of(ESC))
-    vm = subprocess.Popen(["gtimeout", "-k", "2", "25", "build/coolvm", "--headless", "--no-logos", "--cpus", "2",
+    vm = subprocess.Popen(["gtimeout", "-k", "2", "25", "build/coolvm", "--headless", "--no-venus", "--cpus", "2",
                            "--mem", "1024", "--timeout", "20", "--input-script", str(script), sys.argv[1]],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out, keys = [], []

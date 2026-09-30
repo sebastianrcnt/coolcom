@@ -13,7 +13,6 @@ bool gpu3d_init(void);
 void gpu3d_reset(void);
 void gpu3d_cleanup(void);
 bool gpu3d_resource(uint32_t id);
-bool gpu3d_scanout_active(void);
 bool gpu3d_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height);
 void gpu3d_scanout_disable(void);
 bool gpu3d_command(const uint8_t *p,size_t len,uint8_t *out,size_t cap,size_t *n);
@@ -22,7 +21,6 @@ bool gpu3d_mmio(uint64_t off,bool wr,uint32_t *val);
 static inline bool gpu3d_init(void) { return false; }
 static inline void gpu3d_reset(void) {}
 static inline void gpu3d_cleanup(void) {}
-static inline bool gpu3d_scanout_active(void) {return false;}
 static inline bool gpu3d_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
 { (void)pixels;(void)width;(void)height;return false; }
 static inline void gpu3d_scanout_disable(void) {}

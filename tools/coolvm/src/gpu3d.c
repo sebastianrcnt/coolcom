@@ -41,7 +41,6 @@ static int context(uint32_t id)
 static struct blob *find(uint32_t id)
 { for(unsigned i=0;i<NRES;i++)if(id && venus.blobs[i].id==id)return &venus.blobs[i];return NULL; }
 bool gpu3d_resource(uint32_t id) { return find(id)!=NULL; }
-bool gpu3d_scanout_active(void) {return venus.scan_id!=0;}
 void gpu3d_scanout_disable(void) { venus.scan_id=0; }
 bool gpu3d_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
 {

@@ -24,7 +24,7 @@ I64 GpuRead64(I64 off)
 }
 
 Bool GpuVenusInit()
-{// Lazy discovery: ordinary 2D/Logos boot never depends on Venus.
+{// Lazy discovery: ordinary 2D boot never depends on Venus.
     I64 i, count, daif = SpinLockIrq(&venus.lock);
     U32 p[18], info[10];
     Bool ok = FALSE;

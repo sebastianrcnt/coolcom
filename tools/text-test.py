@@ -74,7 +74,7 @@ def main():
     script += keys(' ') + keys('/line 090\n') + keys('g', 600) + 'quit\n'
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '90', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2', '--mem', '1024',
+        subprocess.run(['gtimeout', '-k', '2', '90', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2', '--mem', '1024',
                         '--timeout', '70', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
                         '--disk', str(disk), '--screenshot', str(d / 'screen.png'), sys.argv[1]],
                        stdout=out, stderr=subprocess.STDOUT)

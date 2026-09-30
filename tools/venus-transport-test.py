@@ -11,8 +11,8 @@ OUT.mkdir(parents=True, exist_ok=True)
 image = sys.argv[1]
 
 for name, options, marker in [('stub', ['--gpu-3d-stub'], 'VENUS PASS 1'),
-                               ('2d', ['--no-logos'], 'VENUS SKIP 1'),
-                               ('logos', [], 'VENUS SKIP 1'),
+                               ('2d', ['--no-venus'], 'VENUS SKIP 1'),
+                               ('default', [], 'VENUS SKIP 1'),
                                ('no-gpu', ['--no-gpu'], 'VENUS SKIP 1')]:
     disk = OUT / f'{name}.img'
     with disk.open('wb') as f:

@@ -53,7 +53,7 @@ def main():
     script += 'delay 600\nquit\n'
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '40', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2', '--mem', '1024',
+        subprocess.run(['gtimeout', '-k', '2', '40', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2', '--mem', '1024',
                         '--timeout', '30', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
                         '--disk', str(disk), '--screenshot', str(d / 'screen.png'), sys.argv[1]],
                        stdout=out, stderr=subprocess.STDOUT)

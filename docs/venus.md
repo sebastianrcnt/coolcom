@@ -3,13 +3,15 @@
 Status: decisions accepted. Kernel transport, the guest subset generator and the
 optional real host renderer are implemented. Milestone 1 passes with real guest
 memory coherence, Vulkan triangle rendering and blob scanout pixel validation.
+Milestone 3 passes the Vulkan terminal screen and scroll tests; the subsequent
+Logos retirement leaves Venus → CPU selection.
 See [generator usage](../tools/venus/README.md) and the host validation log below.
 The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
 virtio-gpu **Venus**: under coolvm on the Mac through virglrenderer and MoltenVK to Metal,
-and under QEMU on Linux hosts through virglrenderer to the host's Vulkan driver. Logos
-([logos.md](logos.md)) stays as it is until the terminal runs on Vulkan; then its custom
-channel retires. The original choices are listed with options and a recommendation
+and under QEMU on Linux hosts through virglrenderer to the host's Vulkan driver. The
+[historical Logos design](logos.md) has been ported to the guest Vulkan terminal;
+its custom channel has now retired. The original choices are listed with options and a recommendation
 (**Rec.**), and collected at the end.
 
 How Venus works, in short. Venus is a Vulkan driver in Mesa (`src/virtio/vulkan`). It does
@@ -563,7 +565,7 @@ No vendoring or downloads are implicit in these targets. The kernel starts a
 resident compiler task before `Init.cool` when both Venus and the disk library
 are available. That task owns the compiled app across primary-shell restarts;
 its framebuffer hooks are serialized by `fb.render_lock`. It parks after setup.
-Missing Venus or shader inputs retain Logos, then the CPU renderer; initialization
+Missing Venus or shader inputs retain the CPU renderer; initialization
 exceptions release the lock and partial blob/context resources before fallback.
 
 `os/Vulkan/Terminal.cool` ports the Logos layout directly:
@@ -590,7 +592,7 @@ exceptions release the lock and partial blob/context resources before fallback.
 
 As in milestone 1, the rendered target is copied to a coherent HOST3D scanout
 buffer. Vulkan barriers and a polled completion fence precede blob presentation.
-A Venus blob scanout takes display priority over the bootstrap Logos grid.
+A Venus blob scanout takes display priority over the bootstrap CPU framebuffer.
 `Gfx.no_sleep` polls without scheduling while the existing framebuffer/IRQ lock
 is held; no shaders/files are loaded during frames. This is synchronous and
 bounded, with frame latency to improve before a production compositor.
@@ -625,7 +627,7 @@ and completion polling for every frame. Headless Logos only updates its cells
 on PRESENT and draws when the screenshot is requested. Thus this is a comparison
 of current end-to-end behavior, not equivalent shader execution timings. Venus
 is slower for forced frames; batching reduces the difference. Future work is
-cached command buffers, asynchronous GPU fences/double buffering and direct
+cached command buffers, asynchronous GPU completion and direct
 presentation instead of the full readback copy; these measurements do not claim
 a performance win.
 
@@ -638,9 +640,41 @@ runs. Results are in `build/scroll-bench/venus-m3-*.json`; the prepared test dis
 can also be made with `tools/venus/install.sh` on a formatted FAT32 image.
 
 
+### Logos retirement after milestone 3
+
+Milestone 3 was committed as `b2aaeb6` with Logos still available, after the five
+screen comparisons, changed-row checks and all three backend measurements
+passed. A subsequent commit removes `os/Kernel/Logos.cool`, host `logos.m/.h`,
+feature bit 23 negotiation, `coolcom,logos` FDT metadata and custom GPU commands
+0x4000–0x4006, as decided. No dedicated host cell renderer remains.
+
+Renderer selection is now **Venus → CPU**. The CPU path covers optional-renderer
+absence, `--no-venus`, missing disk libraries/shaders and initialization failure.
+`--no-logos` remains an accepted no-op for old scripts. Ordinary pixel tests use
+`--no-venus`; the renamed `tools/venus-term-test.py` retains the same five screen
+fixtures and CPU tolerance. It is opt-in because it requires vendored renderer
+inputs; `make -j test` continues to run the offline/default suite without them.
+The historical Logos document and the measurements above stay for comparison;
+reproducing Logos requires the pre-retirement commit `b2aaeb6`.
+
+
 Terminal scanout publication now alternates **two coherent readback blobs**.
 The GPU writes the buffer currently off screen; after its fence completes,
 SET_SCANOUT_BLOB publishes it under the same host device lock used by snapshots.
 This preserves the displayed pixels while the next frame is being copied. GPU
 submission remains synchronous. The benchmark table records the validated
 pre-retirement `b2aaeb6` run (before this publication fix).
+
+
+Retirement validation: **`make -j test` exited 0 without downloads** after the
+feature/protocol/Metal removal. `make venus-term-test`, `make venus-test`,
+`make venus-memory-test` and `make venus-host-test` also passed. The final
+Vulkan screen suite passes with alternating scanout blobs. Its additional
+lifecycle tests keep the one resident renderer through two primary-shell
+restarts on both one and two CPUs; an advertised renderer with a missing
+fragment shader correctly leaves CPU rendering active. Default `otool -L`
+shows neither vendored libraries nor a direct Metal framework dependency.
+Latest main (`3d01b29`, including exact binary32 C translation) was merged as
+`3677ba6` before repeating the offline/default and optional Venus checks.
+Logs: `build/venus-retire-main-test.log`, `build/venus-retire-main-optional.log`,
+`build/venus-final-term-test.log`, `build/venus-term-test/lifecycle/`.

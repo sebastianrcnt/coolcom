@@ -7,9 +7,9 @@ U0 VenusTransportTest()
     CGpuBlob *guest, *host, *second;
     U8 *mapped, *again;
     U32 stream[2], bad[2], reply[10];
-    I64 i, old_gpu = gpu.active, old_logos = gpu.logos;
+    I64 i, old_gpu = gpu.active;
     if (!gpu.venus_features) {
-        VenusCheck(!GpuVenusInit && gpu.active == old_gpu && gpu.logos == old_logos, "fallback");
+        VenusCheck(!GpuVenusInit && gpu.active == old_gpu, "fallback");
         Print("VENUS SKIP %d\n", 1); return;
     }
     VenusCheck(GpuVenusInit && venus.cap_size == 16 && venus.cap_version == 0 &&
@@ -44,7 +44,7 @@ U0 VenusTransportTest()
     VenusCheck(!GpuVenusDestroy, "live context");
     VenusCheck(GpuBlobDestroy(second) && GpuBlobDestroy(host) && GpuBlobDestroy(guest), "unref");
     VenusCheck(GpuVenusDestroy && GpuVenusInit && GpuVenusDestroy, "context lifecycle");
-    VenusCheck(gpu.active == old_gpu && gpu.logos == old_logos, "2D state");
+    VenusCheck(gpu.active == old_gpu, "2D state");
     Print("VENUS PASS %d\n", 1);
 }
 VenusTransportTest;
