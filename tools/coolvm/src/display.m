@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <ImageIO/ImageIO.h>
 #import <CoreServices/CoreServices.h>
+#import <QuartzCore/QuartzCore.h>
 #include "coolvm.h"
 
 static CGImageRef framebuffer_image(void)
@@ -112,14 +113,48 @@ void display_init(void)
     [window setAcceptsMouseMovedEvents:YES];
     [NSApp activateIgnoringOtherApps:YES];
 }
-void display_pump(void)
+/* Run the event loop for `seconds`: events are handled as they arrive, and once per
+ * screen frame the window is redrawn and committed if the guest changed the framebuffer
+ * (it writes guest RAM directly, so a copy of the last frame shown is the only way to
+ * tell). The old loop handled events and redrew every 50 ms, and the drawing reached the
+ * screen one more pump later: 0.1-0.15 s from key to echo. */
+void display_pump(double seconds)
 {
+    static uint8_t *shown;
+    static double frame, next, fast_until;
     if (g.headless) return;
-    @autoreleasepool {
-        NSEvent *ev;
-        while ((ev = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast] inMode:NSDefaultRunLoopMode dequeue:YES]))
-            [NSApp sendEvent:ev];
-        [view setNeedsDisplay:YES];
-        [view displayIfNeeded];
+    if (!shown) {
+        shown = calloc(1, g.fb_size);
+        NSInteger fps = [NSScreen mainScreen].maximumFramesPerSecond;
+        frame = 1.0 / (fps >= 60 ? fps : 60);
+    }
+    double now = CFAbsoluteTimeGetCurrent(), end = now + seconds;
+    while (now < end && !atomic_load(&g.stop)) {
+        @autoreleasepool {
+            if (next < now) next = now;
+            NSEvent *ev = [NSApp nextEventMatchingMask:NSEventMaskAny
+                untilDate:[NSDate dateWithTimeIntervalSinceReferenceDate:next < end ? next : end]
+                inMode:NSDefaultRunLoopMode dequeue:YES];
+            if (ev) {
+                [NSApp sendEvent:ev];
+                if (ev.type == NSEventTypeKeyDown || ev.type == NSEventTypeLeftMouseDown) {
+                    /* The guest answers in 1-3 ms: look every millisecond for a while. */
+                    now = CFAbsoluteTimeGetCurrent();
+                    fast_until = now + 0.02;
+                    if (next > now + 0.001) next = now + 0.001;
+                }
+            }
+            now = CFAbsoluteTimeGetCurrent();
+            if (now >= next) {
+                next = now + (now < fast_until ? 0.001 : frame);
+                if (memcmp(shown, g.fb, g.fb_size)) {
+                    fast_until = 0;
+                    memcpy(shown, g.fb, g.fb_size);
+                    [view setNeedsDisplay:YES];
+                    [view displayIfNeeded];
+                    [CATransaction flush];
+                }
+            }
+        }
     }
 }
