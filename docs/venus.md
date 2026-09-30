@@ -1,6 +1,8 @@
 # Venus: Vulkan for coolcom (design, for review)
 
-Status: a proposal; nothing here is implemented. The goal is one general GPU API, Vulkan,
+Status: design decisions accepted. The guest subset generator and host wire tests
+are implemented ([generator usage](../tools/venus/README.md)); GPU transport and
+host integration remain planned. The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
 virtio-gpu **Venus**: under coolvm on the Mac through virglrenderer and MoltenVK to Metal,
 and under QEMU on Linux hosts through virglrenderer to the host's Vulkan driver. Logos

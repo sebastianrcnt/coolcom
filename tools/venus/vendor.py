@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch immutable generator inputs into gitignored vendor/."""
+import argparse
 import hashlib
 from pathlib import Path
 import subprocess
@@ -23,6 +24,9 @@ def check():
     return vk, vn
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--test', action='store_true', help='also fetch pinned C oracle template dependencies')
+    args = parser.parse_args()
     (ROOT / 'vendor').mkdir(exist_ok=True)
     vk = ROOT / 'vendor/vk.xml'
     if not vk.exists():
@@ -38,6 +42,14 @@ def main():
         subprocess.run(['git', 'clone', '--no-checkout', VN_URL, str(vn)], check=True)
         subprocess.run(['git', '-C', str(vn), 'checkout', '--detach', VN_REV], check=True)
     check()
+    if args.test:
+        env = ROOT / 'vendor/venus-python'
+        if not env.exists():
+            subprocess.run(['python3', '-m', 'venv', str(env)], check=True)
+        python = env / 'bin/python'
+        versions = subprocess.run([str(python), '-c', 'import mako, markupsafe; from importlib.metadata import version; assert version("Mako")=="1.3.10" and version("MarkupSafe")=="3.0.3"'], capture_output=True)
+        if versions.returncode:
+            subprocess.run([str(python), '-m', 'pip', 'install', 'Mako==1.3.10', 'MarkupSafe==3.0.3'], check=True)
     print(f'Venus 1.1.3 ({VN_REV}); Vulkan-Headers v1.4.357 ({VK_REV})')
 
 if __name__ == '__main__':

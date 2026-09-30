@@ -93,6 +93,7 @@ class Generator:
         out = ['// Generated; inputs pinned in tools/venus/vendor.py. Do not edit.',
                '// float fields contain IEEE-754 binary32 bits (Cool has no F32).',
                '// Handles are guest object ids; unions use the Venus default wire tags.',
+               '#define VN_WIRE_FORMAT_VERSION 1',
                (ROOT / 'tools/venus/wire.cool').read_text()]
         # Constants include only selected enum groups plus sizes used in declarations.
         constants = {}
@@ -117,12 +118,15 @@ class Generator:
                 out.append(f'#define {k} {v}')
         for t in self.records:
             out.append(f'extern class {t.name};')
-        # dependencies precede containing records; union members are independent alternatives.
+        # Dependencies precede containing records; Cool unions preserve overlapping storage.
         for t in self.records:
             kind = 'union' if t.category == self.T.UNION else 'class'
             out.append(f'{kind} {t.name} {{\n' + '\n'.join('    ' + self.decl(v) + ';' for v in t.variables) + '\n};')
         funcs = []
         def add(ret, name, params, body):
+            if any(f'{t.name} *val' in params for t in self.records) and '_pnext' not in name:
+                w = 'dec' if name.startswith('vn_decode_') else 'enc'
+                body = f'if({w}->error || !val) {{{w}->error=1; return;}}\n' + body
             converted = self.cool(body)
             if 'vn_decode_' in name:
                 converted = converted.replace('enc->error', 'dec->error')
@@ -138,7 +142,7 @@ class Generator:
             add('U0', 'vn_decode_' + name, f'VenusWire *dec, {typ} *val', f'vn_get(dec, val(U8i *), {n}, {max(n,4)});')
             for mode, w in [('encode', 'enc'), ('decode', 'dec')]:
                 add('U0', f'vn_{mode}_{name}_array', f'VenusWire *{w}, {typ} *val, U64i count',
-                    f'if(count>(0xFFFFFFFFFFFFFFFF-3)/{n}) {{{w}->error=1; return;}} vn_{"put" if mode == "encode" else "get"}({w}, val(U8i *), count*{n}, (count*{n}+3)&~3);')
+                    f'if(count>{(2**64-4)//n}) {{{w}->error=1; return;}} vn_{"put" if mode == "encode" else "get"}({w}, val(U8i *), count*{n}, (count*{n}+3)&~3);')
         for t in self.records:
             if not self.gen.is_serializable(t):
                 # Optional allocation callbacks are unsupported by Venus; reject non-null.
@@ -189,7 +193,6 @@ class Generator:
                         add('U0', f'vn_{mode}_{t.name}{suffix}', f'VenusWire *{w}, {t.name} *val', body)
                     else:
                         add('U0', f'vn_{mode}_{t.name}{suffix}', f'VenusWire *{w}, {t.name} *val', '\n'.join(member(v) for v in t.variables))
-        ids = self.gen.reg.type_table['VkCommandTypeEXT'].enums.values
         for t in self.commands:
             params = ', '.join(self.decl(v) for v in t.variables)
             ident = t.attrs['c_type']
@@ -202,7 +205,17 @@ class Generator:
             body = f'I32i cmd;\nvn_decode_VkCommandTypeEXT(dec,&cmd);\nif(cmd!={ident}) {{dec->error=1; return' + (' 0' if t.ret else '') + ';}\n'
             if t.ret:
                 body += self.decl(t.ret) + '=0;\n' + self.gen.decode_command_reply(t, t.ret, '') + '\n'
-            body += '\n'.join(self.fragment(self.gen.decode_command_reply(t, v, '')) for v in t.variables)
+            # Enumeration outputs cannot exceed the caller's input array capacity.
+            counts = {v.name: v for v in t.variables if 'var_in' in v.attrs and 'var_out' in v.attrs and v.ty.is_pointer()}
+            for v in counts.values():
+                body = f'U64i saved_{v.name}=vn_count({v.name});\n' + body
+            for v in t.variables:
+                body += self.fragment(self.gen.decode_command_reply(t, v, '')) + '\n'
+                if v.name in counts:
+                    arrays = [a.name for a in t.variables if v.name in a.attrs.get('len_names', [])]
+                    for array in arrays:
+                        body += f'if({array} && {v.name} && *{v.name}>saved_{v.name}) {{dec->error=1; return' + (' 0' if t.ret else '') + ';}\n'
+
             if t.ret:
                 body += '\nreturn ' + t.ret.name + ';'
             add(ret, f'vn_decode_{t.name}_reply', f'VenusWire *dec, {params}', body)
