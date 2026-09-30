@@ -354,7 +354,7 @@ I64 VarFRegToReg(I64 r) {
 // Replaces IC_CALL_INDIRECT(IC_ADDR_IMPORT) with Short jumps if not import
 //
 U0 AiwniosMakeShortJmps(CCmpCtrl *cc, U8 *cc2) {
-    CRPN *head = &cc->coc.coc_head, *cur, *new;
+    CRPN *head = &cc->coc.coc_head, *cur;
     CCodeMisc *misc;
     for (cur = head->next; cur != head; cur = cur->next) {
         if (cur->type == IC_ADDR_IMPORT) {
@@ -428,7 +428,6 @@ U0 BitSetAdd(CBitSet *bs, I64 b) {
     Bts(bs->body, b);
 }
 U0 BitSetRem(CBitSet *bs, I64 b) {
-    I64 *new;
     if (0x10000 < b) throw('Compiler');
     if (bs->body_sz <= b >> 3)
         return;
@@ -788,7 +787,7 @@ I64 MakeNumberedMember(CCmpCtrl *cc, I64 from_member, I64 num, I64 tmp_off, CMem
     return mc - 1;
 }
 CVarRenumbers *GenerateRenumbersForVar(CCmpCtrl *cc, I64 member, I64 *foff) {
-    I64 new_foff = *foff, cnt = 0, idx;
+    I64 cnt = 0, idx;
     CRPN *head = &cc->coc.coc_head, *cur;
     CMemberLst *mlst = NthMember(cc, member), *who;
     CVarRenumbers *ret = CAlloc(sizeof CVarRenumbers);
@@ -1141,14 +1140,13 @@ U0 LiveVariableAnalysis(CCmpCtrl *cc) {
     Bool changed = FALSE, first_run = TRUE;
     I64 cnt = 0, idx, idx2;
     I64 which;
-    I64 *old_live, old_in, old_out;
+    I64 old_in, old_out;
     CI64Set *changed1 = I64SetNew, *changed2 = I64SetNew, *tmp_set;
     rpn = head->next;
     while (rpn != head) {
         rpn = ICNext(rpn);
         cnt++;
     }
-    I64 run = 0;
     flat = CAlloc(cnt * 8);
     idx = 0;
     rpn = head->next;
@@ -1346,18 +1344,18 @@ U8 *AiwniosCompile(CCmpCtrl *cc, I64 *res_sz = NULL, CDbgInfo **info, Bool byte_
     CHashImport *h;
     CAOTImportExport *tmpaie;
     CAOTAbsAddr *tmpabs;
-    CAOTHeapGlbl *tmpgh, *glbl_gh;
+    CAOTHeapGlbl *tmpgh;
     CAOTHeapGlblRef *tmpghr;
     CAddShortRelocData fill_user_data;
-    I64 idx, argc, member_cnt = 0, ir = AIWNIOS_IREG_START, fr = AIWNIOS_FREG_START, foff, *foff_lookup = NULL, align, idx2;
+    I64 idx, argc, member_cnt = 0, foff, *foff_lookup = NULL, align;
     I64 reported_min_ln = I16_MAX, reported_max_ln = I16_MIN;
     U8 **aiwnios_dbg_info = NULL;
-    U8 *acc = __HC_CmpCtrlNew(), *machine_code, *stat_nam, *dumb_crap_apple;
+    U8 *acc = __HC_CmpCtrlNew(), *machine_code, *stat_nam;
     I64 *table_ptr;
     U8 *cc2 = __HC_CodeCtrlPush(acc);
     U8 *dumb_static;
-    U8 name[STR_LEN], name2[STR_LEN];
-    U8 *name_ptr = name, *name2_ptr = name2;
+    U8 name[STR_LEN];
+    U8 *name_ptr = name;
     Bool force_segment = FALSE;
     I64 statics_sz = 0;
 #ifdef NATIVE_CANONICAL_AOT
@@ -1738,7 +1736,7 @@ found_offset:;;
                         misc->h = HashFind("__Fs", Fs->hash_table, HTT_FUN); //Maybe we arent AOT Compiling
                 }
                 misc = cur->ic_data;
-                misc->addr = INVALID_PTR;
+                misc->addr = INVALID_PTR(U8 *);
                 misc->flags &= ~CMF_SHORT_ADDR;
 #ifdef TARGET_X86
                 force_segment = TRUE;
@@ -1772,7 +1770,7 @@ found_offset:;;
                 }
                 misc = cur->ic_data;
                 misc->flags &= ~CMF_SHORT_ADDR;
-                misc->addr = INVALID_PTR;
+                misc->addr = INVALID_PTR(U8 *);
 
 #ifdef TARGET_X86
                 force_segment = TRUE;
@@ -1872,7 +1870,7 @@ found_offset:;;
                 misc = COCMiscNew(cc, CMT_LABEL);
                 misc->str = MStrPrint("0x%x", cur->imm_i64);
                 misc->flags &= ~CMF_SHORT_ADDR;
-                misc->addr = INVALID_PTR;
+                misc->addr = INVALID_PTR(U8 *);
                 new = __HC_ICAdd_Reloc(
                                        acc,
                                        cc2,
@@ -2200,7 +2198,7 @@ found_offset:;;
     tmpgh = NULL;
     for (misc = cc->coc.coc_next_misc; misc != &cc->coc.coc_next_misc; misc = misc->next) {
         if (misc->flags & CMF_STATIC) {
-            if (misc->addr != INVALID_PTR) {
+            if (misc->addr != INVALID_PTR(U8 *)) {
                 if (cc->flags & CCF_AOT_COMPILE) {
                     if (!tmpgh) {
                         tmpgh = CAlloc(sizeof CAOTHeapGlbl);
@@ -2237,7 +2235,7 @@ found_offset:;;
             // dont add a "fill-in-later" for it
             //
             if (cc->flags & CCF_AOT_COMPILE) {
-                if (misc->addr != INVALID_PTR) {
+                if (misc->addr != INVALID_PTR(U8 *)) {
                     //All non-imported functions are short calls
                     if (misc->flags & CMF_SHORT_ADDR) {
                         fill_user_data.cc = cc;
@@ -2268,7 +2266,7 @@ norm_reloc:
                     }
                 }
             } else {
-                if (misc->addr != INVALID_PTR) {
+                if (misc->addr != INVALID_PTR(U8 *)) {
                     h = CAlloc(sizeof CHashImport);
                     h->type = HTT_IMPORT_SYS_SYM;
                     h->str = StrNew(misc->h->str);
@@ -2286,14 +2284,14 @@ norm_reloc:
                     HashAdd(h, Fs->hash_table);
                 }
             }
-        } else if (misc->addr != INVALID_PTR && misc->type == CMT_LABEL && misc->str && !StrNCmp("0x", misc->str, 2)) {
+        } else if (misc->addr != INVALID_PTR(U8 *) && misc->type == CMT_LABEL && misc->str && !StrNCmp("0x", misc->str, 2)) {
             tmpabs = CAlloc(sizeof(CAOTAbsAddr));
             tmpabs->next = cc->aotc->abss;
             tmpabs->type = AAT_ADD_U64;
             tmpabs->rip = cc->aotc->rip + (misc->addr(U8 *) - machine_code);
             cc->aotc->abss = tmpabs;
             misc->addr(U64 *)[0] = Str2I64(misc->str);
-        } else if (misc->addr != INVALID_PTR && misc->type == CMT_JMP_TABLE && cc->flags & CCF_AOT_COMPILE) {
+        } else if (misc->addr != INVALID_PTR(U8 *) && misc->type == CMT_JMP_TABLE && cc->flags & CCF_AOT_COMPILE) {
             for (idx = 0; idx < misc->range; idx++) {
                 tmpabs = CAlloc(sizeof(CAOTAbsAddr));
                 tmpabs->next = cc->aotc->abss;

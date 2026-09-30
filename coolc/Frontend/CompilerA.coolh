@@ -28,3 +28,9 @@ extern CRPN *RPNAddNew(CCmpCtrl *cc, I64 type, I64 data = 0, CHashClass *cls = N
 extern Bool PrsExpression(CCmpCtrl *cc, U8 **ul = NULL, I64 flags = 0, U8 *prs_stk = NULL);
 extern U8 *COCCompile(CCmpCtrl *cc, I64 *_code_size, CDbgInfo **_dbg, I64 *_type);
 extern CCodeMisc *CodeMiscHashNew(CCmpCtrl *cc, CHash *h);
+// Compiler options beyond KernelA.coolh's: Vet's style checks (Vet, coolc --vet).
+#define OPTf_VET 0x29
+#define VET_ASSIGN_COND 0 //if (a = b) without extra parentheses
+#define VET_EMPTY_STMT 1 //if (x); for (...); while (x);
+#define VET_UNREACHABLE 2 //a statement right after return, break or goto in the same block
+#define VET_CHECKS 3

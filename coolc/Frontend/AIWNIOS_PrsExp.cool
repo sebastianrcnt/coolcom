@@ -30,6 +30,8 @@ class CRPN: CQue {
         Bool visited;
         Bool changed;
     };
+    //An integer or char constant written in the source (a global's address is an IC_IMM_I64 too in JIT code)
+    Bool lit;
 };
 
 Bool IsPtrNode(CRPN *rpn) {
@@ -62,7 +64,6 @@ I64 RPNPtrWidth(CRPN *r) {
     return 1 * mul;
 }
 CHashClass *AssignRawTypeToNode(CRPN *r) {
-    CHashClass *cls;
     I64 rt1, rt2;
     if (r->ic_class)
         return r->ic_class;
@@ -277,7 +278,6 @@ U0 PrsOffsetOf(CCmpCtrl *cc)
 {
     CHashClass *tmpc;
     CMemberLst *tmpm;
-    CRPN *rpn;
     I64 i;
     if (cc->token != TK_IDENT)
         LexExcept(cc, "Invalid class at ");
@@ -310,7 +310,6 @@ U0 PrsOffsetOf(CCmpCtrl *cc)
 }
 U0 PrsSizeOf(CCmpCtrl *cc)
 {
-    CRPN *rpn;
     CHashClass *tmpc;
     CMemberLst *tmpm;
     CDbgInfo *dbg_info;
@@ -384,6 +383,61 @@ CRPN *ICNext(CRPN *rpn) {
     }
     return next;
 }
+#ifdef COOLC_FRONTEND_FIXES
+// Definite bugs found while an operator is built: reported as errors, and the compile goes on.
+Bool RPNIsPtr(CRPN *r)
+{
+    return r->ic_class && r->ic_class->ptr_stars_cnt && !r->ic_dim;
+}
+Bool RPNIsNonzeroLit(CRPN *r)
+{
+    if (r->type == IC_UNARY_MINUS && r->t.arg1_tree)
+        r = r->t.arg1_tree;
+    return r->type == IC_IMM_I64 && r->lit && r->imm_i64;
+}
+Bool RPNIsIntLit(CRPN *r, I64 val)
+{
+    return r->type == IC_IMM_I64 && r->lit && r->imm_i64 == val;
+}
+Bool RPNIsF64(CRPN *r)
+{
+    return r->ic_class && r->ic_class->raw_type == RT_F64 && !r->ic_class->ptr_stars_cnt;
+}
+U0 RPNCheck(CCmpCtrl *cc, CRPN *rpn)
+{
+    CRPN *a, *b;
+    switch (rpn->type) {
+        case IC_EQU_EQU:
+        case IC_NOT_EQU:
+            a = rpn->t.arg1_tree;
+            b = rpn->t.arg2_tree;
+            if (a->type == IC_STR_CONST || b->type == IC_STR_CONST)
+                LexError(cc, "A string literal is compared by address (use StrCmp) at ");
+            else if ((RPNIsPtr(a) && RPNIsNonzeroLit(b)) || (RPNIsPtr(b) && RPNIsNonzeroLit(a)))
+                LexError(cc, "Integer constant compared with a pointer (cast it) at ");
+            break;
+        case IC_ASSIGN:
+            if (RPNIsPtr(rpn->t.arg1_tree) && RPNIsNonzeroLit(rpn->t.arg2_tree))
+                LexError(cc, "Integer constant assigned to a pointer (cast it) at ");
+            break;
+        case IC_DIV:
+        case IC_MOD:
+        case IC_DIV_EQU:
+        case IC_MOD_EQU:
+            if (RPNIsIntLit(rpn->t.arg2_tree, 0) && !RPNIsF64(rpn->t.arg1_tree))
+                LexError(cc, "Division by the constant zero at ");
+            break;
+        case IC_SHL:
+        case IC_SHR:
+        case IC_SHL_EQU:
+        case IC_SHR_EQU:
+            b = rpn->t.arg2_tree;
+            if (b->type == IC_IMM_I64 && b->lit && b->imm_i64 >= 64)
+                LexError(cc, "Shift by 64 or more at ");
+            break;
+    }
+}
+#endif
 //
 // add_to_prs_stk will also not assign the tree args
 //
@@ -418,6 +472,9 @@ U0 RPNAdd(CCmpCtrl *cc, CRPN *rpn, Bool add_to_prs_stk = TRUE) {
                 rpn->t.arg1_class = rpn->t.arg1_tree->ic_class;
                 break; case IS_0_ARG:
         }
+#ifdef COOLC_FRONTEND_FIXES
+        RPNCheck(cc, rpn);
+#endif
         switch (rpn->type) {
             break; case IC_POWER:
                 a = ICNext(rpn);
@@ -756,7 +813,6 @@ next:;
 //start_idx is the first argument
 I64 ImplicitFunCall(CCmpCtrl *cc, CHashFun *fun, I64 start_idx = 0) {
     I64 idx;
-    CRPN *rpn;
     CMemberLst *lst = fun->member_lst_and_root;
     CHashClass *last_c = cc->coc.coc_head.next(CRPN *)->ic_class;
     CCodeMisc *cm;
@@ -816,7 +872,7 @@ next:
 }
 
 CCodeMisc *CodeMiscHashNew(CCmpCtrl *cc, CHash *h) {
-    CCodeMisc *head = &cc->coc.coc_next_misc, *cur;
+    CCodeMisc *cur;
 #ifdef TARGET_X86
     //In X86_64,I will do every relocation as a short one that isnt an import
     if (cc->flags & CCF_AOT_COMPILE) {
@@ -898,7 +954,6 @@ U0 PrsMembers(CCmpCtrl *cc) {
     CHashClass *cls = head->ic_class;
     CArrayDim *ic_dim = head->ic_dim;
     CMemberLst *mlst;
-    CCodeMisc *cm;
     I64 off = 0;
     Bool needs_addr = !(cls->ptr_stars_cnt || ic_dim);
     Bool needs_flush = FALSE;
@@ -1015,7 +1070,7 @@ U0 PrsFmtCheck(CCmpCtrl *cc, U8 *name, I64 kind, U8 *fmt, U8 *vk, I64 nvk)
 {//Warn when a literal Print-style format string and its arguments disagree.
     //vk[i] is 1 for an F64 argument, else 0. Syntax as StrPrintJoin() reads it.
     U8 want[FMT_ARGS_MAX];
-    I64 n = 0, i, bad = 0, ch;
+    I64 n = 0, i, ch;
     U8 *p = fmt;
     if (!name)
         name = "Print";
@@ -1112,10 +1167,9 @@ fmt_next:;
 }
 
 Bool PrsExpression(CCmpCtrl *cc, U8 **ul = NULL, I64 flags = 0, CPrsStk *_ps = NULL) { //TODO REMOVE Ul
-    I64 cur_prec, stk_ptr, tok = cc->token, idx, arity, v, mode, str_len;
+    I64 cur_prec, tok = cc->token, idx, arity, mode, str_len;
     CRPN *orig_next = cc->coc.coc_head.next, *argc, *argv, *next;
     CCodeMisc *misc;
-    I64 intern_code;
     Bool finish = FALSE, lit_arg;
     CPrsStk *old = cc->ps;
     CArrayDim tmpad, *ic_dim;
@@ -1137,7 +1191,7 @@ Bool PrsExpression(CCmpCtrl *cc, U8 **ul = NULL, I64 flags = 0, CPrsStk *_ps = N
     I64 fmt_kind = FMT_NONE;
     //u32[0] is type
     //u32[1] is prec
-    CRPN *rpn, *rpn2;
+    CRPN *rpn;
     while (!finish) {
         rpn = NULL;
         cur_prec = -1;
@@ -1615,12 +1669,12 @@ found_end_square:
                 Lex(cc);
                 break; case TK_CHAR_CONST:
                 if (finish) break;
-                RPNAddNew(cc, IC_IMM_I64, cc->cur_i64, cmp.internal_types[RT_I64]);
+                RPNAddNew(cc, IC_IMM_I64, cc->cur_i64, cmp.internal_types[RT_I64])->lit = TRUE;
                 last_consumes_right = 0;
                 Lex(cc);
                 break; case TK_I64:
                 if (finish) break;
-                RPNAddNew(cc, IC_IMM_I64, cc->cur_i64, cmp.internal_types[RT_I64]);
+                RPNAddNew(cc, IC_IMM_I64, cc->cur_i64, cmp.internal_types[RT_I64])->lit = TRUE;
                 last_consumes_right = 0;
                 Lex(cc);
                 break; case TK_F64:
@@ -1700,7 +1754,7 @@ ins_label:
                     if (cc->local_var_entry->flags & MLF_STATIC) {
                         misc = COCMiscNew(cc, CMT_HASH_ENTRY); //->h will be filled in AIWNIOS_CodeGen.cool
                         misc->offset = cc->local_var_entry;
-                        misc->addr = INVALID_PTR;
+                        misc->addr = INVALID_PTR(U8 *);
                         misc->flags |= CMF_STATIC;
                         rpn = RPNAddNew(cc, IC_STATIC,
                                         misc,
@@ -1953,7 +2007,6 @@ U0 ParserTest() {
 U8 *LexExpression2Bin(CCmpCtrl *cc, I64 *_type = NULL)
 {//Compile cc expression. You call the code.
     U8 *res;
-    I64 size;
     CHashFun *old_fun;
     Bool old_trace = LBtr(&cc->flags, CCf_PASS_TRACE_PRESENT);
     COCPush(cc);

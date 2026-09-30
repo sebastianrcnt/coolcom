@@ -1,0 +1,36 @@
+ERROR: A string literal is compared by address (use StrCmp)
+  Errors.cool,5
+ERROR: A string literal is compared by address (use StrCmp)
+  Errors.cool,6
+ERROR: A string literal is compared by address (use StrCmp)
+  Errors.cool,7
+ERROR: Division by the constant zero
+  Errors.cool,11
+ERROR: Division by the constant zero
+  Errors.cool,12
+ERROR: Division by the constant zero
+  Errors.cool,13
+ERROR: Division by the constant zero
+  Errors.cool,14
+ERROR: Shift by 64 or more
+  Errors.cool,18
+ERROR: Shift by 64 or more
+  Errors.cool,19
+ERROR: Shift by 64 or more
+  Errors.cool,20
+ERROR: Shift by 64 or more
+  Errors.cool,21
+ERROR: Integer constant assigned to a pointer (cast it)
+  Errors.cool,25
+ERROR: Integer constant assigned to a pointer (cast it)
+  Errors.cool,26
+ERROR: Integer constant compared with a pointer (cast it)
+  Errors.cool,27
+ERROR: Integer constant compared with a pointer (cast it)
+  Errors.cool,28
+ERROR: Integer constant compared with a pointer (cast it)
+  Errors.cool,29
+ERROR: Unused local variable 'forgotten' in fun 'UnusedLocal'
+  Errors.cool,31
+ERROR: Duplicate case value 1
+  Errors.cool,42

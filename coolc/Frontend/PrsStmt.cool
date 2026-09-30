@@ -145,10 +145,9 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
 {
     CMemberLst *tmpm;
     CCodeMisc *saved_leave_label;
-    CAOTImportExport *tmpaotie, *tmpaotie1;
     CHashFun *fun;
     I64 i, j, size, *r;
-    Bool old_trace;
+    Bool old_trace, unused_locals = FALSE;
 
     cc->fun_lex_file = cc->lex_include_stk;
     cc->min_line = cc->max_line = cc->lex_include_stk->line_num;
@@ -207,6 +206,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
     LBtr(&cc->htc.fun->flags, Cf_EXTERN);
     COCPop(cc);
     tmpm = cc->htc.fun->member_lst_and_root;
+    i = 0;
     while (tmpm) {
         if (tmpm->flags & MLF_NO_UNUSED_WARN) {
             if (tmpm->use_cnt > 1 && StrCmp(tmpm->str, "_anon_")) {
@@ -215,6 +215,17 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
                                               tmpm->str, cc->htc.fun->str);
                 else PrintWarn("Unneeded no_warn '%s' in '%s' at %s\n", tmpm->str, cc->htc.fun->str, cc->lex_include_stk->full_name);
             }
+#ifdef COOLC_FRONTEND_FIXES
+        } else if (!tmpm->use_cnt && GetOption(OPTf_WARN_UNUSED_VAR) &&
+                   i >= cc->htc.fun->arg_cnt && StrCmp(tmpm->str, "_anon_") &&
+                   !(Bt(&cc->htc.fun->flags, Ff_DOT_DOT_DOT) && (!StrCmp(tmpm->str, "argc") || !StrCmp(tmpm->str, "argv")))) {
+            // An unused local is an error (an unused argument stays a warning: callbacks have them;
+            // so do argc and argv, which "..." declares).
+            PrintErr("Unused local variable '%s' in fun '%s'\n  %s\n", tmpm->str, cc->htc.fun->str,
+                     cc->htc.fun->src_link + 3);
+            cc->error_cnt++;
+            unused_locals = TRUE;
+#endif
         } else if (!tmpm->use_cnt && GetOption(OPTf_WARN_UNUSED_VAR)) {
             if (!IsCmdLineMode) PrintWarn("Unused var $$LK,\"FL:%s,%d\"$$ '%s' in '%s'\n",
                                           cc->lex_include_stk->full_name, cc->lex_include_stk->line_num,
@@ -222,8 +233,13 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
             else PrintWarn("Unused var '%s' in '%s' at %s\n", tmpm->str, cc->htc.fun->str, cc->lex_include_stk->full_name);
         }
         tmpm = tmpm->next;
+        i++;
     }
     cc->htc.local_var_lst = cc->htc.fun = cc->fun_lex_file = NULL;
+#ifdef COOLC_FRONTEND_FIXES
+    if (unused_locals && !(cc->flags & CCF_AOT_COMPILE))
+        throw('Compiler'); //JIT: the function must not be used
+#endif
 }
 
 U0 PrsGlblVarLst(CCmpCtrl *cc, I64 saved_mode, CHashClass *saved_tmpc,
@@ -480,20 +496,62 @@ U0 PrsGlblVarLst(CCmpCtrl *cc, I64 saved_mode, CHashClass *saved_tmpc,
     }
 }
 
+// Vet's checks (off unless OPTf_VET is set; see Vet in CMain.cool).
+U0 VetCond(CCmpCtrl *cc, Bool extra_paren)
+{//The condition just parsed is an assignment not wrapped in extra parentheses.
+    CRPN *root;
+    if (extra_paren || !Bt(&cc->opts, OPTf_VET))
+        return;
+    root = cc->coc.coc_head.next;
+    if (root != &cc->coc.coc_head && root->type == IC_ASSIGN)
+        LexVet(cc, VET_ASSIGN_COND, "assignment used as a condition (== intended? else add parentheses)");
+}
+
+U0 VetBody(CCmpCtrl *cc)
+{//The statement after if/for/while's ')' is just ';'.
+    if (cc->token == ';' && Bt(&cc->opts, OPTf_VET))
+        LexVet(cc, VET_EMPTY_STMT, "empty statement after if/for/while (use {} if it is meant)");
+}
+
+U0 VetDead(CCmpCtrl *cc)
+{//A statement follows return/break/goto in the same block: unless it is a label, it never runs.
+    I64 k;
+    if (!Bt(&cc->opts, OPTf_VET) || cc->token == ';' || cc->token == ',' ||
+            cc->token == '}' || cc->token == TK_EOF)
+        return;
+    k = PrsKeyWord(cc);
+    if (k == KW_CASE || k == KW_DFT || k == KW_START || k == KW_END)
+        return;
+    if (k == KW_BREAK)
+        return; //"return x; break;" in a case is a habit, not a mistake
+    if (cc->token == TK_IDENT && !cc->hash_entry && !cc->local_var_entry)
+        return; //a goto label
+    LexVet(cc, VET_UNREACHABLE, "unreachable code after return, break or goto");
+}
+
+Bool VetEndsFlow(I64 k)
+{
+    return k == KW_RETURN || k == KW_BREAK || k == KW_GOTO;
+}
+
 U0 PrsIf(CCmpCtrl *cc, I64 try_cnt, CCodeMisc *lb_break)
 {
     CCodeMisc *lb, *lb1;
     CPrsStk stk, *old; //IC_BR_ZERO consumes an item
     stk.ptr = 0, stk.ptr2 = 0, stk.ptr3 = 0;
     I64 k;
+    Bool extra_paren;
     if (cc->token != '(')
         LexExcept(cc, "Expecting '(' at ");
     Lex(cc);
+    extra_paren = cc->token == '(';
     if (!PrsExpression(cc, NULL, FALSE, &stk))
         LexExcept(cc, "Expected an expression at ");
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
+    VetCond(cc, extra_paren);
     Lex(cc);
+    VetBody(cc);
     old = cc->ps;
     lb = COCMiscNew(cc, CMT_LABEL);
     cc->ps = &stk;
@@ -515,16 +573,20 @@ U0 PrsIf(CCmpCtrl *cc, I64 try_cnt, CCodeMisc *lb_break)
 U0 PrsWhile(CCmpCtrl *cc, I64 try_cnt)
 {
     CCodeMisc *lb, *lb_done;
+    Bool extra_paren;
     if (cc->token != '(')
         LexExcept(cc, "Expecting '(' at ");
     Lex(cc);
+    extra_paren = cc->token == '(';
     lb = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_LABEL, lb,, FALSE);
     if (!PrsExpression(cc, NULL, FALSE))
         LexExcept(cc, "Expected an expression at ");
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
+    VetCond(cc, extra_paren);
     Lex(cc);
+    VetBody(cc);
     lb_done = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_BR_ZERO, lb_done,, FALSE);
     PrsStmt(cc, try_cnt, lb_done);
@@ -535,6 +597,7 @@ U0 PrsWhile(CCmpCtrl *cc, I64 try_cnt)
 U0 PrsDoWhile(CCmpCtrl *cc, I64 try_cnt)
 {
     CCodeMisc *lb, *lb_done;
+    Bool extra_paren;
     lb = COCMiscNew(cc, CMT_LABEL);
     lb_done = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_LABEL, lb,, FALSE);
@@ -544,10 +607,12 @@ U0 PrsDoWhile(CCmpCtrl *cc, I64 try_cnt)
     if (Lex(cc) != '(')
         LexExcept(cc, "Expecting '(' at ");
     Lex(cc);
+    extra_paren = cc->token == '(';
     if (!PrsExpression(cc, NULL, FALSE))
         LexExcept(cc, "Expected an expression at ");
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
+    VetCond(cc, extra_paren);
     RPNAddNew(cc, IC_BR_NOT_ZERO, lb,, FALSE);
     RPNAddNew(cc, IC_LABEL, lb_done,, FALSE);
     if (Lex(cc) != ';')
@@ -559,6 +624,7 @@ U0 PrsFor(CCmpCtrl *cc, I64 try_cnt)
 {
     CCodeCtrl *tmpcbh;
     CCodeMisc *lb, *lb_done;
+    Bool extra_paren;
 
     if (cc->token != '(')
         LexExcept(cc, "Expecting '(' at ");
@@ -567,8 +633,10 @@ U0 PrsFor(CCmpCtrl *cc, I64 try_cnt)
 
     lb = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_LABEL, lb,, FALSE);
+    extra_paren = cc->token == '(';
     if (!PrsExpression(cc, NULL, FALSE))
         LexExcept(cc, "Expected an expression at ");
+    VetCond(cc, extra_paren);
     lb_done = COCMiscNew(cc, CMT_LABEL);
     RPNAddNew(cc, IC_BR_ZERO, lb_done,, FALSE);
 
@@ -586,6 +654,7 @@ U0 PrsFor(CCmpCtrl *cc, I64 try_cnt)
     if (cc->token != ')')
         LexExcept(cc, "Missing ')' at ");
     Lex(cc);
+    VetBody(cc);
 
     PrsStmt(cc, try_cnt, lb_done);
     COCAppend(cc, tmpcbh);
@@ -610,8 +679,8 @@ U0 PrsSwitch(CCmpCtrl *cc, I64 try_cnt)
     CSwitchCase *header = NULL, *tmps, *tmps1;	//Leaks on except
     CSubSwitch head, *tmpss;			//Leaks on except
     CCodeMisc *lb_dft, *lb_fwd_case, *mc_jt, *lb_entry, **jmp_table;
-    CRPN *tmpi_sub, *tmpi_cmp, *tmpi_jmp, *tmpi_start;
-    Bool dft_found = FALSE, nobound;
+    CRPN *tmpi_sub, *tmpi_jmp, *tmpi_start;
+    Bool dft_found = FALSE, nobound, dead = FALSE;
     I64 i, k_start = I64_MIN, k_end, lo = I64_MAX, hi = I64_MIN, range;
 
     if (cc->token == '(')
@@ -654,6 +723,7 @@ sw_cont:
                 case KW_END:
                     goto sw_sub_end;
                 case KW_START:
+                    dead = FALSE;
                     if (Lex(cc) == ':')
                         Lex(cc);
                     else
@@ -691,6 +761,7 @@ sw_cont:
                     }
                     break;
                 case KW_CASE:
+                    dead = FALSE;
                     if (head.next != &head) {
                         lb_fwd_case = COCMiscNew(cc, CMT_LABEL);
                         tmpi_jmp = RPNAddNew(cc, IC_JMP, lb_fwd_case, 0, FALSE);//In case fall-thru
@@ -747,6 +818,7 @@ sw_cont:
                         LexExcept(cc, "Expecting ':' at ");
                     break;
                 case KW_DFT:
+                    dead = FALSE;
                     if (head.next != &head) {
                         lb_fwd_case = COCMiscNew(cc, CMT_LABEL);
                         tmpi_jmp = RPNAddNew(cc, IC_JMP, lb_fwd_case, 0, FALSE);//In case fall-thru
@@ -769,10 +841,14 @@ sw_cont:
                     dft_found = TRUE;
                     break;
                 default:
+                    if (dead)
+                        VetDead(cc);
+                    dead = VetEndsFlow(PrsKeyWord(cc));
                     PrsStmt(cc, try_cnt, head.last->lb_break);
             }
         }
 sw_sub_end:
+        dead = FALSE;
         tmpss = head.last;
         RPNAddNew(cc, IC_LABEL, tmpss->lb_break, 0, FALSE);
         if (tmpss == &head) {
@@ -807,7 +883,7 @@ sw_sub_end:
     while (tmps) {
         tmps1 = tmps->next;
         if (jmp_table[tmps->val - lo] != lb_dft)
-            LexExcept(cc, "Duplicate case at ");
+            LexExcept(cc, MStrPrint("Duplicate case value %d at ", tmps->val));
         else
             jmp_table[tmps->val - lo] = tmps->label;
         Free(tmps);
@@ -1008,6 +1084,7 @@ Bool PrsStmt(CCmpCtrl *cc, I64 try_cnt = 0,
              CCodeMisc *lb_break = NULL, I64 cmp_flags = CMPF_PRS_SEMICOLON)
 {
     I64 i, fsp_flags = 0;
+    Bool dead;
     CHashExport *tmpex;
     CCodeMisc *g_lb;
     U8 *import_name;
@@ -1026,8 +1103,13 @@ CmpFixUpJITAsm(cc,tmpaot);
                 Lex(cc);
             if (cc->token == '{') {
                 Lex(cc);
-                while (cc->token != '}' && cc->token != TK_EOF)
+                dead = FALSE;
+                while (cc->token != '}' && cc->token != TK_EOF) {
+                    if (dead)
+                        VetDead(cc);
+                    dead = VetEndsFlow(PrsKeyWord(cc));
                     PrsStmt(cc, try_cnt, lb_break);
+                }
                 if (cc->lex_include_stk == cc->fun_lex_file)
                     cc->max_line = cc->lex_include_stk->line_num;
                 if (Lex(cc) != ',') goto sm_done;

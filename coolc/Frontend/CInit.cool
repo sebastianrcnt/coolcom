@@ -264,7 +264,6 @@ U0 CmpLoadDefines()
 
 U0 CmpFillTables()
 {
-    I64 i;
     U32 *d;
 
     cmp.to_reg_vars_map = CAlloc(REG_REGS_NUM * sizeof(U8));

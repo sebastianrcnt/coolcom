@@ -49,6 +49,34 @@ I64 Cmp(U8 *src, U8 *bin = NULL)
     return res;
 }
 
+I64 Vet(U8 *src)
+{//Check src (.cool by default) for style problems without writing a BIN: an assignment used as a
+    //condition ([assign-cond]), an empty statement after if/for/while ([empty-stmt]), code right after
+    //return, break or goto ([unreachable]). Prints each finding and a count per check; returns the total.
+    I64 (*vet)(U8 *filename);
+    U8 *s, *dir, *old;
+    I64 res;
+    if (!(vet = ShellCmpFun("Vet")))
+        return 0;
+    if (!DrvCur) {
+        PrintErr("Vet: no drive\n");
+        return 0;
+    }
+    dir = RtCoolExt(src);
+    s = FileNameAbs(dir);
+    Free(dir);
+    old = DirCur;
+    dir = StrNew(s);
+    StrLastRem(dir, "/");
+    Cd(dir);
+    res = (*vet)(s);
+    Cd(old);
+    Free(old);
+    Free(dir);
+    Free(s);
+    return res;
+}
+
 I64 ExeFile(U8 *name)
 {//JIT-compile and run the file name (.cool by default) in this shell; returns the
     //value of its last statement. Its statements nest inside the caller's.

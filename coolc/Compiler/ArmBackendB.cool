@@ -30,8 +30,7 @@ I64 FuncProlog(CBCmpCtrl *cctrl, U8 *bin, I64 code_off) {
     U8 push_freg[32];
     U8 ilist[32];
     U8 flist[32];
-    I64 i, i2, i3, r, r2, ireg_arg_cnt, freg_arg_cnt, stk_arg_cnt, fsz, code,
-            off;
+    I64 i, i2, i3, ireg_arg_cnt, freg_arg_cnt, stk_arg_cnt, fsz, off;
     CBMemberLst *lst;
     CBICArg fun_arg, write_to;
     MemSet(&fun_arg, 0, sizeof(CBICArg));
@@ -198,11 +197,10 @@ stk2:
 I64 FuncEpilog(CBCmpCtrl *cctrl, U8 *bin, I64 code_off) {
     U8 push_ireg[32], ilist[32];
     U8 push_freg[32], flist[32];
-    I64 i, r, r2, fsz, i2, i3, off;
+    I64 i, fsz, i2, i3, off;
     CBICArg spill_loc, write_to;
     MemSet(&spill_loc, 0, sizeof(CBICArg));
     MemSet(&write_to, 0, sizeof(CBICArg));
-    CBCodeMiscRef *ref;
     CBRPN *rpn;
     /* <== OLD SP
    * saved regs
@@ -227,8 +225,7 @@ I64 FuncEpilog(CBCmpCtrl *cctrl, U8 *bin, I64 code_off) {
         fsz += 8 - fsz % 8;
     I64 to_push = (i2 = __FindPushedIRegs(cctrl, push_ireg)) * 8 +
             (i3 = __FindPushedFRegs(cctrl, push_freg)) * 8 + fsz +
-            cctrl->backend_user_data0,
-            old_regs_start; // old_FP,old_LR
+            cctrl->backend_user_data0;
     to_push = cctrl->prolog_stk_sz;
     i2 = 0;
     for (i = 0; i != 32; i++)
@@ -318,7 +315,7 @@ I64 __OptPassFinal(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
     MemSet(&tmp, 0, sizeof(CBICArg));
     MemSet(&orig_dst, 0, sizeof(CBICArg));
     MemSet(&tmp2, 0, sizeof(CBICArg));
-    I64 i = 0, cnt, i2, use_reg, a_reg, b_reg, into_reg, use_flt_cmp, reverse;
+    I64 i = 0, cnt, i2, into_reg, use_flt_cmp, reverse;
     I64 old_lock_start = cctrl->aarch64_atomic_loop_start;
     //PORT-NOTE: HolyC locals are function-wide, so the block-local `shift_cnt` (twice, in
     // ARM_SHIFT_OP) and the inner loop counter `i` that shadows the outer one (renamed shift_i)
@@ -328,8 +325,7 @@ I64 __OptPassFinal(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
             old_pass_addr = 0;
     cctrl->aarch64_atomic_loop_start = -1;
     rpn->res.set_flags = 0;
-    U8 *enter_addr2, *enter_addr, *exit_addr, **fail1_addr, **fail2_addr,
-            ***range_fail_addrs;
+    U8 *enter_addr, *exit_addr, **fail1_addr, **fail2_addr, ***range_fail_addrs;
     if (cctrl->code_ctrl->final_pass)
         rpn->start_ptr = bin + code_off;
     if (cctrl->code_ctrl->dbg_info && cctrl->code_ctrl->final_pass &&
@@ -3346,10 +3342,8 @@ I64 PushTmpDepthFirst(CBCmpCtrl *cctrl, CBRPN *r, I64 spilled) {
                 PushTmp(cctrl, r);
             return 1;
     }
-    I64 a, argc, old_icnt = cctrl->backend_user_data2,
-            old_fcnt = cctrl->backend_user_data3, i, i2, tmp,
-            old_scnt = cctrl->backend_user_data1;
-    CBRPN *arg, *arg2, *d, *b, *idx, *orig, **array, *new;
+    I64 a, argc, i, tmp;
+    CBRPN *arg, *arg2, *d, *orig, **array;
     switch (r->type) {
         case BIC_MAX_I64:
         case BIC_MAX_U64:
@@ -3476,7 +3470,7 @@ binop:
         case BIC_DEREF:
             orig = r;
 deref_norm:
-            if (!spilled && r->base.last != BIC_ADDR_OF && GetAddrModeParts(cctrl, r)) {
+            if (!spilled && r->base.last(I64) != BIC_ADDR_OF && /*PORT-NOTE: compares the queue link with a code, always true; kept as translated*/ GetAddrModeParts(cctrl, r)) {
                 if (r->res.__sib_base_rpn && r->res.__sib_idx_rpn) {
                     PushTmpDepthFirst(cctrl, r->res.__sib_base_rpn, 0);
                     PushTmpDepthFirst(cctrl, r->res.__sib_idx_rpn, 0);
@@ -3662,10 +3656,9 @@ fin:
 //
 U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
                  CBHeapCtrl *heap) {
-    I64 code_off, run, idx, cnt = 0, cnt2, final_size, is_terminal;
+    I64 code_off, run, idx, cnt = 0, cnt2, final_size;
     I64 min_ln = 0, max_ln = 0, statics_sz = 0;
     U8 *bin = NULL, *obin;
-    U8 *ptr;
     CBCodeMisc *misc;
     CBHashImport *imp;
     CBCodeMiscRef *cm_ref, *cm_ref_tmp;
@@ -3814,7 +3807,7 @@ fill_in_refs:
                 case BCMT_RELOC_U64:
                     // No need to make room for an unued misc
                     if (run && !misc->use_cnt && misc->patch_addr) {
-                        *misc->patch_addr = BINVALID_PTR;
+                        *misc->patch_addr = BINVALID_PTR(U8 *);
                         break;
                     }
                     if (code_off % 8)

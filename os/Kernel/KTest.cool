@@ -85,7 +85,7 @@ U0 KTestHeap()
 {
     U8 *ptr[KT_SLOTS], *p, *q;
     I64 sz[KT_SLOTS], sd[KT_SLOTS];
-    I64 i, j, n, r, last, f0 = kt_fails, free0 = HeapFreeBytes(&sys_heap), nf, errs0 = heap_errs;
+    I64 i, j, n, r, last, free0 = HeapFreeBytes(&sys_heap), nf, errs0 = heap_errs;
 
     for (i = 0; i < KT_SLOTS; i++)
         ptr[i] = NULL;

@@ -489,7 +489,6 @@ I64 __ICMoveF64(CBCmpCtrl *cctrl, I64 dst_reg, F64 imm, U8 *bin,
     //(For now),I ain't messing around with binary literals in ARM
     CBCodeMisc *misc = cctrl->code_ctrl->code_misc->next(CBCodeMisc *);
     CBCodeMiscRef *ref;
-    U8 *dptr;
     for (; misc != cctrl->code_ctrl->code_misc; misc = misc->base.next(CBCodeMisc *)) {
         if (misc->type == BCMT_FLOAT_CONST)
             if (misc->integer == *(&imm)(I64 *)) {
@@ -734,7 +733,7 @@ I64 DerefToICArg(CBCmpCtrl *cctrl, CBICArg *res, CBRPN *rpn,
         MemCpy(res, &rpn->res, sizeof(CBICArg));
         return code_off;
     }
-    I64 r = rpn->raw_type, rsz, off, mul;
+    I64 r = rpn->raw_type, rsz, off;
     switch (r) {
         case BRT_I8i:
             rsz = 1;
@@ -879,7 +878,7 @@ I64 __ICFCallTOS(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
     CBICArg tmp, tmp2;
     MemSet(&tmp, 0, sizeof(CBICArg));
     MemSet(&tmp2, 0, sizeof(CBICArg));
-    CBRPN *rpn2, *varg;
+    CBRPN *rpn2;
     I64 to_pop, vargs_len = 0, ptr;
     U8 *fptr;
     if (rpn->length - 8 > 0)
@@ -1003,8 +1002,7 @@ after_call:
 
 I64 ICMov(CBCmpCtrl *cctrl, CBICArg *dst, CBICArg *src, U8 *bin,
           I64 code_off) {
-    I64 use_reg, use_reg2, restore_from_tmp = 0, indir_off = 0,
-            indir_off2 = 0, opc;
+    I64 use_reg, use_reg2, indir_off = 0, indir_off2 = 0, opc;
     CBCodeMiscRef *ref;
     if (dst->mode == MD_NULL)
         return code_off;
@@ -1958,7 +1956,7 @@ I64 __SexyPreOp(CBCmpCtrl *cctrl, CBRPN *rpn,
                 I32 (*f_op)(I64, I64, I64),
                 U8 *bin, I64 code_off) {
     I64 code;
-    CBRPN *next = rpn->base.next(CBRPN *), *tc;
+    CBRPN *next = rpn->base.next(CBRPN *);
     CBICArg derefed, tmp, tmp2;
     MemSet(&derefed, 0, sizeof(CBICArg));
     MemSet(&tmp, 0, sizeof(CBICArg));
@@ -2042,7 +2040,7 @@ I64 __SexyPostOp(CBCmpCtrl *cctrl, CBRPN *rpn,
                  I64 (*i_reg_op)(I64, I64, I64),
                  I64 (*f_op)(I64, I64, I64),
                  U8 *bin, I64 code_off) {
-    CBRPN *next = rpn->base.next(CBRPN *), *tc;
+    CBRPN *next = rpn->base.next(CBRPN *);
     I64 code;
     CBICArg derefed, tmp, tmp2;
     MemSet(&derefed, 0, sizeof(CBICArg));
@@ -2206,14 +2204,14 @@ I64 __SexyAssignOp(CBCmpCtrl *cctrl, CBRPN *rpn,
                    I32 (*i_imm_op)(I64, I64, I64),
                    I32 (*f_op)(I64, I64, I64),
                    U8 *bin, I64 code_off) {
-    CBRPN *next = ICArgN(rpn, 1), *next2, *next3, *b;
+    CBRPN *next = ICArgN(rpn, 1), *next2, *b;
     CBICArg tmp, tmp2, derefed;
     MemSet(&tmp, 0, sizeof(CBICArg));
     MemSet(&tmp2, 0, sizeof(CBICArg));
     I64 pop, pop2;
     CBICArg _orig;
     MemSet(&derefed, 0, sizeof(CBICArg));
-    I64 i = 0, const_can = 0, retry;
+    I64 const_can = 0, retry;
     next2 = b = ICArgN(rpn, 0);
     if (i_imm_op)
         if (BIsConst(b) && ARM_ERR_INV_OFF != i_imm_op(0, 0, ConstVal(b)))
@@ -2342,7 +2340,7 @@ I64 __FMod(I64 dst, I64 a, I64 b, U8 *bin,
 // Also handles BIC_MOD_EQ
 I64 __CompileMod(CBCmpCtrl *cctrl, CBRPN *rpn, U8 *bin,
                  I64 code_off) {
-    CBRPN *next, *next2, *tc;
+    CBRPN *next, *next2;
     CBICArg tmp, orig_dst, derefed, tmp2;
     MemSet(&tmp, 0, sizeof(CBICArg));
     MemSet(&orig_dst, 0, sizeof(CBICArg));

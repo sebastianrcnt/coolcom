@@ -55,7 +55,7 @@ U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
     I64 cnt, cnt2, vargc;
     CBRPN *rpn2 = rpn->base.next, *ic, *last;
     CBHashFun *ic_fun;
-    CBMemberLst *arg, *args_lst_rev;
+    CBMemberLst *arg;
     for (cnt = 0; cnt != rpn->length; cnt++)
         rpn2 = ICFwd(rpn2);
     BAssignRawTypeToNode(cctrl, rpn2);
@@ -141,7 +141,7 @@ U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
 //
 U0 OptPassFixFunArgs(CBCmpCtrl *cctrl)
 {
-    CBRPN *rpn, *rpn2, *last;
+    CBRPN *rpn;
     for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
             rpn = rpn->base.next) {
         switch (rpn->type) {

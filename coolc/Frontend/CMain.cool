@@ -1,7 +1,7 @@
 // Translated from Aiwnios Src/CMain.HC (nrootconauto, BSD-3), commit e155e87.
 U8 *LexStmt2Bin(CCmpCtrl *cc, I64 *_type, I64 cmp_flags = 0)
 {//Compile one cc stmt to bin code.
-    I64 size, i, j, k, *res = INVALID_PTR;
+    I64 size, i, j, k, *res = INVALID_PTR(I64 *);
     CCodeCtrl *tmpcbh;
     CRPN *rpn;
     LBtr(&cc->flags, CCf_PASS_TRACE_PRESENT);
@@ -154,7 +154,7 @@ CAOT *CmpJoin(CCmpCtrl *cc, I64 cmp_flags, U8 *map_name = NULL, U8 mapfile_drv_l
         if (cc->flags & CCF_AOT_COMPILE) {
             while (cc->token != TK_EOF) {
                 buf = LexStmt2Bin(cc, NULL, cmp_flags);
-                if (buf != INVALID_PTR) {
+                if (buf != INVALID_PTR(U8 *)) {
                     tmpie = CAlloc(sizeof(CAOTImportExport));
                     tmpie->type = IET_MAIN;
                     tmpie->rip = buf;
@@ -226,12 +226,14 @@ CAOT *CmpJoin(CCmpCtrl *cc, I64 cmp_flags, U8 *map_name = NULL, U8 mapfile_drv_l
 }
 
 CAOT *CmpBuf(U8 *buf, U8 *map_name = NULL,
-             I64 *error_cnt = NULL, I64 *warning_cnt = NULL, U8 mapfile_drv_let = 0)
+             I64 *error_cnt = NULL, I64 *warning_cnt = NULL, U8 mapfile_drv_let = 0, Bool vet = FALSE)
 {
     CCmpCtrl *cc;
     CAOT *res = NULL;
     cc = CmpCtrlNew(buf, CCF_DONT_FREE_BUF);
     cc->flags |= CCF_AOT_COMPILE;
+    if (vet)
+        cc->opts |= 1 << OPTf_VET;
 #ifdef TARGET_AARCH64
     //For MacOS RWX protections.
     cc->opts |= 1 << OPTf_GLBLS_ON_DATA_HEAP;
@@ -269,7 +271,15 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
     if (map_name)
         fbuf3 = ExtDft(map_name, "MAP.Z");
 
-    if (tmpaot = CmpBuf(fbuf2, fbuf3, &error_cnt, &warning_cnt, mapfile_drv_let)) {
+    tmpaot = CmpBuf(fbuf2, fbuf3, &error_cnt, &warning_cnt, mapfile_drv_let);
+    if (tmpaot && error_cnt) {
+        // Errors that did not stop the parse (LexError): no BIN.
+        Free(tmpaot->buf);
+        QueDel(tmpaot);
+        Free(tmpaot);
+        tmpaot = NULL;
+    }
+    if (tmpaot) {
         aot_U8s = tmpaot->aot_U8s;
         ptr = patch_table;
         //See $LK,"Load",A="MN:Load"$()
@@ -437,6 +447,30 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
     return error_cnt;
 }
 
+I64 Vet(U8 *filename)
+{//Compile filename (no BIN) with the style checks on: assign-cond, empty-stmt and
+    //unreachable are printed as "vet: [check] message" with the position. Returns the number of findings.
+    U8 *fbuf = ExtDft(filename, "PRJ.Z"), *fbuf2 = MStrPrint("#include \"%s\"", fbuf);
+    CAOT *tmpaot;
+    I64 i, total = 0, error_cnt = 0, warning_cnt = 0;
+    for (i = 0; i < VET_CHECKS; i++)
+        vet_cnt[i] = 0;
+    if (tmpaot = CmpBuf(fbuf2, NULL, &error_cnt, &warning_cnt, 0, TRUE)) {
+        Free(tmpaot->buf);
+        QueDel(tmpaot);
+        Free(tmpaot);
+    }
+    Free(fbuf);
+    Free(fbuf2);
+    Print("Vet:");
+    for (i = 0; i < VET_CHECKS; i++) {
+        Print(" %s=%d", VetName(i), vet_cnt[i]);
+        total += vet_cnt[i];
+    }
+    Print(" Errs:%d\n", error_cnt);
+    return total;
+}
+
 I64 ExePutS(U8 *buf, U8 *filename = NULL,
             I64 ccf_flags = 0, CLexHashTableContext *htc = NULL)
 {//JIT Compile and execute text from a puts("").
@@ -564,7 +598,7 @@ I64 StreamExePrint(U8 *fmt, ...)
 U0 FillInShortCalls(CCmpCtrl *cc) {
     CAOTImportExport *tmpaotie, *tmpaotie1;
     CHashFun *fun;
-    I64 i, ptr, low12;
+    I64 i;
     for (tmpaotie = cc->aot->next_ie; tmpaotie != &cc->aot->next_ie; tmpaotie = tmpaotie1) {
         tmpaotie1 = tmpaotie->next;
         if (tmpaotie->short_jmp) {

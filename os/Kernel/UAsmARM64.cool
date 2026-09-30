@@ -350,7 +350,7 @@ I64 ImmSImmR2Val(U32 inst) {
     inst = (inst >> 10) & (1 << 13 - 1);
     Bool n = !!(inst & (1 << 12));
     I64 s = inst & (1 << 6 - 1), r = (inst >> 6) & (1 << 6 - 1);
-    I64 consec, base_pat, width, idx, idx2, final;
+    I64 consec, width, idx, idx2, final;
     if (n) {
         consec = s + 1;
         width = 64;

@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.cool os/Kernel/*.coolh coolc/Runtime/*.cool) coolc/Fmt/HCTok.cool
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test kernel-test kernel-test-reloc vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test cmdline-test
+.PHONY: c2hc-test stbtt-test all run test kernel-test kernel-test-reloc vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test cmdline-test checks-test
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -22,6 +22,20 @@ seed: build/coolc
 	cmp build/seed2.BIN build/seed3.BIN
 	cp build/seed2.BIN coolc/seed/Compiler.BIN
 	@echo "seed updated (commit coolc/seed/Compiler.BIN)"
+
+# Style checks (coolc --vet; Vet in the OS): [assign-cond] [empty-stmt] [unreachable]. Reports
+# the count per check for each program, the findings go to build/vet/NAME.log. It never fails.
+.PHONY: vet
+VET_UNITS := kernel=os/Kernel/Kernel.cool compiler=build/native-src/Native.cool warm=warmc/Native.cool hcfmt=coolc/Fmt/Native.cool
+vet: build/coolc
+	tools/native/prepare.sh
+	mkdir -p build/warmcool build/vet
+	python3 warmc/embed_builtins.py
+	@for u in $(VET_UNITS); do \
+	  name=$${u%%=*}; src=$${u#*=}; \
+	  COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 90 build/coolc --vet $$src > build/vet/$$name.log 2>&1; \
+	  printf '%-9s %s\n' $$name "$$(grep '^Vet:' build/vet/$$name.log || echo 'vet failed, see build/vet/'$$name.log)"; \
+	done
 
 # Regenerate the console font blob from GNU Unifont's .hex source (downloaded
 # into the gitignored vendor/unifont). The generated os/Kernel/Unifont.BIN is
@@ -188,6 +202,10 @@ ansi-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 syntax-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/syntax-test.py $<
 
+# The compiler's checks: errors for definite bugs, the vet findings (coolc/tests/checks).
+checks-test: build/coolc
+	tools/native/checks.sh
+
 # The OS compiles its own compiler: Cmp in the shell must reproduce the seed.
 selfhost-test: build/kernel.Image coolvm build/ShellPrelude.coolh build/warmcool/Kernel.cool
 	tools/selfhost-test.sh $<
@@ -220,7 +238,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
+test: checks-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
