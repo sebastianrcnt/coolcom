@@ -241,7 +241,7 @@ Bool SynWarmKw(U8 *p, I64 n)
             HCTStrEq(p, n, "for") || HCTStrEq(p, n, "do") || HCTStrEq(p, n, "from") ||
             HCTStrEq(p, n, "to") || HCTStrEq(p, n, "borrow") || HCTStrEq(p, n, "return") ||
             HCTStrEq(p, n, "skip") || HCTStrEq(p, n, "sizeof") || HCTStrEq(p, n, "and") ||
-            HCTStrEq(p, n, "or") || HCTStrEq(p, n, "not");
+            HCTStrEq(p, n, "or") || HCTStrEq(p, n, "not") || HCTStrEq(p, n, "private");
 }
 
 U0 SynLineWarm(CSyn *st, U8 *ls, I64 n, U8 *g)

@@ -1,0 +1,570 @@
+// Warm source formatter. Layout only: it re-lexes the source with WLex (Lexer.cool), so it follows
+// the lexer if the syntax changes, and rewrites the whitespace between tokens.
+//   U8 *WFmt(U8 *src, I64 *err)      the formatted text (CAlloc'ed, the caller frees it)
+//   I64 WarmFmt(path, check, quiet)  format a file: 0 unchanged, 1 changed (or would change), 2 error
+// Line breaks are kept: lines are never split or joined, and blank lines collapse to one.
+//   - Indentation: 4 spaces per block (module, record, union, function, typeclass, instance, if,
+//     else, case/when, while, for, borrow), one more level for a continuation line, and inside
+//     brackets one level past the line that opened them (the closing bracket lines up with it).
+//   - Spaces between tokens follow fixed rules: `name: Type`, `a + b`, `f(x, y)`, `Buffer[T]`,
+//     `&![T, R]`, `x->y`, `{ a: T }`, `-x`.
+//   - Kept as found: comments (a trailing comment keeps its column), strings, and the words of
+//     the docstrings, which are moved with their declaration.
+// The block structure comes from the keywords alone (is/then/else/do/of/end), not from the parser, so
+// unfinished code still formats. The output is checked to have the same tokens (and the same comments) as
+// the input; if not, the input is returned and *err is 1. It is also 1 when the source does not lex.
+
+#define WF_MAX    256
+#define WF_INDENT 4
+
+#define WFK_BLK   1  // closed by `end`
+#define WFK_CASE  2  // `case ... of`, closed by `end case;`
+#define WFK_WHEN  3  // a `when ... do` body, closed by the next `when` or by `end`
+#define WFK_UNION 4  // a union body, closed by `end`
+#define WFK_UCASE 5  // the slots of one union case, closed by the next case or by `end`
+
+#define WFH_RECORD   1
+#define WFH_UNION    2
+#define WFH_OTHER    3  // function, typeclass, instance, method, module
+#define WFH_UCASE    4
+
+class CWFmt
+{
+    CWUnit *u;
+    U8 *text;
+    I64 size;
+    CWToken **tk;
+    I64 nt;
+    U8 *out;
+    I64 olen, ocap, col;
+    I64 fk[WF_MAX], nf;
+    I64 bk[WF_MAX], nb;
+    I64 ifk[WF_MAX], ifs[WF_MAX], nifs;
+    I64 at_start, hdr, in_import, gen_clause, pend_when, line_ind, stmt_ind;
+};
+
+Bool WFmIs(CWToken *t, U8 *s) {return t && t->kind == 1 && WEq(t->text, s);}
+Bool WFmOperandEnd(CWToken *t)
+{
+    if (!t) return FALSE;
+    if (t->kind >= 2 && t->kind <= 6) return TRUE;
+    return WFmIs(t, ")") || WFmIs(t, "]") || WFmIs(t, "}") || WFmIs(t, "nil") || WFmIs(t, "true") || WFmIs(t, "false");
+}
+Bool WFmWordy(CWToken *t)
+{
+    I64 c;
+    if (!t) return FALSE;
+    c = t->text[0];
+    return t->kind >= 2 || WAlpha(c);
+}
+Bool WFmControl(CWToken *t)
+{//A word that a parenthesized expression may follow (`if (a) then`); other words are `Free(X)`, `sizeof(T)`.
+    U8 *w = " and or not if then else else if return while when of is do to from let var case for borrow as ";
+    I64 n = StrLen(t->text), i, j;
+    if (t->kind != 1 || n > 8) return FALSE;
+    for (i = 0; w[i]; i++) {
+        if (w[i] != ' ') {
+            j = 0;
+            while (j < n && w[i + j] == t->text[j]) j++;
+            if (j == n && w[i + j] == ' ') return TRUE;
+            while (w[i] && w[i] != ' ') i++;
+        }
+    }
+    return FALSE;
+}
+Bool WFmMulti(CWFmt *f, CWToken *t)
+{
+    I64 i;
+    for (i = t->start; i < t->end; i++) if (f->text[i] == '\n') return TRUE;
+    return FALSE;
+}
+I64 WFmCol(U8 *s, I64 pos)
+{//Column of pos in its line of the original text, a tab going to the next multiple of 4.
+    I64 b = pos, c = 0, j;
+    while (b > 0 && s[b - 1] != '\n') b--;
+    for (j = b; j < pos; j++) {
+        if (s[j] == '\t') c = (c + 4) & ~3;
+        else c++;
+    }
+    return c;
+}
+I64 WFmLineIndent(U8 *s, I64 pos)
+{
+    I64 b = pos, c = 0;
+    while (b > 0 && s[b - 1] != '\n') b--;
+    while (s[b] == ' ' || s[b] == '\t') {
+        if (s[b] == '\t') c = (c + 4) & ~3;
+        else c++;
+        b++;
+    }
+    return c;
+}
+U0 WFmPut(CWFmt *f, U8 *s, I64 n)
+{
+    I64 i;
+    U8 *p;
+    if (f->olen + n + 1 > f->ocap) {
+        f->ocap = (f->ocap + n + 1) * 2;
+        p = WAlloc(f->u, f->ocap);
+        if (f->olen) MemCpy(p, f->out, f->olen);
+        f->out = p;
+    }
+    if (n) MemCpy(f->out + f->olen, s, n);
+    for (i = 0; i < n; i++) {
+        if (s[i] == '\n') f->col = 0;
+        else f->col++;
+    }
+    f->olen += n;
+    f->out[f->olen] = 0;
+}
+U0 WFmSpaces(CWFmt *f, I64 n)
+{
+    I64 i;
+    for (i = 0; i < n; i++) WFmPut(f, " ", 1);
+}
+U0 WFmNewline(CWFmt *f) {if (f->col > 0) WFmPut(f, "\n", 1);}
+U0 WFmBlank(CWFmt *f)
+{//A blank line, unless the output is empty or ends with one.
+    if (f->olen > 0 && f->out[f->olen - 1] == '\n' && !(f->olen >= 2 && f->out[f->olen - 2] == '\n')) WFmPut(f, "\n", 1);
+}
+Bool WFmStmtElse(CWFmt *f) {return f->nifs == 0 || f->ifk[f->nifs - 1];}
+// The number of block frames that token i closes before it (its own indentation is that of the block outside).
+I64 WFmPops(CWFmt *f, I64 i)
+{
+    CWToken *t = f->tk[i], *next = NULL;
+    I64 k = f->nf;
+    if (i < f->nt) next = f->tk[i + 1];
+    if (WFmIs(t, "end")) {
+        while (k > 0 && (f->fk[k - 1] == WFK_WHEN || f->fk[k - 1] == WFK_UCASE)) k--;
+        if (k > 0) k--;
+    } else if (WFmIs(t, "when")) {
+        if (k > 0 && f->fk[k - 1] == WFK_WHEN) k--;
+    } else if (WFmIs(t, "else") || WFmIs(t, "else if")) {
+        if (WFmStmtElse(f) && k > 0 && f->fk[k - 1] == WFK_BLK) k--;
+    } else if (WFmIs(t, "case")) {
+        if (i > 0 && !WFmIs(f->tk[i - 1], "end") && k > 0 && f->fk[k - 1] == WFK_UCASE) k--;
+    } else if (t->kind == 6) {
+        if (k > 0 && f->fk[k - 1] == WFK_UCASE && WFmIs(next, "case")) k--;
+    }
+    return f->nf - k;
+}
+I64 WFmIndentFor(CWFmt *f, I64 i, Bool pre)
+{//The indentation token i gets if it starts a line. pre: as if it did not close the blocks it closes.
+    CWToken *t = f->tk[i];
+    I64 pops;
+    if (f->nb > 0) {
+        if (WFmIs(t, ")") || WFmIs(t, "]") || WFmIs(t, "}")) return f->bk[f->nb - 1];
+        return f->bk[f->nb - 1] + WF_INDENT;
+    }
+    pops = WFmPops(f, i);
+    if (pops > 0 || WFmIs(t, "end") || WFmIs(t, "when") || f->at_start) {
+        if (pre) return f->nf * WF_INDENT;
+        return (f->nf - pops) * WF_INDENT;
+    }
+    return f->stmt_ind + WF_INDENT;
+}
+Bool WFmGlue(CWToken *p, CWToken *t)
+{//True when the two tokens written without a space would lex differently.
+    I64 a = p->text[StrLen(p->text) - 1], b = t->text[0];
+    if (p->kind != 1 && p->kind != 2 && p->kind != 3 && p->kind != 4) return FALSE;
+    if (t->kind == 5 || t->kind == 6) return FALSE;
+    if (WAlpha(a) || WDigit(a) || a == '_') return WAlpha(b) || WDigit(b) || b == '_' || (p->kind == 3 && b == '.');
+    if (a == '&') return b == '!' || b == '~' || b == '(';
+    if (a == '-') return b == '-' || b == '>' || WDigit(b);
+    if (a == '+') return WDigit(b);
+    if (a == '/' || a == '<' || a == '>' || a == ':') return b == '=';
+    if (a == '=') return b == '>' || b == '=';
+    return FALSE;
+}
+Bool WFmSpace(CWFmt *f, I64 i)
+{//Whether a space goes between tokens i - 1 and i, which are on one line.
+    CWToken *p = f->tk[i - 1], *t = f->tk[i], *pp = NULL;
+    if (i > 1) pp = f->tk[i - 2];
+    if (WFmGlue(p, t)) return TRUE;
+    if (WFmIs(p, "{")) return !WFmIs(t, "}");
+    if (WFmIs(t, "}")) return TRUE;
+    if (WFmIs(p, "(") || WFmIs(p, "[") || WFmIs(p, ".") || WFmIs(p, "->") || WFmIs(p, "!") || WFmIs(p, "~")) return FALSE;
+    if (WFmIs(p, "&!") || WFmIs(p, "&~") || WFmIs(p, "&(")) return FALSE;
+    if (WFmIs(p, "&") && !WFmOperandEnd(pp)) return FALSE;  // a borrow, not a bitwise and
+    if (WFmIs(p, "-") && !WFmOperandEnd(pp)) return FALSE;
+    if (WFmIs(t, ";") || WFmIs(t, ",") || WFmIs(t, ")") || WFmIs(t, "]") || WFmIs(t, ".") || WFmIs(t, "->") || WFmIs(t, ":")) return FALSE;
+    if (WFmIs(t, "(")) {
+        if (f->in_import) return TRUE;
+        if (p->kind == 2 || WFmIs(p, "]") || WFmIs(p, ")") || WFmIs(p, "@embed")) return FALSE;
+        return !WFmWordy(p) || WFmControl(p);
+    }
+    if (WFmIs(t, "[")) {
+        if (WFmIs(p, "generic")) return TRUE;
+        if (WFmWordy(p) || WFmIs(p, "]") || WFmIs(p, ")")) return FALSE;
+        return TRUE;
+    }
+    return TRUE;
+}
+U0 WFmPush(CWFmt *f, I64 kind)
+{
+    if (f->nf < WF_MAX - 1) f->fk[f->nf++] = kind;
+}
+// Update the state after token i has been written (it starts a statement when at_start was set).
+U0 WFmApply(CWFmt *f, I64 i)
+{
+    CWToken *t = f->tk[i], *p = NULL;
+    Bool was_start = f->at_start, ended;
+    U8 *s;
+    f->nf -= WFmPops(f, i);
+    if (i > 0) p = f->tk[i - 1];
+    ended = WFmIs(p, "end");
+    if (t->kind == 6) return;  // a docstring: the declaration it belongs to follows
+    f->at_start = FALSE;
+    if (t->kind != 1) return;
+    s = t->text;
+    if (WEq(s, "private")) {  // a modifier of the declaration that follows
+        f->at_start = was_start;
+        return;
+    }
+    if (WEq(s, "(") || WEq(s, "[") || WEq(s, "{") || WEq(s, "&(")) {
+        if (f->nb < WF_MAX - 1) f->bk[f->nb++] = f->line_ind;
+        if (WEq(s, "(")) f->in_import = FALSE;
+    } else if (WEq(s, ")") || WEq(s, "]") || WEq(s, "}")) {
+        if (f->nb > 0) f->nb--;
+        if (WEq(s, "]") && f->nb == 0 && f->gen_clause) {
+            f->gen_clause = FALSE;
+            f->at_start = TRUE;
+        }
+    } else if (WEq(s, ";")) {
+        if (f->nb == 0) {
+            f->at_start = TRUE;
+            f->hdr = 0;
+            f->in_import = FALSE;
+        }
+    } else if (WEq(s, "generic")) f->gen_clause = TRUE;
+    else if (WEq(s, "import")) f->in_import = TRUE;
+    else if (WEq(s, "record")) {if (!ended) f->hdr = WFH_RECORD;}
+    else if (WEq(s, "union")) {if (!ended) f->hdr = WFH_UNION;}
+    else if (WEq(s, "function") || WEq(s, "typeclass") || WEq(s, "instance") || WEq(s, "method") || WEq(s, "module") || WEq(s, "type") || WEq(s, "constant")) {
+        if (!ended) f->hdr = WFH_OTHER;
+    } else if (WEq(s, "case")) {
+        if (!ended && f->nf > 0 && (f->fk[f->nf - 1] == WFK_UNION || f->fk[f->nf - 1] == WFK_UCASE)) f->hdr = WFH_UCASE;
+    } else if (WEq(s, "is")) {
+        if (f->hdr == WFH_UNION) WFmPush(f, WFK_UNION);
+        else if (f->hdr == WFH_UCASE) WFmPush(f, WFK_UCASE);
+        else WFmPush(f, WFK_BLK);
+        f->hdr = 0;
+        f->at_start = TRUE;
+    } else if (WEq(s, "if")) {
+        if (ended) {
+            if (f->nifs > 0) f->nifs--;
+        } else if (f->nifs < WF_MAX - 1) {
+            f->ifk[f->nifs] = was_start;
+            f->ifs[f->nifs++] = 0;
+        }
+    } else if (WEq(s, "then")) {
+        if (f->nifs > 0 && f->ifs[f->nifs - 1] == 0) {
+            f->ifs[f->nifs - 1] = 1;
+            if (f->ifk[f->nifs - 1]) {
+                WFmPush(f, WFK_BLK);
+                f->at_start = TRUE;
+            }
+        }
+    } else if (WEq(s, "else")) {
+        if (WFmStmtElse(f)) {
+            WFmPush(f, WFK_BLK);
+            f->at_start = TRUE;
+        } else f->nifs--;
+    } else if (WEq(s, "else if")) {
+        if (WFmStmtElse(f)) {
+            if (f->nifs > 0) f->ifs[f->nifs - 1] = 0;
+            else {
+                f->ifk[0] = TRUE;
+                f->ifs[0] = 0;
+                f->nifs = 1;
+            }
+        } else {
+            f->ifk[f->nifs - 1] = FALSE;
+            f->ifs[f->nifs - 1] = 0;
+        }
+    } else if (WEq(s, "of")) {
+        WFmPush(f, WFK_CASE);
+        f->at_start = TRUE;
+    } else if (WEq(s, "when")) f->pend_when = TRUE;
+    else if (WEq(s, "do")) {
+        if (f->pend_when) WFmPush(f, WFK_WHEN);
+        else WFmPush(f, WFK_BLK);
+        f->pend_when = FALSE;
+        f->at_start = TRUE;
+    }
+}
+// The text of a docstring token moved to indentation ind: every later line loses the indentation
+// of the line the token starts on and gets ind instead.
+U8 *WFmDoc(CWFmt *f, CWToken *t, I64 ind, I64 *len)
+{
+    U8 *s = f->text, *r;
+    I64 n = t->end - t->start, lines = 1, i, b = t->start, oc, ls, le, k, lead, m = 0;
+    for (i = t->start; i < t->end; i++) if (s[i] == '\n') lines++;
+    r = WAlloc(f->u, n + (lines + 1) * (ind + 1) + 8);
+    while (b > 0 && s[b - 1] != '\n') b--;
+    oc = t->start - b;
+    ls = t->start;
+    while (ls <= t->end) {
+        le = ls;
+        while (le < t->end && s[le] != '\n') le++;
+        k = le;
+        while (k > ls && (s[k - 1] == ' ' || s[k - 1] == '\t' || s[k - 1] == '\r')) k--;
+        if (ls > t->start) {
+            lead = 0;
+            while (lead < oc && ls + lead < k && (s[ls + lead] == ' ' || s[ls + lead] == '\t')) lead++;
+            ls += lead;
+            if (ls < k) for (i = 0; i < ind; i++) r[m++] = ' ';
+        }
+        for (i = ls; i < k; i++) r[m++] = s[i];
+        if (le >= t->end) break;
+        r[m++] = '\n';
+        ls = le + 1;
+    }
+    r[m] = 0;
+    *len = m;
+    return r;
+}
+// The whitespace, comments and line breaks in front of token i (i == nt: the end of the file).
+// ind_pre and ind_post are the indentations a comment on its own line may take.
+U0 WFmGap(CWFmt *f, I64 i, I64 ind_pre, I64 ind_post)
+{
+    U8 *s = f->text;
+    I64 gs = 0, ge = f->tk[i]->start, p, nl = 0, cs, ce, cind, n, want, gap, c;
+    Bool seen_nl = FALSE, after_comment = FALSE;
+    CWToken *prev = NULL;
+    if (i > 0) {
+        prev = f->tk[i - 1];
+        gs = prev->end;
+    }
+    p = gs;
+    while (p < ge) {
+        c = s[p];
+        if (c == '\n') {
+            nl++;
+            seen_nl = TRUE;
+            p++;
+        } else if (c == '-' && s[p + 1] == '-') {
+            cs = p;
+            while (p < ge && s[p] != '\n' && s[p] != '\r') p++;
+            ce = p;
+            while (ce > cs && (s[ce - 1] == ' ' || s[ce - 1] == '\t')) ce--;
+            if (seen_nl || i == 0 || f->olen == 0) {
+                WFmNewline(f);
+                if (nl >= 2) WFmBlank(f);
+                cind = ind_post;
+                if (ind_pre != ind_post && WFmCol(s, cs) > WFmCol(s, ge)) cind = ind_pre;
+                WFmSpaces(f, cind);
+                WFmPut(f, s + cs, ce - cs);
+            } else {
+                gap = WFmCol(s, cs) - WFmCol(s, gs);
+                n = 1;
+                if (gap > 1) {
+                    if (WFmMulti(f, prev)) n = gap;
+                    else {
+                        want = WFmCol(s, cs) + (f->line_ind - WFmLineIndent(s, cs));
+                        n = want - f->col;
+                    }
+                }
+                if (n < 1) n = 1;
+                WFmSpaces(f, n);
+                WFmPut(f, s + cs, ce - cs);
+            }
+            nl = 0;
+            seen_nl = FALSE;
+            after_comment = TRUE;
+        } else p++;
+    }
+    if (i == f->nt) return;
+    if (nl > 0 || after_comment) {
+        WFmNewline(f);
+        if (nl >= 2) WFmBlank(f);
+    }
+}
+// Like the parser, read `&(`, `&~` and a signed number right after an operand as two tokens (`a &(b)`, `a &~b`,
+// `a -1` are `a & (b)`, `a & ~b`, `a - 1`), so the formatter can space them as the operators they are.
+U0 WFmSplit(CWUnit *u, CWToken *head)
+{
+    CWToken *t, *prev = NULL, *rest;
+    for (t = head; t; t = t->next) {
+        if (WFmOperandEnd(prev) && ((t->kind == 1 && (WEq(t->text, "&(") || WEq(t->text, "&~"))) || ((t->kind == 3 || t->kind == 4) && (t->text[0] == '-' || t->text[0] == '+')))) {
+            rest = WAlloc(u, sizeof(CWToken));
+            MemCpy(rest, t, sizeof(CWToken));
+            rest->start = t->start + 1;
+            rest->text = WText(u, t->text + 1, StrLen(t->text) - 1);
+            if (t->kind == 1) rest->kind = 1;
+            t->end = t->start + 1;
+            t->text = WText(u, t->text, 1);
+            t->kind = 1;
+            t->next = rest;
+        }
+        prev = t;
+    }
+}
+// The comments of the source, one per line, to prove that formatting kept them.
+U8 *WFmComments(CWUnit *u, CWToken *head, U8 *s)
+{
+    CWToken *t;
+    I64 gs = 0, ge, p, cs, ce, m = 0;
+    U8 *r = WAlloc(u, StrLen(s) * 2 + 16);
+    for (t = head; t; t = t->next) {
+        ge = t->start;
+        p = gs;
+        while (p < ge) {
+            if (s[p] == '-' && s[p + 1] == '-') {
+                cs = p;
+                while (p < ge && s[p] != '\n' && s[p] != '\r') p++;
+                ce = p;
+                while (ce > cs && (s[ce - 1] == ' ' || s[ce - 1] == '\t')) ce--;
+                while (cs < ce) r[m++] = s[cs++];
+                r[m++] = '\n';
+            } else p++;
+        }
+        gs = t->end;
+    }
+    r[m] = 0;
+    return r;
+}
+// Docstrings are compared without their indentation.
+Bool WFmSameToken(CWToken *a, CWToken *b)
+{
+    U8 *x = a->text, *y = b->text;
+    if (a->kind != b->kind) return FALSE;
+    if (a->kind != 6) return WEq(x, y);
+    while (TRUE) {
+        if (*x == '\n' || !*x) {
+            while (*y == ' ' || *y == '\t') y++;
+            if (*y != *x) return FALSE;
+            if (!*x) return TRUE;
+            x++;
+            y++;
+            while (*x == ' ' || *x == '\t') x++;
+            while (*y == ' ' || *y == '\t') y++;
+        } else {
+            if (*x != *y) return FALSE;
+            x++;
+            y++;
+        }
+    }
+    return TRUE;
+}
+// The result is right when it lexes to the same tokens and has the same comments.
+Bool WFmVerify(CWFmt *f, CWToken *head, U8 *result)
+{
+    CWUnit *v = WNew();
+    CWSource *src = WAlloc(v, sizeof(CWSource));
+    CWToken *a = head, *b, *bh;
+    Bool ok = TRUE;
+    src->size = StrLen(result);
+    src->text = result;
+    bh = WLex(v, src);
+    if (!v->error_kind) WFmSplit(v, bh);
+    b = bh;
+    if (v->error_kind) ok = FALSE;
+    while (ok && a && b) {
+        if (!WFmSameToken(a, b)) ok = FALSE;
+        if (!a->kind) break;
+        a = a->next;
+        b = b->next;
+    }
+    if (ok && (!a || !b)) ok = FALSE;
+    if (ok && StrCmp(WFmComments(f->u, head, f->text), WFmComments(v, bh, result))) ok = FALSE;
+    WDestroy(v);
+    return ok;
+}
+U8 *WFmCopy(U8 *s)
+{
+    I64 n = StrLen(s);
+    U8 *r = CAlloc(n + 1);
+    MemCpy(r, s, n);
+    return r;
+}
+U8 *WFmt(U8 *src, I64 *err)
+{
+    CWUnit *u = WNew();
+    CWSource *s = WAlloc(u, sizeof(CWSource));
+    CWFmt *f = WAlloc(u, sizeof(CWFmt));
+    CWToken *head, *t;
+    I64 n = StrLen(src), count = 0, i, ind_pre, ind_post, len;
+    Bool bol;
+    U8 *result, *doc;
+    *err = 0;
+    s->size = n;
+    s->text = WText(u, src, n);
+    s->path = "";
+    head = WLex(u, s);
+    if (u->error_kind) {
+        *err = 1;
+        WDestroy(u);
+        return WFmCopy(src);
+    }
+    WFmSplit(u, head);
+    for (t = head; t; t = t->next) count++;
+    f->u = u;
+    f->text = s->text;
+    f->size = n;
+    f->nt = count - 1;
+    f->tk = WAlloc(u, (count + 1) * 8);
+    for (t = head, i = 0; t; t = t->next, i++) f->tk[i] = t;
+    f->at_start = TRUE;
+    for (i = 0; i <= f->nt; i++) {
+        ind_post = WFmIndentFor(f, i, FALSE);
+        ind_pre = WFmIndentFor(f, i, TRUE);
+        WFmGap(f, i, ind_pre, ind_post);
+        if (i == f->nt) break;
+        t = f->tk[i];
+        bol = f->col == 0;
+        if (bol) {
+            WFmSpaces(f, ind_post);
+            f->line_ind = ind_post;
+        } else if (WFmSpace(f, i)) WFmSpaces(f, 1);
+        if (f->at_start) f->stmt_ind = f->line_ind;
+        if (t->kind == 6 && f->at_start && bol && WFmMulti(f, t)) {
+            doc = WFmDoc(f, t, f->line_ind, &len);
+            WFmPut(f, doc, len);
+        } else if (WFmIs(t, "else if")) WFmPut(f, "else if", 7);
+        else WFmPut(f, f->text + t->start, t->end - t->start);
+        WFmApply(f, i);
+    }
+    WFmNewline(f);
+    result = f->out;
+    if (!result) result = "";
+    if (!WFmVerify(f, head, result)) {
+        *err = 2;
+        result = src;
+    }
+    result = WFmCopy(result);
+    WDestroy(u);
+    return result;
+}
+// Format a file in place (check: only report). Returns 0 unchanged, 1 changed or would change, 2 error.
+I64 WarmFmt(U8 *path, Bool check = FALSE, Bool quiet = FALSE)
+{
+    U8 *src, *out, *again;
+    I64 size = 0, err = 0, err2 = 0, ret = 0;
+    src = FileRead(path, &size);
+    if (!src) {
+        Print("WARMFMT ERROR-READ %s\n", path);
+        return 2;
+    }
+    out = WFmt(src, &err);
+    if (err) {
+        if (err == 1) Print("WARMFMT ERROR-LEX %s\n", path);
+        else Print("WARMFMT ERROR-TOKENS %s\n", path);
+        ret = 2;
+    } else {
+        again = WFmt(out, &err2);
+        if (err2 || StrCmp(out, again)) Print("WARMFMT WARN-NOT-IDEMPOTENT %s\n", path);
+        Free(again);
+        if (StrCmp(src, out)) {
+            ret = 1;
+            if (check) Print("WARMFMT WOULD-CHANGE %s\n", path);
+            else {
+                FileWrite(path, out, StrLen(out));
+                Print("WARMFMT CHANGED %s\n", path);
+            }
+        } else if (!quiet) Print("WARMFMT OK %s\n", path);
+    }
+    Free(src);
+    Free(out);
+    return ret;
+}

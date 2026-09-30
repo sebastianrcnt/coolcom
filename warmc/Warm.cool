@@ -7,3 +7,4 @@
 #include "Check.cool"
 #include "Linear.cool"
 #include "Emit.cool"
+#include "Format.cool"

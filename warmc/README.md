@@ -23,6 +23,7 @@ the implementation boundaries.
 | Path | What |
 |---|---|
 | `Core.cool` `Lexer.cool` `Parser.cool` `Resolve.cool` `Types.cool` `Fold.cool` `Check.cool` `Linear.cool` `Emit.cool` `Diagnostic.cool` | the compiler (`Warm.cool` includes the passes) |
+| `Format.cool` `FmtNative.cool` | the formatter (`WFmt`, `WarmFmt`) and its host command line (built into `build/warmfmt.BIN`) |
 | `Runtime.cool` | the runtime that every generated program starts with |
 | `ModuleRuntime.cool` | the smaller runtime of a kernel module (`--kernel-module`) |
 | `Native.cool` | the host command line (built into `build/warmcool/Warm.BIN`) |
@@ -30,6 +31,7 @@ the implementation boundaries.
 | `builtin/` | Pervasive and Memory, original Warm source that is embedded into the compiler (`embed_builtins.py`) |
 | `standard/` `examples/` | the standard library and example programs; `standard/src/Kernel` is `Warm.Kernel` for the OS |
 | `test-programs/` | the end-to-end test suites |
+| `fmt-tests/` | the formatter's fixtures (`NAME.in.warm` formats to `NAME.exp.warm`) |
 | `compare.py` `test_*.py` | the tests |
 
 ## Use on the Mac
@@ -88,6 +90,32 @@ Program arguments are just the source path as argv[0].
 This is Cool text handed to the existing coolc JIT, not direct IR emission. JIT code stays
 in the shell symbol table; the compilation arena is released after every operation.
 
+## Formatting
+
+`tools/warmfmt [--check] files` formats `.warm`/`.warmh` files in place (`--check` only reports and exits 1 when a
+file would change; 2 is an error). In the OS, `WarmFmt("C:/x.warm");` does the same to a file (`WarmFmt(path, TRUE)`
+only reports); it comes with `C:/Warm.cool`. `make fmt` and `make fmt-check` cover the tracked Warm files too, next to
+the HolyC ones (`tools/hcfmt.sh`), and the pre-commit hook (`make hooks`) refuses staged Warm files that are not
+formatted. The suites in `test-programs/suites` are left as they are: their expected diagnostics carry line and column numbers.
+
+The formatter is `Format.cool`. It lexes the text with `WLex` (`Lexer.cool`), so a change to the lexer changes what it
+sees, and it never parses: block structure comes from the keywords (`is`, `then`, `else`, `do`, `of`, `end`), so it also
+formats unfinished code. It only rewrites whitespace and keeps the line breaks:
+
+- Indentation is 4 spaces per block (module, record, union, function, typeclass, instance, `if`/`else`, `case` and its
+  `when`s, `while`, `for`, `borrow`; a union case's slots are one level in). A continuation line is one level past its
+  statement, and inside brackets one level past the line that opened them, with the closing bracket lined up with that line.
+- Spaces follow fixed rules: `name: Type`, `a + b`, `f(x, y)`, `Buffer[T]`, `&![T, R]`, `p->x`, `{ a: T }`, `-x`,
+  `import M (A, B);`. Trailing whitespace goes, runs of blank lines become one, the file ends with one newline.
+- Comments are kept, and a trailing comment keeps its column. A comment on its own line takes the indentation of the code
+  after it; before `end`, `else` or `when` it stays inside the block when it was indented past that word.
+  Docstrings move with their declaration. Strings and other triple-quoted values are untouched.
+
+The output is verified before it is written: it must lex to the same tokens (docstrings up to their indentation) and
+contain the same comments as the input; otherwise the file is left alone and the run reports an error. So does a file that
+does not lex. `python3 warmc/test_fmt.py` (part of `make warm-test`) checks the fixtures, odd inputs, and on all Warm files
+in the repository that formatting is idempotent and leaves the parse tree (`--dump-ast`) unchanged.
+
 ## The Cool backend
 
 The generated program is standalone Cool: records, union payloads and spans are packed
@@ -127,7 +155,7 @@ it: the first is the network stack's packet parser, `os/Kernel/NetParse.warm`
 ([docs/networking.md](../docs/networking.md#the-packet-parser-in-warm)). The Makefile runs
 
 ```sh
-build/warmc compile os/Kernel/NetParse.warm os/Kernel/NetParseExport.warm \
+build/warmc compile os/Kernel/NetParse.warm \
   --kernel-module=NetParse --target-type=hc --output=os/Kernel/NetParse.cool
 ```
 
@@ -135,7 +163,8 @@ and `os/Kernel/Kernel.cool` includes the result. The output lives in the kernel'
 
 - Every generated name starts with `NAME_` (`NetParse_wf12`, `NetParse_WT8`), as do the names of
   the runtime (`NetParse_au_span_t`, `NetParse_wh_abort`). Only `Foreign_Export` functions keep the
-  name they declare; they are the module's interface, and Cool calls them with scalars and pointers.
+  name they declare, and `Export_Layout` records the class name they declare; together they are the
+  module's interface (see "Crossing to Cool" below).
 - The runtime is `ModuleRuntime.cool`, not `Runtime.cool`: spans, abort, and allocation through
   `CAlloc`/`Free`. It has no `#define`s, no output, input, arguments or Float32 helpers; a module that
   uses those does not compile into the kernel.
@@ -161,9 +190,73 @@ What the packet parser needed that Warm did not have, and what was added:
   (2.2 us) for a full segment and 9 times (280 ns) for a small one; see
   [docs/networking.md](../docs/networking.md#the-packet-parser-in-warm). These apply to every
   program, and all the test suites still pass.
-- Still missing: shift operators (the parser multiplies and divides by powers of two instead), and
-  a way to pass a span or record across `Foreign_Export` (the boundary uses a pointer and a length,
-  and writes its result as an array of `Nat64` through `spanWrite`).
+- Shift operators, precedence, and passing spans and records across `Foreign_Export`: added in
+  stage 0 of [docs/warm-stdlib.md](../docs/warm-stdlib.md) (next section). The parser is now one
+  safe file; its unsafe export module and the hand-kept Cool class are gone.
+
+## Warm's additions to Austral
+
+Stage 0 of [docs/warm-stdlib.md](../docs/warm-stdlib.md). All of them are additive: every Austral
+program that parsed before still parses and means the same (all test programs pass unchanged).
+
+**Operators and precedence.** Austral allowed one binary operator per expression, `(a * 256) + b`.
+Warm has precedence and adds the bitwise operators. From loosest to tightest:
+
+| Level | Operators | Notes |
+|---|---|---|
+| 1 | `and` `or` | a chain of one of them; mixing them needs parentheses (`a and (b or c)`) |
+| 2 | `=` `/=` `<` `<=` `>` `>=` | no chains: `a < b < c` is an error |
+| 3 | `\|` | bitwise or |
+| 4 | `^` | bitwise xor |
+| 5 | `&` | bitwise and |
+| 6 | `<<` `>>` | shifts |
+| 7 | `+` `-` | |
+| 8 | `*` `/` | |
+| prefix | `-` `not` `~` | `~` is bitwise not; prefix operators bind tighter than all binary ones |
+
+Levels 3-8 associate to the left. Unlike C, `&`, `^` and `|` bind tighter than comparisons, so
+`flags & 2 /= 0` means `(flags & 2) /= 0`. The bitwise operators and the shifts take two integers
+of the same type (Pervasive's `BitwiseOperations` and new `BitwiseShift` typeclasses:
+`bitwiseAnd`, `bitwiseOr`, `bitwiseXor`, `bitwiseNot`, `bitwiseShiftLeft`, `bitwiseShiftRight`).
+A shift amount outside `0 .. width - 1` aborts; bits shifted out are lost (no overflow check);
+`>>` of a signed type copies the sign bit. Lexing: `<<`, `>>`, `|`, `^` and `~` are new tokens;
+after an operand `&(` and `&~` are read as `&` followed by `(` or `~`, and `x -1` as `x - 1`.
+
+**Region elision.** In a function's parameter types, `Span[T]`, `Span![T]`, `&[T]` and `&![T]`
+may leave out the region. Each gets a fresh region type parameter of the function, as if
+declared in `generic [...]` (they are named `_R1`, `_R2`, ... in messages). A region shared
+between parameters, or one in the result or a `let` type, is still written out:
+
+```
+function get16(f: Span[Nat8], at: Index): Nat64 is          -- was generic [R: Region] ... Span[Nat8, R]
+    return widenToNat64(f[at]) << 8 | widenToNat64(f[at + 1]);
+end;
+```
+
+Only `function` declarations elide, not typeclass or instance methods.
+
+**`private` and optional interfaces.** A module can be one `.warm` file; everything in it is
+importable except declarations marked `private` (`private function f ...`, `private record`,
+`private constant`, also after `generic [...]`). `private` is a keyword now. In a module that has a
+`.warmh`, the interface decides what is public, and `private` on a declaration the interface
+declares is an error; `private` in a `.warmh` is a parse error.
+
+**`Result`.** Pervasive has `union Result[T: Type, E: Type]: Type` with cases `Ok(value: T)` and
+`Err(error: E)`, for fallible operations (the error model of docs/warm-stdlib.md).
+
+**Crossing to Cool.**
+
+- A `Foreign_Export` function may take spans: each `Span[T]` or `Span![T]` parameter is two C
+  parameters, a `T *` and an `I64` count (a negative count aborts). warmc emits a small wrapper
+  with the export's name around the function. An export may have region parameters (elided or
+  not); other type parameters are still an error.
+- `pragma Export_Layout(Name => "CFoo");` before a non-generic record makes it the Cool class
+  `CFoo`, with the record's field names and types (Nat64 is `U64`, Int32 `I32`, Bool `U8`,
+  pointers stay pointers), emitted into the generated file. Fields must be integers, booleans,
+  `Float64` or pointers. Cool code includes the generated file and uses the class directly.
+- An export's record result comes back through an out pointer, the first parameter:
+  `pragma Foreign_Export(External_Name => "NetParseFrame") function parseFrame(frame: Span[Nat8]): Packet`
+  is `U0 NetParseFrame(CNetPkt *out, U8 *frame, I64 len)` in Cool.
 
 ## Tests
 
@@ -177,6 +270,7 @@ python3 warmc/test_semantics.py   # semantic probes (semantic-expected.json)
 python3 warmc/test_numbers.py     # exact numeric representation checks
 python3 warmc/test_cli.py         # entrypoint, export, CLI and diagnostic checks
 python3 warmc/test_standard.py    # the standard library and its tests, semantic checking
+python3 warmc/test_fmt.py         # the formatter (tools/warmfmt): fixtures, idempotence, same parse trees
 python3 warmc/test_kernel.py      # compile and run inside the kernel shell (make build/kernel.Image first)
 warmc/run-examples.sh             # compile and run the examples
 ```
@@ -193,7 +287,7 @@ report for each case are under `build/warmcool-comparison`.
 
 `make warm-kernel-test` (part of `make test`) compiles the kernel examples in
 `examples/kernel` with the Warm compiler and runs them in the real kernel shell. Files
-writes and reads `Warm.txt` (checked with mtools), Screen draws a rectangle whose pixels
+writes and reads `Warm.txt` (checked with mtools), Fmt runs `WarmFmt` on a messy file on the disk (the result is compared with the fixture), Screen draws a rectangle whose pixels
 are checked in the screenshot, Key waits for a scripted key press, and Errors injects a
 throwing `FileWrite` at the adapter boundary. Four negative fixtures in
 `test-programs/kernel` (leaked buffer, double close, missing capability, forged root

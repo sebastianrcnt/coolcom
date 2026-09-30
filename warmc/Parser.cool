@@ -40,6 +40,20 @@ extern CWNode *WExpr(CWUnit *u);
 extern CWNode *WAtom(CWUnit *u);
 extern CWNode *WBlock(CWUnit *u, Bool empty);
 extern CWNode *WStatement(CWUnit *u);
+// Region elision (Warm): in a function's parameter types, Span[T], Span![T], &[T] and &![T]
+// may leave out the region; each gets a fresh region type parameter of the function (_R1,
+// _R2, ..., names a program cannot write), as if declared with generic [_R1: Region].
+CWNode *WElidedRegion(CWUnit *u)
+{
+    CWNode *p = WNode(u, "type-parameter", u->cursor), *c, *r = WNode(u, "type", u->cursor), *uni = WNode(u, "universe", u->cursor);
+    I64 k = 1, i = 30;
+    U8 digits[32];
+    for (c = u->elide->first; c; c = c->next) if (WEq(c->role, "type-parameter") && c->name[0] == '_') k++;
+    digits[31] = 0;
+    do {digits[i--] = '0' + k % 10; k /= 10;} while (k);
+    p->name = WConcat(u, "_R", WText(u, digits + i + 1, 30 - i)); uni->name = "Region"; WAdd(p, uni, "universe");
+    WAdd(u->elide, p, "type-parameter"); r->name = p->name; return r;
+}
 CWNode *WType(CWUnit *u)
 {
     CWNode *n = WNode(u, "type", u->cursor);
@@ -51,7 +65,9 @@ CWNode *WType(CWUnit *u)
     if (ref || WAt(u, "[")) {
         WExpect(u, "[");
         if (ref) {
-            WAdd(n, WType(u), "argument"); WExpect(u, ","); WAdd(n, WType(u), "argument");
+            WAdd(n, WType(u), "argument");
+            if (WAt(u, "]") && u->elide) WAdd(n, WElidedRegion(u), "argument");
+            else {WExpect(u, ","); WAdd(n, WType(u), "argument");}
         } else if (!WAt(u, "]")) {
             WAdd(n, WType(u), "argument");
             while (!u->error_kind && WAccept(u, ",")) WAdd(n, WType(u), "argument");
@@ -140,7 +156,7 @@ CWNode *WAtom(CWUnit *u)
     if (k == 3 || k == 4 || k == 5 || k == 6 || WAt(u, "nil") || WAt(u, "true") || WAt(u, "false")) {
         WTake(u);
     } else if (WAccept(u, "(")) {
-        n = WExpr(u); WExpect(u, ")");
+        n = WExpr(u); WExpect(u, ")"); n->flags |= 8192;  // parenthesized
     } else if (WAccept(u, "sizeof")) {
         n->tag = "sizeof"; WExpect(u, "("); WAdd(n, WType(u), "type"); WExpect(u, ")");
     } else if (WAccept(u, "@embed")) {
@@ -170,9 +186,55 @@ CWNode *WAtom(CWUnit *u)
     } else WFail(u, t, "Parse Error", "Expected expression");
     u->depth--; n->finish = u->cursor; return n;
 }
-Bool WBinary(CWUnit *u)
+// Binary operators by precedence, loosest first (Warm's addition to Austral, which allowed one
+// operator per expression): and/or (never mixed without parentheses), comparisons (no
+// chains), |, ^, &, << >>, + -, * /. All but comparisons associate to the left.
+U0 WSplitToken(CWUnit *u, CWToken *t, I64 n)
+{//Split t after its first n characters (an operator glued to what follows it).
+    CWToken *rest = WAlloc(u, sizeof(CWToken));
+    MemCpy(rest, t, sizeof(CWToken)); rest->start = t->start + n; rest->text = WText(u, t->text + n, StrLen(t->text) - n);
+    if (WEq(rest->text, "(") || WEq(rest->text, "~")) rest->kind = 1;
+    t->end = t->start + n; t->text = WText(u, t->text, n); t->kind = 1; t->next = rest;
+}
+I64 WOpLevel(CWUnit *u)
 {
-    return WAt(u, "+") || WAt(u, "-") || WAt(u, "*") || WAt(u, "/") || WAt(u, "=") || WAt(u, "/=") || WAt(u, "<") || WAt(u, "<=") || WAt(u, ">") || WAt(u, ">=") || WAt(u, "and") || WAt(u, "or");
+    CWToken *t = u->cursor;
+    // After an operand, "&(" and "&~" are "&" and then an operand, and -1 is - 1.
+    if (WEq(t->text, "&(") || WEq(t->text, "&~")) WSplitToken(u, t, 1);
+    if ((t->kind == 3 || t->kind == 4) && (t->text[0] == '-' || t->text[0] == '+')) WSplitToken(u, t, 1);
+    if (WAt(u, "and") || WAt(u, "or")) return 1;
+    if (WAt(u, "=") || WAt(u, "/=") || WAt(u, "<") || WAt(u, "<=") || WAt(u, ">") || WAt(u, ">=")) return 2;
+    if (WAt(u, "|")) return 3;
+    if (WAt(u, "^")) return 4;
+    if (WAt(u, "&")) return 5;
+    if (WAt(u, "<<") || WAt(u, ">>")) return 6;
+    if (WAt(u, "+") || WAt(u, "-")) return 7;
+    if (WAt(u, "*") || WAt(u, "/")) return 8;
+    return 0;
+}
+CWNode *WOperand(CWUnit *u)
+{
+    CWToken *t = u->cursor;
+    CWNode *n;
+    if (!WAt(u, "not") && !WAt(u, "-") && !WAt(u, "~")) return WAtom(u);
+    if (!WEnter(u)) return WNode(u, "error", t);
+    n = WNode(u, "unary", t); n->name = WTake(u)->text; WAdd(n, WOperand(u), "value");
+    u->depth--; n->finish = u->cursor; return n;
+}
+CWNode *WBinaryExpr(CWUnit *u, I64 min)
+{
+    CWNode *n, *left = WOperand(u), *right;
+    CWToken *t;
+    I64 level;
+    while (!u->error_kind && (level = WOpLevel(u)) && level >= min) {
+        t = WTake(u); right = WBinaryExpr(u, level + 1);
+        if (level == 1 && WEq(left->tag, "binary") && !(left->flags & 8192) && (WEq(left->name, "and") || WEq(left->name, "or")) && !WEq(left->name, t->text))
+            WFail(u, t, "Parse Error", "Mixing 'and' and 'or' needs parentheses");
+        n = WNode(u, "binary", t); n->name = t->text; WAdd(n, left, "left"); WAdd(n, right, "right");
+        n->finish = u->cursor; left = n;
+        if (level == 2 && WOpLevel(u) == 2) WFail(u, u->cursor, "Parse Error", "Comparisons do not chain");
+    }
+    return left;
 }
 CWNode *WExpr(CWUnit *u)
 {
@@ -182,14 +244,9 @@ CWNode *WExpr(CWUnit *u)
     if (WAccept(u, "if")) {
         n = WNode(u, "if-expression", t); WAdd(n, WExpr(u), "condition"); WExpect(u, "then");
         WAdd(n, WExpr(u), "then"); WExpect(u, "else"); WAdd(n, WExpr(u), "else");
-    } else if (WAt(u, "not") || WAt(u, "-")) {
-        n = WNode(u, "unary", t); n->name = WTake(u)->text; WAdd(n, WAtom(u), "value");
     } else {
-        n = WAtom(u);
-        if (WBinary(u)) {
-            left = n; n = WNode(u, "binary", u->cursor); n->name = WTake(u)->text;
-            WAdd(n, left, "left"); WAdd(n, WAtom(u), "right");
-        } else if (WAccept(u, ":")) {
+        n = WBinaryExpr(u, 1);
+        if (!WEq(n->tag, "binary") && WAccept(u, ":")) {
             left = n; n = WNode(u, "cast", t); WAdd(n, left, "value"); WAdd(n, WType(u), "type");
         }
     }
@@ -302,7 +359,10 @@ CWNode *WDecl(CWUnit *u, Bool body)
     CWNode *n = WNode(u, "declaration", u->cursor), *c;
     Bool generic = FALSE;
     WDoc(u, n); WPragmas(u, n);
+    // private (Warm): not importable from a module body that has no interface file.
+    if (WAt(u, "private")) {if (!body) WFail(u, u->cursor, "Parse Error", "private is only for module bodies"); WTake(u); n->flags |= 4096;}
     if (WAccept(u, "generic")) {generic = TRUE; WTypeParams(u, n);}
+    if (WAt(u, "private") && !(n->flags & 4096)) {if (!body) WFail(u, u->cursor, "Parse Error", "private is only for module bodies"); WTake(u); n->flags |= 4096;}
     n->tag = WTake(u)->text; n->name = WIdent(u)->text;
     if (generic && !WEq(n->tag, "function") && !WEq(n->tag, "instance")) WFail(u, n->token, "Parse Error", "Unexpected generic segment");
     if (WEq(n->tag, "constant")) {
@@ -334,7 +394,7 @@ CWNode *WDecl(CWUnit *u, Bool body)
         }
         WExpect(u, ";");
     } else if (WEq(n->tag, "function")) {
-        WParams(u, n); WExpect(u, ":"); WAdd(n, WType(u), "result");
+        u->elide = n; WParams(u, n); u->elide = NULL; WExpect(u, ":"); WAdd(n, WType(u), "result");
         if (body) {WExpect(u, "is"); WAdd(n, WBlock(u, TRUE), "body"); WExpect(u, "end");}
         WExpect(u, ";");
     } else if (WEq(n->tag, "typeclass")) {

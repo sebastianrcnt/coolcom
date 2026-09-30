@@ -11,8 +11,8 @@ import Standard.IO.Terminal (
     readLine
 );
 import Standard.String (
-    String, 
-    destroyString, 
+    String,
+    destroyString,
     getSpan,
     length
 );
@@ -31,8 +31,7 @@ module body Example.Greet is
         destroyString(line);
         releaseInput(input);
         releaseTerminal(terminal);
-        surrenderRoot(mutRoot); 
+        surrenderRoot(mutRoot);
         return ExitSuccess();
     end;
 end module body.
-

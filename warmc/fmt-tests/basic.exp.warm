@@ -1,0 +1,84 @@
+-- License header, kept at the top.
+-- stray indent
+
+pragma Unsafe_Module;
+import Standard.Buffer (
+    Buffer,
+    allocateEmpty,   -- the constructor
+    destroy
+);
+import Standard.IO (A as B);
+
+"""
+Module docs.
+   Indented more.
+"""
+module body Test.Fmt is
+    constant x: Int32 := -1;
+    constant y: Int32 := 2 + 3 * 4; -- trailing
+    constant zz: Int32 := 10;         -- aligned
+    """
+    A record.
+      keeps relative indent
+    """
+    record R[T: Type]: Free is
+        a: T;
+        """Doc for b."""
+        b: Nat8;
+    end;
+
+    union U: Free is
+        """The first."""
+        case A;
+        case B is
+            v: Int32;
+            """second slot"""
+            w: R[Int32];
+        """The third."""
+        case C is
+            n: Nat8;
+    end;
+
+    generic [R: Region, S: Region]
+    function f(a: &[Buffer[T], R], b: &![Int32, S]): Int32 is
+        let { p: Int32, q: Int32 } := b;
+        let {} := x;
+        var i: Int32 := - 1;
+        var j: Int32 := -i;
+        let k: Int32 := if i < j then -1 else (j);
+        if i = 0 then
+            skip;
+            -- a comment before else
+        else if i /= 1 then
+            i := 1;
+        else
+            while i < 10 do
+                i := i + 1;
+                -- last in loop
+            end while;
+        end if;
+        for n from 0 to 10 do skip; end for;
+        case a of
+            -- comment before when
+            when A do
+                skip;
+            when B(v: Int32) do
+                return 1;
+                -- comment ending a when
+            when C do
+                skip;
+        end case;
+        borrow r: &[Int32, R] := &!i do
+            drop(r);
+        end borrow;
+        let ptr: Address[Nat8] := @embed(Address[Nat8], "NULL");
+        let e: Int32 := @embed(Int32, "$1", &(rec.field[0]));
+        let s: Int32 := sizeof(Int32) + f(g(1,
+            2),
+            3) - h[4]->z.w;
+        return (a * b)
+            + c;
+        -- comment before end
+    end;
+
+end module body.

@@ -17,4 +17,4 @@ rev = "c1b84cc02006f4dac84b12721935ef27211975dc"
 [grammars.warm]
 repository = "file:///Volumes/t5/coolcom"
 path = "tools/tree-sitter-warm"
-rev = "5066267bbe00f40f883a9323a9be097862af4a8c"
+rev = "c63acba1b1fab477b55cffd27a8ae2f9b0b20818"

@@ -1,0 +1,45 @@
+pragma Unsafe_Module;
+import Austral.Memory (Pointer, Address, allocateBuffer, nullCheck, deallocate, span, spanWrite);
+module body Test is
+    record Counter: Free is
+        total: Nat64;
+    end;
+
+    -- Two spans and a mutable reference, each with its own left-out region.
+    function addBoth(a: Span[Nat8], b: Span[Nat8], c: &![Counter]): Unit is
+        for i from 0 to spanLength(a) - 1 do
+            c->total := c->total + widenToNat64(a[i]);
+        end for;
+        for i from 0 to spanLength(b) - 1 do
+            c->total := c->total + widenToNat64(b[i]);
+        end for;
+        return nil;
+    end;
+
+    function setLast(s: Span![Nat8], value: Nat8): Unit is
+        s[spanWriteLength(s) - 1] := value;
+        return nil;
+    end;
+
+    function main(): ExitCode is
+        var c: Counter := Counter(total => 0);
+        addBoth("AB", "C", &!c);
+        printLn(c.total);
+        let addr: Address[Nat8] := allocateBuffer(4);
+        case nullCheck(addr) of
+            when Some(value: Pointer[Nat8]) do
+                var p: Pointer[Nat8] := value;
+                borrow ref: &![Pointer[Nat8], R] := &!p do
+                    setLast(spanWrite(ref, 0, 3), 7);
+                end borrow;
+                borrow view: &[Pointer[Nat8], S] := &p do
+                    let s: Span[Nat8, S] := span(view, 0, 3);
+                    printLn(s[3]);
+                end borrow;
+                deallocate(p);
+            when None do
+                printLn("no memory");
+        end case;
+        return ExitSuccess();
+    end;
+end module body.

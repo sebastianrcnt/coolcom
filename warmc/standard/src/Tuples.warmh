@@ -6,14 +6,14 @@
 --
 module Standard.Tuples is
     record Pair[A: Type, B: Type]: Type is
-        first:  A;
+        first: A;
         second: B;
     end;
 
     record Triple[A: Type, B: Type, C: Type]: Type is
-        first:  A;
+        first: A;
         second: B;
-        third:  C;
+        third: C;
     end;
 
     record Tuple4[
@@ -22,9 +22,9 @@ module Standard.Tuples is
         C: Type,
         D: Type
     ]: Type is
-        first:  A;
+        first: A;
         second: B;
-        third:  C;
+        third: C;
         fourth: D;
     end;
 
@@ -35,11 +35,11 @@ module Standard.Tuples is
         D: Type,
         E: Type
     ]: Type is
-        first:  A;
+        first: A;
         second: B;
-        third:  C;
+        third: C;
         fourth: D;
-        fifth:  E;
+        fifth: E;
     end;
 
     record Tuple6[
@@ -50,11 +50,11 @@ module Standard.Tuples is
         E: Type,
         F: Type
     ]: Type is
-        first:  A;
+        first: A;
         second: B;
-        third:  C;
+        third: C;
         fourth: D;
-        fifth:  E;
-        sixth:  F;
+        fifth: E;
+        sixth: F;
     end;
 end module.

@@ -18,12 +18,14 @@
 ; Types
 (type_identifier) @type
 ((type_identifier) @type.builtin
-  (#match? @type.builtin "^(Unit|Bool|Nat8|Nat16|Nat32|Nat64|Int8|Int16|Int32|Int64|Index|ByteSize|Float32|Float64|Address|Pointer|Option|Either|ExitCode|RootCapability|Static)$"))
+  (#match? @type.builtin "^(Unit|Bool|Nat8|Nat16|Nat32|Nat64|Int8|Int16|Int32|Int64|Index|ByteSize|Float32|Float64|Address|Pointer|Option|Either|Result|ExitCode|RootCapability|Static)$"))
 (universe) @type.builtin
 
 ; Functions and methods
 (function_declaration name: (identifier) @function.definition)
 (method_declaration name: (identifier) @function.definition)
+((call_expression function: (identifier) @constructor)
+  (#match? @constructor "^(Ok|Err|Some|None)$"))
 (call_expression function: (identifier) @function)
 (pragma name: (identifier) @attribute)
 
@@ -50,7 +52,7 @@
   "module" "body" "is" "end" "import" "as" "pragma"
   "constant" "type" "function" "generic" "record" "union"
   "typeclass" "instance" "method" "case" "of" "when"
-  "let" "var" "borrow" "return" "skip" "sizeof" "@embed"
+  "let" "var" "borrow" "return" "skip" "sizeof" "@embed" "private"
   "Span" "Span!"
 ] @keyword
 
@@ -65,7 +67,7 @@
 
 ; Operators
 [
-  "+" "-" "*" "/" "=" "/=" "<" "<=" ">" ">="
+  "+" "-" "*" "/" "=" "/=" "<" "<=" ">" ">=" "<<" ">>" "|" "^" "~"
   ":=" "=>" "->" "." "&" "&!" "&~" "&(" "!"
 ] @operator
 

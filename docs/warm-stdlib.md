@@ -1,7 +1,8 @@
-# The Warm standard library: design (for review)
+# The Warm standard library: design
 
-Status: a proposal. Nothing here is implemented yet except where it says so. Where a choice
-is yours, the options are listed with a recommendation (**Rec.**) instead of a decision.
+Status: reviewed; the decisions are at the end. Stage 0 is implemented (see
+[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-5 are not. The
+options and recommendations (**Rec.**) below are kept as the reasoning behind the decisions.
 
 Warm today has two unrelated libraries: `Standard.*` from Austral (String, Buffer, Box,
 `Standard.IO` with a terminal capability whose native bindings are C stdio that we cannot
@@ -15,7 +16,7 @@ used neither: it is a pure function over a span. What it taught, briefly:
 - The language was the friction, not the library: no shifts, `Option` from every widening
   conversion (fixed: `widenToNat64`), mandatory parentheses in `(a * 256) + b`, region
   parameters on every helper, and a 22-field record that had to be written out by hand
-  across the Cool boundary (`CNetPkt` and `NetParseExport.warm` must be kept in sync).
+  across the Cool boundary (`CNetPkt` and an unsafe export module had to be kept in sync; fixed in stage 0).
 - Generated code speed matters for kernel use; it was 30x slower than Cool before the
   emitter open-coded operators and indexing, 7x after.
 
@@ -90,7 +91,7 @@ Proposal:
   `Ok(value)` and `Err(error)` (Either's `Left`/`Right` do not say which side failed). A
   failed acquisition of a linear resource returns `Err` and no resource, so there is no
   dummy object to close.
-- **One error type for the library**, `Warm.Error.IoError`, a union: `NotFound`, `Exists`,
+- **One error type for the library**, `OS.Error.IoError`, a union: `NotFound`, `Exists`,
   `InvalidName`, `Denied` (capability does not allow it), `NoSpace`, `NotEmpty`, `Closed`,
   `Timeout`, `Refused`, `Reset`, `Unreachable`, `Interrupted` (Ctrl+C/Kill), and
   `Other(code: Int64)` for a kernel code with no case yet. `ioErrorCode(e): Int64` and
@@ -159,6 +160,9 @@ Cool are outside the model, and kernel modules like NetParse take no capabilitie
 
 ## 5. One API, and names
 
+(Decided differently from the recommendation below: OS-facing modules are `OS.*`, see the
+decisions.)
+
 `Standard.IO`/`Standard.IO.Terminal` (Austral, C stdio, cannot run natively here) and
 `Warm.Kernel` (kernel only) merge into one set of modules with two backends: the kernel
 adapter (`Adapter.cool`) and the host (`build/coolc --run` natives: files, stdout, stdin),
@@ -178,22 +182,22 @@ readers. Conventions: `camelCase` verbs, `open`/`close` for linear handles, `acq
 Each stage lists its API sketch and what it depends on. Stage 0 is language work that the
 others lean on.
 
-**Stage 0 - language and boundary** (depends on: the syntax decision in 1).
-Shifts and bitwise operators, precedence, region elision, optional `.warmh`; `Result` in
-Pervasive; span parameters and `Export_Layout` records on `Foreign_Export`. Then rewrite
-NetParse with them as the check that they pay off.
+**Stage 0 - language and boundary** (done). Shifts and bitwise operators, precedence,
+region elision, optional `.warmh` with `private`; `Result` in Pervasive; span parameters and
+`Export_Layout` records on `Foreign_Export`. NetParse was rewritten with them: it is now one
+safe file, and the hand-kept `CNetPkt` class and the unsafe export module are gone.
 
 **Stage 1 - unified IO, typed terminal and files** (depends on: 0's `Result`, decision 5,
 a host backend in the native runtime).
 
 ```
-module Warm.Error:    union IoError ...; ioErrorCode, ioErrorText
-module Warm.Terminal: acquireOutput(&!root): Output; acquireInput(&!root): Input
+module OS.Error:    union IoError ...; ioErrorCode, ioErrorText
+module OS.Terminal: acquireOutput(&!root): Output; acquireInput(&!root): Input
                       write(&!out, text: Span[Nat8]): Result[Unit, IoError]; writeLine
                       readLine(&!in): Result[String, IoError]
                       readKey(&!in): Key            -- union Key: Char(cp), Up, Down, ..., Ctrl(c)
                       setColor(&!out, fg: Color, bg: Color)   -- Color: a union, not Int64
-module Warm.File:     readAll(&dir, name): Result[Bytes, IoError]
+module OS.File:     readAll(&dir, name): Result[Bytes, IoError]
                       writeAll(&dir, name, data: Span[Nat8]): Result[Unit, IoError]
                       exists, delete, makeDir
 ```
@@ -206,10 +210,10 @@ close; **Rec.**: the buffered version first, since it fixes the API and the kern
 replace it underneath).
 
 ```
-module Warm.Dir:  openRoot(&!fs): Dir; openDir(&dir, name): Result[Dir, IoError]; closeDir
+module OS.Dir:  openRoot(&!fs): Dir; openDir(&dir, name): Result[Dir, IoError]; closeDir
                   entries(&dir): Result[Entries, IoError]
                   next(&!entries): Option[Entry]   -- Entry: name: String, size, isDir, modified
-module Warm.File: open(&dir, name, mode): Result[File, IoError]   -- File: Linear
+module OS.File: open(&dir, name, mode): Result[File, IoError]   -- File: Linear
                   read(&!file, into: Span![Nat8]): Result[Index, IoError]   -- 0 at end
                   write(&!file, data: Span[Nat8]): Result[Index, IoError]
                   seek, size, close(file): Result[Unit, IoError]
@@ -219,7 +223,7 @@ module Warm.File: open(&dir, name, mode): Result[File, IoError]   -- File: Linea
 directly; host backend optional).
 
 ```
-module Warm.Net: acquireNetwork(&!root): Network
+module OS.Net: acquireNetwork(&!root): Network
                  resolve(&net, host: Span[Nat8]): Result[Address, IoError]
                  connect(&net, addr, port, timeoutMs): Result[TcpStream, IoError]
                  listen(&net, port): Result[TcpListener, IoError]; accept(&!l, timeoutMs)
@@ -232,10 +236,10 @@ can be called from a new kernel task and a decision on how Warm code shares stat
 tasks, likely none: pass linear values in, get a result back through `join`).
 
 ```
-module Warm.Time:   now(): DateTime; unixNow(): Int64; monotonicMs(): Int64; Duration
-module Warm.Task:   acquireTasks(&!root): Tasks; sleep(&tasks, ms); yield(&tasks)
+module OS.Time:   now(): DateTime; unixNow(): Int64; monotonicMs(): Int64; Duration
+module OS.Task:   acquireTasks(&!root): Tasks; sleep(&tasks, ms); yield(&tasks)
                     spawn(&tasks, f: Fn[T, R], arg: T): Result[Handle[R], IoError]; join
-module Warm.Random: seeded(seed): Rng; next(&!rng): Nat64  -- not cryptographic
+module OS.Random: seeded(seed): Rng; next(&!rng): Nat64  -- not cryptographic
 ```
 
 **Stage 5 - fine-grained capabilities** (depends on: 2 and 3).
@@ -244,14 +248,19 @@ Rights on `Dir` (`narrow`, read-only and subtree confinement enforced in the ada
 capability's holder gets `Denied`/`InvalidName` for everything outside it (paths with `..`,
 absolute paths, other drives, other hosts).
 
-## Decisions for you
+## Decisions (2026-09-30)
 
-1. Syntax: A, **B** or C; and within B whether `and`/`or` mixtures still need parentheses.
-2. `.warmh`: required, **optional with `private`**, or dropped.
-3. Error type: **one `IoError`**, per-module, or codes. And `Result` with `Ok`/`Err`, or
-   keep `Either`.
-4. Strings: **bytes by convention** or validated UTF-8.
-5. Rights: **runtime set** or types.
-6. Names: **`Warm.*` for OS APIs + `Standard.*` for pure code**, `Std.*`, or today's split.
-7. File streams in stage 2: a real kernel open-file API, or **buffer-and-write-on-close
-   first**, then the kernel API.
+1. Syntax: **B**, the additive extensions. Mixing `and` with `or` still needs parentheses.
+2. `.warmh`: **optional**, with `private` for declarations of a module body that other
+   modules must not import.
+3. Errors: **one `IoError`** (module `OS.Error`) and **`Result` with `Ok`/`Err`**; aborts only
+   for bugs.
+4. Strings: **bytes by convention** (UTF-8 not validated).
+5. Rights: **a runtime set** on one `Dir` type.
+6. Names: OS-facing modules are **`OS.*`** (`OS.File`, `OS.Dir`, `OS.Net`, `OS.Terminal`,
+   `OS.Time`, `OS.Task`, `OS.Random`, `OS.Error`), and the same code runs on CoolOS and
+   macOS. A feature that exists on only one side goes under that side's name, e.g.
+   `OS.CoolOS.Framebuffer` (or `OS.MacOS.*`). Pure modules stay **`Standard.*`**.
+   (`Warm.Kernel` becomes `OS.*` plus `OS.CoolOS.*` in stage 1.)
+7. File streams: **buffer the whole file and write on close first**, then a kernel open-file
+   API underneath.

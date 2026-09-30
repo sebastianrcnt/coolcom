@@ -47,9 +47,35 @@ def stdin_test(OUT):
     assert "Hello, Zed!" in output.split("WarmRun(", 1)[-1], output[-6000:]
     print("warm-kernel: Stdin (greet reads the terminal) PASS", flush=True)
 
+def fmt_test(OUT):
+    """WarmFmt in the shell formats a messy file on the disk (the fixture of warmc/test_fmt.py)."""
+    disk = OUT / "fmt-disk.img"
+    with disk.open("wb") as f:
+        f.truncate(64 * 1024 * 1024)
+    run("mformat", "-i", disk, "-F", "::")
+    run("mcopy", "-o", "-i", disk, ROOT / "build/warmcool/Kernel.cool", "::Warm.cool")
+    run("mcopy", "-o", "-i", disk, ROOT / "warmc/fmt-tests/basic.in.warm", "::Fmt.warm")
+    script = OUT / "Fmt.input"
+    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm.cool"') +
+                      kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
+                      kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT CHANGED C:/Fmt.warm\n" +
+                      kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT OK C:/Fmt.warm\ndelay 300\nquit\n")
+    log = OUT / "Fmt.log"
+    with log.open("wb") as stream:
+        subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
+            "--headless", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT).wait()
+    output = log.read_text(errors="replace")
+    assert "WARMFMT CHANGED C:/Fmt.warm" in output and "WARMFMT OK C:/Fmt.warm" in output, output[-6000:]
+    assert "ERROR" not in output.split("WLOAD1", 1)[-1], output[-6000:]
+    data = run("mtype", "-i", disk, "::Fmt.warm").stdout
+    assert data == (ROOT / "warmc/fmt-tests/basic.exp.warm").read_bytes(), data.decode(errors="replace")
+    print("warm-kernel: Fmt (WarmFmt in the shell) PASS", flush=True)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="", choices=("", "Files", "Screen", "Key", "Errors", "Stdin"))
+    parser.add_argument("--filter", default="", choices=("", "Files", "Screen", "Key", "Errors", "Stdin", "Fmt"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:
@@ -125,6 +151,8 @@ def main():
         print("warm-kernel: " + name + " PASS", flush=True)
     if not args.filter or args.filter == "Stdin":
         stdin_test(OUT)
+    if not args.filter or args.filter == "Fmt":
+        fmt_test(OUT)
     if not args.filter or args.filter == "Files":
         data = run("mtype", "-i", disk, "::Warm.txt").stdout
         assert data == b"Warm FAT32\n", data

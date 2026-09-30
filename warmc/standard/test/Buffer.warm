@@ -60,7 +60,7 @@ module body Standard.Test.Buffer is
         mapEmptyTest();
         getSpanTest();
         getSpanMutTest();
-        
+
         -- New regression tests for specific bug fixes
         reverseEvenNumberTest();
         reverseOddNumberTest();
@@ -68,7 +68,7 @@ module body Standard.Test.Buffer is
         insertIntoFullInitializedBufferTest();
         capacityGrowthTest();
         edgeCaseInvariantsTest();
-        
+
         return nil;
     end;
 
@@ -91,7 +91,7 @@ module body Standard.Test.Buffer is
         assertSuccess("destroyFree complete");
         return nil;
     end;
-    
+
     function initializeEmptyTest(): Unit is
         testHeading("initializeEmpty");
         let b: Buffer[Int32] := initialize(0, 10);
@@ -100,7 +100,7 @@ module body Standard.Test.Buffer is
         assertSuccess("destroyFree complete");
         return nil;
     end;
-    
+
     function storeTest(): Unit is
         testHeading("storeNth");
         var b: Buffer[Int32] := initialize(1, 10);
@@ -321,10 +321,10 @@ module body Standard.Test.Buffer is
         -- Double each element in place.
         inPlaceMap(&!b, double);
         -- Assert contents.
-        assertTrue(nth(&b, 0) = 2,  "[0] = 2");
-        assertTrue(nth(&b, 1) = 4,  "[1] = 4");
-        assertTrue(nth(&b, 2) = 6,  "[2] = 6");
-        assertTrue(nth(&b, 3) = 8,  "[3] = 8");
+        assertTrue(nth(&b, 0) = 2, "[0] = 2");
+        assertTrue(nth(&b, 1) = 4, "[1] = 4");
+        assertTrue(nth(&b, 2) = 6, "[2] = 6");
+        assertTrue(nth(&b, 3) = 8, "[3] = 8");
         assertTrue(nth(&b, 4) = 10, "[4] = 10");
         -- End.
         destroyFree(b);
@@ -338,12 +338,12 @@ module body Standard.Test.Buffer is
         var b: Buffer[Int32] := allocateEmpty();
         inPlaceMap(&!b, double);
         assertLength(&b, 0);
- 
+
         destroyFree(b);
         assertSuccess("destroyFree complete");
         return nil;
     end;
-    
+
     union CardinalDirection: Free is
         case North;
         case South;
@@ -375,10 +375,10 @@ module body Standard.Test.Buffer is
         -- Map each of the cardinal directions into a character.
         let b2: Buffer[Nat8] := map(b1, directionToChar);
         -- Assert the contents.
-        assertTrue(nth(&b2, 0) = 'N',  "[0] = N");
-        assertTrue(nth(&b2, 1) = 'S',  "[1] = S");
-        assertTrue(nth(&b2, 2) = 'E',  "[2] = E");
-        assertTrue(nth(&b2, 3) = 'W',  "[3] = W");
+        assertTrue(nth(&b2, 0) = 'N', "[0] = N");
+        assertTrue(nth(&b2, 1) = 'S', "[1] = S");
+        assertTrue(nth(&b2, 2) = 'E', "[2] = E");
+        assertTrue(nth(&b2, 3) = 'W', "[3] = W");
         -- End.
         destroyFree(b2);
         assertSuccess("destroyFree complete");
@@ -390,9 +390,9 @@ module body Standard.Test.Buffer is
 
         let b1: Buffer[CardinalDirection] := allocateEmpty();
         let b2: Buffer[Nat8] := map(b1, directionToChar);
-        
+
         assertLength(&b2, 0);
-        
+
         destroyFree(b2);
         assertSuccess("destroyFree complete");
         return nil;
@@ -414,9 +414,9 @@ module body Standard.Test.Buffer is
         borrow ref: &[Buffer[Int32], R] := &b do
             let sp: Span[Int32, R] := getSpan(ref, 0, 2);
             -- Assert the contents.
-            assertTrue(sp[0] = 1,  "sp[0] = 1");
-            assertTrue(sp[1] = 2,  "sp[1] = 2");
-            assertTrue(sp[2] = 3,  "sp[2] = 3");
+            assertTrue(sp[0] = 1, "sp[0] = 1");
+            assertTrue(sp[1] = 2, "sp[1] = 2");
+            assertTrue(sp[2] = 3, "sp[2] = 3");
         end borrow;
 
         -- Destroy.
@@ -447,9 +447,9 @@ module body Standard.Test.Buffer is
         end borrow;
 
         -- Assert contents.
-        assertTrue(nth(&b, 0) = 10,  "[0] = 10");
-        assertTrue(nth(&b, 1) = 20,  "[1] = 20");
-        assertTrue(nth(&b, 2) = 30,  "[2] = 30");
+        assertTrue(nth(&b, 0) = 10, "[0] = 10");
+        assertTrue(nth(&b, 1) = 20, "[1] = 20");
+        assertTrue(nth(&b, 2) = 30, "[2] = 30");
 
         -- Destroy.
         destroyFree(b);
@@ -510,24 +510,24 @@ module body Standard.Test.Buffer is
     function insertCapacityResizeTest(): Unit is
         testHeading("insert capacity resize");
         var b: Buffer[Int32] := allocateEmpty();
-        
+
         -- Fill to near capacity
         for i from 0 to 14 do
             insertBack(&!b, indexToInt32(i));
         end for;
-        
+
         assertLength(&b, 15);
-        
+
         -- Trigger resize
         insertBack(&!b, 15);
         assertLength(&b, 16);
         assertNth(&b, 15, 15);
-        
+
         -- Trigger another resize
         insertBack(&!b, 16);
         assertLength(&b, 17);
         assertNth(&b, 16, 16);
-        
+
         destroyFree(b);
         return nil;
     end;
@@ -548,56 +548,56 @@ module body Standard.Test.Buffer is
     function capacityGrowthTest(): Unit is
         testHeading("capacity growth calculation");
         var b: Buffer[Int32] := allocateEmpty();
-        
+
         -- Force multiple resizes
         for i from 0 to 100 do
             insertBack(&!b, indexToInt32(i));
         end for;
-        
+
         assertLength(&b, 101);
-        
+
         -- Verify all elements preserved
         for i from 0 to 100 do
             assertTrue(nth(&b, i) = indexToInt32(i), "Element at index preserved after resizes");
         end for;
-        
+
         destroyFree(b);
         return nil;
     end;
 
     function edgeCaseInvariantsTest(): Unit is
         testHeading("edge case invariants");
-        
+
         -- Empty buffer
         let b1: Buffer[Int32] := allocateEmpty();
         assertLength(&b1, 0);
         destroyEmpty(b1);
-        
+
         -- Single element buffer
         var b2: Buffer[Int32] := initialize(1, 42);
         assertLength(&b2, 1);
         assertNth(&b2, 0, 42);
-        
+
         insertBack(&!b2, 43);
         assertLength(&b2, 2);
         assertNth(&b2, 1, 43);
-        
+
         destroyFree(b2);
-        
+
         -- Minimum capacity boundary
         var b3: Buffer[Int32] := allocateEmpty();
         for i from 0 to 15 do
             insertBack(&!b3, indexToInt32(i * 10));
         end for;
-        
+
         assertLength(&b3, 16);
-        
+
         for i from 0 to 15 do
             assertTrue(nth(&b3, i) = indexToInt32(i * 10), "Minimum capacity boundary test");
         end for;
-        
+
         destroyFree(b3);
-        
+
         assertSuccess("Edge case invariants passed");
         return nil;
     end;

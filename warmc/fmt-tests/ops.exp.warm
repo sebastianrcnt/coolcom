@@ -1,0 +1,19 @@
+pragma Export_Layout(Name => "CFoo");
+module body Ops is
+    private constant k: Nat64 := #xFF | 1 << 4;
+    generic [T: Type]
+    private
+    function get16(f: Span[Nat8], at: Index): Nat64 is
+        return widenToNat64(f[at]) << 8 | widenToNat64(f[at + 1]);
+    end;
+    function g(a: Nat64, b: Nat64): Nat64 is
+        let c: Nat64 := a & ~b;
+        let d: Nat64 := a & ~b ^ (a & (b));
+        let e: Int32 := f(-1, - 2, x - 1, y - 1, z + 1);
+        let h: Bool := not a >> 1 <= ~b;
+        let r: &[Nat64] := &a;
+        let s: &![Nat64] := &!a;
+        let q: Nat64 := a & !r;
+        return (a | b) ^ c >> 2;
+    end;
+end module body.

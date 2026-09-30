@@ -1,6 +1,6 @@
 module body Example.Union is
     function main(): ExitCode is
-        let C : Color := Red();
+        let C: Color := Red();
         case C of
             when Red do
                 skip;
@@ -9,7 +9,7 @@ module body Example.Union is
             when Blue do
                 skip;
         end case;
-        let N : Number := Integer(value => 10);
+        let N: Number := Integer(value => 10);
         case N of
             when Integer(value: Int32) do
                 skip;

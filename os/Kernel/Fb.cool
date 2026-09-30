@@ -20,6 +20,8 @@
 // FINISHER_FB_DAMAGE register), so the window redraws without comparing whole frames.
 #define FB_FRAME_JIFFIES 16  // at most about 60 frames a second while output streams
 #define FB_IDLE_JIFFIES  2   // and a frame this soon after output stops
+#define FB_HIDDEN_JIFFIES 100 // while the program hides the cursor (it is redrawing: Vim, Tmux),
+#define FB_HIDDEN_IDLE    20  // no frames mid-stream: only once output has stopped this long, or this often
 #define FINISHER_FB_DAMAGE 0x18 // coolvm: write (end << 16) | start, the pixel rows just drawn
 
 class CFb
@@ -369,12 +371,32 @@ U0 FbFlush()
     FbRender;
 }
 
+Bool FbCursorOff()
+{//The program hides the cursor: it is probably partway through a redraw (CSI ?25l ... ?25h),
+    //so frames wait for it to finish, and a redraw reaches the screen in one piece.
+    return fb.vt->cursor_off || fb.cursor_hidden;
+}
+
+I64 FbFrameJiffies()
+{//Frame interval while output streams.
+    if (FbCursorOff)
+        return FB_HIDDEN_JIFFIES;
+    return FB_FRAME_JIFFIES;
+}
+
+I64 FbIdleJiffies()
+{//How long output must pause before a frame.
+    if (FbCursorOff)
+        return FB_HIDDEN_IDLE;
+    return FB_IDLE_JIFFIES;
+}
+
 U0 FbTick()
 {//From the timer interrupt on core 0.
     if (!fb.base)
         return;
     fb.ticking = TRUE;
-    if (fb.pending && (jiffies - fb.last_put >= FB_IDLE_JIFFIES || jiffies - fb.last_render >= FB_FRAME_JIFFIES))
+    if (fb.pending && (jiffies - fb.last_put >= FbIdleJiffies || jiffies - fb.last_render >= FbFrameJiffies))
         FbRender;
 }
 
@@ -385,8 +407,8 @@ I64 FbNextJiffy()
     I64 a, b;
     if (!fb.base || !fb.pending)
         return JIFFY_NEVER;
-    a = fb.last_put + FB_IDLE_JIFFIES;
-    b = fb.last_render + FB_FRAME_JIFFIES;
+    a = fb.last_put + FbIdleJiffies;
+    b = fb.last_render + FbFrameJiffies;
     if (b < a)
         return b;
     return a;
@@ -403,7 +425,6 @@ U0 FbPutC(U8 c)
     fb.put_owner = me;
     VtPut(v, c);
     v->dirty = TRUE;
-    fb.cursor_hidden = FALSE;
     was_pending = fb.pending;
     fb.pending = TRUE;
     fb.last_put = TimerJiffies;
@@ -478,7 +499,7 @@ U0 FbSetColor(I64 fg, I64 bg)
 // sequences, without going through the byte stream.
 
 U0 FbCursorHide()
-{//Hide the cursor until the next console output or FbCursorShow.
+{//Hide the cursor until FbCursorShow.
     CVTerm *v = fb.vt;
     I64 daif;
     if (!fb.base)
