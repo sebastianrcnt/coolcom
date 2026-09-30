@@ -1,0 +1,1660 @@
+// Translated from Aiwnios optpass.c (nrootconauto, BSD-3), commit e155e87.
+//
+// IR optimization passes and the Compile() driver that calls the backend.
+//
+// PORT-NOTE: only the AArch64 configuration is translated.  The x86_64,
+// RISC-V and USE_BYTECODE #if branches were dropped, and so was the bytecode
+// path (`#include "aiwn_bytecode.h"` and CompileBC, which is a copy of
+// Compile() ending in OptPassFinalBC).
+//
+// PORT-NOTE: math.h use (constant folding): `BPow` and `BFMod` stay libc-named
+// calls (declared //INTEGRATION in BackendA.coolh).  The kernel must provide
+// `F64 BPow(F64,F64)` and `F64 BFMod(F64,F64)` (HolyC Pow / a BFMod) with results
+// identical to the C library, so constant folding is bit-identical.
+//
+// PORT-NOTE: `continue` was turned into `break` (when directly inside the
+// `switch` that ends the loop body) or into a `goto` to a label at the end of
+// the loop body.
+//
+// PORT-NOTE: `__IC_VARGS` and `__IC_STATIC_REF` keep their C names (they do
+// not start with `IC_`, so RENAMES.txt does not cover them).
+//
+// PORT-NOTE: C's pointer arithmetic `ic_class[-1]` steps back by
+// sizeof(CBHashClass), which is packed in Cool; IRBind.cool must allocate
+// class chains with that same stride.
+//
+// INTEGRATION: BQSort is a host runtime call (see OptPassRegAlloc), BFs is the
+// host task (see OptPassExpandPtrs).
+
+I64 BIsConst(CBRPN *rpn)
+{
+    switch (rpn->type) {
+        case BIC_CHR:
+        case BIC_F64:
+        case BIC_I64:
+            return 1;
+    }
+    return 0;
+}
+
+I64 PtrWidthOfRPN(CBRPN *rpn)
+{
+    I64 r = 1;
+    if (rpn->ic_dim) {
+        if (rpn->ic_dim->next)
+            r *= rpn->ic_dim->next->total_cnt;
+        r *= rpn->ic_class->sz;
+    } else
+        r *= rpn->ic_class[-1].sz;
+
+    return r;
+}
+
+U0 FixFunArgs(CBCmpCtrl *cctrl, CBRPN *rpn)
+{
+    I64 cnt, cnt2, vargc;
+    CBRPN *rpn2 = rpn->base.next, *ic, *last;
+    CBHashFun *ic_fun;
+    CBMemberLst *arg, *args_lst_rev;
+    for (cnt = 0; cnt != rpn->length; cnt++)
+        rpn2 = ICFwd(rpn2);
+    BAssignRawTypeToNode(cctrl, rpn2);
+    ic_fun = rpn2->ic_fun;
+    rpn2 = rpn->base.next;
+    arg = ic_fun->base.members_lst;
+    cnt2 = ic_fun->argc;
+    if (ic_fun->base.flags & CLSF_VARGS)
+        cnt2 -= 2;
+    for (cnt = 0; cnt != rpn->length; cnt++) {
+        if (cnt >= cnt2)
+            break;
+        rpn2 = ICArgN(rpn, rpn->length - cnt - 1); // REVERSE polish notation
+        if (rpn2->type == BIC_NOP) {
+            if (arg->member_class->raw_type == BRT_F64) {
+                rpn2->type = BIC_F64;
+                rpn2->flt = *(&arg->dft_val)(F64 *);
+                BAssignRawTypeToNode(cctrl, rpn2);
+            } else {
+                rpn2->type = BIC_I64;
+                rpn2->integer = arg->dft_val;
+                BAssignRawTypeToNode(cctrl, rpn2);
+            }
+        } else {
+            // If we are passing an F64 to an I64 argument,be sure to convert the F64
+            // to a I64
+            if (((arg->member_class->raw_type == BRT_F64) != 0) ^ // Check for difference
+                    ((BAssignRawTypeToNode(cctrl, rpn2) == BRT_F64) != 0)) {
+                if (arg->member_class->raw_type == BRT_F64) {
+                    ic = CAlloc(sizeof(CBRPN));
+                    ic->type = BIC_TO_F64;
+                    BQueIns(ic, rpn2->base.last);
+                    BAssignRawTypeToNode(cctrl, ic);
+                } else {
+                    ic = CAlloc(sizeof(CBRPN));
+                    ic->type = BIC_TO_I64;
+                    BAssignRawTypeToNode(cctrl, ic);
+                    BQueIns(ic, rpn2->base.last);
+                }
+            }
+        }
+        arg = arg->next;
+    }
+    for (; cnt < cnt2; cnt++) {
+        ic = CAlloc(sizeof(CBRPN));
+        rpn->length++;
+        if (arg->member_class->raw_type == BRT_F64) {
+            ic->type = BIC_F64;
+            ic->flt = *(&arg->dft_val)(F64 *);
+            BAssignRawTypeToNode(cctrl, ic);
+        } else {
+            ic->type = BIC_I64;
+            ic->integer = arg->dft_val;
+            BAssignRawTypeToNode(cctrl, ic);
+        }
+        BQueIns(ic, rpn);
+        arg = arg->next;
+    }
+    if (ic_fun->base.flags & CLSF_VARGS) {
+        rpn2 = ICArgN(rpn, rpn->length - cnt2 - 1 + 1);
+        last = rpn;
+        vargc = rpn->length - cnt2;
+        // Pass argv
+        ic = CAlloc(sizeof(CBRPN));
+        ic->type = __IC_VARGS;
+        ic->length = vargc;
+        ic->raw_type = BRT_I64i;
+        BQueIns(ic, last);
+        // Pass argc
+        ic = CAlloc(sizeof(CBRPN));
+        ic->type = BIC_I64;
+        ic->integer = vargc;
+        BAssignRawTypeToNode(cctrl, ic);
+        BQueIns(ic, ICFwd(last->base.next)->base.last);
+        rpn->length = cnt2 + 2;
+    }
+}
+
+// This one takes into acount the default arguments of function calls(either)
+// ommited or put with IC_NOP
+//
+// Lone function's without arguments will be turned into calls
+//
+U0 OptPassFixFunArgs(CBCmpCtrl *cctrl)
+{
+    CBRPN *rpn, *rpn2, *last;
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        switch (rpn->type) {
+            case BIC_CALL:
+                FixFunArgs(cctrl, rpn);
+        }
+    }
+}
+
+// This one makes takes into account the array dimensions of accessed arrays
+// and will multiply them by the array dim
+//
+// THIS WILL ALSO REMOVE "derefencing function pointers"
+//
+U0 OptPassExpandPtrs(CBCmpCtrl *cctrl)
+{
+    CBRPN *rpn, *new, *lit, *new2, *new3, *a, *b, **list;
+    CBArrayDim *dim;
+    I64 cnt = 0, cnt2, total_off, raw_type;
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        switch (rpn->type) {
+            case BIC_SUB:
+            case BIC_ADD:
+            case BIC_ARRAY_ACC:
+            case BIC_ARROW:
+            case BIC_DOT:
+            case BIC_STATIC:
+            case BIC_LOCAL:
+            case BIC_GLOBAL:
+            case BIC_SUB_EQ:
+            case BIC_ADD_EQ:
+            case BIC_DEREF:
+                cnt++;
+        }
+    }
+    list = CAlloc(sizeof(CBRPN *) * cnt);
+    cnt = 0;
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        switch (rpn->type) {
+            case BIC_SUB:
+            case BIC_ADD:
+            case BIC_ARRAY_ACC:
+            case BIC_ARROW:
+            case BIC_DOT:
+            case BIC_LOCAL:
+            case BIC_STATIC:
+            case BIC_GLOBAL:
+            case BIC_SUB_EQ:
+            case BIC_ADD_EQ:
+            case BIC_DEREF:
+                list[cnt++] = rpn;
+        }
+    }
+    for (cnt2 = 0; cnt2 != cnt; cnt2++) {
+        rpn = list[cnt2];
+        switch (rpn->type) {
+            case BIC_DEREF:
+                b = rpn->base.next;
+                if (b->raw_type == BRT_FUNC)
+                    ICFree(rpn);
+                break;
+            case BIC_SUB_EQ:
+            case BIC_SUB:
+                b = rpn->base.next;
+                a = ICFwd(b);
+                if (a->ic_class->ptr_star_cnt || a->ic_dim) {
+                    if (b->ic_class->ptr_star_cnt || b->ic_dim) {
+                        new = CAlloc(sizeof(CBRPN));
+                        new->type = BIC_DIV;
+                        BQueIns(new, rpn->base.last);
+                        lit = CAlloc(sizeof(CBRPN));
+                        lit->type = BIC_I64;
+                        lit->integer = PtrWidthOfRPN(a);
+                        BQueIns(lit, new);
+                        BAssignRawTypeToNode(cctrl, new);
+                    } else {
+                        new = CAlloc(sizeof(CBRPN));
+                        new->type = BIC_MUL;
+                        BQueIns(new, b->base.last);
+                        lit = CAlloc(sizeof(CBRPN));
+                        lit->type = BIC_I64;
+                        lit->integer = PtrWidthOfRPN(a);
+                        BQueIns(lit, new);
+                        BAssignRawTypeToNode(cctrl, new);
+                    }
+                }
+                break;
+            case BIC_ADD_EQ:
+            case BIC_ADD:
+                b = rpn->base.next;
+                a = ICFwd(b);
+                if (a->ic_class->ptr_star_cnt || a->ic_dim) {
+                    new = CAlloc(sizeof(CBRPN));
+                    new->type = BIC_MUL;
+                    BQueIns(new, b->base.last);
+                    lit = CAlloc(sizeof(CBRPN));
+                    lit->type = BIC_I64;
+                    lit->integer = PtrWidthOfRPN(a);
+                    BQueIns(lit, new);
+                    BAssignRawTypeToNode(cctrl, new);
+                } else if ((b->ic_class->ptr_star_cnt || b->ic_dim) &&
+                           rpn->type != BIC_ADD_EQ) {
+                    new = CAlloc(sizeof(CBRPN));
+                    new->type = BIC_MUL;
+                    BQueIns(new, a->base.last);
+                    lit = CAlloc(sizeof(CBRPN));
+                    lit->type = BIC_I64;
+                    lit->integer = PtrWidthOfRPN(b);
+                    BQueIns(lit, new);
+                    BAssignRawTypeToNode(cctrl, new);
+                }
+                break;
+            case BIC_ARRAY_ACC:
+                b = rpn->base.next;
+                a = ICFwd(b);
+                dim = rpn->ic_dim;
+                if (!dim)
+                    goto aderef;
+                if (dim->next) {
+                    new = CAlloc(sizeof(CBRPN));
+                    new->type = BIC_MUL;
+                    new->raw_type = BRT_I64i;
+                    //INTEGRATION: BFs is the host (Aiwnios) task here, not the kernel CTask
+                    new->ic_class = BHashFind("I64i", BFs->hash_table, BHTT_CLASS, 1);
+                    BQueIns(new, rpn);
+                    lit = CAlloc(sizeof(CBRPN));
+                    lit->type = BIC_I64;
+                    lit->raw_type = new->raw_type;
+                    lit->ic_class = new->ic_class;
+                    lit->integer = PtrWidthOfRPN(a);
+                    BQueIns(lit, new);
+                    BAssignRawTypeToNode(cctrl, new);
+                    dim = dim->next;
+                    rpn->type = BIC_ADD;
+                } else {
+aderef:
+                    new2 = CAlloc(sizeof(CBRPN));
+                    new2->type = BIC_ADD;
+                    BQueIns(new2, rpn);
+                    new = CAlloc(sizeof(CBRPN));
+                    new->type = BIC_MUL;
+                    BQueIns(new, new2);
+                    lit = CAlloc(sizeof(CBRPN));
+                    lit->type = BIC_I64;
+                    lit->integer = PtrWidthOfRPN(a);
+                    BQueIns(lit, new);
+                    rpn->type = BIC_DEREF;
+                    BAssignRawTypeToNode(cctrl, new2);
+                }
+                break;
+            case BIC_ARROW:
+addrof_arr:
+                // If we already have a addrof,no need to do it twice
+                if (rpn->base.last != cctrl->code_ctrl->ir_code) {
+                    b = rpn->base.last;
+                    if (b->type == BIC_ADDR_OF) {
+                        break;
+                    }
+                }
+                if (rpn->local_mem->dim.next) {
+                    new = CAlloc(sizeof(CBRPN));
+                    new->type = BIC_ADDR_OF;
+                    BQueIns(new, rpn->base.last);
+                    BAssignRawTypeToNode(cctrl, new);
+                }
+                break;
+            case BIC_DOT:
+                goto addrof_arr;
+                break;
+            case BIC_STATIC:
+                goto addrof_arr;
+            case BIC_LOCAL:
+                goto addrof_arr;
+                break;
+            case BIC_GLOBAL:
+                if (rpn->global_var->base.type & BHTT_GLBL_VAR)
+                    if (rpn->global_var->dim.next) {
+                        //
+                        // Do not get address of thing if we are already getting the address
+                        // of it
+                        //
+                        b = rpn->base.last;
+                        if (b->type != BIC_ADDR_OF) {
+                            new = CAlloc(sizeof(CBRPN));
+                            new->type = BIC_ADDR_OF;
+                            BQueIns(new, rpn->base.last);
+                            BAssignRawTypeToNode(cctrl, new);
+                        }
+                    }
+                break;
+            default:
+                dim = NULL;
+        }
+    }
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        switch (rpn->type) {
+            case BIC_DOT:
+                raw_type = rpn->raw_type;
+                a = rpn->base.next;
+                total_off = rpn->local_mem->off;
+                for (; a->type == BIC_DOT; a = b) {
+                    b = a->base.next;
+                    raw_type = a->raw_type;
+                    total_off += a->local_mem->off;
+                    ICFree(a);
+                }
+                new = CAlloc(sizeof(CBRPN));
+                new->type = BIC_ADDR_OF;
+                new->raw_type = BRT_PTR;
+                BQueIns(new, a->base.last);
+                new2 = CAlloc(sizeof(CBRPN));
+                new2->type = BIC_ADD;
+                new2->raw_type = BRT_PTR;
+                BQueIns(new2, rpn);
+                new3 = CAlloc(sizeof(CBRPN));
+                new3->type = BIC_I64;
+                new3->integer = total_off;
+                new3->raw_type = BRT_I64i;
+                BQueIns(new3, new2);
+                rpn->type = BIC_DEREF;
+                rpn->raw_type = raw_type;
+                break;
+            case BIC_ARROW:
+                new = CAlloc(sizeof(CBRPN));
+                new->type = BIC_DEREF;
+                new->raw_type = rpn->raw_type;
+                new->ic_fun = rpn->ic_fun;
+                new->ic_dim = rpn->ic_dim;
+                new2 = CAlloc(sizeof(CBRPN));
+                new2->type = BIC_I64;
+                new2->integer = rpn->local_mem->off;
+                new2->raw_type = BRT_I64i;
+                BQueIns(new2, rpn);
+                BQueIns(new, rpn->base.last);
+                rpn->type = BIC_ADD;
+                rpn->raw_type = BRT_PTR;
+        }
+    }
+    // Remove addresses of dereferences
+    for (rpn = cctrl->code_ctrl->ir_code->next;
+            rpn != cctrl->code_ctrl->ir_code;) {
+        a = rpn;
+        b = rpn->base.next;
+        if (a->type == BIC_ADDR_OF) {
+            if (b->type == BIC_DEREF) {
+                rpn = b->base.next;
+                ICFree(a);
+                ICFree(b);
+                goto addr_deref_next; // continue
+            }
+        }
+        rpn = a->base.next;
+addr_deref_next:;
+    }
+    Free(list);
+}
+
+// COMM_ACCUMULATE_FUN(name, __type, oper, is_i64, only_rightside) expanded by hand
+// PORT-NOTE: `cur oper= x` mixes int64_t and double in C; the conversions are
+// explicit here (I64 variants: convert cur to F64, operate, truncate back).
+
+F64 SumComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
+                    I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    if (BIsConst(a) && !first) {
+        if (a->type != BIC_F64)
+            cur = cur + BToF64(a->integer);
+        else
+            cur = cur + a->flt;
+        ICFree(rpn);
+        ICFree(a);
+        return SumComConstsF64(cctrl, b, operator, cur, 0);
+    }
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur + BToF64(b->integer);
+        else
+            cur = cur + b->flt;
+        ICFree(rpn);
+        ICFree(b);
+        return SumComConstsF64(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(a)) {
+            if (a->type != BIC_F64)
+                cur = cur + BToF64(a->integer);
+            else
+                cur = cur + a->flt;
+            cur = SumComConstsF64(cctrl, b, operator, cur, 0);
+            a->type = BIC_F64;
+            a->flt = cur;
+        } else if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur + BToF64(b->integer);
+            else
+                cur = cur + b->flt;
+            cur = SumComConstsF64(cctrl, a, operator, cur, 0);
+            b->type = BIC_F64;
+            b->flt = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+I64 SumComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
+                    I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    if (BIsConst(a) && !first) {
+        if (a->type != BIC_F64)
+            cur = cur + a->integer;
+        else
+            cur = BToI64((BToF64(cur) + a->flt));
+        ICFree(rpn);
+        ICFree(a);
+        return SumComConstsI64(cctrl, b, operator, cur, 0);
+    }
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur + b->integer;
+        else
+            cur = BToI64((BToF64(cur) + b->flt));
+        ICFree(rpn);
+        ICFree(b);
+        return SumComConstsI64(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(a)) {
+            if (a->type != BIC_F64)
+                cur = cur + a->integer;
+            else
+                cur = BToI64((BToF64(cur) + a->flt));
+            cur = SumComConstsI64(cctrl, b, operator, cur, 0);
+            a->type = BIC_I64;
+            a->integer = cur;
+        } else if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur + b->integer;
+            else
+                cur = BToI64((BToF64(cur) + b->flt));
+            cur = SumComConstsI64(cctrl, a, operator, cur, 0);
+            b->type = BIC_I64;
+            b->integer = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+F64 MulComConstsF64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
+                    I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    if (BIsConst(a) && !first) {
+        if (a->type != BIC_F64)
+            cur = cur * BToF64(a->integer);
+        else
+            cur = cur * a->flt;
+        ICFree(rpn);
+        ICFree(a);
+        return MulComConstsF64(cctrl, b, operator, cur, 0);
+    }
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur * BToF64(b->integer);
+        else
+            cur = cur * b->flt;
+        ICFree(rpn);
+        ICFree(b);
+        return MulComConstsF64(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(a)) {
+            if (a->type != BIC_F64)
+                cur = cur * BToF64(a->integer);
+            else
+                cur = cur * a->flt;
+            cur = MulComConstsF64(cctrl, b, operator, cur, 0);
+            a->type = BIC_F64;
+            a->flt = cur;
+        } else if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur * BToF64(b->integer);
+            else
+                cur = cur * b->flt;
+            cur = MulComConstsF64(cctrl, a, operator, cur, 0);
+            b->type = BIC_F64;
+            b->flt = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+I64 MulComConstsI64(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
+                    I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    if (BIsConst(a) && !first) {
+        if (a->type != BIC_F64)
+            cur = cur * a->integer;
+        else
+            cur = BToI64((BToF64(cur) * a->flt));
+        ICFree(rpn);
+        ICFree(a);
+        return MulComConstsI64(cctrl, b, operator, cur, 0);
+    }
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur * b->integer;
+        else
+            cur = BToI64((BToF64(cur) * b->flt));
+        ICFree(rpn);
+        ICFree(b);
+        return MulComConstsI64(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(a)) {
+            if (a->type != BIC_F64)
+                cur = cur * a->integer;
+            else
+                cur = BToI64((BToF64(cur) * a->flt));
+            cur = MulComConstsI64(cctrl, b, operator, cur, 0);
+            a->type = BIC_I64;
+            a->integer = cur;
+        } else if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur * b->integer;
+            else
+                cur = BToI64((BToF64(cur) * b->flt));
+            cur = MulComConstsI64(cctrl, a, operator, cur, 0);
+            b->type = BIC_I64;
+            b->integer = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+F64 SumComConstsF642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
+                     I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    //PORT-NOTE: the C `IsConst(a) && !first && !only_rightside` arm is dead
+    //for this variant (only_rightside == 1) and was dropped.
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur + BToF64(b->integer);
+        else
+            cur = cur + b->flt;
+        ICFree(rpn);
+        ICFree(b);
+        return SumComConstsF642(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur + BToF64(b->integer);
+            else
+                cur = cur + b->flt;
+            cur = SumComConstsF642(cctrl, a, operator, cur, 0);
+            b->type = BIC_F64;
+            b->flt = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+I64 SumComConstsI642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
+                     I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    //PORT-NOTE: the C `IsConst(a) && !first && !only_rightside` arm is dead
+    //for this variant (only_rightside == 1) and was dropped.
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur + b->integer;
+        else
+            cur = BToI64((BToF64(cur) + b->flt));
+        ICFree(rpn);
+        ICFree(b);
+        return SumComConstsI642(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur + b->integer;
+            else
+                cur = BToI64((BToF64(cur) + b->flt));
+            cur = SumComConstsI642(cctrl, a, operator, cur, 0);
+            b->type = BIC_I64;
+            b->integer = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+F64 MulComConstsF642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, F64 cur,
+                     I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    //PORT-NOTE: the C `IsConst(a) && !first && !only_rightside` arm is dead
+    //for this variant (only_rightside == 1) and was dropped.
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur * BToF64(b->integer);
+        else
+            cur = cur * b->flt;
+        ICFree(rpn);
+        ICFree(b);
+        return MulComConstsF642(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur * BToF64(b->integer);
+            else
+                cur = cur * b->flt;
+            cur = MulComConstsF642(cctrl, a, operator, cur, 0);
+            b->type = BIC_F64;
+            b->flt = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+I64 MulComConstsI642(CBCmpCtrl *cctrl, CBRPN *rpn, I64 operator, I64 cur,
+                     I64 first)
+{
+    if (rpn->type != operator)
+        return cur;
+    CBRPN *b = rpn->base.next, *a;
+    a = ICFwd(b);
+    //PORT-NOTE: the C `IsConst(a) && !first && !only_rightside` arm is dead
+    //for this variant (only_rightside == 1) and was dropped.
+    if (BIsConst(b) && !first) {
+        if (b->type != BIC_F64)
+            cur = cur * b->integer;
+        else
+            cur = BToI64((BToF64(cur) * b->flt));
+        ICFree(rpn);
+        ICFree(b);
+        return MulComConstsI642(cctrl, a, operator, cur, 0);
+    }
+    if (first) {
+        if (BIsConst(b)) {
+            if (b->type != BIC_F64)
+                cur = cur * b->integer;
+            else
+                cur = BToI64((BToF64(cur) * b->flt));
+            cur = MulComConstsI642(cctrl, a, operator, cur, 0);
+            b->type = BIC_I64;
+            b->integer = cur;
+        }
+        return 0;
+    }
+    return cur;
+}
+
+U0 OptPassMergeCommunitives(CBCmpCtrl *cctrl)
+{
+    CBRPN *rpn;
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        switch (rpn->type) {
+            case BIC_SUB:
+                if (rpn->raw_type == BRT_F64)
+                    SumComConstsF642(cctrl, rpn, rpn->type, 0, 1);
+                else
+                    SumComConstsI642(cctrl, rpn, rpn->type, 0, 1);
+                break;
+            case BIC_ADD:
+                if (rpn->raw_type == BRT_F64)
+                    SumComConstsF64(cctrl, rpn, rpn->type, 0, 1);
+                else
+                    SumComConstsI64(cctrl, rpn, rpn->type, 0, 1);
+                break;
+            case BIC_MUL:
+                if (rpn->raw_type == BRT_F64)
+                    MulComConstsF64(cctrl, rpn, rpn->type, 1, 1);
+                else
+                    MulComConstsI64(cctrl, rpn, rpn->type, 1, 1);
+                break;
+            case BIC_DIV:
+                if (rpn->raw_type == BRT_F64)
+                    MulComConstsF642(cctrl, rpn, rpn->type, 1, 1);
+                else
+                    MulComConstsI642(cctrl, rpn, rpn->type, 1, 1);
+        }
+    }
+}
+
+// PORT-NOTE: the C SET_AB / SET_A2B2 macros modify the caller's `next`, `a`,
+// `b` (or `a2`, `b2`); they became functions taking pointers.
+U0 SET_AB(CBRPN **next, F64 *a, F64 *b)
+{
+    if ((*next)->type == BIC_F64)
+        *b = (*next)->flt;
+    else
+        *b = BToF64((*next)->integer);
+    *next = ICFwd(*next);
+    if ((*next)->type == BIC_F64)
+        *a = (*next)->flt;
+    else
+        *a = BToF64((*next)->integer);
+}
+U0 SET_A2B2(CBRPN **next, I64 *a2, I64 *b2)
+{
+    // Like C, this assigns the F64 to an int64_t (truncation).
+    if ((*next)->type == BIC_F64)
+        *b2 = BToI64((*next)->flt);
+    else
+        *b2 = (*next)->integer;
+    *next = ICFwd(*next);
+    if ((*next)->type == BIC_F64)
+        *a2 = BToI64((*next)->flt);
+    else
+        *a2 = (*next)->integer;
+}
+
+U0 BOptPassConstFold(CBCmpCtrl *cctrl)
+{
+    //PORT-NOTE: the C `CRPN next2` (a whole struct, unused) and `int64_t i`
+    //were dropped.
+    CBRPN *rpn, *next;
+    F64 a, b;
+    I64 a2, b2, changed;
+loop:
+    changed = 0;
+    for (rpn = cctrl->code_ctrl->ir_code->next;
+            cctrl->code_ctrl->ir_code != rpn;) {
+        switch (rpn->type) {
+            case BIC_TO_BOOL:
+                next = rpn->base.next;
+                if (BIsConst(next)) {
+                    if (next->type == BIC_F64)
+                        a2 = BToI64(next->flt);
+                    else
+                        a2 = next->integer;
+                    rpn->integer = !!a2;
+                    rpn->raw_type = BRT_I64i;
+                    rpn->type = BIC_I64;
+                    ICFree(next);
+                    changed = 1;
+                } else
+                    goto next1;
+                break;
+            case BIC_GOTO:
+skip:
+                rpn = ICFwd(rpn);
+                break;
+            case BIC_LABEL:
+                goto next1;
+                break;
+next1:
+                rpn = rpn->base.next;
+                break;
+            case BIC_STATIC:
+            case BIC_LOCAL:
+                goto next1;
+                break;
+            case BIC_GLOBAL:
+                goto next1;
+                break;
+            case BIC_NOP:
+                goto next1;
+                break;
+            case BIC_PAREN:
+                BAssert(FALSE, "abort: IC_PAREN in OptPassConstFold");
+                break;
+            case BIC_TYPECAST:
+                if (BIsConst(next = rpn->base.next)) {
+                    if (rpn->raw_type == BRT_F64) {
+                        //PORT-NOTE: C switches on rpn->type (always IC_TYPECAST here),
+                        //so the IC_F64 arm is dead; kept as is.
+                        switch (rpn->type) {
+                            default:
+                                rpn->flt = *(&next->integer)(F64 *);
+                                break;
+                            case BIC_F64:
+                                rpn->flt = next->flt;
+                        }
+                        rpn->type = BIC_F64;
+                    } else {
+                        switch (rpn->type) {
+                            case BIC_F64:
+                                rpn->integer = *(&next->flt)(I64 *);
+                                break;
+                            default:
+                                rpn->integer = next->integer;
+                        }
+                        rpn->type = BIC_I64;
+                    }
+                    changed = 1;
+                    ICFree(next);
+                    break;
+                } else
+                    goto next1;
+            case BIC_NEG:
+                if (BIsConst(next = rpn->base.next)) {
+                    rpn->raw_type = next->raw_type;
+                    rpn->ic_class = next->ic_class;
+                    if (next->type == BIC_F64) {
+                        rpn->type = BIC_F64;
+                        rpn->flt = -next->flt;
+                        ICFree(next);
+                        changed = 1;
+                    } else {
+                        rpn->type = next->type;
+                        rpn->integer = -next->integer;
+                        ICFree(next);
+                        changed = 1;
+                    }
+                }
+                rpn = rpn->base.next;
+                break;
+            case BIC_POS:
+                if (BIsConst(next = rpn->base.next)) {
+                    rpn->raw_type = next->raw_type;
+                    rpn->ic_class = next->ic_class;
+                    if (next->type == BIC_F64) {
+                        rpn->type = BIC_F64;
+                        rpn->flt = +next->flt;
+                        ICFree(next);
+                        changed = 1;
+                    } else {
+                        rpn->type = next->type;
+                        rpn->integer = +next->integer;
+                        ICFree(next);
+                        changed = 1;
+                    }
+                    rpn = rpn->base.next;
+                } else
+                    goto next1;
+                break;
+            case BIC_NAME:
+                goto next1;
+                break;
+            case BIC_STR:
+                goto next1;
+                break;
+            case BIC_CHR:
+                goto next1;
+                break;
+            case BIC_POW:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    SET_AB(&next, &a, &b);
+                    rpn->type = BIC_F64;
+                    rpn->flt = BPow(a, b);
+                } else
+                    goto next1;
+binop_next:
+                ICFree(ICFwd(rpn->base.next));
+                ICFree(rpn->base.next);
+                changed = 1;
+                rpn = rpn->base.next;
+                break;
+            case BIC_ADD:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = a + b;
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 + b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_SUB:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = a - b;
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 - b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_DIV:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        if (b != 0.0)
+                            rpn->flt = a / b;
+                        else
+                            rpn->integer = 0; //???
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        if (b2)
+                            rpn->integer = a2 / b2;
+                        else
+                            rpn->integer = 0; //???
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_MUL:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = a * b;
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 * b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_AND:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64(((*(&a)(I64 *)) & (*(&b)(I64 *))));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 & b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_XOR:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64(((*(&a)(I64 *)) ^ (*(&b)(I64 *))));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 ^ b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_MOD:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        if (b == 0.0)
+                            goto next1;
+                        rpn->type = BIC_F64;
+                        rpn->flt = BFMod(a, b);
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        if (!b2)
+                            goto next1;
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 % b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_OR:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64(((*(&a)(I64 *)) | (*(&b)(I64 *))));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 | b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_LT:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64((a < b));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = (a2 < b2);
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_GT:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64((a > b));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = (a2 > b2);
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_EQ_EQ:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64((a == b));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = (a2 == b2);
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_NE:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64((a != b));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = (a2 != b2);
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_LE:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64((a <= b));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = (a2 <= b2);
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_GE:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->flt = BToF64((a >= b));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = (a2 >= b2);
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_LSH:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->integer = ((*(&a)(I64 *)) << (*(&b)(I64 *)));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 << b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_RSH:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (rpn->raw_type == BRT_F64) {
+                        SET_AB(&next, &a, &b);
+                        rpn->type = BIC_F64;
+                        rpn->integer = ((*(&a)(I64 *)) >> (*(&b)(I64 *)));
+                    } else {
+                        SET_A2B2(&next, &a2, &b2);
+                        rpn->type = BIC_I64;
+                        rpn->integer = a2 >> b2;
+                    }
+                } else
+                    goto next1;
+                goto binop_next;
+                break;
+            case BIC_DEREF:
+                goto next1;
+                break;
+            case BIC_ADDR_OF:
+                goto next1;
+                break;
+            case BIC_EQ:
+                goto next1;
+                break;
+            case BIC_LNOT:
+                if (BIsConst(next = rpn->base.next)) {
+                    rpn->type = BIC_I64;
+                    if (next->type == BIC_F64)
+                        rpn->integer = (next->flt == 0.0);
+                    else
+                        rpn->integer = !next->integer;
+                    ICFree(next);
+                    changed = 1;
+                }
+                goto next1;
+                break;
+            case BIC_BNOT:
+                if (BIsConst(next = rpn->base.next)) {
+                    rpn->type = BIC_I64;
+                    if (next->type == BIC_F64)
+                        rpn->integer = ~next->integer; // Type punning
+                    else
+                        rpn->integer = ~next->integer;
+                    ICFree(next);
+                    changed = 1;
+                }
+                goto next1;
+                break;
+            case BIC_POST_INC:
+            case BIC_POST_DEC:
+            case BIC_PRE_INC:
+            case BIC_PRE_DEC:
+                goto next1;
+                break;
+            case BIC_AND_AND:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (next->type == BIC_F64)
+                        b2 = (next->flt != 0.0);
+                    else
+                        b2 = next->integer;
+                    next = ICFwd(next);
+                    if (next->type == BIC_F64)
+                        a2 = (next->flt != 0.0);
+                    else
+                        a2 = next->integer;
+                    rpn->type = BIC_I64;
+                    rpn->integer = (a2 && b2);
+                    goto binop_next;
+                } else
+                    goto next1;
+                break;
+            case BIC_OR_OR:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (next->type == BIC_F64)
+                        b2 = (next->flt != 0.0);
+                    else
+                        b2 = next->integer;
+                    next = ICFwd(next);
+                    if (next->type == BIC_F64)
+                        a2 = (next->flt != 0.0);
+                    else
+                        a2 = next->integer;
+                    rpn->type = BIC_I64;
+                    rpn->integer = (a2 || b2);
+                    goto binop_next;
+                } else
+                    goto next1;
+                break;
+            case BIC_XOR_XOR:
+                if (BIsConst(next = rpn->base.next) && BIsConst(ICFwd(rpn->base.next))) {
+                    if (next->type == BIC_F64)
+                        b2 = (next->flt != 0.0);
+                    else
+                        b2 = next->integer;
+                    next = ICFwd(next);
+                    if (next->type == BIC_F64)
+                        a2 = (next->flt != 0.0);
+                    else
+                        a2 = next->integer;
+                    rpn->type = BIC_I64;
+                    rpn->integer = ((!!a2) ^ (!!b2));
+                    goto binop_next;
+                } else
+                    goto next1;
+                break;
+            case BIC_ADD_EQ:
+            case BIC_SUB_EQ:
+            case BIC_MUL_EQ:
+            case BIC_DIV_EQ:
+            case BIC_LSH_EQ:
+            case BIC_RSH_EQ:
+            case BIC_AND_EQ:
+            case BIC_OR_EQ:
+            case BIC_XOR_EQ:
+            case BIC_ARROW:
+            case BIC_MOD_EQ:
+            case BIC_I64:
+            case BIC_F64:
+            case BIC_ARRAY_ACC:
+                goto next1;
+                break;
+            default:
+                goto next1;
+        }
+    }
+    if (changed)
+        goto loop;
+}
+
+//CBOptMemberVar is declared in BackendA.coolh.
+
+//PORT-NOTE: BQSort comparators return C `int`; the I64 difference is what
+//the C code returned (truncated to int by the caller in C).
+I64 OptMemberVarSort(CBOptMemberVar *a, CBOptMemberVar *b)
+{
+    return a->score - b->score;
+}
+
+I64 OptMemberVarSortSz(CBOptMemberVar *a, CBOptMemberVar *b)
+{
+    I64 asz = a->m->member_class->sz * a->m->dim.total_cnt;
+    I64 bsz = b->m->member_class->sz * b->m->dim.total_cnt;
+    return asz - bsz;
+}
+
+U0 OptPassRegAlloc(CBCmpCtrl *cctrl)
+{
+    /*
+   * Heres the deal. AIWNIOS will not do fancy register allocation
+   * shenanigins. We will get a score for REG_MAYBE|REG_ALLOC(bigger
+   * score means more chance of getting put in a register).
+   * If we dereference a variable with IC_ADDR,it will be turned into
+   * REG_NONE(can't get pointer of register)
+   */
+    CBOptMemberVar *mv;
+    CBMemberLst *tmpm;
+    CBRPN *rpn, *next;
+    I64 i, cnt, ireg, freg, off, align, sz;
+    if (!cctrl->cur_fun)
+        return;
+    mv = CAlloc(sizeof(CBOptMemberVar) * cctrl->cur_fun->base.member_cnt);
+    i = 0;
+    for (tmpm = cctrl->cur_fun->base.members_lst; tmpm; tmpm = tmpm->next) {
+        mv[i].m = tmpm;
+        if (tmpm->flags & BMLF_STATIC)
+            mv[i].m->reg = BREG_NONE;
+        mv[i++].score = 1;
+    }
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        //PORT-NOTE: every C `continue` here is directly in the switch that ends
+        //the loop body, so it is equivalent to `break`; the many empty
+        //`case X: continue;` arms of the C source are folded into `default`.
+        switch (rpn->type) {
+            case BIC_LOCAL:
+                for (i = 0; i != cctrl->cur_fun->base.member_cnt; i++) {
+                    if (mv[i].m == rpn->local_mem) {
+                        mv[i].score++;
+                        break;
+                    }
+                }
+                break;
+            case BIC_PAREN:
+                BAssert(FALSE, "abort: IC_PAREN in OptPassRegAlloc");
+                break;
+            case BIC_NAME:
+                BAssert(FALSE, "abort: IC_NAME in OptPassRegAlloc");
+                break;
+            case BIC_ADDR_OF:
+                next = rpn->base.next;
+                if (next->type == BIC_LOCAL) {
+                    for (i = 0; i != cctrl->cur_fun->base.member_cnt; i++) {
+                        if (mv[i].m == next->local_mem) {
+                            mv[i].score = 0;
+                            mv[i].m->reg = BREG_NONE;
+                            break;
+                        }
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    //INTEGRATION: BQSort(base, nmemb, size, cmp) is a host runtime call.
+    //PORT-NOTE: sort stability matters for byte-identical output (equal scores);
+    //the C build used the platform BQSort.
+    BQSort(mv, cnt = cctrl->cur_fun->base.member_cnt, sizeof(CBOptMemberVar),
+            &OptMemberVarSort);
+    ireg = BAIWNIOS_IREG_START;
+    freg = BAIWNIOS_FREG_START;
+    for (i = cnt - 1; i >= 0; i--) {
+        if (mv[i].m->reg == BREG_MAYBE || mv[i].m->reg == BREG_ALLOC) {
+            if (mv[i].m->member_class->raw_type == BRT_F64) {
+                if (freg - BAIWNIOS_FREG_START < BAIWNIOS_FREG_CNT) {
+                    mv[i].m->reg = freg++;
+                } else
+                    mv[i].m->reg = BREG_NONE;
+            } else if (BRT_I8i <= mv[i].m->member_class->raw_type &&
+                       mv[i].m->member_class->raw_type <= BRT_PTR &&
+                       !mv[i].m->dim.next) {
+                if (ireg - BAIWNIOS_IREG_START < BAIWNIOS_IREG_CNT) {
+                    mv[i].m->reg = ireg++;
+                    //PORT-NOTE: the AArch64 build overwrites the register just chosen
+                    //with REG_NONE (the C code does so too: integer locals are never
+                    //register-allocated).  Kept as is.
+                    mv[i].m->reg = BREG_NONE;
+                } else
+                    mv[i].m->reg = BREG_NONE;
+            } else
+                mv[i].m->reg = BREG_NONE;
+        }
+    }
+    // Time to assign the rest of the function members to the base pointer
+    BQSort(mv, cnt, sizeof(CBOptMemberVar), &OptMemberVarSortSz);
+    off = 0;
+    for (i = 0; i != cnt; i++) {
+        if (mv[i].m->reg == BREG_NONE && !(mv[i].m->flags & BMLF_STATIC)) {
+            switch (mv[i].m->member_class->raw_type) {
+                case BRT_U0:
+                    align = 1;
+                    break;
+                case BRT_U8i:
+                    align = 1;
+                    break;
+                case BRT_I8i:
+                    align = 1;
+                    break;
+                case BRT_I16i:
+                    align = 2;
+                    break;
+                case BRT_U16i:
+                    align = 2;
+                    break;
+                case BRT_I32i:
+                    align = 4;
+                    break;
+                case BRT_U32i:
+                    align = 4;
+                    break;
+                default:
+                    align = 8;
+            }
+            off += (align - off % align) % align;
+            sz = mv[i].m->member_class->sz;
+            sz *= mv[i].m->dim.total_cnt;
+            mv[i].m->off = off;
+            off += sz;
+        }
+    }
+    if (cctrl->cur_fun)
+        cctrl->cur_fun->base.sz = off; // Stack size
+    // Replace references of function members to IC_LOCAL/IREG/FREG
+    for (rpn = cctrl->code_ctrl->ir_code->next; rpn != cctrl->code_ctrl->ir_code;
+            rpn = rpn->base.next) {
+        if (rpn->type == BIC_LOCAL) {
+            if (rpn->local_mem->flags & BMLF_STATIC) {
+                rpn->type = BIC_STATIC;
+                rpn->integer = rpn->local_mem->static_bytes;
+            } else if (rpn->local_mem->reg != BREG_NONE) {
+                i = rpn->local_mem->reg;
+                if (rpn->local_mem->member_class->raw_type == BRT_F64) {
+                    rpn->type = BIC_FREG;
+                } else
+                    rpn->type = BIC_IREG;
+                rpn->integer = i;
+            } else {
+                i = rpn->local_mem->off;
+                rpn->type = BIC_BASE_PTR;
+                rpn->integer = i;
+            }
+        }
+    }
+    Free(mv);
+}
+
+I64 AlwaysPasses(CBRPN *rpn)
+{
+    if (!BIsConst(rpn))
+        return 0;
+    switch (rpn->type) {
+        case BIC_I64:
+            return !!rpn->integer;
+            break;
+        case BIC_F64:
+            return (rpn->flt != 0.0);
+            break;
+        case BIC_CHR:
+            return !!rpn->integer;
+            break;
+        case BIC_STR:
+            return 1;
+    }
+    return 0;
+}
+
+// PORT-NOTE: the C RPN_IS_VALUE(RPN, v) macro assigned `is_value`; it is a
+// function returning the value here.
+I64 RPN_IS_VALUE(CBRPN *rpn, I64 v)
+{
+    I64 is_value = 0;
+    switch (rpn->type) {
+        case BIC_I64:
+            is_value = (rpn->integer == v);
+            break;
+        case BIC_F64:
+            is_value = (rpn->flt == BToF64(v));
+    }
+    return is_value;
+}
+
+U0 OptPassRemoveUselessArith(CBCmpCtrl *cctrl)
+{
+    CBRPN *r, *next, *next2;
+    I64 is_value;
+    for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
+            r = next2) {
+        next2 = r->base.next;
+        //PORT-NOTE: the C `continue`s are directly in this switch, which ends the
+        //loop body, so they are `break` here.
+        switch (r->type) {
+            case BIC_ADD:
+                next = ICArgN(r, 0);
+                is_value = RPN_IS_VALUE(next, 0);
+                if (is_value) {
+                    next2 = ICArgN(r, 1);
+                    ICFree(next);
+                    ICFree(r);
+                    break;
+                }
+                next = ICArgN(r, 1);
+                is_value = RPN_IS_VALUE(next, 0);
+                if (is_value) {
+                    next2 = ICArgN(r, 0);
+                    ICFree(next);
+                    ICFree(r);
+                    break;
+                }
+                break;
+            case BIC_SUB:
+                next = ICArgN(r, 0);
+                is_value = RPN_IS_VALUE(next, 0);
+                if (is_value) {
+                    next2 = ICArgN(r, 1);
+                    ICFree(next);
+                    ICFree(r);
+                    break;
+                }
+                break;
+            case BIC_MUL:
+                next = ICArgN(r, 0);
+                is_value = RPN_IS_VALUE(next, 1);
+                if (is_value) {
+                    next2 = ICArgN(r, 1);
+                    ICFree(next);
+                    ICFree(r);
+                    break;
+                }
+                next = ICArgN(r, 1);
+                is_value = RPN_IS_VALUE(next, 1);
+                if (is_value) {
+                    next2 = ICArgN(r, 0);
+                    ICFree(next);
+                    ICFree(r);
+                    break;
+                }
+                break;
+            case BIC_DIV:
+                next = ICArgN(r, 0);
+                is_value = RPN_IS_VALUE(next, 1);
+                if (is_value) {
+                    next2 = ICArgN(r, 1);
+                    ICFree(next);
+                    ICFree(r);
+                    break;
+                }
+        }
+    }
+}
+
+U0 OptPassRemoveUselessTypecasts(CBCmpCtrl *cctrl)
+{
+    CBRPN *r, *next;
+    for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
+            r = next) {
+        next = r->base.next;
+        if (r->type == BIC_TYPECAST) {
+            if ((r->raw_type == BRT_F64) == (next->raw_type == BRT_F64)) {
+                next->raw_type = r->raw_type;
+                next->ic_class = r->ic_class;
+                ICFree(r);
+            }
+        }
+    }
+}
+
+U0 OptPassMergeAddressOffsets(CBCmpCtrl *cctrl)
+{
+    CBRPN *r, *arg, *next, *base, *off;
+    I64 run;
+    for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
+            r = next) {
+        next = r->base.next;
+        if (r->type == BIC_ADD) {
+            for (run = 0; run != 2; run++) {
+                arg = ICArgN(r, run);
+                off = ICArgN(r, 1 - run);
+                if (arg->type != BIC_ADDR_OF)
+                    goto run_next; // continue
+                if (off->type != BIC_I64)
+                    goto run_next; // continue
+                base = arg->base.next;
+                switch (base->type) {
+                    case BIC_SHORT_ADDR:
+                    case __IC_STATIC_REF:
+                        base->integer += off->integer;
+                        goto fin;
+                        break;
+                    case BIC_BASE_PTR:
+                        // Stack grows down
+                        base->integer += off->integer;
+fin:
+                        arg->raw_type = r->raw_type;
+                        ICFree(r);
+                        ICFree(off);
+                        next = base;
+                        goto nxt;
+                        break;
+                }
+run_next:;
+            }
+        }
+nxt:;
+    }
+    // When we do "cd3.z" we have *(base_ptr+16). Turn *(base+16) into a frame ptr
+    for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
+            r = next) {
+        next = r->base.next;
+        if (r->type == BIC_DEREF && next->type == BIC_ADDR_OF) {
+            base = next->base.next;
+            if (base->type == BIC_BASE_PTR) {
+                // Set the raw type of the IC_DEREF to the base_ptr
+                base->raw_type = r->raw_type;
+                ICFree(r);
+                ICFree(next);
+                next = base;
+            }
+        }
+    }
+}
+
+U8 *Compile(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
+            CBHeapCtrl *heap)
+{
+    CBRPN *r;
+    I64 old_flags = cctrl->flags;
+    for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
+            r = r->base.next) {
+        BAssignRawTypeToNode(cctrl, r);
+    }
+    OptPassFixFunArgs(cctrl);
+    OptPassExpandPtrs(cctrl);
+    BOptPassConstFold(cctrl);
+    OptPassMergeCommunitives(cctrl);
+    // OptPassDeadCodeElim(cctrl);
+    OptPassRegAlloc(cctrl);
+    OptPassRemoveUselessArith(cctrl);
+    OptPassRemoveUselessTypecasts(cctrl);
+    OptPassMergeAddressOffsets(cctrl);
+    cctrl->flags = old_flags;
+    return OptPassFinal(cctrl, res_sz, dbg_info, heap);
+}
+
+// PORT-NOTE: `#include "aiwn_bytecode.h"` and CompileBC (the bytecode
+// backend's copy of Compile()) are not translated.

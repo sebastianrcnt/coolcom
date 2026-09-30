@@ -25,11 +25,11 @@ let test_compile_help_cmd _ =
   assert_equal cmd CompileHelp
 
 let test_compile_default _ =
-  let cmd: cmd = parse_cmd ["austral"; "compile"; "foo.aum"; "bar.aui,bar.aum"; "--entrypoint=Foo:main"; "--output=out"]
+  let cmd: cmd = parse_cmd ["austral"; "compile"; "foo.warm"; "bar.warmh,bar.warm"; "--entrypoint=Foo:main"; "--output=out"]
   and expected: cmd = WholeProgramCompile {
                           modules = [
-                            ModuleBodySource { body_path = "foo.aum" };
-                            ModuleSource { inter_path = "bar.aui"; body_path = "bar.aum" };
+                            ModuleBodySource { body_path = "foo.warm" };
+                            ModuleSource { inter_path = "bar.warmh"; body_path = "bar.warm" };
                           ];
                           target = Executable {
                                        bin_path = "out";
@@ -42,11 +42,11 @@ let test_compile_default _ =
 
 let test_compile_hc _ =
   List.iter (fun (flag, expected) ->
-    let cmd = parse_cmd ["warmc"; "compile"; "foo.aum"; "--target-type=hc";
-                         "--output=out.HC"; flag] in
+    let cmd = parse_cmd ["warmc"; "compile"; "foo.warm"; "--target-type=hc";
+                         "--output=out.cool"; flag] in
     match cmd with
     | WholeProgramCompile { target = HCStandalone {output_path; entrypoint}; _ } ->
-        assert_equal "out.HC" output_path;
+        assert_equal "out.cool" output_path;
         assert_equal expected entrypoint
     | _ -> assert_failure "expected a HolyC source target")
     ["--no-entrypoint", None;

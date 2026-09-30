@@ -64,7 +64,7 @@ CMT_	BCMT_
 MLF_	BMLF_
 PRSF_	BPRSF_
 REG_	BREG_
-## host runtime (implemented in BackendRT.HC / BQSort.HC)
+## host runtime (implemented in BackendRT.cool / BQSort.cool)
 Fs	BFs
 HashFind	BHashFind
 HashAdd	BHashAdd

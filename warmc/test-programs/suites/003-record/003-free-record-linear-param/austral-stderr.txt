@@ -12,7 +12,7 @@
     { "type": "text", "content": " universe." }
   ],
   "span": {
-    "filename": "test-programs/suites/003-record/003-free-record-linear-param/Test.aum",
+    "filename": "test-programs/suites/003-record/003-free-record-linear-param/Test.warm",
     "startp": { "line": 2, "column": 4 },
     "end": { "line": 3, "column": 8 }
   },

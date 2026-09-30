@@ -38,7 +38,7 @@ def arguments(case, target, output):
         args = [a for a in args if not a.startswith(('--target-type=', '--error-format='))]
         args += ['--target-type=' + target, '--error-format=json']
         return args
-    return ['compile', str(case / 'Test.aum'), '--entrypoint=Test:main',
+    return ['compile', str(case / 'Test.warm'), '--entrypoint=Test:main',
             '--target-type=' + target, '--output=' + str(output), '--error-format=json']
 
 
@@ -90,7 +90,7 @@ def main():
                     else:
                         row['reason'] = error_kind(p)
             else:
-                c, hc = dest / 'oracle.c', dest / 'program.HC'
+                c, hc = dest / 'oracle.c', dest / 'program.cool'
                 binary = dest / 'program.BIN'
                 for f in (c, hc, binary, dest / 'oracle'):
                     f.unlink(missing_ok=True)

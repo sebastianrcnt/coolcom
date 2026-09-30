@@ -1,0 +1,834 @@
+#include "TestBase.coolh"
+// return constants
+I64 K0() {return 0;}
+I64 K1() {return 1;}
+I64 K2() {return 2;}
+I64 K3() {return 3;}
+I64 K4() {return 7;}
+I64 K5() {return 8;}
+I64 K6() {return 15;}
+I64 K7() {return 16;}
+I64 K8() {return 255;}
+I64 K9() {return 256;}
+I64 K10() {return 4095;}
+I64 K11() {return 4096;}
+I64 K12() {return 4097;}
+I64 K13() {return 8191;}
+I64 K14() {return 65535;}
+I64 K15() {return 65536;}
+I64 K16() {return 2147483647;}
+I64 K17() {return 2147483648;}
+I64 K18() {return 4294967295;}
+I64 K19() {return 4294967296;}
+I64 K20() {return 281470681808895;}
+I64 K21() {return 71777214294589695;}
+I64 K22() {return 6148914691236517205;}
+I64 K23() {return 12297829382473034410;}
+I64 K24() {return 18446462598732840960;}
+I64 K25() {return 281470681743360;}
+I64 K26() {return 4660;}
+I64 K27() {return 305419896;}
+I64 K28() {return 1311768467463790320;}
+I64 K29() {return 17361641481138401520;}
+I64 K30() {return 9223372036854775808;}
+I64 K31() {return 9223372036854775807;}
+I64 K32() {return 18446744073709551615;}
+I64 K33() {return 18446744073709486080;}
+I64 K34() {return 18446462603027808255;}
+I64 K35() {return 4294967294;}
+I64 K36() {return 4611686018427387903;}
+I64 K37() {return 4294967294;}
+I64 K38() {return 4294967040;}
+I64 K39() {return 4080;}
+I64 N0() {return -0;}
+I64 N23() {return -12297829382473034410;}
+I64 N24() {return -18446462598732840960;}
+I64 N29() {return -17361641481138401520;}
+I64 N32() {return -18446744073709551615;}
+I64 N33() {return -18446744073709486080;}
+I64 N34() {return -18446462603027808255;}
+// binary ops with constants
+I64 Add0(I64 a) {return a + 0;}
+I64 Sub0(I64 a) {return a - 0;}
+I64 And0(I64 a) {return a & 0;}
+I64 Or0(I64 a) {return a | 0;}
+I64 Xor0(I64 a) {return a ^ 0;}
+I64 Mul0(I64 a) {return a * 0;}
+I64 Lt0(I64 a) {return a < 0;}
+I64 Eq0(I64 a) {return a == 0;}
+U64 Ult0(U64 a) {return a < 0;}
+U64 Uge0(U64 a) {if (a >= 0) return 1; return 0;}
+I64 Add1(I64 a) {return a + 1;}
+I64 Sub1(I64 a) {return a - 1;}
+I64 And1(I64 a) {return a & 1;}
+I64 Or1(I64 a) {return a | 1;}
+I64 Xor1(I64 a) {return a ^ 1;}
+I64 Mul1(I64 a) {return a * 1;}
+I64 Lt1(I64 a) {return a < 1;}
+I64 Eq1(I64 a) {return a == 1;}
+U64 Ult1(U64 a) {return a < 1;}
+U64 Uge1(U64 a) {if (a >= 1) return 1; return 0;}
+I64 Add2(I64 a) {return a + 2;}
+I64 Sub2(I64 a) {return a - 2;}
+I64 And2(I64 a) {return a & 2;}
+I64 Or2(I64 a) {return a | 2;}
+I64 Xor2(I64 a) {return a ^ 2;}
+I64 Mul2(I64 a) {return a * 2;}
+I64 Lt2(I64 a) {return a < 2;}
+I64 Eq2(I64 a) {return a == 2;}
+U64 Ult2(U64 a) {return a < 2;}
+U64 Uge2(U64 a) {if (a >= 2) return 1; return 0;}
+I64 Add3(I64 a) {return a + 3;}
+I64 Sub3(I64 a) {return a - 3;}
+I64 And3(I64 a) {return a & 3;}
+I64 Or3(I64 a) {return a | 3;}
+I64 Xor3(I64 a) {return a ^ 3;}
+I64 Mul3(I64 a) {return a * 3;}
+I64 Lt3(I64 a) {return a < 3;}
+I64 Eq3(I64 a) {return a == 3;}
+U64 Ult3(U64 a) {return a < 3;}
+U64 Uge3(U64 a) {if (a >= 3) return 1; return 0;}
+I64 Add4(I64 a) {return a + 7;}
+I64 Sub4(I64 a) {return a - 7;}
+I64 And4(I64 a) {return a & 7;}
+I64 Or4(I64 a) {return a | 7;}
+I64 Xor4(I64 a) {return a ^ 7;}
+I64 Mul4(I64 a) {return a * 7;}
+I64 Lt4(I64 a) {return a < 7;}
+I64 Eq4(I64 a) {return a == 7;}
+U64 Ult4(U64 a) {return a < 7;}
+U64 Uge4(U64 a) {if (a >= 7) return 1; return 0;}
+I64 Add5(I64 a) {return a + 8;}
+I64 Sub5(I64 a) {return a - 8;}
+I64 And5(I64 a) {return a & 8;}
+I64 Or5(I64 a) {return a | 8;}
+I64 Xor5(I64 a) {return a ^ 8;}
+I64 Mul5(I64 a) {return a * 8;}
+I64 Lt5(I64 a) {return a < 8;}
+I64 Eq5(I64 a) {return a == 8;}
+U64 Ult5(U64 a) {return a < 8;}
+U64 Uge5(U64 a) {if (a >= 8) return 1; return 0;}
+I64 Add6(I64 a) {return a + 15;}
+I64 Sub6(I64 a) {return a - 15;}
+I64 And6(I64 a) {return a & 15;}
+I64 Or6(I64 a) {return a | 15;}
+I64 Xor6(I64 a) {return a ^ 15;}
+I64 Mul6(I64 a) {return a * 15;}
+I64 Lt6(I64 a) {return a < 15;}
+I64 Eq6(I64 a) {return a == 15;}
+U64 Ult6(U64 a) {return a < 15;}
+U64 Uge6(U64 a) {if (a >= 15) return 1; return 0;}
+I64 Add7(I64 a) {return a + 16;}
+I64 Sub7(I64 a) {return a - 16;}
+I64 And7(I64 a) {return a & 16;}
+I64 Or7(I64 a) {return a | 16;}
+I64 Xor7(I64 a) {return a ^ 16;}
+I64 Mul7(I64 a) {return a * 16;}
+I64 Lt7(I64 a) {return a < 16;}
+I64 Eq7(I64 a) {return a == 16;}
+U64 Ult7(U64 a) {return a < 16;}
+U64 Uge7(U64 a) {if (a >= 16) return 1; return 0;}
+I64 Add8(I64 a) {return a + 255;}
+I64 Sub8(I64 a) {return a - 255;}
+I64 And8(I64 a) {return a & 255;}
+I64 Or8(I64 a) {return a | 255;}
+I64 Xor8(I64 a) {return a ^ 255;}
+I64 Mul8(I64 a) {return a * 255;}
+I64 Lt8(I64 a) {return a < 255;}
+I64 Eq8(I64 a) {return a == 255;}
+U64 Ult8(U64 a) {return a < 255;}
+U64 Uge8(U64 a) {if (a >= 255) return 1; return 0;}
+I64 Add9(I64 a) {return a + 256;}
+I64 Sub9(I64 a) {return a - 256;}
+I64 And9(I64 a) {return a & 256;}
+I64 Or9(I64 a) {return a | 256;}
+I64 Xor9(I64 a) {return a ^ 256;}
+I64 Mul9(I64 a) {return a * 256;}
+I64 Lt9(I64 a) {return a < 256;}
+I64 Eq9(I64 a) {return a == 256;}
+U64 Ult9(U64 a) {return a < 256;}
+U64 Uge9(U64 a) {if (a >= 256) return 1; return 0;}
+I64 Add10(I64 a) {return a + 4095;}
+I64 Sub10(I64 a) {return a - 4095;}
+I64 And10(I64 a) {return a & 4095;}
+I64 Or10(I64 a) {return a | 4095;}
+I64 Xor10(I64 a) {return a ^ 4095;}
+I64 Mul10(I64 a) {return a * 4095;}
+I64 Lt10(I64 a) {return a < 4095;}
+I64 Eq10(I64 a) {return a == 4095;}
+U64 Ult10(U64 a) {return a < 4095;}
+U64 Uge10(U64 a) {if (a >= 4095) return 1; return 0;}
+I64 Add11(I64 a) {return a + 4096;}
+I64 Sub11(I64 a) {return a - 4096;}
+I64 And11(I64 a) {return a & 4096;}
+I64 Or11(I64 a) {return a | 4096;}
+I64 Xor11(I64 a) {return a ^ 4096;}
+I64 Mul11(I64 a) {return a * 4096;}
+I64 Lt11(I64 a) {return a < 4096;}
+I64 Eq11(I64 a) {return a == 4096;}
+U64 Ult11(U64 a) {return a < 4096;}
+U64 Uge11(U64 a) {if (a >= 4096) return 1; return 0;}
+I64 Add12(I64 a) {return a + 4097;}
+I64 Sub12(I64 a) {return a - 4097;}
+I64 And12(I64 a) {return a & 4097;}
+I64 Or12(I64 a) {return a | 4097;}
+I64 Xor12(I64 a) {return a ^ 4097;}
+I64 Mul12(I64 a) {return a * 4097;}
+I64 Lt12(I64 a) {return a < 4097;}
+I64 Eq12(I64 a) {return a == 4097;}
+U64 Ult12(U64 a) {return a < 4097;}
+U64 Uge12(U64 a) {if (a >= 4097) return 1; return 0;}
+I64 Add13(I64 a) {return a + 8191;}
+I64 Sub13(I64 a) {return a - 8191;}
+I64 And13(I64 a) {return a & 8191;}
+I64 Or13(I64 a) {return a | 8191;}
+I64 Xor13(I64 a) {return a ^ 8191;}
+I64 Mul13(I64 a) {return a * 8191;}
+I64 Lt13(I64 a) {return a < 8191;}
+I64 Eq13(I64 a) {return a == 8191;}
+U64 Ult13(U64 a) {return a < 8191;}
+U64 Uge13(U64 a) {if (a >= 8191) return 1; return 0;}
+I64 Add14(I64 a) {return a + 65535;}
+I64 Sub14(I64 a) {return a - 65535;}
+I64 And14(I64 a) {return a & 65535;}
+I64 Or14(I64 a) {return a | 65535;}
+I64 Xor14(I64 a) {return a ^ 65535;}
+I64 Mul14(I64 a) {return a * 65535;}
+I64 Lt14(I64 a) {return a < 65535;}
+I64 Eq14(I64 a) {return a == 65535;}
+U64 Ult14(U64 a) {return a < 65535;}
+U64 Uge14(U64 a) {if (a >= 65535) return 1; return 0;}
+I64 Add15(I64 a) {return a + 65536;}
+I64 Sub15(I64 a) {return a - 65536;}
+I64 And15(I64 a) {return a & 65536;}
+I64 Or15(I64 a) {return a | 65536;}
+I64 Xor15(I64 a) {return a ^ 65536;}
+I64 Mul15(I64 a) {return a * 65536;}
+I64 Lt15(I64 a) {return a < 65536;}
+I64 Eq15(I64 a) {return a == 65536;}
+U64 Ult15(U64 a) {return a < 65536;}
+U64 Uge15(U64 a) {if (a >= 65536) return 1; return 0;}
+I64 Add16(I64 a) {return a + 2147483647;}
+I64 Sub16(I64 a) {return a - 2147483647;}
+I64 And16(I64 a) {return a & 2147483647;}
+I64 Or16(I64 a) {return a | 2147483647;}
+I64 Xor16(I64 a) {return a ^ 2147483647;}
+I64 Mul16(I64 a) {return a * 2147483647;}
+I64 Lt16(I64 a) {return a < 2147483647;}
+I64 Eq16(I64 a) {return a == 2147483647;}
+U64 Ult16(U64 a) {return a < 2147483647;}
+U64 Uge16(U64 a) {if (a >= 2147483647) return 1; return 0;}
+I64 Add17(I64 a) {return a + 2147483648;}
+I64 Sub17(I64 a) {return a - 2147483648;}
+I64 And17(I64 a) {return a & 2147483648;}
+I64 Or17(I64 a) {return a | 2147483648;}
+I64 Xor17(I64 a) {return a ^ 2147483648;}
+I64 Mul17(I64 a) {return a * 2147483648;}
+I64 Lt17(I64 a) {return a < 2147483648;}
+I64 Eq17(I64 a) {return a == 2147483648;}
+U64 Ult17(U64 a) {return a < 2147483648;}
+U64 Uge17(U64 a) {if (a >= 2147483648) return 1; return 0;}
+I64 Add18(I64 a) {return a + 4294967295;}
+I64 Sub18(I64 a) {return a - 4294967295;}
+I64 And18(I64 a) {return a & 4294967295;}
+I64 Or18(I64 a) {return a | 4294967295;}
+I64 Xor18(I64 a) {return a ^ 4294967295;}
+I64 Mul18(I64 a) {return a * 4294967295;}
+I64 Lt18(I64 a) {return a < 4294967295;}
+I64 Eq18(I64 a) {return a == 4294967295;}
+U64 Ult18(U64 a) {return a < 4294967295;}
+U64 Uge18(U64 a) {if (a >= 4294967295) return 1; return 0;}
+I64 Add19(I64 a) {return a + 4294967296;}
+I64 Sub19(I64 a) {return a - 4294967296;}
+I64 And19(I64 a) {return a & 4294967296;}
+I64 Or19(I64 a) {return a | 4294967296;}
+I64 Xor19(I64 a) {return a ^ 4294967296;}
+I64 Mul19(I64 a) {return a * 4294967296;}
+I64 Lt19(I64 a) {return a < 4294967296;}
+I64 Eq19(I64 a) {return a == 4294967296;}
+U64 Ult19(U64 a) {return a < 4294967296;}
+U64 Uge19(U64 a) {if (a >= 4294967296) return 1; return 0;}
+I64 Add20(I64 a) {return a + 281470681808895;}
+I64 Sub20(I64 a) {return a - 281470681808895;}
+I64 And20(I64 a) {return a & 281470681808895;}
+I64 Or20(I64 a) {return a | 281470681808895;}
+I64 Xor20(I64 a) {return a ^ 281470681808895;}
+I64 Mul20(I64 a) {return a * 281470681808895;}
+I64 Lt20(I64 a) {return a < 281470681808895;}
+I64 Eq20(I64 a) {return a == 281470681808895;}
+U64 Ult20(U64 a) {return a < 281470681808895;}
+U64 Uge20(U64 a) {if (a >= 281470681808895) return 1; return 0;}
+I64 Add21(I64 a) {return a + 71777214294589695;}
+I64 Sub21(I64 a) {return a - 71777214294589695;}
+I64 And21(I64 a) {return a & 71777214294589695;}
+I64 Or21(I64 a) {return a | 71777214294589695;}
+I64 Xor21(I64 a) {return a ^ 71777214294589695;}
+I64 Mul21(I64 a) {return a * 71777214294589695;}
+I64 Lt21(I64 a) {return a < 71777214294589695;}
+I64 Eq21(I64 a) {return a == 71777214294589695;}
+U64 Ult21(U64 a) {return a < 71777214294589695;}
+U64 Uge21(U64 a) {if (a >= 71777214294589695) return 1; return 0;}
+I64 Add22(I64 a) {return a + 6148914691236517205;}
+I64 Sub22(I64 a) {return a - 6148914691236517205;}
+I64 And22(I64 a) {return a & 6148914691236517205;}
+I64 Or22(I64 a) {return a | 6148914691236517205;}
+I64 Xor22(I64 a) {return a ^ 6148914691236517205;}
+I64 Mul22(I64 a) {return a * 6148914691236517205;}
+I64 Lt22(I64 a) {return a < 6148914691236517205;}
+I64 Eq22(I64 a) {return a == 6148914691236517205;}
+U64 Ult22(U64 a) {return a < 6148914691236517205;}
+U64 Uge22(U64 a) {if (a >= 6148914691236517205) return 1; return 0;}
+I64 Add23(I64 a) {return a + 12297829382473034410;}
+I64 Sub23(I64 a) {return a - 12297829382473034410;}
+I64 And23(I64 a) {return a & 12297829382473034410;}
+I64 Or23(I64 a) {return a | 12297829382473034410;}
+I64 Xor23(I64 a) {return a ^ 12297829382473034410;}
+I64 Mul23(I64 a) {return a * 12297829382473034410;}
+I64 Lt23(I64 a) {return a < 12297829382473034410;}
+I64 Eq23(I64 a) {return a == 12297829382473034410;}
+U64 Ult23(U64 a) {return a < 12297829382473034410;}
+U64 Uge23(U64 a) {if (a >= 12297829382473034410) return 1; return 0;}
+I64 Add24(I64 a) {return a + 18446462598732840960;}
+I64 Sub24(I64 a) {return a - 18446462598732840960;}
+I64 And24(I64 a) {return a & 18446462598732840960;}
+I64 Or24(I64 a) {return a | 18446462598732840960;}
+I64 Xor24(I64 a) {return a ^ 18446462598732840960;}
+I64 Mul24(I64 a) {return a * 18446462598732840960;}
+I64 Lt24(I64 a) {return a < 18446462598732840960;}
+I64 Eq24(I64 a) {return a == 18446462598732840960;}
+U64 Ult24(U64 a) {return a < 18446462598732840960;}
+U64 Uge24(U64 a) {if (a >= 18446462598732840960) return 1; return 0;}
+I64 Add25(I64 a) {return a + 281470681743360;}
+I64 Sub25(I64 a) {return a - 281470681743360;}
+I64 And25(I64 a) {return a & 281470681743360;}
+I64 Or25(I64 a) {return a | 281470681743360;}
+I64 Xor25(I64 a) {return a ^ 281470681743360;}
+I64 Mul25(I64 a) {return a * 281470681743360;}
+I64 Lt25(I64 a) {return a < 281470681743360;}
+I64 Eq25(I64 a) {return a == 281470681743360;}
+U64 Ult25(U64 a) {return a < 281470681743360;}
+U64 Uge25(U64 a) {if (a >= 281470681743360) return 1; return 0;}
+I64 Add26(I64 a) {return a + 4660;}
+I64 Sub26(I64 a) {return a - 4660;}
+I64 And26(I64 a) {return a & 4660;}
+I64 Or26(I64 a) {return a | 4660;}
+I64 Xor26(I64 a) {return a ^ 4660;}
+I64 Mul26(I64 a) {return a * 4660;}
+I64 Lt26(I64 a) {return a < 4660;}
+I64 Eq26(I64 a) {return a == 4660;}
+U64 Ult26(U64 a) {return a < 4660;}
+U64 Uge26(U64 a) {if (a >= 4660) return 1; return 0;}
+I64 Add27(I64 a) {return a + 305419896;}
+I64 Sub27(I64 a) {return a - 305419896;}
+I64 And27(I64 a) {return a & 305419896;}
+I64 Or27(I64 a) {return a | 305419896;}
+I64 Xor27(I64 a) {return a ^ 305419896;}
+I64 Mul27(I64 a) {return a * 305419896;}
+I64 Lt27(I64 a) {return a < 305419896;}
+I64 Eq27(I64 a) {return a == 305419896;}
+U64 Ult27(U64 a) {return a < 305419896;}
+U64 Uge27(U64 a) {if (a >= 305419896) return 1; return 0;}
+I64 Add28(I64 a) {return a + 1311768467463790320;}
+I64 Sub28(I64 a) {return a - 1311768467463790320;}
+I64 And28(I64 a) {return a & 1311768467463790320;}
+I64 Or28(I64 a) {return a | 1311768467463790320;}
+I64 Xor28(I64 a) {return a ^ 1311768467463790320;}
+I64 Mul28(I64 a) {return a * 1311768467463790320;}
+I64 Lt28(I64 a) {return a < 1311768467463790320;}
+I64 Eq28(I64 a) {return a == 1311768467463790320;}
+U64 Ult28(U64 a) {return a < 1311768467463790320;}
+U64 Uge28(U64 a) {if (a >= 1311768467463790320) return 1; return 0;}
+I64 Add29(I64 a) {return a + 17361641481138401520;}
+I64 Sub29(I64 a) {return a - 17361641481138401520;}
+I64 And29(I64 a) {return a & 17361641481138401520;}
+I64 Or29(I64 a) {return a | 17361641481138401520;}
+I64 Xor29(I64 a) {return a ^ 17361641481138401520;}
+I64 Mul29(I64 a) {return a * 17361641481138401520;}
+I64 Lt29(I64 a) {return a < 17361641481138401520;}
+I64 Eq29(I64 a) {return a == 17361641481138401520;}
+U64 Ult29(U64 a) {return a < 17361641481138401520;}
+U64 Uge29(U64 a) {if (a >= 17361641481138401520) return 1; return 0;}
+I64 Add30(I64 a) {return a + 9223372036854775808;}
+I64 Sub30(I64 a) {return a - 9223372036854775808;}
+I64 And30(I64 a) {return a & 9223372036854775808;}
+I64 Or30(I64 a) {return a | 9223372036854775808;}
+I64 Xor30(I64 a) {return a ^ 9223372036854775808;}
+I64 Mul30(I64 a) {return a * 9223372036854775808;}
+I64 Lt30(I64 a) {return a < 9223372036854775808;}
+I64 Eq30(I64 a) {return a == 9223372036854775808;}
+U64 Ult30(U64 a) {return a < 9223372036854775808;}
+U64 Uge30(U64 a) {if (a >= 9223372036854775808) return 1; return 0;}
+I64 Add31(I64 a) {return a + 9223372036854775807;}
+I64 Sub31(I64 a) {return a - 9223372036854775807;}
+I64 And31(I64 a) {return a & 9223372036854775807;}
+I64 Or31(I64 a) {return a | 9223372036854775807;}
+I64 Xor31(I64 a) {return a ^ 9223372036854775807;}
+I64 Mul31(I64 a) {return a * 9223372036854775807;}
+I64 Lt31(I64 a) {return a < 9223372036854775807;}
+I64 Eq31(I64 a) {return a == 9223372036854775807;}
+U64 Ult31(U64 a) {return a < 9223372036854775807;}
+U64 Uge31(U64 a) {if (a >= 9223372036854775807) return 1; return 0;}
+I64 Add32(I64 a) {return a + 18446744073709551615;}
+I64 Sub32(I64 a) {return a - 18446744073709551615;}
+I64 And32(I64 a) {return a & 18446744073709551615;}
+I64 Or32(I64 a) {return a | 18446744073709551615;}
+I64 Xor32(I64 a) {return a ^ 18446744073709551615;}
+I64 Mul32(I64 a) {return a * 18446744073709551615;}
+I64 Lt32(I64 a) {return a < 18446744073709551615;}
+I64 Eq32(I64 a) {return a == 18446744073709551615;}
+U64 Ult32(U64 a) {return a < 18446744073709551615;}
+U64 Uge32(U64 a) {if (a >= 18446744073709551615) return 1; return 0;}
+I64 Add33(I64 a) {return a + 18446744073709486080;}
+I64 Sub33(I64 a) {return a - 18446744073709486080;}
+I64 And33(I64 a) {return a & 18446744073709486080;}
+I64 Or33(I64 a) {return a | 18446744073709486080;}
+I64 Xor33(I64 a) {return a ^ 18446744073709486080;}
+I64 Mul33(I64 a) {return a * 18446744073709486080;}
+I64 Lt33(I64 a) {return a < 18446744073709486080;}
+I64 Eq33(I64 a) {return a == 18446744073709486080;}
+U64 Ult33(U64 a) {return a < 18446744073709486080;}
+U64 Uge33(U64 a) {if (a >= 18446744073709486080) return 1; return 0;}
+I64 Add34(I64 a) {return a + 18446462603027808255;}
+I64 Sub34(I64 a) {return a - 18446462603027808255;}
+I64 And34(I64 a) {return a & 18446462603027808255;}
+I64 Or34(I64 a) {return a | 18446462603027808255;}
+I64 Xor34(I64 a) {return a ^ 18446462603027808255;}
+I64 Mul34(I64 a) {return a * 18446462603027808255;}
+I64 Lt34(I64 a) {return a < 18446462603027808255;}
+I64 Eq34(I64 a) {return a == 18446462603027808255;}
+U64 Ult34(U64 a) {return a < 18446462603027808255;}
+U64 Uge34(U64 a) {if (a >= 18446462603027808255) return 1; return 0;}
+I64 Add35(I64 a) {return a + 4294967294;}
+I64 Sub35(I64 a) {return a - 4294967294;}
+I64 And35(I64 a) {return a & 4294967294;}
+I64 Or35(I64 a) {return a | 4294967294;}
+I64 Xor35(I64 a) {return a ^ 4294967294;}
+I64 Mul35(I64 a) {return a * 4294967294;}
+I64 Lt35(I64 a) {return a < 4294967294;}
+I64 Eq35(I64 a) {return a == 4294967294;}
+U64 Ult35(U64 a) {return a < 4294967294;}
+U64 Uge35(U64 a) {if (a >= 4294967294) return 1; return 0;}
+I64 Add36(I64 a) {return a + 4611686018427387903;}
+I64 Sub36(I64 a) {return a - 4611686018427387903;}
+I64 And36(I64 a) {return a & 4611686018427387903;}
+I64 Or36(I64 a) {return a | 4611686018427387903;}
+I64 Xor36(I64 a) {return a ^ 4611686018427387903;}
+I64 Mul36(I64 a) {return a * 4611686018427387903;}
+I64 Lt36(I64 a) {return a < 4611686018427387903;}
+I64 Eq36(I64 a) {return a == 4611686018427387903;}
+U64 Ult36(U64 a) {return a < 4611686018427387903;}
+U64 Uge36(U64 a) {if (a >= 4611686018427387903) return 1; return 0;}
+I64 Add37(I64 a) {return a + 4294967294;}
+I64 Sub37(I64 a) {return a - 4294967294;}
+I64 And37(I64 a) {return a & 4294967294;}
+I64 Or37(I64 a) {return a | 4294967294;}
+I64 Xor37(I64 a) {return a ^ 4294967294;}
+I64 Mul37(I64 a) {return a * 4294967294;}
+I64 Lt37(I64 a) {return a < 4294967294;}
+I64 Eq37(I64 a) {return a == 4294967294;}
+U64 Ult37(U64 a) {return a < 4294967294;}
+U64 Uge37(U64 a) {if (a >= 4294967294) return 1; return 0;}
+I64 Add38(I64 a) {return a + 4294967040;}
+I64 Sub38(I64 a) {return a - 4294967040;}
+I64 And38(I64 a) {return a & 4294967040;}
+I64 Or38(I64 a) {return a | 4294967040;}
+I64 Xor38(I64 a) {return a ^ 4294967040;}
+I64 Mul38(I64 a) {return a * 4294967040;}
+I64 Lt38(I64 a) {return a < 4294967040;}
+I64 Eq38(I64 a) {return a == 4294967040;}
+U64 Ult38(U64 a) {return a < 4294967040;}
+U64 Uge38(U64 a) {if (a >= 4294967040) return 1; return 0;}
+I64 Add39(I64 a) {return a + 4080;}
+I64 Sub39(I64 a) {return a - 4080;}
+I64 And39(I64 a) {return a & 4080;}
+I64 Or39(I64 a) {return a | 4080;}
+I64 Xor39(I64 a) {return a ^ 4080;}
+I64 Mul39(I64 a) {return a * 4080;}
+I64 Lt39(I64 a) {return a < 4080;}
+I64 Eq39(I64 a) {return a == 4080;}
+U64 Ult39(U64 a) {return a < 4080;}
+U64 Uge39(U64 a) {if (a >= 4080) return 1; return 0;}
+I64 Sl0(I64 a) {return a << 0;}
+I64 Sr0(I64 a) {return a >> 0;}
+U64 Ur0(U64 a) {return a >> 0;}
+U32 Ur32_0(U32 a) {return a >> 0;}
+I32 Sr32_0(I32 a) {return a >> 0;}
+U8 Sl8_0(U8 a) {return a << 0;}
+I64 Sl1(I64 a) {return a << 1;}
+I64 Sr1(I64 a) {return a >> 1;}
+U64 Ur1(U64 a) {return a >> 1;}
+U32 Ur32_1(U32 a) {return a >> 1;}
+I32 Sr32_1(I32 a) {return a >> 1;}
+U8 Sl8_1(U8 a) {return a << 1;}
+I64 Sl2(I64 a) {return a << 2;}
+I64 Sr2(I64 a) {return a >> 2;}
+U64 Ur2(U64 a) {return a >> 2;}
+U32 Ur32_2(U32 a) {return a >> 2;}
+I32 Sr32_2(I32 a) {return a >> 2;}
+U8 Sl8_2(U8 a) {return a << 2;}
+I64 Sl7(I64 a) {return a << 7;}
+I64 Sr7(I64 a) {return a >> 7;}
+U64 Ur7(U64 a) {return a >> 7;}
+U32 Ur32_7(U32 a) {return a >> 7;}
+I32 Sr32_7(I32 a) {return a >> 7;}
+U8 Sl8_7(U8 a) {return a << 7;}
+I64 Sl8(I64 a) {return a << 8;}
+I64 Sr8(I64 a) {return a >> 8;}
+U64 Ur8(U64 a) {return a >> 8;}
+U32 Ur32_8(U32 a) {return a >> 8;}
+I32 Sr32_8(I32 a) {return a >> 8;}
+U8 Sl8_8(U8 a) {return a << 0;}
+I64 Sl15(I64 a) {return a << 15;}
+I64 Sr15(I64 a) {return a >> 15;}
+U64 Ur15(U64 a) {return a >> 15;}
+U32 Ur32_15(U32 a) {return a >> 15;}
+I32 Sr32_15(I32 a) {return a >> 15;}
+U8 Sl8_15(U8 a) {return a << 7;}
+I64 Sl16(I64 a) {return a << 16;}
+I64 Sr16(I64 a) {return a >> 16;}
+U64 Ur16(U64 a) {return a >> 16;}
+U32 Ur32_16(U32 a) {return a >> 16;}
+I32 Sr32_16(I32 a) {return a >> 16;}
+U8 Sl8_16(U8 a) {return a << 0;}
+I64 Sl31(I64 a) {return a << 31;}
+I64 Sr31(I64 a) {return a >> 31;}
+U64 Ur31(U64 a) {return a >> 31;}
+U32 Ur32_31(U32 a) {return a >> 31;}
+I32 Sr32_31(I32 a) {return a >> 31;}
+U8 Sl8_31(U8 a) {return a << 7;}
+I64 Sl32(I64 a) {return a << 32;}
+I64 Sr32(I64 a) {return a >> 32;}
+U64 Ur32(U64 a) {return a >> 32;}
+U32 Ur32_32(U32 a) {return a >> 0;}
+I32 Sr32_32(I32 a) {return a >> 0;}
+U8 Sl8_32(U8 a) {return a << 0;}
+I64 Sl33(I64 a) {return a << 33;}
+I64 Sr33(I64 a) {return a >> 33;}
+U64 Ur33(U64 a) {return a >> 33;}
+U32 Ur32_33(U32 a) {return a >> 1;}
+I32 Sr32_33(I32 a) {return a >> 1;}
+U8 Sl8_33(U8 a) {return a << 1;}
+I64 Sl47(I64 a) {return a << 47;}
+I64 Sr47(I64 a) {return a >> 47;}
+U64 Ur47(U64 a) {return a >> 47;}
+U32 Ur32_47(U32 a) {return a >> 15;}
+I32 Sr32_47(I32 a) {return a >> 15;}
+U8 Sl8_47(U8 a) {return a << 7;}
+I64 Sl48(I64 a) {return a << 48;}
+I64 Sr48(I64 a) {return a >> 48;}
+U64 Ur48(U64 a) {return a >> 48;}
+U32 Ur32_48(U32 a) {return a >> 16;}
+I32 Sr32_48(I32 a) {return a >> 16;}
+U8 Sl8_48(U8 a) {return a << 0;}
+I64 Sl62(I64 a) {return a << 62;}
+I64 Sr62(I64 a) {return a >> 62;}
+U64 Ur62(U64 a) {return a >> 62;}
+U32 Ur32_62(U32 a) {return a >> 30;}
+I32 Sr32_62(I32 a) {return a >> 30;}
+U8 Sl8_62(U8 a) {return a << 6;}
+I64 Sl63(I64 a) {return a << 63;}
+I64 Sr63(I64 a) {return a >> 63;}
+U64 Ur63(U64 a) {return a >> 63;}
+U32 Ur32_63(U32 a) {return a >> 31;}
+I32 Sr32_63(I32 a) {return a >> 31;}
+U8 Sl8_63(U8 a) {return a << 7;}
+I64 Dv2(I64 a) {return a / 2;}
+I64 Md2(I64 a) {return a % 2;}
+U64 UDv2(U64 a) {return a / 2;}
+U64 UMd2(U64 a) {return a % 2;}
+I64 Mu2(I64 a) {return a * 2;}
+I64 Dv3(I64 a) {return a / 3;}
+I64 Md3(I64 a) {return a % 3;}
+U64 UDv3(U64 a) {return a / 3;}
+U64 UMd3(U64 a) {return a % 3;}
+I64 Mu3(I64 a) {return a * 3;}
+I64 Dv4(I64 a) {return a / 4;}
+I64 Md4(I64 a) {return a % 4;}
+U64 UDv4(U64 a) {return a / 4;}
+U64 UMd4(U64 a) {return a % 4;}
+I64 Mu4(I64 a) {return a * 4;}
+I64 Dv5(I64 a) {return a / 5;}
+I64 Md5(I64 a) {return a % 5;}
+U64 UDv5(U64 a) {return a / 5;}
+U64 UMd5(U64 a) {return a % 5;}
+I64 Mu5(I64 a) {return a * 5;}
+I64 Dv6(I64 a) {return a / 6;}
+I64 Md6(I64 a) {return a % 6;}
+U64 UDv6(U64 a) {return a / 6;}
+U64 UMd6(U64 a) {return a % 6;}
+I64 Mu6(I64 a) {return a * 6;}
+I64 Dv7(I64 a) {return a / 7;}
+I64 Md7(I64 a) {return a % 7;}
+U64 UDv7(U64 a) {return a / 7;}
+U64 UMd7(U64 a) {return a % 7;}
+I64 Mu7(I64 a) {return a * 7;}
+I64 Dv8(I64 a) {return a / 8;}
+I64 Md8(I64 a) {return a % 8;}
+U64 UDv8(U64 a) {return a / 8;}
+U64 UMd8(U64 a) {return a % 8;}
+I64 Mu8(I64 a) {return a * 8;}
+I64 Dv9(I64 a) {return a / 9;}
+I64 Md9(I64 a) {return a % 9;}
+U64 UDv9(U64 a) {return a / 9;}
+U64 UMd9(U64 a) {return a % 9;}
+I64 Mu9(I64 a) {return a * 9;}
+I64 Dv10(I64 a) {return a / 10;}
+I64 Md10(I64 a) {return a % 10;}
+U64 UDv10(U64 a) {return a / 10;}
+U64 UMd10(U64 a) {return a % 10;}
+I64 Mu10(I64 a) {return a * 10;}
+I64 Dv11(I64 a) {return a / 11;}
+I64 Md11(I64 a) {return a % 11;}
+U64 UDv11(U64 a) {return a / 11;}
+U64 UMd11(U64 a) {return a % 11;}
+I64 Mu11(I64 a) {return a * 11;}
+I64 Dv12(I64 a) {return a / 12;}
+I64 Md12(I64 a) {return a % 12;}
+U64 UDv12(U64 a) {return a / 12;}
+U64 UMd12(U64 a) {return a % 12;}
+I64 Mu12(I64 a) {return a * 12;}
+I64 Dv13(I64 a) {return a / 13;}
+I64 Md13(I64 a) {return a % 13;}
+U64 UDv13(U64 a) {return a / 13;}
+U64 UMd13(U64 a) {return a % 13;}
+I64 Mu13(I64 a) {return a * 13;}
+I64 Dv15(I64 a) {return a / 15;}
+I64 Md15(I64 a) {return a % 15;}
+U64 UDv15(U64 a) {return a / 15;}
+U64 UMd15(U64 a) {return a % 15;}
+I64 Mu15(I64 a) {return a * 15;}
+I64 Dv16(I64 a) {return a / 16;}
+I64 Md16(I64 a) {return a % 16;}
+U64 UDv16(U64 a) {return a / 16;}
+U64 UMd16(U64 a) {return a % 16;}
+I64 Mu16(I64 a) {return a * 16;}
+I64 Dv17(I64 a) {return a / 17;}
+I64 Md17(I64 a) {return a % 17;}
+U64 UDv17(U64 a) {return a / 17;}
+U64 UMd17(U64 a) {return a % 17;}
+I64 Mu17(I64 a) {return a * 17;}
+I64 Dv25(I64 a) {return a / 25;}
+I64 Md25(I64 a) {return a % 25;}
+U64 UDv25(U64 a) {return a / 25;}
+U64 UMd25(U64 a) {return a % 25;}
+I64 Mu25(I64 a) {return a * 25;}
+I64 Dv31(I64 a) {return a / 31;}
+I64 Md31(I64 a) {return a % 31;}
+U64 UDv31(U64 a) {return a / 31;}
+U64 UMd31(U64 a) {return a % 31;}
+I64 Mu31(I64 a) {return a * 31;}
+I64 Dv32(I64 a) {return a / 32;}
+I64 Md32(I64 a) {return a % 32;}
+U64 UDv32(U64 a) {return a / 32;}
+U64 UMd32(U64 a) {return a % 32;}
+I64 Mu32(I64 a) {return a * 32;}
+I64 Dv64(I64 a) {return a / 64;}
+I64 Md64(I64 a) {return a % 64;}
+U64 UDv64(U64 a) {return a / 64;}
+U64 UMd64(U64 a) {return a % 64;}
+I64 Mu64(I64 a) {return a * 64;}
+I64 Dv100(I64 a) {return a / 100;}
+I64 Md100(I64 a) {return a % 100;}
+U64 UDv100(U64 a) {return a / 100;}
+U64 UMd100(U64 a) {return a % 100;}
+I64 Mu100(I64 a) {return a * 100;}
+I64 Dv127(I64 a) {return a / 127;}
+I64 Md127(I64 a) {return a % 127;}
+U64 UDv127(U64 a) {return a / 127;}
+U64 UMd127(U64 a) {return a % 127;}
+I64 Mu127(I64 a) {return a * 127;}
+I64 Dv128(I64 a) {return a / 128;}
+I64 Md128(I64 a) {return a % 128;}
+U64 UDv128(U64 a) {return a / 128;}
+U64 UMd128(U64 a) {return a % 128;}
+I64 Mu128(I64 a) {return a * 128;}
+I64 Dv255(I64 a) {return a / 255;}
+I64 Md255(I64 a) {return a % 255;}
+U64 UDv255(U64 a) {return a / 255;}
+U64 UMd255(U64 a) {return a % 255;}
+I64 Mu255(I64 a) {return a * 255;}
+I64 Dv256(I64 a) {return a / 256;}
+I64 Md256(I64 a) {return a % 256;}
+U64 UDv256(U64 a) {return a / 256;}
+U64 UMd256(U64 a) {return a % 256;}
+I64 Mu256(I64 a) {return a * 256;}
+I64 Dv1000(I64 a) {return a / 1000;}
+I64 Md1000(I64 a) {return a % 1000;}
+U64 UDv1000(U64 a) {return a / 1000;}
+U64 UMd1000(U64 a) {return a % 1000;}
+I64 Mu1000(I64 a) {return a * 1000;}
+I64 Dv1023(I64 a) {return a / 1023;}
+I64 Md1023(I64 a) {return a % 1023;}
+U64 UDv1023(U64 a) {return a / 1023;}
+U64 UMd1023(U64 a) {return a % 1023;}
+I64 Mu1023(I64 a) {return a * 1023;}
+I64 Dv1024(I64 a) {return a / 1024;}
+I64 Md1024(I64 a) {return a % 1024;}
+U64 UDv1024(U64 a) {return a / 1024;}
+U64 UMd1024(U64 a) {return a % 1024;}
+I64 Mu1024(I64 a) {return a * 1024;}
+I64 Dv4096(I64 a) {return a / 4096;}
+I64 Md4096(I64 a) {return a % 4096;}
+U64 UDv4096(U64 a) {return a / 4096;}
+U64 UMd4096(U64 a) {return a % 4096;}
+I64 Mu4096(I64 a) {return a * 4096;}
+I64 Dv65535(I64 a) {return a / 65535;}
+I64 Md65535(I64 a) {return a % 65535;}
+U64 UDv65535(U64 a) {return a / 65535;}
+U64 UMd65535(U64 a) {return a % 65535;}
+I64 Mu65535(I64 a) {return a * 65535;}
+I64 Dv65537(I64 a) {return a / 65537;}
+I64 Md65537(I64 a) {return a % 65537;}
+U64 UDv65537(U64 a) {return a / 65537;}
+U64 UMd65537(U64 a) {return a % 65537;}
+I64 Mu65537(I64 a) {return a * 65537;}
+I64 Dv1000000(I64 a) {return a / 1000000;}
+I64 Md1000000(I64 a) {return a % 1000000;}
+U64 UDv1000000(U64 a) {return a / 1000000;}
+U64 UMd1000000(U64 a) {return a % 1000000;}
+I64 Mu1000000(I64 a) {return a * 1000000;}
+I64 Dv2147483647(I64 a) {return a / 2147483647;}
+I64 Md2147483647(I64 a) {return a % 2147483647;}
+U64 UDv2147483647(U64 a) {return a / 2147483647;}
+U64 UMd2147483647(U64 a) {return a % 2147483647;}
+I64 Mu2147483647(I64 a) {return a * 2147483647;}
+I64 SA0(I64 a) {return a + (0);}
+I64 SB0(I64 a) {return a - (0);}
+I64 SC0(I64 a) {return a * (0);}
+I64 SD0(I64 a) {return a < (0);}
+U0 SE0(I64 *p) {*p = 0;}
+U0 SF0(I64 *p) {p[3] = 0;}
+U0 SG0(I64 *p) {*p += 0;}
+U0 SH0(U8 *p) {*p = 0;}
+U0 SI0(I16 *p) {*p = 0;}
+U0 SJ0(I32 *p) {*p = 0;}
+I64 SA1(I64 a) {return a + (1);}
+I64 SB1(I64 a) {return a - (1);}
+I64 SC1(I64 a) {return a * (1);}
+I64 SD1(I64 a) {return a < (1);}
+U0 SE1(I64 *p) {*p = 1;}
+U0 SF1(I64 *p) {p[3] = 1;}
+U0 SG1(I64 *p) {*p += 1;}
+U0 SH1(U8 *p) {*p = 1;}
+U0 SI1(I16 *p) {*p = 1;}
+U0 SJ1(I32 *p) {*p = 1;}
+I64 SAm1(I64 a) {return a + (-1);}
+I64 SBm1(I64 a) {return a - (-1);}
+I64 SCm1(I64 a) {return a * (-1);}
+I64 SDm1(I64 a) {return a < (-1);}
+U0 SEm1(I64 *p) {*p = -1;}
+U0 SFm1(I64 *p) {p[3] = -1;}
+U0 SGm1(I64 *p) {*p += -1;}
+U0 SHm1(U8 *p) {*p = -1;}
+U0 SIm1(I16 *p) {*p = -1;}
+U0 SJm1(I32 *p) {*p = -1;}
+I64 SA2(I64 a) {return a + (2);}
+I64 SB2(I64 a) {return a - (2);}
+I64 SC2(I64 a) {return a * (2);}
+I64 SD2(I64 a) {return a < (2);}
+U0 SE2(I64 *p) {*p = 2;}
+U0 SF2(I64 *p) {p[3] = 2;}
+U0 SG2(I64 *p) {*p += 2;}
+U0 SH2(U8 *p) {*p = 2;}
+U0 SI2(I16 *p) {*p = 2;}
+U0 SJ2(I32 *p) {*p = 2;}
+I64 SAm2(I64 a) {return a + (-2);}
+I64 SBm2(I64 a) {return a - (-2);}
+I64 SCm2(I64 a) {return a * (-2);}
+I64 SDm2(I64 a) {return a < (-2);}
+U0 SEm2(I64 *p) {*p = -2;}
+U0 SFm2(I64 *p) {p[3] = -2;}
+U0 SGm2(I64 *p) {*p += -2;}
+U0 SHm2(U8 *p) {*p = -2;}
+U0 SIm2(I16 *p) {*p = -2;}
+U0 SJm2(I32 *p) {*p = -2;}
+I64 SA100(I64 a) {return a + (100);}
+I64 SB100(I64 a) {return a - (100);}
+I64 SC100(I64 a) {return a * (100);}
+I64 SD100(I64 a) {return a < (100);}
+U0 SE100(I64 *p) {*p = 100;}
+U0 SF100(I64 *p) {p[3] = 100;}
+U0 SG100(I64 *p) {*p += 100;}
+U0 SH100(U8 *p) {*p = 100;}
+U0 SI100(I16 *p) {*p = 100;}
+U0 SJ100(I32 *p) {*p = 100;}
+I64 SAm100(I64 a) {return a + (-100);}
+I64 SBm100(I64 a) {return a - (-100);}
+I64 SCm100(I64 a) {return a * (-100);}
+I64 SDm100(I64 a) {return a < (-100);}
+U0 SEm100(I64 *p) {*p = -100;}
+U0 SFm100(I64 *p) {p[3] = -100;}
+U0 SGm100(I64 *p) {*p += -100;}
+U0 SHm100(U8 *p) {*p = -100;}
+U0 SIm100(I16 *p) {*p = -100;}
+U0 SJm100(I32 *p) {*p = -100;}
+I64 SA4095(I64 a) {return a + (4095);}
+I64 SB4095(I64 a) {return a - (4095);}
+I64 SC4095(I64 a) {return a * (4095);}
+I64 SD4095(I64 a) {return a < (4095);}
+U0 SE4095(I64 *p) {*p = 4095;}
+U0 SF4095(I64 *p) {p[3] = 4095;}
+U0 SG4095(I64 *p) {*p += 4095;}
+U0 SH4095(U8 *p) {*p = 4095;}
+U0 SI4095(I16 *p) {*p = 4095;}
+U0 SJ4095(I32 *p) {*p = 4095;}
+I64 SAm4096(I64 a) {return a + (-4096);}
+I64 SBm4096(I64 a) {return a - (-4096);}
+I64 SCm4096(I64 a) {return a * (-4096);}
+I64 SDm4096(I64 a) {return a < (-4096);}
+U0 SEm4096(I64 *p) {*p = -4096;}
+U0 SFm4096(I64 *p) {p[3] = -4096;}
+U0 SGm4096(I64 *p) {*p += -4096;}
+U0 SHm4096(U8 *p) {*p = -4096;}
+U0 SIm4096(I16 *p) {*p = -4096;}
+U0 SJm4096(I32 *p) {*p = -4096;}
+I64 SA40000(I64 a) {return a + (40000);}
+I64 SB40000(I64 a) {return a - (40000);}
+I64 SC40000(I64 a) {return a * (40000);}
+I64 SD40000(I64 a) {return a < (40000);}
+U0 SE40000(I64 *p) {*p = 40000;}
+U0 SF40000(I64 *p) {p[3] = 40000;}
+U0 SG40000(I64 *p) {*p += 40000;}
+U0 SH40000(U8 *p) {*p = 40000;}
+U0 SI40000(I16 *p) {*p = 40000;}
+U0 SJ40000(I32 *p) {*p = 40000;}
+I64 SAm40000(I64 a) {return a + (-40000);}
+I64 SBm40000(I64 a) {return a - (-40000);}
+I64 SCm40000(I64 a) {return a * (-40000);}
+I64 SDm40000(I64 a) {return a < (-40000);}
+U0 SEm40000(I64 *p) {*p = -40000;}
+U0 SFm40000(I64 *p) {p[3] = -40000;}
+U0 SGm40000(I64 *p) {*p += -40000;}
+U0 SHm40000(U8 *p) {*p = -40000;}
+U0 SIm40000(I16 *p) {*p = -40000;}
+U0 SJm40000(I32 *p) {*p = -40000;}
+I64 SA1193046(I64 a) {return a + (1193046);}
+I64 SB1193046(I64 a) {return a - (1193046);}
+I64 SC1193046(I64 a) {return a * (1193046);}
+I64 SD1193046(I64 a) {return a < (1193046);}
+U0 SE1193046(I64 *p) {*p = 1193046;}
+U0 SF1193046(I64 *p) {p[3] = 1193046;}
+U0 SG1193046(I64 *p) {*p += 1193046;}
+U0 SH1193046(U8 *p) {*p = 1193046;}
+U0 SI1193046(I16 *p) {*p = 1193046;}
+U0 SJ1193046(I32 *p) {*p = 1193046;}
+I64 SAm1193046(I64 a) {return a + (-1193046);}
+I64 SBm1193046(I64 a) {return a - (-1193046);}
+I64 SCm1193046(I64 a) {return a * (-1193046);}
+I64 SDm1193046(I64 a) {return a < (-1193046);}
+U0 SEm1193046(I64 *p) {*p = -1193046;}
+U0 SFm1193046(I64 *p) {p[3] = -1193046;}
+U0 SGm1193046(I64 *p) {*p += -1193046;}
+U0 SHm1193046(U8 *p) {*p = -1193046;}
+U0 SIm1193046(I16 *p) {*p = -1193046;}
+U0 SJm1193046(I32 *p) {*p = -1193046;}
+I64 SA78187493530(I64 a) {return a + (78187493530);}
+I64 SB78187493530(I64 a) {return a - (78187493530);}
+I64 SC78187493530(I64 a) {return a * (78187493530);}
+I64 SD78187493530(I64 a) {return a < (78187493530);}
+U0 SE78187493530(I64 *p) {*p = 78187493530;}
+U0 SF78187493530(I64 *p) {p[3] = 78187493530;}
+U0 SG78187493530(I64 *p) {*p += 78187493530;}
+U0 SH78187493530(U8 *p) {*p = 78187493530;}
+U0 SI78187493530(I16 *p) {*p = 78187493530;}
+U0 SJ78187493530(I32 *p) {*p = 78187493530;}

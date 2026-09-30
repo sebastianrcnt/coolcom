@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/007-borrowing/005-anon-borrow-after-consume/Test.aum",
+    "filename": "test-programs/suites/007-borrowing/005-anon-borrow-after-consume/Test.warm",
     "startp": { "line": 10, "column": 8 },
     "end": { "line": 10, "column": 33 }
   },

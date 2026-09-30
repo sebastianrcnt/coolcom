@@ -6,7 +6,7 @@
     { "type": "type", "content": "Foo" }
   ],
   "span": {
-    "filename": "test-programs/suites/007-borrowing/009-dereference-linear/Test.aum",
+    "filename": "test-programs/suites/007-borrowing/009-dereference-linear/Test.warm",
     "startp": { "line": 7, "column": 12 },
     "end": { "line": 7, "column": 27 }
   },

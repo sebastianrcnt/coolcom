@@ -1,21 +1,21 @@
 STDLIB := \
-		../../standard/src/Tuples.aui,../../standard/src/Tuples.aum \
-		../../standard/src/Bounded.aui,../../standard/src/Bounded.aum \
-		../../standard/src/Equality.aui,../../standard/src/Equality.aum \
-		../../standard/src/Order.aui,../../standard/src/Order.aum \
-		../../standard/src/Box.aui,../../standard/src/Box.aum \
-		../../standard/src/Buffer.aui,../../standard/src/Buffer.aum \
-		../../standard/src/String.aui,../../standard/src/String.aum \
-		../../standard/src/StringBuilder.aui,../../standard/src/StringBuilder.aum \
-		../../standard/src/IO/IO.aui,../../standard/src/IO/IO.aum \
-		../../standard/src/IO/Terminal.aui,../../standard/src/IO/Terminal.aum \
+		../../standard/src/Tuples.warmh,../../standard/src/Tuples.warm \
+		../../standard/src/Bounded.warmh,../../standard/src/Bounded.warm \
+		../../standard/src/Equality.warmh,../../standard/src/Equality.warm \
+		../../standard/src/Order.warmh,../../standard/src/Order.warm \
+		../../standard/src/Box.warmh,../../standard/src/Box.warm \
+		../../standard/src/Buffer.warmh,../../standard/src/Buffer.warm \
+		../../standard/src/String.warmh,../../standard/src/String.warm \
+		../../standard/src/StringBuilder.warmh,../../standard/src/StringBuilder.warm \
+		../../standard/src/IO/IO.warmh,../../standard/src/IO/IO.warm \
+		../../standard/src/IO/Terminal.warmh,../../standard/src/IO/Terminal.warm \
 		
 PROG := FFI
 
 ENTRY := Example.$(PROG):main
 
 SRC := \
-	$(PROG).aui,$(PROG).aum
+	$(PROG).warmh,$(PROG).warm
 
 .DEFAULT: all
 all: 

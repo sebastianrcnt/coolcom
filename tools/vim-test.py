@@ -41,7 +41,7 @@ def typed(text):
     return result
 
 
-# Input-script sync (tools/coolvm/README.md): the shell has started (and run C:/Init.HC) and shows its
+# Input-script sync (tools/coolvm/README.md): the shell has started (and run C:/Init.cool) and shows its
 # prompt. Waiting for guest output instead of a fixed boot delay keeps the scripts right when
 # the host is loaded (make -j test); QUIT ends the VM instead of idling until --timeout.
 # A wait text must not occur in the echo of the lines typed before it: print numbers with
@@ -59,16 +59,16 @@ def finish(text, settle=200):
 
 
 def check_init_log(log):
-    marker = 'Running C:/Init.HC\n'
+    marker = 'Running C:/Init.cool\n'
     if marker not in log:
-        raise AssertionError('shell did not run C:/Init.HC')
+        raise AssertionError('shell did not run C:/Init.cool')
     after_init = log.split(marker, 1)[1]
     prompt = re.search(r'(?m)^(?:[A-Z]:\S*)?> ', after_init)  # "C:/> ", or "> " without a drive
     if not prompt:
-        raise AssertionError('shell did not reach a prompt after C:/Init.HC')
+        raise AssertionError('shell did not reach a prompt after C:/Init.cool')
     diagnostics = re.findall(r'^(?:ERROR|WARNING):.*$', after_init[:prompt.start()], re.MULTILINE)
     if diagnostics:
-        raise AssertionError('C:/Init.HC diagnostics:\n' + '\n'.join(diagnostics))
+        raise AssertionError('C:/Init.cool diagnostics:\n' + '\n'.join(diagnostics))
 
 
 # name, starting text, actual input keys, expected text, expected byte cursor.
@@ -179,12 +179,12 @@ def run(args, **kw):
 def screen_test(d, disk, kernel):
     """Exercise framebuffer rendering with a visible wide-character selection."""
     (d / 'screen.png').unlink(missing_ok=True)
-    source = d / 'Screen.HC'
+    source = d / 'Screen.cool'
     source.write_text('I64 count = 42;\n// Cool syntax and Hangul\nU8 *s = "한글";\nif (count) { Print(s); }\n')
-    run(['mcopy', '-o', '-i', str(disk), str(source), '::Screen.HC'])
+    run(['mcopy', '-o', '-i', str(disk), str(source), '::Screen.cool'])
     script = d / 'screen-input.txt'
-    script.write_text(BOOT + typed('Vim("C:/Screen.HC");\n') + wait('NORMAL C:/Screen.HC') +
-                      typed('jj9lv') + wait('VISUAL C:/Screen.HC') + typed('l') + finish('\x1b[3;18H'))
+    script.write_text(BOOT + typed('Vim("C:/Screen.cool");\n') + wait('NORMAL C:/Screen.cool') +
+                      typed('jj9lv') + wait('VISUAL C:/Screen.cool') + typed('l') + finish('\x1b[3;18H'))
     with (d / 'screen.log').open('wb') as out:
         proc = subprocess.run(['gtimeout', '-k', '2', '12', 'build/coolvm', '--headless',
                         '--cpus', '2', '--mem', '1024', '--width', '640', '--height', '480',
@@ -195,11 +195,11 @@ def screen_test(d, disk, kernel):
         raise AssertionError(f'screen VM failed with {proc.returncode}')
     log = (d / 'screen.log').read_text(errors='replace')
     check_init_log(log)
-    # Same ANSI stream is consumed by Fb.HC and the serial console. Check token
+    # Same ANSI stream is consumed by Fb.cool and the serial console. Check token
     # classes, selected wide glyphs, line numbers, status mode and cell cursor.
     for marker in ('\x1b[0;36mI', '\x1b[0;33m4', '\x1b[0;35mi',
                    '\x1b[0;90m/', '\x1b[0;32;44m한글',
-                   '    3 ', 'VISUAL C:/Screen.HC', '\x1b[3;18H'):
+                   '    3 ', 'VISUAL C:/Screen.cool', '\x1b[3;18H'):
         if marker not in log:
             raise AssertionError(f'missing screen marker {marker!r}; see {d / "screen.log"}')
     if not (d / 'screen.png').is_file():
@@ -228,7 +228,7 @@ def main():
     unicode_file.write_bytes(b'abc\n')
     copy(unicode_file, unicode_file.name)
     runner = ['U0 VimTests() {']
-    script = BOOT + typed('#include "C:/Run.HC"\n') + wait('> ')
+    script = BOOT + typed('#include "C:/Run.cool"\n') + wait('> ')
     script += typed('VimTests;\n')
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
         if i:  # the previous editor has quit; the next one gets these keys
@@ -257,7 +257,7 @@ def main():
     script += '1 29 1\n1 56 1\n' + keys_of(46) + '1 56 0\n1 29 0\n' + wait('Break')
     script += typed('Print("BREAKRECOVER %d %d\\n", vim_active, shell_stmt_cleanup);\n')
     script += typed('VimUart;\n')
-    path = d / 'Run.HC'
+    path = d / 'Run.cool'
     path.write_text('\n'.join(runner))
     copy(path, path.name)
     (d / 'input.txt').write_text(script)

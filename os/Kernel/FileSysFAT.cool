@@ -1,0 +1,882 @@
+// FAT32 file system, from TempleOS by Terry A. Davis (public domain) as kept
+// in Aiwnios (nrootconauto, commit e155e87, Src/FileSysFAT.HC).
+//
+// Changes from the original:
+// - no exceptions (the kernel has none yet): failures print and return;
+// - names compare case-insensitively, as FAT requires, and short names show
+//   the NT lower-case flags other systems set (mtools, Windows);
+// - FATNameTo keeps the 8.3 short name within 11 bytes, FAT32FilesDel passes
+//   the short name and not its first char, a removed long name at the end of
+//   the previous cluster is written from that cluster's buffer, and a new
+//   directory's ".." is cluster 0 when its parent is the root;
+// - the FSInfo free cluster count is kept up to date, not set to unknown.
+// UTF-8 kernel names are encoded as validated VFAT UTF-16 sequences.
+
+extern Bool Cd(U8 *dirname = NULL, Bool make_dirs = FALSE);
+extern U0 DirEntryDel(CDirEntry *tmpde);
+extern I64 FileWrite(U8 *filename, U8 *fbuf, I64 size, CDate cdt = 0, I64 attr = 0);
+
+// NTres bits (Windows NT): the short name's base or extension is lower case.
+#define FAT_NT_LOWER_BASE 0x08
+#define FAT_NT_LOWER_EXT  0x10
+
+U0 CDate2Dos(U16 *t, U16 *d, CDate cdt)
+{
+    CDateStruct ds;
+    Date2Struct(&ds, cdt);
+    *d = ds.day_of_mon + (ds.mon + (ds.year - 1980) << 4) << 5;
+    *t = ds.sec >> 1 + (ds.min + ds.hour << 6) << 5;
+}
+
+CDate Dos2CDate(U16 t, U16 d)
+{
+    CDateStruct ds;
+    MemSet(&ds, 0, sizeof(CDateStruct));
+    ds.day_of_mon = d & 0x1F;
+    d = d >> 5;
+    ds.mon = d & 0xF;
+    ds.year = d >> 4 + 1980;
+    ds.sec = (t & 0x1F) * 2;
+    t = t >> 5;
+    ds.min = t & 0x3F;
+    ds.hour = t >> 6;
+    return Struct2Date(&ds);
+}
+
+Bool FAT32Init(CDrv *dv)
+{//Read the boot sector and FSInfo of a FAT32 drive.
+    CFAT32Boot br32;
+    Bool unlock, res = FALSE;
+    unlock = DrvLock(dv);
+    dv->fs_type = FSt_FAT32;
+    if (DrvBlkRead(dv, &br32, dv->drv_offset, 1)) {
+        if (br32.bytes_per_sect != 512 || !br32.sects_per_clus ||
+                br32.sects_per_clus & (br32.sects_per_clus - 1) || br32.sects_per_clus > 128 ||
+                br32.copies_of_fat != 2 || br32.flags & 0x80 || !br32.reserved_sects ||
+                br32.file_system_info_sect >= br32.reserved_sects ||
+                br32.sects > dv->size || br32.sects <= br32.reserved_sects + 2 * br32.sects_per_fat ||
+                (br32.sects - br32.reserved_sects - 2 * br32.sects_per_fat) / br32.sects_per_clus + 2 > br32.sects_per_fat * 128) {
+            if (unlock) DrvUnlock(dv);
+            return FALSE;
+        }
+        dv->size = br32.sects;
+        dv->file_system_info_sect = dv->drv_offset + br32.file_system_info_sect;
+        dv->fat1 = dv->drv_offset + br32.reserved_sects;
+        dv->fat2 = dv->fat1 + br32.sects_per_fat;
+        dv->data_area = dv->fat2 + br32.sects_per_fat - 2 * br32.sects_per_clus;  // Starts at Clus 2
+        dv->spc = br32.sects_per_clus;
+        dv->root_clus = br32.root_clus;
+        DrvFATBlkAlloc(dv);
+        Free(dv->fis);
+        dv->fis = MAlloc(BLK_SIZE);
+        res = DrvBlkRead(dv, dv->fis, dv->file_system_info_sect, 1);
+    }
+    if (unlock)
+        DrvUnlock(dv);
+    return res;
+}
+
+Bool FATNameTo(U8 *dst, U8 *src)
+{//Name to 8.3 short name (11 bytes, space padded).
+    I64 i;
+    U8 *ext;
+    MemSet(dst, ' ', 11);
+    if (!FileNameChk(src))
+        return FALSE;
+    if (!StrCmp(src, "..")) {
+        *dst = '.';
+        dst[1] = '.';
+        return TRUE;
+    } else if (!StrCmp(src, ".")) {
+        *dst = '.';
+        return TRUE;
+    }
+    ext = StrLastOcc(src, ".");
+    i = 0;
+    while (i < 8 && *src && src != ext)
+        if (*src != '.' && *src != ' ')
+            dst[i++] = ToUpper(*src++);
+        else
+            src++;
+    if (ext) {
+        ext++;
+        i = 8;
+        while (i < 11 && *ext)
+            if (*ext != ' ')
+                dst[i++] = ToUpper(*ext++);
+            else
+                ext++;
+    }
+    return TRUE;
+}
+
+I64 FATNameXSum(U8 *src)
+{
+    I64 i, res = 0;
+    for (i = 0; i < 11; i++)
+        if (res & 1)
+            res.u8[0] = 0x80 + res >> 1 + *src++;
+        else
+            res.u8[0] = res >> 1 + *src++;
+    return res;
+}
+
+Bool FATFromName(U8 *dst, U8 *src, I64 nt_res = 0)
+{//8.3 short name to name. nt_res: FAT_NT_LOWER_BASE/EXT.
+    I64 i, j, k = 0;
+    for (j = 7; j >= 0 && src[j] == ' '; j--) {}
+    for (i = 0; i <= j; i++)
+        if (nt_res & FAT_NT_LOWER_BASE)
+            dst[k++] = ToLower(src[i]);
+        else
+            dst[k++] = src[i];
+    for (j = 10; j >= 8 && src[j] == ' '; j--) {}
+    if (*src != '.' && j != 7)
+        dst[k++] = '.';
+    for (i = 8; i <= j; i++)
+        if (nt_res & FAT_NT_LOWER_EXT)
+            dst[k++] = ToLower(src[i]);
+        else
+            dst[k++] = src[i];
+    dst[k++] = 0;
+    return FileNameChk(dst);
+}
+
+U8 fat_long_name_map[13] = {
+    offset(CFAT32DirEntryLong.name1),
+    offset(CFAT32DirEntryLong.name1) + 2,
+    offset(CFAT32DirEntryLong.name1) + 4,
+    offset(CFAT32DirEntryLong.name1) + 6,
+    offset(CFAT32DirEntryLong.name1) + 8,
+    offset(CFAT32DirEntryLong.name2),
+    offset(CFAT32DirEntryLong.name2) + 2,
+    offset(CFAT32DirEntryLong.name2) + 4,
+    offset(CFAT32DirEntryLong.name2) + 6,
+    offset(CFAT32DirEntryLong.name2) + 8,
+    offset(CFAT32DirEntryLong.name2) + 10,
+    offset(CFAT32DirEntryLong.name3),
+    offset(CFAT32DirEntryLong.name3) + 2};
+
+Bool DirLongNameFill(CDirEntry *tmpde, CFAT32DirEntryLong *de, I64 *xsum)
+{//Assemble reverse-ordered UTF-16 slots, then decode once the sequence is complete.
+    I64 ord = de->ord & 31, i, n = 0, cp, lo;
+    U16 wide[261], *w = tmpde->name;
+    U8 *ptr = de;
+    if (de->ord & 0x40) {
+        MemSet(tmpde, 0, sizeof(CDirEntry));
+        tmpde->user_data = ord;
+        *xsum = de->xsum;
+    }
+    if (!ord || ord > 20 || de->ord & 0xA0 || de->type || de->zero ||
+            de->xsum != *xsum || tmpde->user_data != ord) goto lfn_bad;
+    for (i = 0; i < 13; i++)
+        w[(ord - 1) * 13 + i] = *(ptr + fat_long_name_map[i])(U16 *);
+    tmpde->user_data--;
+    if (ord != 1) return TRUE;
+    MemCpy(wide, w, 520);
+    wide[260] = 0;
+    for (i = 0; i < 260 && wide[i] && wide[i] != 0xFFFF; i++) {
+        if (i >= 255) goto lfn_bad;
+        cp = wide[i];
+        if (0xD800 <= cp <= 0xDBFF) {
+            lo = wide[++i];
+            if (i >= 255 || !(0xDC00 <= lo <= 0xDFFF)) goto lfn_bad;
+            cp = 0x10000 + ((cp - 0xD800) << 10) + lo - 0xDC00;
+        } else if (0xDC00 <= cp <= 0xDFFF) goto lfn_bad;
+        n += Utf8Enc(tmpde->name + n, cp);
+    }
+    tmpde->name[n] = 0;
+    if (!FileNameChk(tmpde->name)) goto lfn_bad;
+    return TRUE;
+lfn_bad:
+    MemSet(tmpde, 0, sizeof(CDirEntry));
+    *xsum = -1;
+    return FALSE;
+}
+
+Bool FAT32CDirFill(CDirEntry *tmpde, CFAT32DirEntry *de, CDate _local_time_offset)
+{
+    Bool res;
+    if (tmpde->user_data) tmpde->name[0] = 0;
+    if (tmpde->name[0]) res = TRUE;
+    else res = FATFromName(tmpde->name, de->name, de->NTres);
+    tmpde->user_data = 0;
+    tmpde->clus = de->clus_lo + de->clus_hi << 16;
+    tmpde->size = de->size;
+    tmpde->attr = de->attr;
+    tmpde->datetime = Dos2CDate(de->WrtTime, de->WrtDate) - _local_time_offset;
+    return res;
+}
+
+Bool FAT32DirFill(CFAT32DirEntry *de, CDirEntry *tmpde, I64 *_de_cnt, CDate _local_time_offset,
+                  U8 *short_name = NULL)
+{//At most 20 LFN slots plus the short entry. Names in the kernel are UTF-8.
+    I64 cnt = 0, i, j, n, v;
+    U16 wide[256];
+    U8 sn[11], plain[16], *ptr;
+    CFAT32DirEntryLong *ld;
+    if (!FATNameTo(sn, tmpde->name)) return FALSE;
+    if (short_name) MemCpy(sn, short_name, 11);
+    FATFromName(plain, sn);
+    n = FATNameUtf16(wide, tmpde->name);
+    if (n < 0) return FALSE;
+    if (StrCmp(plain, tmpde->name)) cnt = (n + 12) / 13;
+    MemSet(de, 0, (cnt + 1) * 32);
+    for (i = 0; i < cnt; i++) {
+        ld = &de[i];
+        ld->ord = cnt - i;
+        if (!i) ld->ord |= 0x40;
+        ld->attr = RS_ATTR_LONG_NAME;
+        ld->xsum = FATNameXSum(sn);
+        ptr = ld;
+        for (j = 0; j < 13; j++) {
+            v = (cnt - i - 1) * 13 + j;
+            if (v < n) v = wide[v];
+            else if (v == n) v = 0;
+            else v = 0xFFFF;
+            *(ptr + fat_long_name_map[j])(U16 *) = v;
+        }
+    }
+    MemCpy(de[cnt].name, sn, 11);
+    de[cnt].clus_lo = tmpde->clus.u16[0];
+    de[cnt].clus_hi = tmpde->clus.u16[1];
+    if (!(tmpde->attr & RS_ATTR_DIR)) de[cnt].size = tmpde->size;
+    de[cnt].attr = tmpde->attr;
+    if (!tmpde->datetime) tmpde->datetime = Now;
+    CDate2Dos(&de[cnt].WrtTime, &de[cnt].WrtDate, tmpde->datetime + _local_time_offset);
+    de[cnt].CrtTime = de[cnt].WrtTime;
+    de[cnt].CrtDate = de[cnt].LstAccDate = de[cnt].WrtDate;
+    if (_de_cnt) *_de_cnt = cnt + 1;
+    return TRUE;
+}
+
+Bool FAT32FileFind(CDrv *dv, I64 cur_dir_clus, U8 *name, CDirEntry *_res, I64 fuf_flags = 0)
+{//FUF_JUST_DIRS, FUF_JUST_FILES
+    Bool res = FALSE, unlock;
+    CFAT32DirEntry *buf;
+    I64 xsum = 0, attr, cur_dir_entry, entries_per_clus, hops = 0;
+    U8 dname[CDIR_FILENAME_LEN], alias[16], ch;
+    CDirEntry long_name;
+    MemSet(_res, 0, sizeof(CDirEntry));
+    MemSet(&long_name, 0, sizeof(CDirEntry));
+    if (!DrvChk(dv))
+        return FALSE;
+    if (dv->fs_type != FSt_FAT32)
+        PrintErr("Not FAT32 Drv\n");
+    else if (!CFileNameTo(dname, name))
+        PrintErr("Invalid FileName: \"%s\".\n", name);
+    else {
+        unlock = DrvLock(dv);
+        buf = MAlloc(BLK_SIZE * dv->spc);
+        entries_per_clus = dv->spc << FAT32_ENTRIES_BITS;
+        if (!DrvBlkRead(dv, buf, Clus2Blk(dv, cur_dir_clus), dv->spc)) goto fff_done;
+        cur_dir_entry = 0;
+        while (ch = buf[cur_dir_entry].name[0]) {
+            attr = buf[cur_dir_entry].attr;
+            if (ch != 0xE5) {
+                if (attr & RS_ATTR_LONG_NAME_MASK == RS_ATTR_LONG_NAME)
+                    DirLongNameFill(&long_name, &buf[cur_dir_entry], &xsum);
+                else {
+                    if (!(attr & RS_ATTR_VOL_ID)) {
+                        if (!long_name.user_data && xsum == FATNameXSum(buf[cur_dir_entry].name))
+                            MemCpy(_res, &long_name, sizeof(CDirEntry));
+                        else
+                            MemSet(_res, 0, sizeof(CDirEntry));
+                        FATFromName(alias, buf[cur_dir_entry].name, buf[cur_dir_entry].NTres);
+                        if (!(fuf_flags & FUF_JUST_DIRS && !(attr & RS_ATTR_DIR)) &&
+                                !(fuf_flags & FUF_JUST_FILES && attr & RS_ATTR_DIR) &&
+                                FAT32CDirFill(_res, &buf[cur_dir_entry], dv->fat32_local_time_offset) &&
+                                (!StrICmp(dname, _res->name) || !StrICmp(dname, alias))) {
+                            res = TRUE;
+                            goto fff_done;
+                        }
+                    }
+                    MemSet(&long_name, 0, sizeof(CDirEntry));
+                }
+            } else
+                MemSet(&long_name, 0, sizeof(CDirEntry));
+            if (++cur_dir_entry == entries_per_clus) {
+                if (++hops > dv->size / dv->spc) break;
+                cur_dir_clus = ClusNumNext(dv, cur_dir_clus);
+                if (!(0 < cur_dir_clus < 0x0FFFFFF8))
+                    break;
+                else {
+                    if (!DrvBlkRead(dv, buf, Clus2Blk(dv, cur_dir_clus), dv->spc)) break;
+                    cur_dir_entry = 0;
+                }
+            }
+        }
+        MemSet(_res, 0, sizeof(CDirEntry));
+fff_done:
+        Free(buf);
+        if (unlock)
+            DrvUnlock(dv);
+    }
+    return res;
+}
+
+I64 Name2DirClus(CDrv *dv, U8 *dirname)
+{//(DskStrB.cool) Clus of the directory dirname ("/A/B"), 0 if not found.
+    Bool cont = TRUE, unlock;
+    I64 cur_dir_clus;
+    CDirEntry de;
+    U8 *buf = StrNew(dirname), *buf2 = StrNew(dirname);
+    if (!DrvChk(dv))
+        return 0;
+    unlock = DrvLock(dv);
+    cur_dir_clus = dv->root_clus;
+    while (*buf && cont) {
+        StrFirstRem(buf, "/", buf2);
+        if (*buf2) {
+            cont = FAT32FileFind(dv, cur_dir_clus, buf2, &de, FUF_JUST_DIRS);
+            cur_dir_clus = de.clus;
+            if (!cur_dir_clus)  // ".." to the root
+                cur_dir_clus = dv->root_clus;
+        }
+    }
+    if (!cont) {
+        PrintErr("File not found: \"%s\".\n", dirname);
+        cur_dir_clus = 0;
+    }
+    if (unlock)
+        DrvUnlock(dv);
+    Free(buf);
+    Free(buf2);
+    return cur_dir_clus;
+}
+
+U8 *FAT32FileRead(CDrv *dv, U8 *cur_dir, U8 *filename, I64 *_size, I64 *_attr)
+{
+    U8 *buf = NULL, *seen = NULL;
+    CDirEntry de;
+    I64 c, blocks, pos = 0, n, first, limit;
+    Bool unlock;
+    *_size = *_attr = 0;
+    if (!DrvChk(dv)) return NULL;
+    unlock = DrvLock(dv);
+    first = Name2DirClus(dv, cur_dir);
+    if (!first || !FAT32FileFind(dv, first, filename, &de, FUF_JUST_FILES)) goto read_done;
+    blocks = (de.size + 511) / 512;
+    buf = MAlloc(blocks * 512 + 1);
+    limit = (dv->drv_offset + dv->size - dv->data_area) / dv->spc;
+    seen = CAlloc(limit);
+    c = de.clus;
+    while (blocks) {
+        if (!(2 <= c < limit) || seen[c]) goto read_bad;
+        seen[c] = 1;
+        n = MinI64(blocks, dv->spc);
+        if (!DrvBlkRead(dv, buf + pos, Clus2Blk(dv, c), n)) goto read_bad;
+        pos += n * 512; blocks -= n;
+        c = ClusNumNext(dv, c);
+    }
+    buf[de.size] = 0;
+    *_size = de.size; *_attr = FileAttr(de.name, de.attr);
+    goto read_done;
+read_bad:
+    PrintErr("File read failed: %s\n", filename);
+    Free(buf); buf = NULL;
+read_done:
+    Free(seen);
+    if (unlock) DrvUnlock(dv);
+    return buf;
+}
+
+Bool FAT32Cd(U8 *name, I64 cur_dir_clus)
+{
+    CDirEntry de;
+    CDrv *dv = DrvCur;
+    if (dv->fs_type != FSt_FAT32)
+        PrintErr("Not FAT32 Drv\n");
+    else if (FAT32FileFind(dv, cur_dir_clus, name, &de, FUF_JUST_DIRS))
+        return TRUE;
+    else
+        PrintErr("File not found: \"%s\".\n", name);
+    return FALSE;
+}
+
+U0 FAT32FreeCntAdd(CDrv *dv, I64 n)
+{//Keep FSInfo's free cluster count, unless it is unknown.
+    if (dv->fis->free_clus != 0xFFFFFFFF)
+        dv->fis->free_clus += n;
+    DrvBlkWrite(dv, dv->fis, dv->file_system_info_sect, 1);
+}
+
+U0 FAT32FreeClus(CDrv *dv, I64 c)
+{//Clear both FAT copies together. Clearing each link also terminates a cycle.
+    I64 next, freed = 0, limit = (dv->drv_offset + dv->size - dv->data_area) / dv->spc;
+    Bool unlock = DrvLock(dv);
+    while (2 <= c < limit) {
+        DrvFATBlkSet(dv, c);
+        next = dv->cur_fat_blk[c & 127] & 0x0FFFFFFF;
+        if (!next || next == 0x0FFFFFF7) break;
+        dv->cur_fat_blk[c & 127] = 0;
+        LBts(&dv->fat_blk_dirty, 0);
+        freed++;
+        c = next;
+    }
+    DrvFATBlkClean(dv);
+    FAT32FreeCntAdd(dv, freed);
+    if (unlock) DrvUnlock(dv);
+}
+
+I64 FAT32AllocClus(CDrv *dv, I64 c, I64 cnt)
+{
+    Bool wrap_around = FALSE, unlock;
+    I64 first = INVALID_CLUS, j, l, n = 0, parent = c;
+
+    if (cnt <= 0)
+        return 0x0FFFFFFF;
+    unlock = DrvLock(dv);
+    l = (dv->size + dv->drv_offset - dv->data_area) / dv->spc;
+    j = dv->fis->most_recently_alloced;
+    while (cnt-- > 0) {
+        while (TRUE) {
+            j++;
+            if (j < 2)
+                j = 2;
+            if (j >= l) {
+                if (wrap_around) {
+                    PrintErr("Drive %c: is full\n", Drv2Let(dv));
+                    goto fac_done;
+                }
+                j = 2;
+                wrap_around = TRUE;
+            }
+            DrvFATBlkSet(dv, j);
+            if (!dv->cur_fat_blk[j & (BLK_SIZE / 4 - 1)])
+                break;
+        }
+        if (!(0 < first < 0x0FFFFFF8))
+            first = j;
+        n++;
+        if (0 < c < l) {
+            DrvFATBlkSet(dv, c);
+            dv->cur_fat_blk[c & (BLK_SIZE / 4 - 1)] = j;
+            LBts(&dv->fat_blk_dirty, 0);
+        }
+        c = j;
+        // Reserve immediately so a wrapped scan cannot allocate this cluster twice.
+        DrvFATBlkSet(dv, c);
+        dv->cur_fat_blk[c & 127] = 0x0FFFFFFF;
+        LBts(&dv->fat_blk_dirty, 0);
+    }
+
+fac_done:
+    if (0 < c < l) {
+        DrvFATBlkSet(dv, c);
+        dv->cur_fat_blk[c & (BLK_SIZE / 4 - 1)] = 0x0FFFFFFF;
+        LBts(&dv->fat_blk_dirty, 0);
+    }
+    DrvFATBlkClean(dv);
+
+    dv->fis->most_recently_alloced = j;
+    FAT32FreeCntAdd(dv, -n);
+    if (cnt >= 0) {
+        FAT32FreeClus(dv, first);
+        if (2 <= parent < l) {
+            DrvFATBlkSet(dv, parent);
+            dv->cur_fat_blk[parent & 127] = 0x0FFFFFFF;
+            LBts(&dv->fat_blk_dirty, 0);
+            DrvFATBlkClean(dv);
+        }
+        first = INVALID_CLUS;
+    }
+    if (unlock)
+        DrvUnlock(dv);
+    return first;
+}
+
+I64 FAT32AllocContiguousClus(CDrv *dv, I64 cnt)
+{
+    I64 i, first = 1;
+    Bool cont, unlock;
+
+    if (cnt <= 0)
+        return 0x0FFFFFFF;
+    unlock = DrvLock(dv);
+    while (TRUE) {
+        first++;
+        i = 0;
+        cont = TRUE;
+        while (cont && i < cnt) {
+            if ((first + i + 1) * dv->spc + dv->data_area > dv->size + dv->drv_offset) {
+                PrintErr("Drive %c: has no contiguous space\n", Drv2Let(dv));
+                first = INVALID_CLUS;
+                goto facc_done;
+            }
+            DrvFATBlkSet(dv, first + i);
+            if (dv->cur_fat_blk[(first + i) & (BLK_SIZE / 4 - 1)])
+                cont = FALSE;
+            else
+                i++;
+        }
+        if (!cont)
+            first = first + i;
+        else {
+            DrvFATBlkClean(dv);
+
+            for (i = 0; i < cnt; i++) {
+                DrvFATBlkSet(dv, first + i, 0);
+                if (i + 1 == cnt)
+                    dv->cur_fat_blk[(first + i) & (BLK_SIZE / 4 - 1)] = 0x0FFFFFFF;
+                else
+                    dv->cur_fat_blk[(first + i) & (BLK_SIZE / 4 - 1)] = first + i + 1;
+                LBts(&dv->fat_blk_dirty, 0);
+            }
+            DrvFATBlkClean(dv, 0);
+
+            for (i = 0; i < cnt; i++) {
+                DrvFATBlkSet(dv, first + i, 1);
+                if (i + 1 == cnt)
+                    dv->cur_fat_blk[(first + i) & (BLK_SIZE / 4 - 1)] = 0x0FFFFFFF;
+                else
+                    dv->cur_fat_blk[(first + i) & (BLK_SIZE / 4 - 1)] = first + i + 1;
+                LBts(&dv->fat_blk_dirty, 0);
+            }
+            DrvFATBlkClean(dv, 1);
+            FAT32FreeCntAdd(dv, -cnt);
+            break;
+        }
+    }
+facc_done:
+    if (unlock)
+        DrvUnlock(dv);
+    return first;
+}
+
+I64 FAT32DirBlk(CDrv *dv, I64 clus, I64 entry)
+{//Block holding directory entry number entry of cluster clus.
+    return dv->data_area + clus * dv->spc + (entry >> FAT32_ENTRIES_BITS);
+}
+
+I64 FAT32Limit(CDrv *dv)
+{//Exclusive upper bound on data cluster numbers.
+    return (dv->drv_offset + dv->size - dv->data_area) / dv->spc;
+}
+
+CFAT32DirEntry *FAT32DirLoad(CDrv *dv, I64 first, I64 *_count)
+{//Bounded chain traversal; reject loops and invalid/free links before editing.
+    I64 c = first, n = 0, limit = FAT32Limit(dv), bytes = dv->spc * 512;
+    U8 *seen = CAlloc(limit), *buf;
+    while (2 <= c < limit && !seen[c]) {
+        seen[c] = 1;
+        n++;
+        DrvFATBlkSet(dv, c);
+        c = dv->cur_fat_blk[c & 127] & 0x0FFFFFFF;
+    }
+    Free(seen);
+    if (c < 0x0FFFFFF8) return NULL;
+    buf = MAlloc(n * bytes);
+    c = first;
+    for (c = first, n = 0; c != INVALID_CLUS; c = ClusNumNext(dv, c), n++)
+        if (!DrvBlkRead(dv, buf + n * bytes, Clus2Blk(dv, c), dv->spc)) {Free(buf); return NULL;}
+    *_count = n * bytes / 32;
+    return buf;
+}
+
+Bool FAT32DirStore(CDrv *dv, I64 first, CFAT32DirEntry *buf, I64 count)
+{
+    I64 c = first, n, epc = dv->spc * 16;
+    for (n = 0; n < count; n += epc) {
+        if (c == INVALID_CLUS || !DrvBlkWrite(dv, &buf[n], Clus2Blk(dv, c), dv->spc)) return FALSE;
+        c = ClusNumNext(dv, c);
+    }
+    return TRUE;
+}
+
+Bool FAT32Alias(CFAT32DirEntry *buf, I64 count, U8 *name, U8 *sn)
+{//ASCII aliases are legal OEM names on every host; probe the entire directory.
+    I64 i, j, serial = 0, len;
+    U8 plain[16], base[9], tail[16];
+    Bool collision, simple;
+    FATNameTo(sn, name);
+    for (i = 0; i < 11; i++)
+        if (!(sn[i] == ' ' || sn[i] == '_' || sn[i] == '-' || sn[i] == '~' ||
+                'A' <= sn[i] <= 'Z' || '0' <= sn[i] <= '9')) sn[i] = '_';
+    FATFromName(plain, sn);
+    simple = !StrICmp(plain, name);
+    MemCpy(base, sn, 8);
+    base[8] = 0;
+    do {
+        if (!simple || serial) {
+            serial++;
+            if (serial > 999999) return FALSE;
+            StrPrint(tail, "~%d", serial);
+            len = 8 - StrLen(tail);
+            MemSet(sn, ' ', 8);
+            for (j = 0; j < len && base[j] && base[j] != ' '; j++) sn[j] = base[j];
+            MemCpy(sn + j, tail, StrLen(tail));
+        }
+        collision = FALSE;
+        for (i = 0; i < count && buf[i].name[0]; i++)
+            if (buf[i].name[0] != 0xE5 && buf[i].attr != RS_ATTR_LONG_NAME && !MemCmp(sn, buf[i].name, 11))
+                collision = TRUE;
+        if (simple && collision && !serial) simple = FALSE;
+    } while (collision);
+    return TRUE;
+}
+
+Bool FAT32DirNew(CDrv *dv, U8 *cur_dir, CDirEntry *tmpde, Bool free_old_chain)
+{
+    I64 first, count, i, start = -1, run = 0, cnt, last, c, sum = -1, epc = dv->spc * 16;
+    CFAT32DirEntry *buf, *bigger, de[21];
+    U8 sn[11], alias[16];
+    CDirEntry entry;
+    Bool unlock = DrvLock(dv), ok = FALSE;
+    first = Name2DirClus(dv, cur_dir);
+    buf = FAT32DirLoad(dv, first, &count);
+    if (!buf) goto new_done;
+    MemSet(&entry, 0, sizeof(CDirEntry));
+    for (i = 0; i < count; i++) {
+        if (!buf[i].name[0]) {MemSet(&buf[i], 0, (count - i) * 32); break;}
+        if (buf[i].name[0] == 0xE5) {sum = -1; MemSet(&entry, 0, sizeof(CDirEntry));}
+        else if (buf[i].attr == RS_ATTR_LONG_NAME) DirLongNameFill(&entry, &buf[i], &sum);
+        else {
+            if (sum != FATNameXSum(buf[i].name) || entry.user_data) entry.name[0] = 0;
+            FAT32CDirFill(&entry, &buf[i], dv->fat32_local_time_offset);
+            FATFromName(alias, buf[i].name, buf[i].NTres);
+            if (!(entry.attr & RS_ATTR_VOL_ID) &&
+                    (!StrICmp(entry.name, tmpde->name) || !StrICmp(alias, tmpde->name))) {
+                // Preserve the existing LFN and alias while switching to the new chain.
+                MemCpy(sn, buf[i].name, 11);
+                if (!FAT32DirFill(de, tmpde, &cnt, dv->fat32_local_time_offset, sn)) goto new_done;
+                MemCpy(&buf[i], &de[cnt - 1], 32);
+                ok = FAT32DirStore(dv, first, buf, count);
+                if (ok && free_old_chain && entry.clus != tmpde->clus) FAT32FreeClus(dv, entry.clus);
+                goto new_done;
+            }
+            sum = -1; MemSet(&entry, 0, sizeof(CDirEntry));
+        }
+    }
+    if (!FAT32Alias(buf, count, tmpde->name, sn) ||
+            !FAT32DirFill(de, tmpde, &cnt, dv->fat32_local_time_offset, sn)) goto new_done;
+    for (i = 0; i < count; i++) {
+        if (!buf[i].name[0] || buf[i].name[0] == 0xE5) run++;
+        else run = 0;
+        if (run == cnt) {start = i - cnt + 1; break;}
+    }
+    if (start < 0) {
+        last = first;
+        while ((c = ClusNumNext(dv, last)) != INVALID_CLUS) last = c;
+        start = count - run;
+        while (count - start < cnt + 1) {
+            c = ClusAlloc(dv, last, 1);
+            if (c == INVALID_CLUS) goto new_done;
+            bigger = CAlloc((count + epc) * 32);
+            MemCpy(bigger, buf, count * 32);
+            Free(buf); buf = bigger;
+            count += epc; last = c;
+            if (!DrvBlkWrite(dv, &buf[count - epc], Clus2Blk(dv, c), dv->spc)) goto new_done;
+        }
+    }
+    MemCpy(&buf[start], de, cnt * 32);
+    ok = FAT32DirStore(dv, first, buf, count);
+new_done:
+    Free(buf);
+    if (unlock) DrvUnlock(dv);
+    return ok;
+}
+
+I64 FAT32FilesDel(CDrv *dv, U8 *cur_dir, U8 *mask, I64 flags, Bool del_dir, Bool print_msg)
+{//Caller removes directory children first. Slots may span any number of clusters.
+    I64 first, count, i, j, begin = -1, sum = -1, result = 0, c;
+    CFAT32DirEntry *buf;
+    CDirEntry entry;
+    U8 alias[16];
+    Bool unlock = DrvLock(dv);
+    first = Name2DirClus(dv, cur_dir);
+    buf = FAT32DirLoad(dv, first, &count);
+    MemSet(&entry, 0, sizeof(CDirEntry));
+    if (!buf) {result = -1; goto del_done;}
+    for (i = 0; i < count && buf[i].name[0]; i++) {
+        if (buf[i].name[0] == 0xE5) {begin = -1; sum = -1; goto del_next;}
+        if (buf[i].attr == RS_ATTR_LONG_NAME) {
+            if (buf[i].name[0] & 0x40) begin = i;
+            DirLongNameFill(&entry, &buf[i], &sum);
+            goto del_next;
+        }
+        if (sum != FATNameXSum(buf[i].name) || entry.user_data) entry.name[0] = 0;
+        FAT32CDirFill(&entry, &buf[i], dv->fat32_local_time_offset);
+        FATFromName(alias, buf[i].name, buf[i].NTres);
+        if (!(entry.attr & RS_ATTR_VOL_ID) && StrCmp(entry.name, ".") && StrCmp(entry.name, "..") &&
+                (del_dir || !(entry.attr & RS_ATTR_DIR)) &&
+                (FilesFindMatch(entry.name, mask, flags) || FilesFindMatch(alias, mask, flags))) {
+            c = entry.clus;
+            if (print_msg) Print("Del %s\n", entry.name);
+            if (begin < 0 || sum != FATNameXSum(buf[i].name)) begin = i;
+            for (j = begin; j <= i; j++) buf[j].name[0] = 0xE5;
+            if (!FAT32DirStore(dv, first, buf, count)) {result = -1; goto del_done;}
+            FAT32FreeClus(dv, c);
+            result++;
+        }
+        begin = -1; sum = -1;
+        MemSet(&entry, 0, sizeof(CDirEntry));
+del_next:;
+    }
+del_done:
+    Free(buf);
+    if (unlock) DrvUnlock(dv);
+    return result;
+}
+
+I64 FAT32FileWrite(CDrv *dv, U8 *cur_dir, U8 *name, U8 *buf, I64 size, CDate cdt, I64 attr)
+{
+    CDirEntry de, old;
+    I64 c = INVALID_CLUS, blocks, first, pos, n, next;
+    U8 *padded;
+    Bool unlock = DrvLock(dv);
+    MemSet(&de, 0, sizeof(CDirEntry));
+    if (dv->bd->flags & BDF_READ_ONLY || size < 0 || size > 0xFFFFFFFF || !CFileNameTo(de.name, name) ||
+            !StrCmp(name, ".") || !StrCmp(name, "..")) goto write_done;
+    first = Name2DirClus(dv, cur_dir);
+    if (!first) goto write_done;
+    if (FAT32FileFind(dv, first, name, &old) && old.attr & RS_ATTR_DIR) goto write_done;
+    de.size = size; de.attr = attr; de.datetime = cdt;
+    blocks = (size + 511) / 512;
+    c = 0;
+    if (blocks) c = ClusAlloc(dv, 0, (blocks + dv->spc - 1) / dv->spc, attr & RS_ATTR_CONTIGUOUS);
+    if (c == INVALID_CLUS) goto write_done;
+    de.clus = c;
+    padded = CAlloc(dv->spc * 512);
+    next = c;
+    for (pos = 0; pos < size; pos += dv->spc * 512) {
+        n = MinI64(size - pos, dv->spc * 512);
+        MemSet(padded, 0, dv->spc * 512);
+        MemCpy(padded, buf + pos, n);
+        if (!DrvBlkWrite(dv, padded, Clus2Blk(dv, next), dv->spc)) {
+            Free(padded); FAT32FreeClus(dv, c); c = INVALID_CLUS; goto write_done;
+        }
+        next = ClusNumNext(dv, next);
+    }
+    Free(padded);
+    if (!FAT32DirNew(dv, cur_dir, &de, TRUE)) {
+        FAT32FreeClus(dv, c); c = INVALID_CLUS;
+    }
+write_done:
+    if (unlock) DrvUnlock(dv);
+    return c;
+}
+
+CDirEntry *FAT32FilesFind(U8 *files_find_mask, I64 fuf_flags, CDirEntry *parent = NULL, I64 *_dir_size = NULL)
+{
+    CDrv *dv = DrvCur;
+    CFAT32DirEntry *buf;
+    I64 attr, xsum = 0, dir_size = 0, sub_dir_size, cur_dir_clus, cur_dir_entry, entries_per_clus;
+    U8 ch;
+    CDirEntry *res = NULL, *tmpde, long_name;
+    MemSet(&long_name, 0, sizeof(CDirEntry));
+    DrvLock(dv);
+    cur_dir_clus = Name2DirClus(dv, Fs->cur_dir);
+    if (!cur_dir_clus) {
+        DrvUnlock(dv);
+        return NULL;
+    }
+    buf = MAlloc(BLK_SIZE * dv->spc);
+    entries_per_clus = dv->spc << FAT32_ENTRIES_BITS;
+    ClusRead(dv, buf, cur_dir_clus, 1);
+    dir_size += dv->spc * BLK_SIZE;
+    cur_dir_entry = 0;
+    while (ch = buf[cur_dir_entry].name[0]) {
+        attr = buf[cur_dir_entry].attr;
+        if (ch != 0xE5) {
+            if (attr & RS_ATTR_LONG_NAME_MASK == RS_ATTR_LONG_NAME)
+                DirLongNameFill(&long_name, &buf[cur_dir_entry], &xsum);
+            else {
+                if (!(attr & RS_ATTR_VOL_ID)) {
+                    tmpde = MAlloc(sizeof(CDirEntry));
+                    if (!long_name.user_data && xsum == FATNameXSum(buf[cur_dir_entry].name))
+                        MemCpy(tmpde, &long_name, sizeof(CDirEntry));
+                    else
+                        MemSet(tmpde, 0, sizeof(CDirEntry));
+                    if (FAT32CDirFill(tmpde, &buf[cur_dir_entry], dv->fat32_local_time_offset)) {
+                        tmpde->parent = parent;
+                        if (Bt(&fuf_flags, FUf_RECURSE) && attr & RS_ATTR_DIR && tmpde->name[0] != '.') {
+                            tmpde->next = res;
+                            res = tmpde;
+                            tmpde->full_name = DirNameAbs(tmpde->name);
+                            DrvUnlock(dv);
+                            if (Cd(tmpde->name)) {
+                                tmpde->sub = FAT32FilesFind(files_find_mask, fuf_flags, tmpde, &sub_dir_size);
+                                tmpde->size = sub_dir_size;
+                                Cd("..");
+                            }
+                            DrvLock(dv);
+                        } else {
+                            tmpde->full_name = FileNameAbs(tmpde->name);
+                            if ((attr & RS_ATTR_DIR || !Bt(&fuf_flags, FUf_JUST_DIRS)) &&
+                                    !(Bt(&fuf_flags, FUf_RECURSE) && tmpde->name[0] == '.' && attr & RS_ATTR_DIR) &&
+                                    FilesFindMatch(tmpde->full_name, files_find_mask, fuf_flags)) {
+                                tmpde->next = res;
+                                res = tmpde;
+                            } else
+                                DirEntryDel(tmpde);
+                        }
+                    } else
+                        DirEntryDel(tmpde);
+                }
+                MemSet(&long_name, 0, sizeof(CDirEntry));
+            }
+        } else
+            MemSet(&long_name, 0, sizeof(CDirEntry));
+        if (++cur_dir_entry == entries_per_clus) {
+            cur_dir_clus = ClusNumNext(dv, cur_dir_clus);
+            if (cur_dir_clus == INVALID_CLUS)
+                break;
+            else {
+                ClusRead(dv, buf, cur_dir_clus, 1);
+                dir_size += dv->spc * BLK_SIZE;
+                cur_dir_entry = 0;
+            }
+        }
+    }
+    Free(buf);
+    DrvUnlock(dv);
+    if (_dir_size)
+        *_dir_size = dir_size;
+    return res;
+}
+
+Bool FAT32MkDir(CDrv *dv, U8 *cur_dir, U8 *name, I64 entry_cnt)
+{
+    I64 c, cur_dir_clus = Name2DirClus(dv, cur_dir), clus_bytes = dv->spc << BLK_SIZE_BITS,
+            // Rough estimate of size
+            size = ((entry_cnt + 2) * sizeof(CFAT32DirEntry) + clus_bytes - 1) / clus_bytes * clus_bytes;
+    U8 *buf = CAlloc(size);
+    CDirEntry d_native;
+    CFAT32DirEntry *dFAT = buf;
+
+    if (!cur_dir_clus) {
+        Free(buf);
+        return FALSE;
+    }
+    c = FileWrite(name, buf, size, 0, RS_ATTR_DIR);
+    if (!(0 < c < 0x0FFFFFF8)) {
+        Free(buf);
+        return FALSE;
+    }
+    MemSet(&d_native, 0, sizeof(CDirEntry));
+    d_native.attr = RS_ATTR_DIR;
+    d_native.name[0] = '.';
+    d_native.name[1] = 0;
+    d_native.clus = c;
+    d_native.size = 0;
+    d_native.datetime = Now;
+    FAT32DirFill(dFAT, &d_native, NULL, dv->fat32_local_time_offset);
+    dFAT++;
+
+    MemSet(&d_native, 0, sizeof(CDirEntry));
+    d_native.attr = RS_ATTR_DIR;
+    d_native.name[0] = '.';
+    d_native.name[1] = '.';
+    d_native.name[2] = 0;
+    if (cur_dir_clus == dv->root_clus)
+        d_native.clus = 0;  // FAT: ".." of a child of the root is 0
+    else
+        d_native.clus = cur_dir_clus;
+    d_native.size = 0;
+    d_native.datetime = Now;
+    FAT32DirFill(dFAT, &d_native, NULL, dv->fat32_local_time_offset);
+    c = DrvBlkWrite(dv, buf, Clus2Blk(dv, c), dv->spc);
+    Free(buf);
+    return c;
+}

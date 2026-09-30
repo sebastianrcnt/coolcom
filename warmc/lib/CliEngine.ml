@@ -112,8 +112,8 @@ and print_compile_usage _: unit =
   print_endline "                    `exe` target.";
   print_endline "";
   print_endline "Positional arguments:";
-  print_endline "    module    Of the form 'file.aui,file.aum' for modules with";
-  print_endline "              both an interface and body file, or 'file.aum' for";
+  print_endline "    module    Of the form 'file.warmh,file.warm' for modules with";
+  print_endline "              both an interface and body file, or 'file.warm' for";
   print_endline "              modules with only a body."
 
 and exec_compile (modules: mod_source list) (target: target) (error_reporting_mode: error_reporting_mode): unit =

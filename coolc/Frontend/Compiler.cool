@@ -1,0 +1,20 @@
+// Translated from Aiwnios Src/Compiler.HC (nrootconauto, BSD-3), commit e155e87.
+CCmpGlbls cmp;
+#include "OptLib.cool"
+#include "CInit.cool"
+#include "AsmLib.cool"
+#include "CExcept.cool"
+#include "LexLib.cool"
+#include "Lex.cool"
+#include "PrsLib.cool"
+#include "PrsVar.cool"
+#include "CMisc.cool"
+CmpLoadDefines;
+CmpFillTables;
+CMiscInit;
+#include "AIWNIOS_PrsExp.cool"
+#include "AIWNIOS_CodeGen.cool"
+#include "PrsStmt.cool";
+#include "AsmResolve.cool"
+#include "CMain.cool"
+//AiwniosAotCompile("HCRT_TOS.HC","HCRT.BIN")

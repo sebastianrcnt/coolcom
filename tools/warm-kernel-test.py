@@ -28,18 +28,18 @@ def main():
     for name, diagnostic in (("Leak", "not consumed"), ("DoubleClose", "consumed"),
                              ("NoCapability", "Type Error"), ("Forge", "callable named `Filesystem`")):
         result = subprocess.run([str(ROOT / "warmc/warmc"), "compile",
-            str(MODULE / "Kernel.aui") + "," + str(MODULE / "Kernel.aum"),
-            str(ROOT / "warmc/test-programs/kernel" / (name + ".aum")),
+            str(MODULE / "Kernel.warmh") + "," + str(MODULE / "Kernel.warm"),
+            str(ROOT / "warmc/test-programs/kernel" / (name + ".warm")),
             "--entrypoint=" + name + ":main", "--target-type=hc",
-            "--output=" + str(OUT / (name + ".HC"))], cwd=OUT, capture_output=True)
+            "--output=" + str(OUT / (name + ".cool"))], cwd=OUT, capture_output=True)
         diagnostic_text = (result.stdout + result.stderr).decode(errors="replace")
         (OUT / (name + ".log")).write_text(diagnostic_text)
         assert result.returncode and diagnostic in diagnostic_text, diagnostic_text
         print("warm-kernel: rejects " + name, flush=True)
     # Exercise Unit/U0, scalar and decayed-span foreign calls directly.
-    foreign_hc = OUT / "ForeignUnit.HC"
+    foreign_hc = OUT / "ForeignUnit.cool"
     foreign_bin = OUT / "ForeignUnit.BIN"
-    run(ROOT / "warmc/warmc", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.aum",
+    run(ROOT / "warmc/warmc", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.warm",
         "--entrypoint=ForeignUnit:main", "--target-type=hc", "--output=" + str(foreign_hc))
     compiled = run("env", "COOLC_COMPILER_BIN=" + str(ROOT / "coolc/seed/Compiler.BIN"),
                    ROOT / "build/coolc", foreign_hc, foreign_bin)
@@ -50,26 +50,26 @@ def main():
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
-    run("mcopy", "-o", "-i", disk, MODULE / "Adapter.HC", "::")
+    run("mcopy", "-o", "-i", disk, MODULE / "Adapter.cool", "::")
     for name in ("Files", "Screen", "Key", "Errors"):
         if args.filter not in name:
             continue
-        hc = OUT / (name + ".HC")
+        hc = OUT / (name + ".cool")
         run(ROOT / "warmc/warmc", "compile",
-            str(MODULE / "Kernel.aui") + "," + str(MODULE / "Kernel.aum"),
-            ROOT / "warmc/examples/kernel" / (name + ".aum"),
+            str(MODULE / "Kernel.warmh") + "," + str(MODULE / "Kernel.warm"),
+            ROOT / "warmc/examples/kernel" / (name + ".warm"),
             "--entrypoint=" + name + ":main", "--target-type=hc", "--output=" + str(hc))
         prefix = ""
         if name == "Errors":
             prefix = ("I64 WarmThrowWrite(U8 *p, U8 *d, I64 n) { throw('WarmTest'); return 0; }\n"
                       "#define FileWrite WarmThrowWrite\n")
-        hc.write_text(prefix + '#include "C:/Adapter.HC"\n' +
+        hc.write_text(prefix + '#include "C:/Adapter.cool"\n' +
                       hc.read_text())
         run("mcopy", "-o", "-i", disk, hc, "::")
         script = OUT / (name + ".input")
         marker = "WARM " + name.upper().replace("FILES", "FILE") + " PASS"
         # Type once the shell prompts; stop the VM once the program has passed (coolvm wait/quit).
-        script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/' + name + '.HC"') +
+        script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/' + name + '.cool"') +
                           ("wait WARM KEY READY\n" + kv.keys_of(45) if name == "Key" else "") +
                           "wait " + marker + "\ndelay 200\nquit\n")
         log = OUT / (name + ".log")

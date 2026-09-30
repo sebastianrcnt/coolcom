@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Package the kernel's assembly for MakeKernel, the in-OS kernel linker
-(os/Kernel/MakeKernel.HC, docs/kernel-rebuild.md).
+(os/Kernel/MakeKernel.cool, docs/kernel-rebuild.md).
 
 The OS has no assembler, so the assembly (Boot.S, Arch.S, Blob.S with the
 compiler seed, FontData.S) is the one prebuilt part. Its input is a link of

@@ -11,7 +11,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
            COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
 cmd = [ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN']
-source = OUT / 'Library.aum'
+source = OUT / 'Library.warm'
 source.write_text('''module body Library is
 pragma Foreign_Export(External_Name => "exported_increment");
 function increment(x: Int32): Int32 is return x + 1; end;
@@ -26,7 +26,7 @@ def run(command, label):
     (OUT / (label + '.stderr')).write_bytes(p.stderr)
     return p
 
-out = OUT / 'Library.HC'
+out = OUT / 'Library.cool'
 p = run([*cmd, 'compile', source, '--no-entrypoint', '--target-type=hc', '--output=' + str(out)], 'library')
 assert p.returncode == 0, p.stdout + p.stderr
 text = out.read_text()
@@ -37,14 +37,14 @@ assert p.returncode == 0 and b'Errs:0 ' in p.stdout, p.stdout + p.stderr
 p = run([ROOT / 'build/coolc', '--run', OUT / 'Library.BIN'], 'execute')
 assert (p.returncode, p.stdout, p.stderr) == (0, b'20\n', b''), p
 checks += ['no-entrypoint', 'exported-call']
-bad = OUT / 'Bad.aum'
+bad = OUT / 'Bad.warm'
 bad.write_text('module body Broken is\nfunction main(): ExitCode is\nreturn ;\nend;\nend module body.\n')
 p = run([*cmd, '--parse', bad, '--error-format=json'], 'json')
 error = json.loads(p.stderr)
 assert p.returncode == 1 and error['kind'] == 'Parse Error'
 assert error['span']['filename'] == str(bad) and error['span']['startp']['line'] == 3
 p = run([*cmd, '--parse', bad], 'caret')
-assert p.returncode == 1 and b'Bad.aum:3:' in p.stdout and b'\nreturn ;\n       ^\n' in p.stdout, p.stdout
+assert p.returncode == 1 and b'Bad.warm:3:' in p.stdout and b'\nreturn ;\n       ^\n' in p.stdout, p.stdout
 checks += ['json-location', 'plain-caret']
 p = run([*cmd, source, '--target-type=invalid', '--error-format=json'], 'invalid-option')
 assert p.returncode == 1 and b'Command Line Arguments Error' in p.stdout + p.stderr

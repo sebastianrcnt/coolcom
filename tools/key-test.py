@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ctrl+B, Up and Esc must give the same key events (os/Kernel/Key.HC) from the VM
+"""Ctrl+B, Up and Esc must give the same key events (os/Kernel/Key.cool) from the VM
 window's input FIFO and from the host terminal on the UART.
 
 The window types a shell line that prints six GetKey events, then Ctrl+B, Up, Esc;

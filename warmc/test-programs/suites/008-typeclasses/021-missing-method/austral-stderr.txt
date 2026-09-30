@@ -8,7 +8,7 @@
     { "type": "text", "content": "required method is missing" }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/021-missing-method/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/021-missing-method/Test.warm",
     "startp": { "line": 4, "column": 8 },
     "end": { "line": 6, "column": 8 }
   },

@@ -1,0 +1,255 @@
+// MakeKernel: the OS builds its own kernel Image from C:/Kernel, as the host's
+// `make` does (docs/kernel-rebuild.md). Cmp compiles Kernel.cool to Kernel.BIN,
+// KLink (KLink.cool, the port of tools/binlink.py) links the module, and this
+// file assembles the Image as Kernel.ld and objcopy do: the boot stub at the
+// image base, the module at MODULE_BASE, the console font after the module's
+// zeroed globals. The assembly is the one prebuilt part: BootStub.BIN (made by
+// tools/mkbootstub.py) holds its linked bytes, its symbols and the relocations
+// that refer to the module or to what follows it; they are applied here.
+
+#define STUB_R_PREL64      260
+#define STUB_R_ADR_LO21    274
+#define STUB_R_ADR_PG_HI21 275
+#define STUB_R_ADD_LO12    277
+#define STUB_R_CONDBR19    280
+#define STUB_R_JUMP26      282
+#define STUB_R_CALL26      283
+
+class CStubHdr
+{
+    U8 magic[8];
+    I64 image_base, module_base, text_size, mmu_size, nrelocs, narch, pool_size;
+};
+
+class CStubReloc
+{
+    U32 at, type;
+    I64 addend, val, name;
+};
+
+class CStubArch
+{
+    I64 val, name;
+};
+
+class CStubLayout
+{//Where things land after the module (Kernel.ld).
+    I64 font, mmu, image_end;
+};
+
+I64 StubSymVal(CKLink *l, CStubLayout *lay, U8 *name, Bool *_found)
+{
+    *_found = TRUE;
+    if (!StrCmp(name, ".fontdata"))
+        return lay->font;
+    if (!StrCmp(name, ".mmutables"))
+        return lay->mmu;
+    if (!StrCmp(name, "image_end"))
+        return lay->image_end;
+    return KLLdSym(l, name, _found);
+}
+
+Bool StubFits(I64 v, I64 bits)
+{//v fits a signed bits-bit field.
+    return -(1 << (bits - 1)) <= v < 1 << (bits - 1);
+}
+
+Bool StubReloc(U8 *img, I64 base, CStubReloc *r, I64 s, U8 *name)
+{//Apply one AArch64 relocation (ELF for the Arm 64-bit Architecture, 5.7) at img + r->at.
+    I64 p = base + r->at, x = s + r->addend, ins = 0, imm;
+    MemCpy(&ins, img + r->at, 4);
+    switch (r->type) {
+        case STUB_R_PREL64:
+            x -= p;
+            MemCpy(img + r->at, &x, 8);
+            return TRUE;
+        case STUB_R_ADR_PG_HI21:
+        case STUB_R_ADR_LO21:
+            if (r->type == STUB_R_ADR_PG_HI21)
+                imm = ((x & ~0xFFF) - (p & ~0xFFF)) >> 12;
+            else
+                imm = x - p;
+            if (!StubFits(imm, 21))
+                goto range;
+            ins = ins & ~0x60FFFFE0 | (imm & 3) << 29 | (imm >> 2 & 0x7FFFF) << 5;
+            break;
+        case STUB_R_ADD_LO12:
+            ins = ins & ~(0xFFF << 10) | (x & 0xFFF) << 10;
+            break;
+        case STUB_R_CONDBR19:
+            x -= p;
+            if (x & 3 || !StubFits(x >> 2, 19))
+                goto range;
+            ins = ins & ~(0x7FFFF << 5) | (x >> 2 & 0x7FFFF) << 5;
+            break;
+        case STUB_R_JUMP26:
+        case STUB_R_CALL26:
+            x -= p;
+            if (x & 3 || !StubFits(x >> 2, 26))
+                goto range;
+            ins = ins & ~0x3FFFFFF | x >> 2 & 0x3FFFFFF;
+            break;
+        default:
+            PrintErr("MakeKernel: relocation type %d at %X is not handled\n", r->type, p);
+            return FALSE;
+    }
+    MemCpy(img + r->at, &ins, 4);
+    return TRUE;
+range:
+    PrintErr("MakeKernel: %s is out of range of the type-%d relocation at %X\n", name, r->type, p);
+    return FALSE;
+}
+
+U8 *MakeKernelRead(U8 *dir, U8 *name, I64 *_size)
+{
+    U8 *path = MStrPrint("%s/%s", dir, name), *res = FileRead(path, _size);
+    if (!res)
+        PrintErr("MakeKernel: cannot read %s\n", path);
+    Free(path);
+    return res;
+}
+
+U8 *KernelImage(U8 *bin, I64 bin_size, U8 *stub, I64 stub_size, U8 *prelude, I64 prelude_size,
+                U8 *ops, I64 ops_size, U8 *font, I64 font_size, I64 *_size, U8 **_syms_ld = NULL,
+                I64 *_syms_ld_size = NULL)
+{//Link Kernel.BIN with the prebuilt assembly (BootStub.BIN) and the blobs into an
+    //Image; NULL on error. *_syms_ld gets the text binlink.py writes to syms.ld.
+    CStubHdr *h = stub;
+    CStubReloc *rel;
+    CStubArch *sa;
+    CBinSym *arch;
+    CStubLayout lay;
+    CKLink *l;
+    U8 *pool, *img = NULL, *blob_names[2], *blobs[2], *name;
+    I64 k, off, size, blob_sizes[2], s, errs = 0;
+    Bool found;
+    if (stub_size < sizeof(CStubHdr) || MemCmp(h->magic, "CoolStub", 8)) {
+        PrintErr("MakeKernel: not a BootStub.BIN\n");
+        return NULL;
+    }
+    off = sizeof(CStubHdr) + KLAlign(h->text_size, 8);
+    rel = stub + off;
+    sa = rel(U8 *) + h->nrelocs * sizeof(CStubReloc);
+    pool = sa(U8 *) + h->narch * sizeof(CStubArch);
+    if (pool + h->pool_size != stub + stub_size) {
+        PrintErr("MakeKernel: BootStub.BIN is truncated\n");
+        return NULL;
+    }
+    arch = MAlloc(h->narch * sizeof(CBinSym) + 8);
+    for (k = 0; k < h->narch; k++) {
+        arch[k].name = pool + sa[k].name;
+        arch[k].val = sa[k].val;
+    }
+    blob_names[0] = "SHELL_PRELUDE";
+    blobs[0] = prelude;
+    blob_sizes[0] = prelude_size;
+    blob_names[1] = "ARM64_OPS";
+    blobs[1] = ops;
+    blob_sizes[1] = ops_size;
+    l = KLink(bin, bin_size, h->module_base, arch, h->narch, blob_names, blobs, blob_sizes, 2);
+    if (l->errs)
+        goto done;
+    if (h->text_size > h->module_base - h->image_base) {
+        PrintErr("MakeKernel: boot stub overlaps the kernel module\n");
+        goto done;
+    }
+    lay.font = l->kbss_end;  // .fontdata (16-byte aligned, as KBSS_END is)
+    lay.mmu = KLAlign(lay.font + font_size, 16384);
+    lay.image_end = lay.mmu + h->mmu_size;
+    size = lay.font + font_size - h->image_base;
+    img = CAlloc(size);
+    MemCpy(img, stub + sizeof(CStubHdr), h->text_size);
+    MemCpy(img + h->module_base - h->image_base, l->img, l->len);
+    MemCpy(img + lay.font - h->image_base, font, font_size);
+    for (k = 0; k < h->nrelocs; k++) {
+        if (rel[k].name < 0) {
+            s = rel[k].val;
+            name = "a stub symbol";
+        } else {
+            name = pool + rel[k].name;
+            s = StubSymVal(l, &lay, name, &found);
+            if (!found) {
+                PrintErr("MakeKernel: the assembly needs %s, which the module lacks\n", name);
+                errs++;
+            }
+        }
+        if (!StubReloc(img, h->image_base, &rel[k], s, name))
+            errs++;
+    }
+    if (errs) {
+        Free(img);
+        img = NULL;
+        goto done;
+    }
+    *_size = size;
+    if (_syms_ld)
+        *_syms_ld = KLinkSymsLd(l, _syms_ld_size);
+    "Linked: %d relocation sites, %d symbols, module %X..%X, Image %d bytes\n",
+            l->nsites, l->nksyms, l->org, l->kbss_end, size;
+done:
+    Free(arch);
+    Free(l->img);
+    Free(l->tab);
+    Free(l->imps);
+    Free(l->globs);
+    Free(l->abss);
+    Free(l->mains);
+    Free(l->sites);
+    Free(l->blob_addrs);
+    Free(l);
+    return img;
+}
+
+I64 MakeKernel(U8 *out = "C:/Kernel.Image", U8 *dir = "C:/Kernel", U8 *prelude = "C:/Kernel.coolh")
+{//Build a kernel Image from the sources in dir: compile dir/Kernel.cool to
+    //dir/Kernel.BIN, link it with dir/BootStub.BIN (the prebuilt assembly), the
+    //shell prelude, dir/Arm64Ops.csv and dir/Unifont.BIN, and write out (and
+    //dir/Syms.ld, binlink.py's syms.ld). Boot it with Reboot(out). Returns 0 on success.
+    U8 *src = MStrPrint("%s/Kernel.cool", dir), *bin_name = MStrPrint("%s/Kernel.BIN", dir),
+            *ld_name = MStrPrint("%s/Syms.ld", dir), *bin = NULL, *stub = NULL, *pre = NULL,
+            *ops = NULL, *font = NULL, *img = NULL, *ld = NULL;
+    I64 res = 1, bin_size, stub_size, pre_size, ops_size, font_size, img_size, ld_size;
+    F64 t0 = tS;
+    if (!FileFind(src)) {  // an old disk: Kernel.HC and Kernel.HH
+        Free(src);
+        src = MStrPrint("%s/Kernel.HC", dir);
+    }
+    if (!FileFind(prelude) && FileFind("C:/Kernel.HH"))
+        prelude = "C:/Kernel.HH";
+    "Compiling %s\n", src;
+    if (Cmp(src, bin_name))
+        goto done;
+    if (!(bin = FileRead(bin_name, &bin_size))) {
+        PrintErr("MakeKernel: cannot read %s\n", bin_name);
+        goto done;
+    }
+    if (!(stub = MakeKernelRead(dir, "BootStub.BIN", &stub_size)) ||
+            !(ops = MakeKernelRead(dir, "Arm64Ops.csv", &ops_size)) ||
+            !(font = MakeKernelRead(dir, "Unifont.BIN", &font_size)))
+        goto done;
+    if (!(pre = FileRead(prelude, &pre_size))) {
+        PrintErr("MakeKernel: cannot read %s\n", prelude);
+        goto done;
+    }
+    if (!(img = KernelImage(bin, bin_size, stub, stub_size, pre, pre_size, ops, ops_size, font,
+                            font_size, &img_size, &ld, &ld_size)))
+        goto done;
+    if (FileWrite(ld_name, ld, ld_size) == INVALID_CLUS || FileWrite(out, img, img_size) == INVALID_CLUS) {
+        PrintErr("MakeKernel: cannot write %s\n", out);
+        goto done;
+    }
+    "Wrote %s (%d bytes) in %.2f s\n", out, img_size, tS - t0;
+    res = 0;
+done:
+    Free(src);
+    Free(bin_name);
+    Free(ld_name);
+    Free(bin);
+    Free(stub);
+    Free(pre);
+    Free(ops);
+    Free(font);
+    Free(img);
+    Free(ld);
+    return res;
+}

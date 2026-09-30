@@ -146,5 +146,7 @@ If there are no blank-lines, returns zero and the empty string."
 
 (add-to-list 'auto-mode-alist '("\\.aui\\'" . austral-mode))
 (add-to-list 'auto-mode-alist '("\\.aum\\'" . austral-mode))
+(add-to-list 'auto-mode-alist '("\\.warmh\\'" . austral-mode))
+(add-to-list 'auto-mode-alist '("\\.warm\\'" . austral-mode))
 
 (provide 'austral-mode)

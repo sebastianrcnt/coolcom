@@ -25,6 +25,8 @@
           "austral"
         ],
         "extensions": [
+          ".warm",
+          ".warmh",
           ".aum",
           ".aui"
         ],

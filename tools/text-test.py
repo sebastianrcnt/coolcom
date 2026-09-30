@@ -3,7 +3,7 @@
 by typed shell statements; results from the UART stream, the disk files and one screenshot.
 
 Man opens Vim (or Less, for a file over Vim's 128 KiB) at the symbol's file and line, found from the
-compiler's symbol table (Vim.HC's own functions) or the kernel sources on the disk (C:/Kernel).
+compiler's symbol table (Vim.cool's own functions) or the kernel sources on the disk (C:/Kernel).
 """
 import importlib.util
 import pathlib
@@ -68,7 +68,7 @@ def main():
     for i, sym in enumerate(('VimOpen', 'StrLen', 'jiffies', 'VIM_CAP', 'CTask', 'I64', 'NoSuchSymbol')):
         script += line(f'Print("\\nSTEP-MAN{i}\\n"); Man("{sym}");', 700)
         if sym == 'CTask':
-            script += keys('q')  # KernelA.HH is too big for Vim: opened in Less
+            script += keys('q')  # KernelA.coolh is too big for Vim: opened in Less
         elif sym not in ('I64', 'NoSuchSymbol'):
             script += keys(':q\n')
     # Less: paging, search, and (left open for the screenshot) a wide-character line.
@@ -82,7 +82,7 @@ def main():
                        stdout=out, stderr=subprocess.STDOUT)
     raw = (d / 'vm.log').read_text(errors='replace')
     vim.check_init_log(raw)
-    after = raw.split('Running C:/Init.HC', 1)[-1]
+    after = raw.split('Running C:/Init.cool', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
 
     def part(a, b=None):
@@ -99,7 +99,7 @@ def main():
 
     find = strip(part('FIND', 'HEX')).replace('\r', '')
     for m in ('C:/A.TXT,1: alpha one', 'C:/A.TXT,3: alpha three', 'C:/B.TXT,1: alpha one', 'C:/B.TXT,4: alpha three',
-              'C:/Kernel/Console.HC,41: I64 Utf8Width(I64 cp)', 'C:/Kernel/Key.HC,'):
+              'C:/Kernel/Console.cool,41: I64 Utf8Width(I64 cp)', 'C:/Kernel/Key.cool,'):
         need(find, m)
     if 'beta' in find.split('Utf8Width')[0]:
         failures.append('Find printed a line without the text')
@@ -116,12 +116,12 @@ def main():
     if merged != B:
         failures.append(f'merged C.TXT is {merged!r}, expected {B!r}')
     man = {i: strip(part(f'MAN{i}', f'MAN{i + 1}' if i < 6 else 'LESS')).replace('\r', '') for i in range(7)}
-    need(man[0], 'VimOpen: function, C:/Vim.HC:')
-    m = re.search(r'VimOpen: function, C:/Vim.HC:(\d+)', man[0])
+    need(man[0], 'VimOpen: function, C:/Vim.cool:')
+    m = re.search(r'VimOpen: function, C:/Vim.cool:(\d+)', man[0])
     if m:
         # Vim's first screen holds that line, numbered, near the top.
         need(man[0], f'{int(m.group(1)):5d} ')
-        src = (ROOT / 'os/Disk/Vim.HC').read_text().split('\n')
+        src = (ROOT / 'os/Disk/Vim.cool').read_text().split('\n')
         if not src[int(m.group(1)) - 1].startswith('Bool VimOpen('):
             failures.append(f'VimOpen line {m.group(1)} is {src[int(m.group(1)) - 1]!r}')
     def line_of(path, pattern):
@@ -130,16 +130,16 @@ def main():
                 return n
         return None
     for i, (sym, kind, path, pattern) in enumerate((
-            ('StrLen', 'function', 'os/Kernel/KUtils.HC', r'I64 StrLen\('),
-            ('jiffies', 'global variable', 'os/Kernel/Timer.HC', r'I64 jiffies\b')), 1):
+            ('StrLen', 'function', 'os/Kernel/KUtils.cool', r'I64 StrLen\('),
+            ('jiffies', 'global variable', 'os/Kernel/Timer.cool', r'I64 jiffies\b')), 1):
         want = line_of(ROOT / path, pattern)
         if want is None or f'{sym}: {kind}, C:/Kernel/{pathlib.Path(path).name}:{want}\n' not in man[i]:
             failures.append(f'Man({sym}): expected {kind} at {path}:{want}; got {man[i][:200]!r}')
         else:
             need(man[i], f'{want:5d} ')
-    need(man[3], 'VIM_CAP: #define, C:/Vim.HC:4\n')
-    need(man[4], 'CTask: type, C:/Kernel/KernelA.HH:')
-    need(man[4], 'C:/Kernel/KernelA.HH is too big for Vim; opening it in Less')
+    need(man[3], 'VIM_CAP: #define, C:/Vim.cool:4\n')
+    need(man[4], 'CTask: type, C:/Kernel/KernelA.coolh:')
+    need(man[4], 'C:/Kernel/KernelA.coolh is too big for Vim; opening it in Less')
     need(man[4], 'class CTask')
     need(man[5], 'I64 is a built-in type')
     need(man[6], 'Man: unknown symbol NoSuchSymbol')

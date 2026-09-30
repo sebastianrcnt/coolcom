@@ -29,37 +29,37 @@ numeric conversion. Postfix casts are used intentionally for bit reinterpretatio
 
 ## Implemented passes
 
-1. `Lexer.HC`, `Parser.HC`: all grammar forms, interfaces/bodies, docstrings,
+1. `Lexer.cool`, `Parser.cool`: all grammar forms, interfaces/bodies, docstrings,
    literals, pragmas, generic/typeclass declarations, aggregates, paths, cases,
    borrowing and expressions. Warm's explicit binary grouping is preserved.
-2. `Resolve.HC`: module/declaration indexing, interface/body pairing, imports
+2. `Resolve.cool`: module/declaration indexing, interface/body pairing, imports
    and aliases, implicit Pervasive, lexical scopes and nominal identities.
    Public function/constant/instance signatures use interface imports; bodies
    use implementation imports. Opaque representations stay private.
-3. `Types.HC`, `Fold.HC`, `Check.HC`: universes, substitution and inference,
+3. `Types.cool`, `Fold.cool`, `Check.cool`: universes, substitution and inference,
    generic constraints, visible/coherent instances and contracts, interface
    signatures, complete aggregate/case payloads, return paths and expressions.
    Integer constant expressions use signed decimal bignums before range checks;
    intermediate overflow cannot silently change a constant. Decimal float
    literals are rounded exactly to binary64, bypassing the HolyC lexer.
-4. `Linear.HC`: per-declaration live/consumed/read-loan/write-loan states,
+4. `Linear.cool`: per-declaration live/consumed/read-loan/write-loan states,
    temporary loans, branch snapshots/merges, loop invariants, scope exits,
    consumption assignment and reborrowing. Fresh nominal region identities
    prevent anonymous borrow escape. Borrow statement mode follows its operator,
    as in the reference parser (the displayed type annotation is not authoritative).
-5. `Emit.HC`: discover reachable concrete instantiations, specialize typeclass
+5. `Emit.cool`: discover reachable concrete instantiations, specialize typeclass
    methods, lower checked operators to Pervasive implementations, emit packed
    records and overlapping union payloads. Aggregates use pointer arguments and
    out-pointer returns, including function-pointer calls. Temporary assignments
    preserve evaluation order, copies and short-circuit behavior. Integer widths
    are normalized explicitly. `Foreign_Export` roots are retained; no-entrypoint
    mode emits concrete library functions without a main invocation.
-6. `Diagnostic.HC`: a first-error record, plain filename/line/column/excerpt/caret
+6. `Diagnostic.cool`: a first-error record, plain filename/line/column/excerpt/caret
    rendering, and escaped structured JSON. Native option parsing precedes input
    parsing so trailing diagnostic-format flags also apply to parser errors.
 
 The runtime follows the OCaml HC target's allocation headers, copies, span
-bounds, argument and abort conventions. `Runtime.HC` additionally represents
+bounds, argument and abort conventions. `Runtime.cool` additionally represents
 Float32 as four-byte U32 IEEE bits, converting and rounding at expression
 boundaries. Float64-to-Nat64 conversion splits around 2^63 because the native
 Cool scalar conversion instruction is signed. Numeric tests compare exact bits,
@@ -72,18 +72,18 @@ monomorphization count (100,000) are bounded with diagnostics.
 
 ## Host and kernel boundaries
 
-`Warm.HC` includes the reusable core. It has no process exit, CLI or filesystem
+`Warm.cool` includes the reusable core. It has no process exit, CLI or filesystem
 operations. A caller uses `WNew`, `WParse` for its sources, `WBuiltins`, `WResolve`,
 `WTypeCheck`, `WLinearity`, `WEmit`, inspects `error_kind`, then calls `WDestroy`.
 Allocation/string primitives are supplied by the host or kernel.
 
-`Native.HC` adapts native file, argument and output APIs. `embed_builtins.py`
+`Native.cool` adapts native file, argument and output APIs. `embed_builtins.py`
 packages the original builtin interfaces/bodies and the HC runtime as source
 strings; it does not translate the compiler logic. `build.sh` invokes native
 coolc and checks both the binary and `Errs:0`, since compiler status alone is
 not sufficient to detect an HC error.
 
-`package_kernel.py` flattens includes and appends `Kernel.HC` to make one file
+`package_kernel.py` flattens includes and appends `Kernel.cool` to make one file
 loadable by the TempleOS frontend. The kernel adapter loads FAT sources and
 calls the same passes. For `WarmRun`, generated HolyC is sent to `ShellExe` on
 the compiler/shell task. Runtime services replace native imports; Print format

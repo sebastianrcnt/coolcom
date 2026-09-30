@@ -10,7 +10,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/012-consume-twice-in-expr/Test.aum",
+    "filename": "test-programs/suites/006-linearity/012-consume-twice-in-expr/Test.warm",
     "startp": { "line": 17, "column": 8 },
     "end": { "line": 17, "column": 36 }
   },

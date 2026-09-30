@@ -1,13 +1,13 @@
 # C to Cool pilot
 
 `make c2hc-test` builds the native host, parses each `tests/*.c` with clang's
-JSON AST, writes `.HC` and `.BIN` files under `build/c2hc-test`, and compares
+JSON AST, writes `.cool` and `.BIN` files under `build/c2hc-test`, and compares
 the byte-for-byte stdout of the C executable and native Cool BIN.
 
 Run the translator directly with:
 
 ```sh
-python3 tools/c2hc/c2hc.py input.c output.HC
+python3 tools/c2hc/c2hc.py input.c output.cool
 ```
 
 This pilot accepts simple definitions using integer, pointer, array, record,
@@ -35,7 +35,7 @@ that this does not change the selected raster outputs.
 ## stb_truetype bitmap comparison
 
 `make stbtt-test` downloads pinned upstream files into gitignored `vendor/`,
-checks their SHA-256 digests, regenerates `coolc/Lib/StbTrueType.HC`, checks it
+checks their SHA-256 digests, regenerates `coolc/Lib/StbTrueType.cool`, checks it
 against the committed copy, and compares six 64×64 bitmaps byte for byte. The
 reference is compiled by clang from unchanged upstream `stb_truetype.h`; the
 Cool bitmap uses the translated library and native `coolc` host. The test
@@ -47,7 +47,7 @@ source changes specialize unused CFF/OpenType paths for TrueType: reject fonts
 without `glyf`/`loca`, zero the CFF size, and choose TrueType implementations
 for glyph boxes and shapes. The upstream header in `vendor/stb` stays
 untouched. The platform hook overrides in `stbtt_source.c` replace C library
-calls with Cool host imports. There are no edits to the generated `.HC` file.
+calls with Cool host imports. There are no edits to the generated `.cool` file.
 The library currently covers the `stbtt_InitFont` and
 `stbtt_MakeCodepointBitmap` call graph for TrueType fonts; other stbtt APIs
 and CFF fonts have not been verified.

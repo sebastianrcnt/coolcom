@@ -2,7 +2,7 @@
 # Refuse commits whose staged HolyC files are not formatted with tools/hcfmt.sh.
 # Enabled by `git config core.hooksPath tools/git-hooks` (make hooks).
 ROOT=$(git rev-parse --show-toplevel)
-files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.HC' '*.HH' |
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.cool' '*.coolh' |
   grep -v -e '^coolc/third_party/' -e '^coolc/Fmt/tests/')
 [ -z "$files" ] && exit 0
 # Check the staged versions, not the working tree.

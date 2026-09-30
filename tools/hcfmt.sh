@@ -1,6 +1,6 @@
 #!/bin/sh
 # Format HolyC with the checked-in native compiler and the native BIN host.
-# Usage: hcfmt.sh [--check|--diff] file.HC... | --selftest
+# Usage: hcfmt.sh [--check|--diff] file.cool... | --selftest
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MODE=write
@@ -16,7 +16,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ "$SELF" = 1 ] || [ $# -gt 0 ] || {
-  echo 'usage: hcfmt.sh [--check|--diff] file.HC... | --selftest' >&2
+  echo 'usage: hcfmt.sh [--check|--diff] file.cool... | --selftest' >&2
   exit 2
 }
 make -s -C "$ROOT" build/hcfmt.BIN || exit 2
@@ -28,10 +28,10 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 if [ "$SELF" = 1 ]; then
   count=0
   pass=0
-  for input in "$ROOT"/coolc/Fmt/tests/*.in.HC; do
-    name=$(basename "$input" .in.HC)
-    expected=$ROOT/coolc/Fmt/tests/$name.exp.HC
-    [ -f "$expected" ] || { echo "hcfmt: missing $name.exp.HC" >&2; exit 2; }
+  for input in "$ROOT"/coolc/Fmt/tests/*.in.cool; do
+    name=$(basename "$input" .in.cool)
+    expected=$ROOT/coolc/Fmt/tests/$name.exp.cool
+    [ -f "$expected" ] || { echo "hcfmt: missing $name.exp.cool" >&2; exit 2; }
     count=$((count + 1))
     if "$HOST" --format "$FMT" "$input" "$TMP/actual" &&
        "$HOST" --format "$FMT" "$expected" "$TMP/fixed" &&

@@ -45,7 +45,7 @@ Error:
   Module:
     Test
   Location:
-    Filename: 'test-programs/suites/012-numbers/{dirname}/Test.aum'
+    Filename: 'test-programs/suites/012-numbers/{dirname}/Test.warm'
     From: line 5, column 8
     To: line 5, column 33
   Description:
@@ -66,7 +66,7 @@ for i, a in enumerate(types):
             for op in ops:
                 name: str = f"{op}-{a}-{b}"
                 os.makedirs(f"{base}/{name}")
-                with open(f"{base}/{name}/Test.aum", "w") as sourcefile:
+                with open(f"{base}/{name}/Test.warm", "w") as sourcefile:
                     sourcefile.write(code(a,b))
                 with open(f"{base}/{name}/austral-stderr.txt", "w") as errorfile:
                     errorfile.write(errs(name,a,b))

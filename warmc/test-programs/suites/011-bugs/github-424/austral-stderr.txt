@@ -10,7 +10,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/011-bugs/github-424/Test.aum",
+    "filename": "test-programs/suites/011-bugs/github-424/Test.warm",
     "startp": { "line": 2, "column": 4 },
     "end": { "line": 5, "column": 8 }
   },

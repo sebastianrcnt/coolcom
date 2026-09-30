@@ -9,7 +9,7 @@
     { "type": "type", "content": "Unit" }
   ],
   "span": {
-    "filename": "test-programs/suites/013-ref-transforms/001-not-a-ref/Test.aum",
+    "filename": "test-programs/suites/013-ref-transforms/001-not-a-ref/Test.warm",
     "startp": { "line": 4, "column": 8 },
     "end": { "line": 4, "column": 22 }
   },

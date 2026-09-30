@@ -16,7 +16,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/020-unsatisfied-constraint/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/020-unsatisfied-constraint/Test.warm",
     "startp": { "line": 12, "column": 8 },
     "end": { "line": 12, "column": 20 }
   },

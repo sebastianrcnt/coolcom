@@ -9,15 +9,15 @@ test-programs/
     suites/
         XXX-suite/      # Represents a test suite
             YYY-test/      # Represents a test
-                Test.aui   # Module interface
-                Test.aum   # Module body
+                Test.warmh   # Module interface
+                Test.warm   # Module body
                 output.txt # Expected program output, if the program is meant to compile.
                 error.txt  # Expected compiler output, if the program is meant to compile.
 ```
 
 The `suites` directory has numbered subdirectories, each representing a test suite: a collection of tests covering specific compiler features.
 
-Each test directory contains some Austral source files (in the simplest cases, `Test.aui` and `Test.aum`) and some control files:
+Each test directory contains some Austral source files (in the simplest cases, `Test.warmh` and `Test.warm`) and some control files:
 
 1. `austral-stderr.txt` is the compiler's error message if the test is expected to fail.
 

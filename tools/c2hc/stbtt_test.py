@@ -47,22 +47,22 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     fetch_assets()
     run(sys.executable, 'tools/c2hc/stbtt_prepare.py', str(OUT))
-    generated = OUT / 'StbTrueType.HC'
+    generated = OUT / 'StbTrueType.cool'
     run(sys.executable, 'tools/c2hc/c2hc.py', '--root', 'stbtt_InitFont',
         '--root', 'stbtt_MakeCodepointBitmap',
         str(OUT / 'stbtt_ttf.c'), str(generated))
-    formatted = OUT / 'StbTrueType.formatted.HC'
+    formatted = OUT / 'StbTrueType.formatted.cool'
     run('build/coolc', '--format', 'build/hcfmt.BIN',
         str(generated), str(formatted))
-    committed = ROOT / 'coolc/Lib/StbTrueType.HC'
+    committed = ROOT / 'coolc/Lib/StbTrueType.cool'
     if formatted.read_bytes() != committed.read_bytes():
-        raise RuntimeError('coolc/Lib/StbTrueType.HC differs from generated output')
+        raise RuntimeError('coolc/Lib/StbTrueType.cool differs from generated output')
     run('clang', '-std=c11', '-O0', 'tools/c2hc/stbtt_reference.c',
         '-lm', '-o', str(OUT / 'reference'))
     run(str(OUT / 'reference'))
     env = os.environ.copy()
     env['COOLC_COMPILER_BIN'] = str(ROOT / 'coolc/seed/Compiler.BIN')
-    compiled = run('build/coolc', 'tools/c2hc/stbtt_driver.HC',
+    compiled = run('build/coolc', 'tools/c2hc/stbtt_driver.cool',
                    str(OUT / 'driver.BIN'), env=env)
     if 'Errs:0 ' not in compiled.stdout:
         raise RuntimeError(f'Cool compiler reported errors:\n{compiled.stdout[-3000:]}')

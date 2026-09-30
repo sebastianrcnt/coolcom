@@ -23,21 +23,21 @@ def program(decls='', body='return ExitSuccess();'):
 cases = {
     'borrow-mode-from-operator': (True, program('generic [S: Region] function read(r: &![Int32,S]): Int32 is return !r; end;', 'var x: Int32 := 9; borrow r: &[Bool,R] := &!x do printLn(read(r)); end borrow; return ExitSuccess();')),
     'public-signature-interface-import': (True, {
-        'A.aui': 'module A is record R: Free is x: Int32; end; end module.',
-        'A.aum': 'module body A is end module body.',
-        'B.aui': 'import A(R); module B is function value(r: R): Int32; end module.',
-        'B.aum': 'module body B is function value(r: R): Int32 is return r.x; end; end module body.',
-        'Test.aum': 'import A(R); import B(value); ' + program(body='printLn(value(R(x => 42))); return ExitSuccess();'),
+        'A.warmh': 'module A is record R: Free is x: Int32; end; end module.',
+        'A.warm': 'module body A is end module body.',
+        'B.warmh': 'import A(R); module B is function value(r: R): Int32; end module.',
+        'B.warm': 'module body B is function value(r: R): Int32 is return r.x; end; end module body.',
+        'Test.warm': 'import A(R); import B(value); ' + program(body='printLn(value(R(x => 42))); return ExitSuccess();'),
     }),
     'public-parameter-name-mismatch': (False, {
-        'A.aui': 'module A is function value(x: Int32): Int32; end module.',
-        'A.aum': 'module body A is function value(y: Int32): Int32 is return y; end; end module body.',
-        'Test.aum': program(),
+        'A.warmh': 'module A is function value(x: Int32): Int32; end module.',
+        'A.warm': 'module body A is function value(y: Int32): Int32 is return y; end; end module body.',
+        'Test.warm': program(),
     }),
     'opaque-parameter-count-mismatch': (False, {
-        'A.aui': 'module A is type R[A: Free]: Free; end module.',
-        'A.aum': 'module body A is record R: Free is end; end module body.',
-        'Test.aum': program(),
+        'A.warmh': 'module A is type R[A: Free]: Free; end module.',
+        'A.warm': 'module body A is record R: Free is end; end module body.',
+        'Test.warm': program(),
     }),
     'anonymous-region-escape': (False, program('function bad(): &[Int32, Static] is let x: Int32 := 10; return &x; end;')),
     'missing-record-payload': (False, program('record R: Linear is value: Int32; end;', 'let r: R := R(value => 7); let {} := r; return ExitSuccess();')),
@@ -70,22 +70,22 @@ for operation, body in {
     'destructure': 'let {x: Int32} := make(); printLn(x);',
 }.items():
     cases['opaque-' + operation] = (False, {
-        'A.aui': 'module A is type R: Free; function make(): R; end module.',
-        'A.aum': 'module body A is record R: Free is x: Int32; end; function make(): R is return R(x => 42); end; end module body.',
-        'Test.aum': 'import A(R,make); ' + program(body=body + ' return ExitSuccess();'),
+        'A.warmh': 'module A is type R: Free; function make(): R; end module.',
+        'A.warm': 'module body A is record R: Free is x: Int32; end; function make(): R is return R(x => 42); end; end module body.',
+        'Test.warm': 'import A(R,make); ' + program(body=body + ' return ExitSuccess();'),
     })
 results = []
 for name, (success, source) in cases.items():
     dest = OUT / name
     dest.mkdir(exist_ok=True)
     paths = []
-    sources = source if isinstance(source, dict) else {'Test.aum': source}
+    sources = source if isinstance(source, dict) else {'Test.warm': source}
     for filename, contents in sources.items():
         (dest / filename).write_text(contents)
     for filename in sources:
-        if filename.endswith('.aui'):
-            paths.append(str(dest / filename) + ',' + str(dest / filename.replace('.aui', '.aum')))
-        elif filename.replace('.aum', '.aui') not in sources:
+        if filename.endswith('.warmh'):
+            paths.append(str(dest / filename) + ',' + str(dest / filename.replace('.warmh', '.warm')))
+        elif filename.replace('.warm', '.warmh') not in sources:
             paths.append(str(dest / filename))
 
     def run(cmd, label):
@@ -97,7 +97,7 @@ for name, (success, source) in cases.items():
     opts = ['compile', *paths, '--entrypoint=Test:main', '--error-format=json']
     ref = run([ROOT / 'warmc/warmc', *opts, '--target-type=c', '--output=' + str(dest / 'ref.c')], 'ocaml')
     actual = run([ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN', *opts,
-                  '--target-type=hc', '--output=' + str(dest / 'out.HC')], 'cool')
+                  '--target-type=hc', '--output=' + str(dest / 'out.cool')], 'cool')
     reason = None
     if bool(ref.returncode) == success:
         reason = 'oracle-unexpected-result'
@@ -106,7 +106,7 @@ for name, (success, source) in cases.items():
             reason = 'cool-' + comparison.error_kind(actual)
         else:
             cc = run(['cc', '-fwrapv', dest / 'ref.c', '-lm', '-o', dest / 'ref'], 'cc')
-            hc = run([ROOT / 'build/coolc', dest / 'out.HC', dest / 'out.BIN'], 'coolc')
+            hc = run([ROOT / 'build/coolc', dest / 'out.cool', dest / 'out.BIN'], 'coolc')
             if cc.returncode or hc.returncode or b'Errs:0 ' not in hc.stdout:
                 reason = 'native-build'
             else:

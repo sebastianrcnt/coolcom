@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/025-duplicate-class-method/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/025-duplicate-class-method/Test.warm",
     "startp": { "line": 2, "column": 4 },
     "end": { "line": 5, "column": 8 }
   },

@@ -8,7 +8,7 @@
     { "type": "text", "content": "signature does not match" }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/022-wrong-signature/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/022-wrong-signature/Test.warm",
     "startp": { "line": 4, "column": 8 },
     "end": { "line": 9, "column": 8 }
   },

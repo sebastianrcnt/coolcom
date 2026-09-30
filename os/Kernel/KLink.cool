@@ -1,0 +1,539 @@
+// The kernel module linker: a Cool port of tools/binlink.py, which MakeKernel
+// (MakeKernel.cool) runs in the OS. It relocates Kernel.BIN to its link address,
+// lays out the main table, the globals, the relocation table, the kernel
+// symbol table and the blobs, and resolves the imports; the result is the
+// module as binlink.py writes build/kernel.raw, byte for byte, plus the values
+// binlink.py writes to build/syms.ld (KLinkSymsLd makes the same text). The
+// layout and the table formats are described at the top of binlink.py.
+
+#define IET_REL_I0       2  // the rest are in BinLoad.cool
+#define IET_REL_RISCV    12
+#define IET_IMM32_EXPORT 17
+
+#define KL_REL   1  // code offset in the module
+#define KL_ADDR  2  // absolute address
+#define KL_CONST 3  // plain number (IMM export)
+
+class CKLSym
+{
+    U8 *name;
+    I64 val, kind;
+    Bool arch, glob;
+};
+
+class CKLGlob
+{
+    U8 *name, *init, *refs;  // refs: count x {I32 patch_at, I32 addend}
+    I64 size, nrefs;
+};
+
+class CKLImp
+{
+    I64 type, at, addend;
+    U8 *name;
+};
+
+class CKLink
+{
+    I64 org, errs;
+    U8 *img;  // the module being built
+    I64 len, cap;
+    CKLSym *tab;  // open-addressed hash table of symbols
+    I64 tab_size, nsyms;
+    CKLImp *imps;
+    I64 nimps, max_imps;
+    CKLGlob *globs;
+    I64 nglobs, max_globs;
+    I64 *abss, nabss, max_abss;
+    I64 *mains, nmains, max_mains;
+    I64 *sites, nsites, max_sites;
+    U8 **blob_names;
+    I64 *blob_addrs, nblobs;
+    I64 main_table, reloc_table, ksym_table, kbss_start, kbss_end, nksyms;
+};
+
+U0 KLErr(CKLink *l, U8 *fmt, ...)
+{
+    U8 *s = StrPrintJoin(NULL, fmt, argc, argv);
+    PrintErr("KLink: %s\n", s);
+    Free(s);
+    l->errs++;
+}
+
+I64 KLAlign(I64 n, I64 a = 16)
+{
+    return (n + a - 1) & -a;
+}
+
+I64 KLHash(U8 *s)
+{
+    I64 h = 0xCBF29CE484222325;
+    while (*s)
+        h = (h ^ *s++) * 0x100000001B3;
+    return h;
+}
+
+CKLSym *KLSym(CKLink *l, U8 *name, Bool add = FALSE)
+{//The entry of name; with add, a new empty one if there is none (else NULL).
+    I64 i = KLHash(name) & (l->tab_size - 1);
+    while (l->tab[i].name) {
+        if (!StrCmp(l->tab[i].name, name))
+            return &l->tab[i];
+        i = (i + 1) & (l->tab_size - 1);
+    }
+    if (!add)
+        return NULL;
+    l->tab[i].name = name;
+    l->tab[i].kind = KL_CONST;
+    l->nsyms++;
+    return &l->tab[i];
+}
+
+U8 *KLGrow(U8 *arr, I64 n, I64 *max, I64 size)
+{
+    if (n < *max)
+        return arr;
+    *max = *max * 2 + 64;
+    return ReAlloc(arr, *max * size);
+}
+
+U0 KLPut(CKLink *l, U8 *data, I64 n)
+{//Append n bytes (zeros if data is NULL) to the module.
+    I64 cap;
+    U8 *b;
+    if (l->len + n > l->cap) {
+        cap = KLAlign(l->cap * 2 + n, 0x10000);
+        b = CAlloc(cap);
+        MemCpy(b, l->img, l->len);
+        Free(l->img);
+        l->img = b;
+        l->cap = cap;
+    }
+    if (data)
+        MemCpy(l->img + l->len, data, n);
+    else
+        MemSet(l->img + l->len, 0, n);
+    l->len += n;
+}
+
+U0 KLPad(CKLink *l, I64 a = 16)
+{
+    KLPut(l, NULL, KLAlign(l->len, a) - l->len);
+}
+
+U0 KLSite(CKLink *l, I64 off)
+{//off holds an absolute U64: Boot.S adds the load delta to it.
+    if (off & 7 || off < 0)
+        KLErr(l, "absolute address site at image offset %X is not 8-byte aligned", off);
+    l->sites = KLGrow(l->sites, l->nsites, &l->max_sites, sizeof(I64));
+    l->sites[l->nsites++] = off;
+}
+
+Bool KLIsIdent(U8 *s)
+{//Python's str.isidentifier for the names a BIN holds.
+    if (!*s || ('0' <= *s <= '9'))
+        return FALSE;
+    while (*s) {
+        if (!(*s >= 0x80 || *s == '_' || ('a' <= *s <= 'z') || ('A' <= *s <= 'Z') || ('0' <= *s <= '9')))
+            return FALSE;
+        s++;
+    }
+    return TRUE;
+}
+
+I64 KLAddr(CKLink *l, U8 *name, U8 *ctx = "symbol table")
+{
+    CKLSym *s = KLSym(l, name);
+    if (!s) {
+        KLErr(l, "unresolved import \"%s\" (needed by %s); the kernel must define it", name, ctx);
+        return 0;
+    }
+    if (s->kind == KL_REL)
+        return l->org + s->val;
+    return s->val;
+}
+
+I64 KLCmpI64(I64 a, I64 b)
+{
+    if (a < b)
+        return -1;
+    return a > b;
+}
+
+I64 KLCmpStr(U8 *a, U8 *b)
+{
+    return StrCmp(a, b);
+}
+
+I64 KLCmpKSym(I64 *a, I64 *b)
+{//{addr, name offset, kind}: by address, then name offset.
+    if (a[0] != b[0])
+        return KLCmpI64(a[0], b[0]);
+    return KLCmpI64(a[1], b[1]);
+}
+
+Bool KLParse(CKLink *l, U8 *bin, I64 size)
+{//Read the patch table (binlink.py's first loop).
+    I64 p, et, i, k, addend;
+    U8 *name, *cur = NULL;
+    CKLSym *s;
+    CKLGlob *g;
+    if (size < 32 || (p = BinU64(bin + 16)) < 32 || p >= size) {
+        KLErr(l, "not a BIN file");
+        return FALSE;
+    }
+    KLPut(l, bin + 32, p - 32);
+    while (p < size && bin[p]) {
+        et = bin[p];
+        i = BinU32(bin + p + 1);
+        p += 5;
+        addend = 0;
+        if (IET_REL_I0 <= et <= IET_REL_RISCV) {
+            addend = BinI32(bin + p);
+            p += 4;
+        }
+        name = bin + p;
+        p += StrLen(name) + 1;
+        if (IET_REL32_EXPORT <= et <= IET_IMM64_EXPORT) {
+            s = KLSym(l, name, TRUE);
+            s->val = i;
+            if (et == IET_IMM32_EXPORT || et == IET_IMM64_EXPORT)
+                s->kind = KL_CONST;
+            else
+                s->kind = KL_REL;
+        } else if (IET_REL_I8 <= et <= IET_IMM_I64) {
+            if (*name)
+                cur = name;  // an empty name reuses the previous symbol
+            if (!cur) {
+                KLErr(l, "import entry at patch offset %X has no symbol name", p);
+                return FALSE;
+            }
+            l->imps = KLGrow(l->imps, l->nimps, &l->max_imps, sizeof(CKLImp));
+            l->imps[l->nimps].type = et;
+            l->imps[l->nimps].at = i;
+            l->imps[l->nimps].addend = addend;
+            l->imps[l->nimps].name = cur;
+            l->nimps++;
+        } else if (et == IET_ABS_ADDR) {
+            for (k = 0; k < i; k++) {
+                l->abss = KLGrow(l->abss, l->nabss, &l->max_abss, sizeof(I64));
+                l->abss[l->nabss++] = BinU32(bin + p);
+                p += 4;
+            }
+        } else if (et == IET_DATA_HEAP || et == IET_ZEROED_DATA_HEAP) {
+            l->globs = KLGrow(l->globs, l->nglobs, &l->max_globs, sizeof(CKLGlob));
+            g = &l->globs[l->nglobs++];
+            g->name = name;
+            g->size = BinU64(bin + p);
+            p += 8;
+            g->init = bin + p;
+            p += g->size;
+            g->refs = bin + p;
+            g->nrefs = i;
+            p += 8 * i;
+        } else if (et == IET_MAIN) {
+            l->mains = KLGrow(l->mains, l->nmains, &l->max_mains, sizeof(I64));
+            l->mains[l->nmains++] = i;
+        } else {
+            KLErr(l, "unsupported patch table entry type %d name '%s'", et, name);
+            return FALSE;
+        }
+    }
+    if (p >= size) {
+        KLErr(l, "truncated patch table");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+Bool KLAllZero(U8 *p, I64 n)
+{
+    while (n-- > 0)
+        if (*p++)
+            return FALSE;
+    return TRUE;
+}
+
+U0 KLGlobRefs(CKLink *l, CKLGlob *g, I64 at)
+{//Point every reference to global g (at address at) at it.
+    I64 k, v;
+    for (k = 0; k < g->nrefs; k++) {
+        v = at + BinI32(g->refs + 8 * k + 4);
+        MemCpy(l->img + BinI32(g->refs + 8 * k), &v, 8);
+    }
+}
+
+U0 KLImports(CKLink *l)
+{//Patch every import (binlink.py's last loop).
+    I64 k, v, width, lo, hi;
+    CKLImp *im;
+    Bool rel;
+    for (k = 0; k < l->nimps; k++) {
+        im = &l->imps[k];
+        width = 1 << ((im->type - IET_REL_I8) >> 1);
+        rel = !(im->type & 1);
+        v = KLAddr(l, im->name, "a patch") + im->addend;
+        if (rel) {
+            v -= l->org + im->at + width;
+            lo = -(1 << (width * 8 - 1));
+            hi = -lo - 1;
+        } else {
+            lo = 0;
+            hi = (1 << (width * 8)) - 1;
+        }
+        if (width < 8 && !(lo <= v <= hi) || width == 8 && !rel && v < 0)
+            KLErr(l, "patch value %X for \"%s\" does not fit type %d", v, im->name, im->type);
+        else
+            MemCpy(l->img + im->at, &v, width);
+    }
+}
+
+CKLink *KLink(U8 *bin, I64 size, I64 org, CBinSym *arch, I64 narch,
+              U8 **blob_names, U8 **blobs, I64 *blob_sizes, I64 nblobs)
+{//Link Kernel.BIN at org (MODULE_BASE). arch: the assembly's symbols (arch.syms,
+    //in nm order); blobs are appended NUL-terminated at linker symbol blob_names[i].
+    //Returns the link (check ->errs); ->img/->len is kernel.raw.
+    CKLink *l = CAlloc(sizeof(CKLink));
+    CKLSym *s;
+    CKLGlob *g;
+    CKLImp *im;
+    U8 **names;
+    I64 k, i, n, at, kind, v, *ks, name_off, *zeroed, nzeroed = 0, kbss;
+    U32 u32;
+    l->org = org;
+    l->tab_size = 1024;
+    while (l->tab_size < 2 * (size / 6 + narch + nblobs + 16))
+        l->tab_size <<= 1;
+    l->tab = CAlloc(l->tab_size * sizeof(CKLSym));
+    if (!KLParse(l, bin, size))
+        return l;
+    for (k = 0; k < narch; k++)
+        if (!KLSym(l, arch[k].name)) {
+            s = KLSym(l, arch[k].name, TRUE);
+            s->val = arch[k].val;
+            s->kind = KL_ADDR;
+            s->arch = TRUE;
+        }
+
+    // Code, then the main table and the initialized globals.
+    KLPad(l, 16384);
+    l->main_table = org + l->len;
+    for (k = 0; k < l->nmains; k++) {
+        KLSite(l, l->len);
+        v = org + l->mains[k];
+        KLPut(l, &v, 8);
+    }
+    KLPut(l, NULL, 8);
+    zeroed = MAlloc(l->nglobs * sizeof(I64) + 8);
+    for (k = 0; k < l->nglobs; k++) {
+        g = &l->globs[k];
+        if (KLAllZero(g->init, g->size))
+            zeroed[nzeroed++] = k;
+        else {
+            KLPad(l);
+            at = org + l->len;
+            KLPut(l, g->init, g->size);
+            if (*g->name) {
+                s = KLSym(l, g->name, TRUE);
+                s->val = at;
+                s->kind = KL_ADDR;
+            }
+            KLGlobRefs(l, g, at);
+        }
+    }
+    for (k = 0; k < l->nabss; k++)
+        KLSite(l, l->abss[k]);
+    for (k = 0; k < l->nglobs; k++) {
+        g = &l->globs[k];
+        for (i = 0; i < g->nrefs; i++)
+            KLSite(l, BinI32(g->refs + 8 * i));
+        if (*g->name) {  // globals are addresses, the zeroed ones too
+            s = KLSym(l, g->name, TRUE);
+            s->glob = TRUE;
+            s->kind = KL_ADDR;
+        }
+    }
+    // Imports of addresses stored as absolute values are relocation sites too.
+    for (k = 0; k < l->nimps; k++) {
+        im = &l->imps[k];
+        if (im->type & 1 && (s = KLSym(l, im->name)) && s->kind != KL_CONST) {
+            if (im->type != IET_IMM_I64)
+                KLErr(l, "import \"%s\" at code offset %X stores an address in a type-%d field "
+                        "that cannot be relocated", im->name, im->at, im->type);
+            else
+                KLSite(l, im->at);
+        }
+    }
+    QSortI64(l->sites, l->nsites, &KLCmpI64);
+    for (k = 1; k < l->nsites; k++)
+        if (l->sites[k] == l->sites[k - 1])
+            KLErr(l, "image offset %X is patched twice", l->sites[k]);
+
+    // The relocation table.
+    KLPad(l, 8);
+    l->reloc_table = org + l->len;
+    v = org;
+    KLPut(l, &v, 8);
+    v = l->nsites;
+    KLPut(l, &v, 8);  // U32 count, U32 pad
+    for (k = 0; k < l->nsites; k++) {
+        u32 = l->sites[k];
+        KLPut(l, &u32, 4);
+    }
+    KLPad(l, 8);
+
+    // The kernel symbol table: names now, addresses after the zeroed globals.
+    names = MAlloc(l->nsyms * sizeof(U8 *) + 8);
+    n = 0;
+    for (k = 0; k < l->tab_size; k++) {
+        s = &l->tab[k];
+        if (s->name && KLIsIdent(s->name) && (s->glob || s->kind != KL_CONST))
+            names[n++] = s->name;
+    }
+    QSortI64(names, n, &KLCmpStr);
+    l->nksyms = n;
+    l->ksym_table = org + l->len;
+    at = l->len;
+    KLPut(l, NULL, 8 + 16 * n);
+    for (k = 0; k < n; k++)
+        KLPut(l, names[k], StrLen(names[k]) + 1);
+    l->blob_names = blob_names;
+    l->blob_addrs = MAlloc(nblobs * sizeof(I64) + 8);
+    l->nblobs = nblobs;
+    for (k = 0; k < nblobs; k++) {
+        KLPad(l, 8);
+        l->blob_addrs[k] = org + l->len;
+        KLPut(l, blobs[k], blob_sizes[k]);
+        KLPut(l, NULL, 1);
+    }
+    KLPad(l);
+
+    // The zeroed globals follow the image (KBSS_START..KBSS_END, cleared by Boot.S).
+    l->kbss_start = kbss = org + l->len;
+    for (k = 0; k < nzeroed; k++) {
+        g = &l->globs[zeroed[k]];
+        kbss = KLAlign(kbss);
+        if (*g->name)
+            KLSym(l, g->name)->val = kbss;
+        KLGlobRefs(l, g, kbss);
+        kbss += g->size;
+    }
+    l->kbss_end = KLAlign(kbss);
+
+    ks = MAlloc(24 * n + 8);
+    name_off = 8 + 16 * n;
+    for (k = 0; k < n; k++) {
+        s = KLSym(l, names[k]);
+        if (s->arch)
+            kind = 3;
+        else if (s->glob || s->kind == KL_ADDR)
+            kind = 2;
+        else
+            kind = 1;
+        ks[3 * k] = KLAddr(l, names[k]);
+        ks[3 * k + 1] = name_off;
+        ks[3 * k + 2] = kind;
+        name_off += StrLen(names[k]) + 1;
+    }
+    QSort(ks, n, 24, &KLCmpKSym);
+    MemCpy(l->img + at, &n, 8);
+    for (k = 0; k < n; k++) {
+        v = ks[3 * k] - l->ksym_table;
+        MemCpy(l->img + at + 8 + 16 * k, &v, 8);
+        u32 = ks[3 * k + 1];
+        MemCpy(l->img + at + 16 + 16 * k, &u32, 4);
+        u32 = ks[3 * k + 2];
+        MemCpy(l->img + at + 20 + 16 * k, &u32, 4);
+    }
+
+    for (k = 0; k < l->nabss; k++) {
+        MemCpy(&v, l->img + l->abss[k], 8);
+        v += org;
+        MemCpy(l->img + l->abss[k], &v, 8);
+    }
+    KLImports(l);
+    if (!KLSym(l, "KMain"))
+        KLErr(l, "KMain is not defined");
+    Free(ks);
+    Free(names);
+    Free(zeroed);
+    return l;
+}
+
+I64 KLBlob(CKLink *l, U8 *name)
+{
+    I64 k;
+    for (k = 0; k < l->nblobs; k++)
+        if (!StrCmp(l->blob_names[k], name))
+            return l->blob_addrs[k];
+    return 0;
+}
+
+I64 KLLdSym(CKLink *l, U8 *name, Bool *_found = NULL)
+{//Value of a symbol binlink.py writes to syms.ld (HC_<export>, KMAIN, ...).
+    CKLSym *s;
+    I64 v = 0;
+    Bool found = TRUE;
+    if (!StrNCmp(name, "HC_", 3)) {
+        if ((s = KLSym(l, name + 3)) && !s->arch && KLIsIdent(name + 3))
+            v = KLAddr(l, name + 3);
+        else
+            found = FALSE;
+    } else if (!StrCmp(name, "KMAIN"))
+        v = KLAddr(l, "KMain", "boot");
+    else if (!StrCmp(name, "KTEXT_END") || !StrCmp(name, "MAIN_TABLE"))
+        v = l->main_table;
+    else if (!StrCmp(name, "RELOC_TABLE"))
+        v = l->reloc_table;
+    else if (!StrCmp(name, "KSYM_TABLE"))
+        v = l->ksym_table;
+    else if (!StrCmp(name, "KBSS_START"))
+        v = l->kbss_start;
+    else if (!StrCmp(name, "KBSS_END"))
+        v = l->kbss_end;
+    else if (!(v = KLBlob(l, name)))
+        found = FALSE;
+    if (_found)
+        *_found = found;
+    return v;
+}
+
+U8 *KLLdLine(U8 *p, U8 *prefix, U8 *name, I64 v)
+{//"<prefix><name> = <v as Python's f'{v:#x}'>;\n" at p; returns its end.
+    if (v < 0)
+        StrPrint(p, "%s%s = -0x%x;\n", prefix, name, -v);
+    else
+        StrPrint(p, "%s%s = 0x%x;\n", prefix, name, v);
+    return p + StrLen(p);
+}
+
+U8 *KLinkSymsLd(CKLink *l, I64 *_size)
+{//The text binlink.py writes to syms.ld.
+    U8 **names = MAlloc(l->nsyms * sizeof(U8 *) + 8), *res, *p;
+    I64 k, n = 0, len = 0;
+    CKLSym *s;
+    for (k = 0; k < l->tab_size; k++) {
+        s = &l->tab[k];
+        if (s->name && KLIsIdent(s->name) && !s->arch) {
+            names[n++] = s->name;
+            len += StrLen(s->name) + 32;
+        }
+    }
+    QSortI64(names, n, &KLCmpStr);
+    p = res = MAlloc(len + 1024 + 64 * l->nblobs);
+    for (k = 0; k < n; k++)
+        p = KLLdLine(p, "HC_", names[k], KLAddr(l, names[k], "export"));
+    p = KLLdLine(p, "", "KMAIN", KLAddr(l, "KMain", "boot"));
+    p = KLLdLine(p, "", "KTEXT_END", l->main_table);
+    p = KLLdLine(p, "", "MAIN_TABLE", l->main_table);
+    p = KLLdLine(p, "", "RELOC_TABLE", l->reloc_table);
+    p = KLLdLine(p, "", "KSYM_TABLE", l->ksym_table);
+    for (k = 0; k < l->nblobs; k++)
+        p = KLLdLine(p, "", l->blob_names[k], l->blob_addrs[k]);
+    p = KLLdLine(p, "", "KBSS_START", l->kbss_start);
+    p = KLLdLine(p, "", "KBSS_END", l->kbss_end);
+    Free(names);
+    if (_size)
+        *_size = p - res;
+    return res;
+}

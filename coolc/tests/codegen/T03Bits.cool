@@ -1,0 +1,61 @@
+#include "TestBase.coolh"
+I64 gb = 0xF0; U64 gub = 0xFF00;
+I64 B1(I64 a, I64 b) {return a & b;}
+I64 B2(I64 a, I64 b) {return a | b;}
+I64 B3(I64 a, I64 b) {return a ^ b;}
+I64 B4(I64 a) {return a & 0xFF;}
+I64 B5(I64 a) {return a | 0x100;}
+I64 B6(I64 a) {return a ^ 0xFFFF;}
+I64 B7(I64 a) {return a & 0xFFFFFFFF;}
+I64 B8(I64 a) {return a | 0x8000000000000000;}
+I64 B9(I64 a) {return a & 0x5555555555555555;}
+I64 B10(I64 a) {return a ^ 0xAAAAAAAAAAAAAAAA;}
+I64 B11(I64 a) {return a & 0xF0F0F0F0;}
+I64 B12(I64 a) {return a | 0x00FF00FF;}
+I64 B13(I64 a) {return a & -8;}
+I64 B14(I64 a) {return a & 1;}
+I64 B15(I64 a) {return a & 0x3FF;}
+I64 B16(I64 a) {return a & (a - 1);}
+I64 B17(I64 a) {return a & -a;}
+I64 B18(I64 a) {return ~(a | 0x0F);}
+I64 B19(I64 a, I64 b) {return ~a & b;}
+I64 B20(I64 a, I64 b) {return a & ~b;}
+I64 B21(I64 a, I64 b) {return ~(a ^ b);}
+I64 L1(I64 a, I64 b) {return a << b;}
+I64 L2(I64 a, I64 b) {return a >> b;}
+U64 L3(U64 a, I64 b) {return a << b;}
+U64 L4(U64 a, I64 b) {return a >> b;}
+I64 L5(I64 a) {return a << 1;}
+I64 L6(I64 a) {return a << 63;}
+I64 L7(I64 a) {return a >> 1;}
+I64 L8(I64 a) {return a >> 63;}
+U64 L9(U64 a) {return a >> 1;}
+U64 L10(U64 a) {return a >> 63;}
+U64 L11(U64 a) {return a << 32;}
+I64 L12(I64 a) {return a << 16 >> 16;}
+U64 L13(U64 a) {return a << 16 >> 16;}
+I64 L14(I64 a) {return (a << 8) | (a >> 56 & 0xFF);}
+I64 L15() {return 1 << 40;}
+I64 L16() {return 0x100 >> 4;}
+I64 L17(I64 a) {return 1 << a;}
+I64 L18(I64 a) {return -1 >> a;}
+U64 L19(U64 a, U64 b) {return a << b | a >> 64 - b;}
+I64 M1() {gb &= 0x3C; gb |= 0x101; gb ^= 0xFF; gb <<= 3; gb >>= 1; return gb;}
+U64 M2() {gub &= 0xF0F0; gub |= 1; gub ^= 0xFFF; gub <<= 8; gub >>= 4; return gub;}
+I64 M3(I64 a, I64 b) {a &= b; a |= b << 2; a ^= b >> 1; a <<= b; a >>= b; return a;}
+U64 M4(U64 a, U64 b) {a &= b; a |= b << 2; a ^= b >> 1; a <<= b; a >>= b; return a;}
+I64 M5(I64 a) {a &= 0xFFFFFFFF; a |= 0x100000000; a ^= 0xAAAAAAAAAAAA; return a;}
+I64 M6(I64 *p, I64 v) {*p &= v; *p |= v; *p ^= v; *p <<= v; *p >>= v; return *p;}
+I64 M7(U8 *p) {*p &= 0xF; *p |= 0x30; *p ^= 0x5; *p <<= 1; *p >>= 2; return *p;}
+I64 M8(I64 *p, I64 i) {p[i] &= 1; p[i] |= 2; p[i] ^= 3; p[i + 1] <<= 1; return p[i];}
+I64 N1(I64 a) {return !a;}
+I64 N2(I64 a) {return !!a;}
+I64 N3(I64 a, I64 b) {return !a + !b;}
+I64 N4(I64 a) {return !(a & 1);}
+U64 N5(U64 a) {return ~a;}
+I64 N6(I64 a, I64 b) {return a & b | a ^ b;}
+I64 N7(I64 a, I64 b, I64 c) {return a & b | c;}
+I64 N8(I64 a, I64 b, I64 c) {return a | b & c;}
+I64 N9(I64 a, I64 b, I64 c) {return a ^ b & c;}
+I64 N10(I64 a) {return (a & 0xFF) << 8 | (a >> 8) & 0xFF;}
+I64 N11(I64 a) {return (a & 0xFF00FF00) >> 8 | (a & 0x00FF00FF) << 8;}

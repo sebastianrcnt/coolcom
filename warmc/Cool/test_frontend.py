@@ -36,12 +36,12 @@ negative = [
     'module body Test is function f(): Unit is f(x => 1, 2); end; end module body.',
 ]
 for i, source in enumerate(negative):
-    path = OUT / f'negative-{i}.aum'
+    path = OUT / f'negative-{i}.warm'
     path.write_text(source)
     p = run(path)
     if p.returncode != 1 or b'Parse Error:' not in p.stdout or b'^' not in p.stdout:
         failures.append((str(path), p.stdout.decode(), p.stderr.decode()))
-path = OUT / 'shape.aum'
+path = OUT / 'shape.warm'
 path.write_text('module body Test is function f(x: Int64): Int64 is return (x + 1) * 2; end; end module body.')
 p = run(path, True)
 assert p.returncode == 0, p.stdout

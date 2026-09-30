@@ -8,7 +8,7 @@
     { "type": "type", "content": "Bool" }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/016-private-instance/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/016-private-instance/Test.warm",
     "startp": { "line": 5, "column": 8 },
     "end": { "line": 5, "column": 33 }
   },

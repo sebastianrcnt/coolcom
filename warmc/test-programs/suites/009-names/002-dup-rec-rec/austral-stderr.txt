@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/009-names/002-dup-rec-rec/Test.aum",
+    "filename": "test-programs/suites/009-names/002-dup-rec-rec/Test.warm",
     "startp": { "line": 4, "column": 4 },
     "end": { "line": 4, "column": 26 }
   },

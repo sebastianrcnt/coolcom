@@ -1,8 +1,8 @@
 digraph G {
     node[style=filled]
 
-    aui[shape=rect fillcolor=coral label=".aui file"]
-    aum[shape=rect fillcolor=coral label=".aum file"]
+    aui[shape=rect fillcolor=coral label=".warmh file"]
+    aum[shape=rect fillcolor=coral label=".warm file"]
 
     subgraph cluster_0 {
         label="Frontend"

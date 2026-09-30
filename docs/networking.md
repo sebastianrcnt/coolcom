@@ -27,14 +27,14 @@ lwIP was the other option: `tools/c2hc` could transpile it. It was not used beca
 
 | File | Contents |
 |---|---|
-| `os/Kernel/NetDrv.HC` | virtio-net over virtio-mmio v2: 64 receive and 64 transmit buffers of 2 KiB, polled |
-| `os/Kernel/Net.HC` | Ethernet, ARP (16-entry cache, packets wait for the reply), IPv4, ICMP echo, UDP sockets, the loopback queue, `NetPoll`/`NetWait` |
-| `os/Kernel/NetTcp.HC` | TCP and the TCP socket calls |
-| `os/Kernel/NetApp.HC` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
-| `os/Kernel/NetTools.HC` | Shell tools: `Dns`, `Ping`, `HttpGet`/`HttpFetch`, `NetRep` |
-| `os/Kernel/NetShell.HC` | `ShellServe`: independent shells over TCP (remote shell) |
-| `os/Kernel/NetHttp.HC` | `Wget` (a URL to a file) and `HttpServe`, a small HTTP file server |
-| `os/Kernel/NetTest.HC` | `DevTestNet`, run by `DevTest` when there is a NIC |
+| `os/Kernel/NetDrv.cool` | virtio-net over virtio-mmio v2: 64 receive and 64 transmit buffers of 2 KiB, polled |
+| `os/Kernel/Net.cool` | Ethernet, ARP (16-entry cache, packets wait for the reply), IPv4, ICMP echo, UDP sockets, the loopback queue, `NetPoll`/`NetWait` |
+| `os/Kernel/NetTcp.cool` | TCP and the TCP socket calls |
+| `os/Kernel/NetApp.cool` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
+| `os/Kernel/NetTools.cool` | Shell tools: `Dns`, `Ping`, `HttpGet`/`HttpFetch`, `NetRep` |
+| `os/Kernel/NetShell.cool` | `ShellServe`: independent shells over TCP (remote shell) |
+| `os/Kernel/NetHttp.cool` | `Wget` (a URL to a file) and `HttpServe`, a small HTTP file server |
+| `os/Kernel/NetTest.cool` | `DevTestNet`, run by `DevTest` when there is a NIC |
 
 `KMain` calls `NetInit` after the secondary cores start. `NetInit` probes the FDT's `virtio,mmio`
 nodes for device ID 1 (the block driver skips that ID) and starts the `Net` task on the last
@@ -82,7 +82,7 @@ forever. On a real M1 there is no virtio device, so `NetInit` finds nothing and 
 
 ## API
 
-UDP (`Net.HC`):
+UDP (`Net.cool`):
 
 ```
 CUdpSock *UdpOpen(I64 port = 0);          // 0: an ephemeral port (49152..65535); NULL if taken
@@ -91,7 +91,7 @@ I64 UdpRecv(CUdpSock *s, U8 *buf, I64 max, I64 *_src = NULL, I64 *_sport = NULL,
 U0 UdpClose(CUdpSock *s);
 ```
 
-TCP (`NetTcp.HC`). Errors are `TCP_ERR_REFUSED`, `TCP_ERR_RESET`, `TCP_ERR_TIMEOUT` and
+TCP (`NetTcp.cool`). Errors are `TCP_ERR_REFUSED`, `TCP_ERR_RESET`, `TCP_ERR_TIMEOUT` and
 `TCP_ERR_CLOSED` (all negative):
 
 ```
@@ -103,7 +103,7 @@ I64 TcpRecv(CTcb *t, U8 *buf, I64 max, I64 timeout_ms = -1);    // > 0 bytes, 0 
 U0 TcpClose(CTcb *t);   // FIN after queued data; the stack frees t when both sides are done
 ```
 
-Names and addresses (`NetApp.HC`, `Net.HC`): `DnsQuery(name, ips, max)` returns a count or a
+Names and addresses (`NetApp.cool`, `Net.cool`): `DnsQuery(name, ips, max)` returns a count or a
 `DNS_ERR_*` code, `DnsResolve(host, &ip)` accepts a name or a dotted quad, `NetParseIp` and
 `NetIpStr` convert addresses, and `Dhcp` configures the interface again. The DNS cache keeps 16
 names for their TTL.
@@ -148,7 +148,7 @@ $ tools/rsh.sh 2323                                          # on the Mac: nc wi
 $ telnet localhost 2323                                      # or telnet, if installed
 ```
 
-- **Output** is streamed as it is printed: the terminal has a sink (`CVTerm.sink`, `Term.HC`) that
+- **Output** is streamed as it is printed: the terminal has a sink (`CVTerm.sink`, `Term.cool`) that
   queues every byte in a 64 KiB ring (`\n` as `\r\n`, bytes beyond a full ring are dropped), and the
   connection's task sends the ring. The terminal's cells are kept too, 80x24 unless the client reports
   its size.
@@ -179,7 +179,7 @@ upload support.
 
 ```
 > HttpServe(80, "C:/");                          // in the OS, under make run-net
-$ curl localhost:8080/Init.HC                    # on the Mac
+$ curl localhost:8080/Init.cool                    # on the Mac
 ```
 
 ## Tests

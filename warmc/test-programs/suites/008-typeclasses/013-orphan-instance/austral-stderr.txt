@@ -8,7 +8,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/013-orphan-instance/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/013-orphan-instance/Test.warm",
     "startp": { "line": 4, "column": 19 },
     "end": { "line": 9, "column": 8 }
   },

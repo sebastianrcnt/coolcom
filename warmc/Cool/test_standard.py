@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'build/warmcool/standard'
 OUT.mkdir(parents=True, exist_ok=True)
 standard = ROOT / 'warmc/standard'
-modules = re.findall(r'(?:src|test)/[^\s]+\.aum', (standard / 'Makefile').read_text().split('TEST_BIN')[0])
+modules = re.findall(r'(?:src|test)/[^\s]+\.warm', (standard / 'Makefile').read_text().split('TEST_BIN')[0])
 paths = [','.join(str(standard / name) for name in pair.split(',')) for pair in modules]
 env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
            COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))

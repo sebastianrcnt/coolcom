@@ -182,7 +182,7 @@ uint8_t *board_build_fdt(uint32_t *size, uint64_t ram_size, const char *bootargs
     fdt_prop_empty(f, "ranges");
     fdt_prop_str(f, "stdout-path", "serial0");
     fdt_prop_str(f, "bootargs", bootargs ? bootargs : "");
-    { /* the host clock, for the guest's Now (coolcom os/Kernel/KDate.HC) */
+    { /* the host clock, for the guest's Now (coolcom os/Kernel/KDate.cool) */
         time_t now = time(NULL);
         struct tm tm;
         localtime_r(&now, &tm);

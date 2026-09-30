@@ -7,7 +7,7 @@
     { "type": "text", "content": " because it is immutable." }
   ],
   "span": {
-    "filename": "test-programs/suites/015-mutability/001-cant-assign-let/Test.aum",
+    "filename": "test-programs/suites/015-mutability/001-cant-assign-let/Test.warm",
     "startp": { "line": 4, "column": 8 },
     "end": { "line": 4, "column": 16 }
   },

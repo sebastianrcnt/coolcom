@@ -1,0 +1,181 @@
+// virtio-net over virtio-mmio v2 (coolvm --net), VM-only. Polled like Blk.cool:
+// both queues set VRING_AVAIL_F_NO_INTERRUPT and the network task (Net.cool)
+// looks at the used rings. Queue 0 receives into NET_RXN buffers of 2 KiB,
+// queue 1 transmits from NET_TXN buffers of 2 KiB; every buffer starts with
+// the 12-byte virtio_net_hdr (all zero: no offloads). Only VERSION_1 and MAC
+// are negotiated. The caller (Net.cool) holds net_lock around every call.
+#define NET_RXN      64
+#define NET_TXN      64
+#define NET_BUF      2048
+#define VNET_HDR     12
+#define VIO_F_NET_MAC (1 << 5)
+
+class CVirtNet
+{
+    I64 base, rx_used, tx_avail, tx_used, rx_avail;
+    U8 *rxdesc, *rxavail, *rxused, *txdesc, *txavail, *txused, *rxbuf, *txbuf;
+    I64 rx_pending_id;  // buffer handed to NetDrvRx, reposted by NetDrvRxDone
+    Bool rx_repost;
+};
+
+CVirtNet net_dev;
+
+U0 NetVioWr(I64 off, I64 v)
+{
+    ArchMmioWrite32(net_dev.base + off, v);
+}
+
+I64 NetVioRd(I64 off)
+{
+    return ArchMmioRead32(net_dev.base + off);
+}
+
+U0 NetVioQueue(I64 q, I64 n, U8 *desc, U8 *avail, U8 *used)
+{
+    NetVioWr(VIO_QSEL, q);
+    NetVioWr(VIO_QNUM, n);
+    NetVioWr(VIO_QDESC, desc(I64) & 0xFFFFFFFF);
+    NetVioWr(VIO_QDESC + 4, desc(I64) >> 32);
+    NetVioWr(VIO_QAVAIL, avail(I64) & 0xFFFFFFFF);
+    NetVioWr(VIO_QAVAIL + 4, avail(I64) >> 32);
+    NetVioWr(VIO_QUSED, used(I64) & 0xFFFFFFFF);
+    NetVioWr(VIO_QUSED + 4, used(I64) >> 32);
+    ArchDsb;
+    NetVioWr(VIO_QREADY, 1);
+}
+
+U0 NetVioDesc(U8 *desc, I64 i, U8 *addr, I64 len, I64 flags)
+{
+    U8 *p = desc + 16 * i;
+    *p(I64 *) = addr;
+    *(p + 8)(U32i *) = len;
+    *(p + 12)(U16i *) = flags;
+    *(p + 14)(U16i *) = 0;
+}
+
+Bool NetDrvProbe(I64 base, U8 *mac)
+{//Bring up the virtio-net device at base; FALSE if it is not one.
+    I64 f0, f1, i, m;
+    net_dev.base = base;
+    if (NetVioRd(VIO_MAGIC_OFF) != VIO_MAGIC || NetVioRd(VIO_VERSION_OFF) != 2 || NetVioRd(VIO_DEVID_OFF) != 1)
+        return FALSE;
+    NetVioWr(VIO_STATUS, 0);
+    NetVioWr(VIO_STATUS, VIO_ST_ACK);
+    NetVioWr(VIO_STATUS, VIO_ST_ACK | VIO_ST_DRIVER);
+    NetVioWr(VIO_DEVFEAT_SEL, 0);
+    f0 = NetVioRd(VIO_DEVFEAT);
+    NetVioWr(VIO_DEVFEAT_SEL, 1);
+    f1 = NetVioRd(VIO_DEVFEAT);
+    if (!(f1 & VIO_F_VERSION_1) || !(f0 & VIO_F_NET_MAC))
+        return FALSE;
+    NetVioWr(VIO_DRVFEAT_SEL, 0);
+    NetVioWr(VIO_DRVFEAT, VIO_F_NET_MAC);
+    NetVioWr(VIO_DRVFEAT_SEL, 1);
+    NetVioWr(VIO_DRVFEAT, VIO_F_VERSION_1);
+    NetVioWr(VIO_STATUS, VIO_ST_ACK | VIO_ST_DRIVER | VIO_ST_FEAT_OK);
+    if (!(NetVioRd(VIO_STATUS) & VIO_ST_FEAT_OK))
+        return FALSE;
+    for (i = 0; i < 2; i++) {
+        NetVioWr(VIO_QSEL, i);
+        if (NetVioRd(VIO_QNUM_MAX) < NET_RXN)
+            return FALSE;
+    }
+    m = NetVioRd(VIO_CONFIG);
+    for (i = 0; i < 4; i++)
+        mac[i] = (m >> (8 * i)) & 0xFF;
+    m = NetVioRd(VIO_CONFIG + 4);
+    mac[4] = m & 0xFF;
+    mac[5] = (m >> 8) & 0xFF;
+    net_dev.rxdesc = CAlloc(16 * NET_RXN);
+    net_dev.rxavail = CAlloc(6 + 2 * NET_RXN);
+    net_dev.rxused = CAlloc(6 + 8 * NET_RXN);
+    net_dev.txdesc = CAlloc(16 * NET_TXN);
+    net_dev.txavail = CAlloc(6 + 2 * NET_TXN);
+    net_dev.txused = CAlloc(6 + 8 * NET_TXN);
+    net_dev.rxbuf = CAlloc(NET_BUF * NET_RXN);
+    net_dev.txbuf = CAlloc(NET_BUF * NET_TXN);
+    *(net_dev.rxavail)(U16i *) = 1;  // VRING_AVAIL_F_NO_INTERRUPT
+    *(net_dev.txavail)(U16i *) = 1;
+    for (i = 0; i < NET_RXN; i++) {
+        NetVioDesc(net_dev.rxdesc, i, net_dev.rxbuf + NET_BUF * i, NET_BUF, VRING_F_WRITE);
+        *(net_dev.rxavail + 4 + 2 * i)(U16i *) = i;
+    }
+    ArchDsb;
+    *(net_dev.rxavail + 2)(U16i *) = NET_RXN;
+    net_dev.rx_avail = NET_RXN;
+    net_dev.rx_pending_id = -1;
+    NetVioQueue(0, NET_RXN, net_dev.rxdesc, net_dev.rxavail, net_dev.rxused);
+    NetVioQueue(1, NET_TXN, net_dev.txdesc, net_dev.txavail, net_dev.txused);
+    NetVioWr(VIO_STATUS, VIO_ST_ACK | VIO_ST_DRIVER | VIO_ST_FEAT_OK | VIO_ST_DRIVER_OK);
+    NetVioWr(VIO_QNOTIFY, 0);
+    return TRUE;
+}
+
+U8 *NetDrvRx(I64 *_len)
+{//Next received frame (without the virtio header) or NULL. Call NetDrvRxDone after.
+    I64 e, id, len;
+    ArchDsb;
+    if (*(net_dev.rxused + 2)(U16i *) == (net_dev.rx_used & 0xFFFF))
+        return NULL;
+    ArchDsb;
+    e = 4 + 8 * (net_dev.rx_used % NET_RXN);
+    id = *(net_dev.rxused + e)(U32i *);
+    len = *(net_dev.rxused + e + 4)(U32i *);
+    net_dev.rx_used++;
+    if (id >= NET_RXN)
+        return NULL;
+    net_dev.rx_pending_id = id;
+    *_len = len - VNET_HDR;
+    return net_dev.rxbuf + NET_BUF * id + VNET_HDR;
+}
+
+U0 NetDrvRxDone()
+{//Give the last NetDrvRx buffer back to the device (notified by NetDrvKick).
+    I64 id = net_dev.rx_pending_id;
+    if (id < 0)
+        return;
+    net_dev.rx_pending_id = -1;
+    *(net_dev.rxavail + 4 + 2 * (net_dev.rx_avail % NET_RXN))(U16i *) = id;
+    ArchDsb;
+    net_dev.rx_avail++;
+    *(net_dev.rxavail + 2)(U16i *) = net_dev.rx_avail;
+    net_dev.rx_repost = TRUE;
+}
+
+U0 NetDrvKick()
+{//Tell the device about reposted receive buffers.
+    if (net_dev.rx_repost) {
+        net_dev.rx_repost = FALSE;
+        ArchDsb;
+        NetVioWr(VIO_QNOTIFY, 0);
+    }
+}
+
+Bool NetDrvTx(U8 *frame, I64 len)
+{//Queue one Ethernet frame; FALSE if the ring stays full.
+    I64 slot, deadline;
+    U8 *b;
+    if (len > NET_BUF - VNET_HDR)
+        return FALSE;
+    deadline = ArchCntVct + ArchCntFrq / 10;
+    while (TRUE) {
+        ArchDsb;
+        net_dev.tx_used = *(net_dev.txused + 2)(U16i *);
+        if (((net_dev.tx_avail - net_dev.tx_used) & 0xFFFF) < NET_TXN)
+            break;
+        if (ArchCntVct > deadline)
+            return FALSE;
+    }
+    slot = net_dev.tx_avail % NET_TXN;
+    b = net_dev.txbuf + NET_BUF * slot;
+    MemSet(b, 0, VNET_HDR);
+    MemCpy(b + VNET_HDR, frame, len);
+    NetVioDesc(net_dev.txdesc, slot, b, VNET_HDR + len, 0);
+    *(net_dev.txavail + 4 + 2 * slot)(U16i *) = slot;
+    ArchDsb;
+    net_dev.tx_avail++;
+    *(net_dev.txavail + 2)(U16i *) = net_dev.tx_avail;
+    ArchDsb;
+    NetVioWr(VIO_QNOTIFY, 1);
+    return TRUE;
+}

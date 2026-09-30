@@ -55,7 +55,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
         <"$dir/shell.in" >"$dir/shell.log" 2>&1 || true
     # KTestHeap deliberately reports four corruptions; startup must add none.
     if [ "$(grep -c 'heap overflow block=' "$dir/shell.log")" = 4 ] \
-        && grep -q 'Running C:/Init.HC' "$dir/shell.log" \
+        && grep -q 'Running C:/Init.cool' "$dir/shell.log" \
         && python3 tools/kernel-verify.py verify-shell "$dir"; then
         exit 0
     fi

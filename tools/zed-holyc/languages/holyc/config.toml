@@ -1,6 +1,6 @@
 name = "HolyC"
 grammar = "holyc"
-path_suffixes = ["HC", "HH", "hc", "hh"]
+path_suffixes = ["cool", "coolh", "HC", "HH", "hc", "hh"]
 line_comments = ["// "]
 block_comment = ["/* ", " */"]
 autoclose_before = ";:.,=}])>"

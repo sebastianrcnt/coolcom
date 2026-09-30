@@ -3,7 +3,7 @@
 Cool is our HolyC dialect; `coolc` is its compiler (as Warm and `warmc`).
 
 On Apple Silicon, `make` builds `build/coolc` from `coolc/Host`, then uses the
-checked-in `coolc/seed/Compiler.BIN` to compile `os/Kernel/Kernel.HC`. The
+checked-in `coolc/seed/Compiler.BIN` to compile `os/Kernel/Kernel.cool`. The
 resulting `build/Kernel.BIN` is linked into `build/kernel.Image`. The seed was
 compiled by `build/coolc` from the owned frontend, runtime, and backend with
 `COOLC_FRONTEND_FIXES` enabled. Aiwnios is not needed.
@@ -13,10 +13,10 @@ checks the formatter; `make fmt-check` checks tracked HolyC source. The
 pre-commit hook installed by `make hooks` uses the same formatter.
 
 The kernel also embeds the seed and loads it at run time for its shell, with a
-HolyC port of `coolc/Host/native.c` (`os/Kernel/BinLoad.HC`, `os/Kernel/Shell.HC`;
+HolyC port of `coolc/Host/native.c` (`os/Kernel/BinLoad.cool`, `os/Kernel/Shell.cool`;
 see os/Kernel/M1.md). The shell depends on the seed's exports `ExePutS`,
 `LexStmt2Bin` and `HashAdd`, on its imports, and on the `CCmpCtrl` and
-`CHashExport` offsets noted in `Shell.HC`; rebuilding the seed with other
+`CHashExport` offsets noted in `Shell.cool`; rebuilding the seed with other
 layouts or imports means updating the shell.
 
 To compile another HolyC entry point:
@@ -24,7 +24,7 @@ To compile another HolyC entry point:
 ```sh
 make build/coolc
 COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
-  build/coolc path/to/Entry.HC path/to/Output.BIN
+  build/coolc path/to/Entry.cool path/to/Output.BIN
 ```
 
 `tools/native/prepare.sh` stages the owned compiler source under
@@ -32,7 +32,7 @@ COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
 
 The OS reaches the same fixed point: `make selfhost-test` (part of `make test`)
 puts the staged sources on a FAT32 disk as `C:/Compiler`, the shell runs
-`Cmp("C:/Compiler/Native.HC", "C:/Self.BIN")` with the compiler loaded from the
+`Cmp("C:/Compiler/Native.cool", "C:/Self.BIN")` with the compiler loaded from the
 seed, and the host requires `Self.BIN` to equal `coolc/seed/Compiler.BIN`. This
 found that `Cmp` left 15 bytes past the patch table's end uninitialized (zero
 from macOS's fresh pages, the heap's poison in the kernel); they are zeroed now.

@@ -25,7 +25,7 @@ def main():
     for source in cases:
         name = source.stem
         c_exe = OUT / (name + '.c.bin')
-        hc = OUT / (name + '.HC')
+        hc = OUT / (name + '.cool')
         hc_bin = OUT / (name + '.BIN')
         run('clang', '-std=c11', '-O0', '-Wall', '-Wextra', str(source), '-o', str(c_exe))
         run(sys.executable, str(ROOT / 'tools' / 'c2hc' / 'c2hc.py'), str(source), str(hc))
