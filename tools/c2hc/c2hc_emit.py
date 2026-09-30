@@ -32,7 +32,7 @@ def emit(p, args):
     libc = args.libc or str(Path(__file__).resolve().parents[2] / 'coolc/LibC/LibC.cool')
     out.append(f'#include "{libc}"')
     libc_names = set(re.findall(r'^\w+[\w *]*?\b(\w+)\s*\(', (Path(__file__).resolve().parents[2] / 'coolc/LibC/LibC.cool').read_text(), re.M))
-    out += ['F64 C2HUnsignedToFloat(U64i x) {F64 f = x & 0x7FFFFFFFFFFFFFFF; if (x >> 63) f += 9223372036854775808.0; return f;}',
+    out += ['F64 C2HUnsignedToFloat(U64i x) {return LC_UIntToF64(x);}',
             'U64i C2HFloatToUnsigned(F64 x) {I64i n; if (x >= 9223372036854775808.0) {n = x - 9223372036854775808.0; return n(U64i) | 0x8000000000000000;} n = x; return n(U64i);}']
     # Forward class declarations allow mutually recursive pointer fields.
     out += ['extern class ' + r.cool + ';' for r in p.recs if not r.external]
@@ -42,14 +42,19 @@ def emit(p, args):
         if ('g', k) in keep and not g.external:
             out.append(p.decl(g.ct, names[k]) + ';')
     def signature(ft, name):
-        params = [p.decl(t, f'_p{i}') for i, t in enumerate(ft.params)]
+        params = [p.decl(t, f'_p{i}', value=True) for i, t in enumerate(ft.params)]
         if ft.variadic: params.append('...')
         return p.cool(ft.to) + ' ' + name + '(' + ', '.join(params) + ')'
+    referenced = set().union(*(r for key, r in refs.items() if key in keep))
     for k, f in p.funcs.items():
+        ft = f['ct']
+        if (('f', k) in referenced and not f['defined'] and k[1] not in libc_names
+                and any(t.kind == 'float' and t.bits == 32 for t in [ft.to] + ft.params)):
+            raise CError(f'{k[1]}: native C float ABI requires a LibC adapter')
         if ('f', k) in keep and not f['external'] and (f['defined'] or k[1] not in libc_names):
             out.append(('extern ' if f['defined'] else 'import ') + signature(f['ct'], names[k]) + ';')
     for ft, name in p.thunks.values():
-        params = [p.decl(t, f'_p{i}') for i, t in enumerate(ft.params)]
+        params = [p.decl(t, f'_p{i}', value=True) for i, t in enumerate(ft.params)]
         decl = p.cool(ft.to) + ' (*fn)(' + ', '.join(params) + ');'
         out.append(p.cool(ft.to) + ' ' + name + '(U8i *fp' + (', ' if params else '') + ', '.join(params) + ') {\n    ' + decl + '\n    fn = fp;\n    ' + ('return ' if ft.to.kind != 'void' else '') + '(*fn)(' + ', '.join(f'_p{i}' for i in range(len(params))) + ');\n}')
     out += [fix(s) for k, s, _ in p.func_defs if ('f', k) in keep]

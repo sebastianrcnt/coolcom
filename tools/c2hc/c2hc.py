@@ -165,20 +165,23 @@ class Program:
                 return 'U8i *'
             if to.kind == 'arr':
                 raise CError('pointer to array')
-            return self.cool(to) + (' *' if to.kind != 'ptr' else '*')
+            return self.storage(to) + (' *' if to.kind != 'ptr' else '*')
         if k == 'rec':
             return t.rec.cool
         if k == 'arr':
             raise CError('array type in a scalar position')
         raise CError(f'cool type of {k}')
 
-    def decl(self, t, name):
+    def storage(self, t):
+        return 'U32i' if t.kind == 'float' and t.bits == 32 else self.cool(t)
+
+    def decl(self, t, name, value=False):
         """A Cool declaration of name with type t (arrays get their dimensions)."""
         dims = ''
         while t.kind == 'arr':
             dims += f'[{t.n if t.n is not None else 1}]'
             t = t.to
-        c = self.cool(t)
+        c = self.cool(t) if value else self.storage(t)
         if c.endswith('*'):
             return f'{c}{name}{dims}'
         return f'{c} {name}{dims}'

@@ -540,6 +540,16 @@ F64 LC_UIntToF32(U64i x)
     return LC_F32FromBits(((e + 126) << 23) + q);
 }
 
+F64 LC_UIntToF64(U64i x)
+{
+    U64i top = x, q;
+    I64i e = 0;
+    if (!x) return 0.0;
+    while (top >> 1) {top >>= 1; e++;}
+    q = LC_RoundShift(x, e - 52);
+    return LC_Bits2F(((e + 1022) << 52) + q);
+}
+
 F64 LC_IntToF32(I64i x)
 {
     U64i magnitude = x;

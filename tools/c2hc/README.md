@@ -19,9 +19,33 @@ can be linked into one output; file-static names are qualified by translation un
 Supported constructs include integer, pointer, array, record, union, typedef and
 enum types, C record padding, function pointers, variadic functions, static data,
 control flow, initializer lists and side-effecting conditional expressions.
-Unsupported AST constructs fail with a source location. C `float` is widened to
-Cool F64; binary32 storage/layout is not preserved. Record arguments/returns by
-value, bit fields, compound literals and computed goto are not supported.
+Unsupported AST constructs fail with a source location. C `float` objects use
+four-byte IEEE binary32 bits (`U32i`); loads expand exactly to F64 and stores
+round to binary32. Float expression results round after each operation, matching
+`FLT_EVAL_METHOD == 0` with round-to-nearest, ties-to-even. LibC integer bit
+helpers work on ARM64 and x86-64, including subnormals, signed zero, overflow,
+infinities and NaN payloads (arithmetic NaNs need not have identical payloads).
+Float and double stay distinct in the type model; clang's conversions implement
+mixed arithmetic, comparisons, casts, fixed arguments/returns and float-to-double
+promotion in variadic calls. Translated functions pass float values as F64,
+with binary32 parameter objects; this is the Cool ABI, not a native C float ABI.
+Constants are emitted as IEEE bits to avoid decimal parser precision loss.
+64-bit integer-to-float conversion rounds directly, avoiding double rounding.
+
+`+`, `-`, `*`, `/` and `sqrtf` evaluate in F64 then round to binary32. `fma` and
+`fmaf` (including builtins) fail explicitly because widening and rounding would
+not implement their single rounding semantics. Other float math functions need
+an exact LibC implementation before use; a rounded double transcendental is not
+generally an exact float implementation. Dynamic rounding modes, floating-point
+exception flags, native C float ABI calls, long double, record arguments/returns
+by value, bit fields, compound literals and computed goto are not supported.
+
+The float fixtures compare exact bits and byte layouts with host `cc` on both
+ARM64 and x86-64 Cool targets. They cover accumulated rounding, division, sqrt,
+mixed types, integer and double conversions (including midpoint/subnormal and
+overflow boundaries), fixed/variadic/function-pointer calls, sizeof/offsetof,
+unions, pointer increments and float array memcpy. A deterministic sweep checks
+4096 operand pairs and conversions across the exponent range.
 
 The compiler's postfix cast can reinterpret storage at the destination width.
 Integer widening therefore uses typed temporary assignments, keeping adjacent
