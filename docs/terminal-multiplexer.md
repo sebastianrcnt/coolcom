@@ -26,7 +26,10 @@ session. Each pane runs `Init.cool` and an independent interactive Cool shell.
 
 ## Kernel implementation
 
-`Term.cool` stores Unicode cells, their width and 16-color foreground/background,
+`Term.cool` is the only terminal emulator: the framebuffer console, the outer
+shell, Tmux panes and remote shells all use it. It stores Unicode cells (code
+point, width, palette or 24-bit foreground/background, bold/reverse attributes),
+the rows changed since the last frame and the number of full-screen scrolls,
 cursor, UTF-8/ANSI parser state, primary/alternate buffers, and a 256-slot key
 ring (255 usable entries) in `CVTerm`. It handles cursor positioning/movement,
 SGR (including reverse), erase, lazy wrap, scrolling, and DEC alternate screen
@@ -37,8 +40,10 @@ cursors. It does not implement the entire xterm protocol or scrollback.
 and input (`KeyPop`/`GetKey`/`GetChar`/`GetLine`) to a terminal. Spawned workers
 inherit a reference to their parent's terminal, as members of that terminal's
 process group. Tmux binds each new shell to a fresh terminal before it runs.
-The ordinary outer shell has a direct terminal: it records the same ANSI
-screen while forwarding bytes to UART/framebuffer and reading physical keys.
+The ordinary outer shell has a direct terminal: with a framebuffer it is the
+console's own grid (`vt_screen`), which the renderer in `Fb.cool` draws; bytes
+are forwarded to the UART and the console output, and keys come from the
+physical keyboard.
 Boot tasks without a terminal retain the physical console. History/edit
 scratch storage is per task, so another shell cannot replace a pending line.
 

@@ -586,8 +586,10 @@ U0 ShellTask(U8 *data)
     CVTerm *v;
     U8 *init;
     if (!VtCurrent) {
-        if (fb.base) {cols = fb.cols; rows = fb.rows;}
-        v = VtNew(cols, rows); v->direct = TRUE;
+        // With a framebuffer, the console's own terminal (Fb.cool), whose grid is what the screen shows.
+        if (vt_screen) {v = vt_screen; ArchAdd(&v->refs, 1); cons_route = &VtOutput;}
+        else v = VtNew(cols, rows);
+        v->direct = TRUE;
         VtBind(Fs, v); VtRelease(v);
         v->owner = Fs;
     }

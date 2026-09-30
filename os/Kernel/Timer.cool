@@ -4,10 +4,14 @@
 I64 cnt_freq, cnts_per_jiffy, cnt_start;
 I64 jiffies;
 
+extern U0 FbTick();
+
 U0 TimerFiq()
 {//Derive jiffies from the counter so late interrupts don't make time drift.
     cnts.jiffies = jiffies = (ArchCntVct - cnt_start) / cnts_per_jiffy;
     ArchCntvCvalSet(cnt_start + (jiffies + 1) * cnts_per_jiffy);
+    if (!ArchCpuNum)
+        FbTick;  // the console's frames (Fb.cool)
 }
 
 U0 TimerCoreInit()

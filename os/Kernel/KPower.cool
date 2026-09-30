@@ -20,6 +20,7 @@ U0 PowerHalt(I64 finisher_code, U8 *what)
 {
     DskFlushAll;
     "%s\n", what;
+    FbFlush;
     if (fdt_finisher)
         ArchMmioWrite32(fdt_finisher, finisher_code);
     else
