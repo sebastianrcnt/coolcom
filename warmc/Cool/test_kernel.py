@@ -18,20 +18,20 @@ disk = OUT / 'disk.img'
 with disk.open('wb') as f:
     f.truncate(64 * 1024 * 1024)
 run(['mformat', '-i', disk, '-F', '-v', 'WARMC', '::'], capture_output=True)
-(OUT / 'Bad.aum').write_text('module body Broken is function f(): Unit is return ; end; end module body.\n')
-(OUT / 'Abort.aum').write_text('module body Test is function main(): ExitCode is abort("kernel abort probe"); end; end module body.\n')
-(OUT / 'Init.HC').write_text('''#include "C:/Warm.HC"
+(OUT / 'Bad.warm').write_text('module body Broken is function f(): Unit is return ; end; end module body.\n')
+(OUT / 'Abort.warm').write_text('module body Test is function main(): ExitCode is abort("kernel abort probe"); end; end module body.\n')
+(OUT / 'Init.cool').write_text('''#include "C:/Warm.cool"
 Print("WARM-KERNEL-LOADED\\n");
-Print("WARM-ABORT:%d\\n",WarmRun("C:/Abort.aum"));
-Print("WARM-FIRST:%d\\n",WarmRun("C:/Test.aum"));
-Print("WARM-BAD:%d\\n",WarmRun("C:/Bad.aum"));
-Print("WARM-SECOND:%d\\n",WarmRun("C:/Test.aum"));
+Print("WARM-ABORT:%d\\n",WarmRun("C:/Abort.warm"));
+Print("WARM-FIRST:%d\\n",WarmRun("C:/Test.warm"));
+Print("WARM-BAD:%d\\n",WarmRun("C:/Bad.warm"));
+Print("WARM-SECOND:%d\\n",WarmRun("C:/Test.warm"));
 Print("WARM-KERNEL-DONE\\n");
 Shutdown();
 ''')
-files = [(ROOT / 'build/warmcool/Kernel.HC', 'Warm.HC'),
-         (ROOT / 'warmc/test-programs/suites/018-hc-backend/002-record-flow-float/Test.aum', 'Test.aum'),
-         (OUT / 'Abort.aum', 'Abort.aum'), (OUT / 'Bad.aum', 'Bad.aum'), (OUT / 'Init.HC', 'Init.HC')]
+files = [(ROOT / 'build/warmcool/Kernel.cool', 'Warm.cool'),
+         (ROOT / 'warmc/test-programs/suites/018-hc-backend/002-record-flow-float/Test.warm', 'Test.warm'),
+         (OUT / 'Abort.warm', 'Abort.warm'), (OUT / 'Bad.warm', 'Bad.warm'), (OUT / 'Init.cool', 'Init.cool')]
 for src, name in files:
     run(['mcopy', '-o', '-i', disk, src, '::' + name], capture_output=True)
 cmd = [ROOT / 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024', '--timeout', '35',

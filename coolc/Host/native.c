@@ -659,7 +659,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc != 3)
-        fail("usage: coolc <entry.HC> <out.BIN>");
+        fail("usage: coolc <entry.cool> <out.BIN>");
     const char *compiler_image = getenv("COOLC_COMPILER_BIN");
     Module module = load_bin(compiler_image ? compiler_image : "build/coolc-compiler.BIN");
     if (getenv("COOLC_DEBUG"))

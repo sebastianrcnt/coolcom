@@ -1,0 +1,139 @@
+// ANSI terminal library: the escape sequences that Vim, Tmux, Nyan, the shell line
+// editor and Cls send, in one place. Everything goes through Print, so it reaches the
+// caller's terminal (a task terminal, else the framebuffer console and the UART).
+//
+// Colors are one number: 0..7 the ANSI colors, 8..15 the bright ones, 16..255 the xterm
+// 256-color palette, AnsiRgb(r, g, b) a 24-bit color and ANSI_DEFAULT the default one.
+// Rows and columns start at 1, like in the escape sequences. The functions with an
+// "S" suffix write the sequence to a buffer and return the end of it (no NUL needed
+// by the caller: the buffer is NUL terminated), for drawing a whole screen in one Print.
+// AnsiTermSize is at the end of Term.cool, which defines the terminals.
+#define ANSI_BLACK    0
+#define ANSI_RED      1
+#define ANSI_GREEN    2
+#define ANSI_YELLOW   3
+#define ANSI_BLUE     4
+#define ANSI_MAGENTA  5
+#define ANSI_CYAN     6
+#define ANSI_WHITE    7
+#define ANSI_GRAY     8   // bright black
+#define ANSI_DEFAULT  -1
+#define ANSI_RGB_FLAG 0x1000000
+
+I64 AnsiRgb(I64 r, I64 g, I64 b)
+{
+    return ANSI_RGB_FLAG | ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
+}
+
+//---- sequences as strings
+
+U8 *AnsiCursorS(U8 *p, I64 row, I64 col)
+{
+    StrPrint(p, "\x1b[%d;%dH", row, col);
+    return p + StrLen(p);
+}
+
+U8 *AnsiColorParamS(U8 *p, I64 color, Bool bg)
+{//The SGR parameters that select color (no "ESC [" or "m"): 36, 90, 38;5;196, 48;2;255;128;0.
+    I64 base = 30;
+    if (bg)
+        base = 40;
+    if (color < 0)
+        StrPrint(p, "%d", base + 9);
+    else if (color < 8)
+        StrPrint(p, "%d", base + color);
+    else if (color < 16)
+        StrPrint(p, "%d", base + 60 + color - 8);
+    else if (color < ANSI_RGB_FLAG)
+        StrPrint(p, "%d;5;%d", base + 8, color);
+    else
+        StrPrint(p, "%d;2;%d;%d;%d", base + 8, (color >> 16) & 255, (color >> 8) & 255, color & 255);
+    return p + StrLen(p);
+}
+
+U8 *AnsiColorS(U8 *p, I64 color, Bool bg)
+{//Select color for the foreground, or the background if bg.
+    StrCpy(p, "\x1b[");
+    p = AnsiColorParamS(p + 2, color, bg);
+    StrCpy(p, "m");
+    return p + 1;
+}
+
+U8 *AnsiSetS(U8 *p, I64 fg, I64 bg = ANSI_DEFAULT)
+{//Reset, then choose the colors, in one sequence: ESC [ 0;36;44 m.
+    StrCpy(p, "\x1b[0;");
+    p = AnsiColorParamS(p + 4, fg, FALSE);
+    if (bg != ANSI_DEFAULT) {
+        StrCpy(p, ";");
+        p = AnsiColorParamS(p + 1, bg, TRUE);
+    }
+    StrCpy(p, "m");
+    return p + 1;
+}
+
+U8 *AnsiFgS(U8 *p, I64 color) {return AnsiColorS(p, color, FALSE);}
+U8 *AnsiBgS(U8 *p, I64 color) {return AnsiColorS(p, color, TRUE);}
+
+U8 *AnsiResetS(U8 *p)
+{
+    StrCpy(p, "\x1b[0m");
+    return p + 4;
+}
+
+//---- cursor
+
+U0 AnsiCursor(I64 row, I64 col) {Print("\x1b[%d;%dH", row, col);}
+U0 AnsiHome() {Print("\x1b[H");}
+U0 AnsiUp(I64 n = 1) {Print("\x1b[%dA", n);}
+U0 AnsiDown(I64 n = 1) {Print("\x1b[%dB", n);}
+U0 AnsiRight(I64 n = 1) {if (n > 0) Print("\x1b[%dC", n);}
+U0 AnsiLeft(I64 n = 1) {if (n > 0) Print("\x1b[%dD", n);}
+U0 AnsiColumn(I64 col) {Print("\x1b[%dG", col);}
+U0 AnsiCursorHide() {Print("\x1b[?25l");}
+U0 AnsiCursorShow() {Print("\x1b[?25h");}
+U0 AnsiCursorSave() {Print("\x1b[s");}
+U0 AnsiCursorRestore() {Print("\x1b[u");}
+
+//---- erase
+
+U0 AnsiClear() {Print("\x1b[2J");}      // the whole screen; the cursor stays
+U0 AnsiClearBelow() {Print("\x1b[0J");} // from the cursor to the end of the screen
+U0 AnsiClearLine() {Print("\x1b[2K");}  // the whole line
+U0 AnsiClearEol() {Print("\x1b[K");}    // from the cursor to the end of the line
+
+//---- attributes
+
+U0 AnsiReset() {Print("\x1b[0m");}
+U0 AnsiBold() {Print("\x1b[1m");}
+U0 AnsiReverse() {Print("\x1b[7m");}
+
+U0 AnsiFg(I64 color)
+{
+    U8 b[48];
+    AnsiFgS(b, color);
+    Print("%s", b);
+}
+
+U0 AnsiBg(I64 color)
+{
+    U8 b[48];
+    AnsiBgS(b, color);
+    Print("%s", b);
+}
+
+U0 AnsiSet(I64 fg, I64 bg = ANSI_DEFAULT)
+{//Reset, then choose the colors: one Print for what a drawing loop changes cell by cell.
+    U8 b[96];
+    AnsiSetS(b, fg, bg);
+    Print("%s", b);
+}
+
+//---- screens
+
+U0 AnsiAltScreen(Bool on)
+{//The alternate screen keeps the shell's screen and cursor for when the program ends.
+    if (on)
+        Print("\x1b[?1049h");
+    else
+        Print("\x1b[?1049l");
+}

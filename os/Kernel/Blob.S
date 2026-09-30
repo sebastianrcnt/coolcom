@@ -1,6 +1,6 @@
 #include "Asm.h"
-// Files embedded in the Image for the shell (Shell.HC): the Cool compiler
-// seed here, and the shell prelude source (build/ShellPrelude.HH, made by
+// Files embedded in the Image for the shell (Shell.cool): the Cool compiler
+// seed here, and the shell prelude source (build/ShellPrelude.coolh, made by
 // tools/mkprelude.py from the kernel sources), which tools/binlink.py puts in
 // the kernel module (SHELL_PRELUDE).
 // Paths are relative to the repository root, where make runs the assembler.
@@ -22,19 +22,19 @@ ArchCompilerBin:
   mov x0, x1
   ret
 
-// ArchKSyms(): the kernel symbol table (tools/binlink.py, KSym.HC).
+// ArchKSyms(): the kernel symbol table (tools/binlink.py, KSym.cool).
 .global ArchKSyms
 ArchKSyms:
   LA x0, KSYM_TABLE
   ret
 
-// ArchArm64Ops(): the disassembler's opcode table (Arm64Ops.csv, UAsmARM64.HC).
+// ArchArm64Ops(): the disassembler's opcode table (Arm64Ops.csv, UAsmARM64.cool).
 .global ArchArm64Ops
 ArchArm64Ops:
   LA x0, ARM64_OPS
   ret
 
-// ArchFp(): the caller's frame pointer (x29), for backtraces (KDbg.HC).
+// ArchFp(): the caller's frame pointer (x29), for backtraces (KDbg.cool).
 .global ArchFp
 ArchFp:
   mov x0, x29

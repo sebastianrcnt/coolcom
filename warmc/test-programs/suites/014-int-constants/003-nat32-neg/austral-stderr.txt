@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/014-int-constants/003-nat32-neg/Test.aum",
+    "filename": "test-programs/suites/014-int-constants/003-nat32-neg/Test.warm",
     "startp": { "line": 3, "column": 8 },
     "end": { "line": 3, "column": 27 }
   },

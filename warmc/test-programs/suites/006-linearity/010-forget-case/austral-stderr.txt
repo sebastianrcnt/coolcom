@@ -7,7 +7,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/010-forget-case/Test.aum",
+    "filename": "test-programs/suites/006-linearity/010-forget-case/Test.warm",
     "startp": { "line": 9, "column": 8 },
     "end": { "line": 14, "column": 17 }
   },

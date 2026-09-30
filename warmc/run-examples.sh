@@ -10,12 +10,12 @@ dune build
 
 function compile() {
     ./warmc compile \
-        ./standard/src/Buffer.aui,./standard/src/Buffer.aum \
-        ./standard/src/String.aui,./standard/src/String.aum \
-        ./standard/src/StringBuilder.aui,./standard/src/StringBuilder.aum \
-        ./standard/src/IO/IO.aui,./standard/src/IO/IO.aum \
-        ./standard/src/IO/Terminal.aui,./standard/src/IO/Terminal.aum \
-        $1/$2.aui,$1/$2.aum \
+        ./standard/src/Buffer.warmh,./standard/src/Buffer.warm \
+        ./standard/src/String.warmh,./standard/src/String.warm \
+        ./standard/src/StringBuilder.warmh,./standard/src/StringBuilder.warm \
+        ./standard/src/IO/IO.warmh,./standard/src/IO/IO.warm \
+        ./standard/src/IO/Terminal.warmh,./standard/src/IO/Terminal.warm \
+        $1/$2.warmh,$1/$2.warm \
         --entrypoint=Example.$2:main --output=testbin
 
     if [ $# -eq 4 ] 

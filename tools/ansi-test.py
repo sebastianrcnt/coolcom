@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Ansi.HC and the consoles' colors: typed shell statements -> framebuffer pixels.
+"""Ansi.cool and the consoles' colors: typed shell statements -> framebuffer pixels.
 
-Twice: on the framebuffer console directly, and inside a Tmux pane (Term.HC cells
+Twice: on the framebuffer console directly, and inside a Tmux pane (Term.cool cells
 re-emitted to the framebuffer). The statements print with 256-color and truecolor SGR
 (38;5 48;5 38;2 48;2), save and restore the cursor, and print AnsiTermSize, which must
 be the task's terminal size: 30x80 for the 640x480 screen, 29x80 in a pane (the status row).
@@ -83,7 +83,7 @@ def scenario(name, tmux, size):
                        stdout=out, stderr=subprocess.STDOUT)
     log = (d / 'vm.log').read_text(errors='replace')
     vim.check_init_log(log)
-    after = log.split('Running C:/Init.HC', 1)[-1]
+    after = log.split('Running C:/Init.cool', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
     try:
         check(d, size)

@@ -67,7 +67,7 @@ volumes.
 ## Tests
 
 `make test` includes the existing editor, input, shell, relocation and device
-tests, plus FAT32 interoperability tests in `DevTest.HC` and
+tests, plus FAT32 interoperability tests in `DevTest.cool` and
 `tools/kernel-verify.py`. All FAT test images are disposable and created under
 `build/`. Required macOS commands: `newfs_msdos`, `fsck_msdos`, and mtools
 (`mformat`, `mcopy`, `mdir`).

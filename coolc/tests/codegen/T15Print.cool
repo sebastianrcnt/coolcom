@@ -1,0 +1,57 @@
+#include "TestBase.coolh"
+I64 g = 5; F64 gf = 2.5; U8 *gs = "global str";
+U0 P1() {"hello\n";}
+U0 P2() {"no newline";}
+U0 P3(I64 x) {"x=%d\n", x;}
+U0 P4(I64 x, I64 y) {"%d,%d\n", x, y;}
+U0 P5(I64 a, I64 b, I64 c, I64 d, I64 e, I64 f, I64 g, I64 h) {"%d %d %d %d %d %d %d %d\n", a, b, c, d, e, f, g, h;}
+U0 P6(I64 a, I64 b, I64 c, I64 d, I64 e, I64 f, I64 g, I64 h, I64 i, I64 j) {"%d %d %d %d %d %d %d %d %d %d\n", a, b, c, d, e, f, g, h, i, j;}
+U0 P7(F64 x) {"%f\n", x;}
+U0 P8(F64 x, F64 y) {"%8.3f|%-8.3f|\n", x, y;}
+U0 P9(I64 a, F64 b, I64 c, F64 d) {"%d %f %d %f\n", a, b, c, d;}
+U0 P10(U8 *s) {"%s\n", s;}
+U0 P11(U8 *s, I64 n) {"%s=%d\n", s, n;}
+U0 P12(I64 c) {"%c\n", c;}
+U0 P13(I64 x) {"%X %x %08X %o\n", x, x, x, x;}
+U0 P14() {"%d\n", g;}
+U0 P15() {"%f\n", gf;}
+U0 P16() {"%s\n", gs;}
+U0 P17() {"a\tb\\c\"d\n";}
+U0 P18() {"percent %% done\n";}
+U0 P19(I64 x) {"%d\n", x + 1;}
+U0 P20(I64 x) {"%d\n", x * x - 3;}
+U0 P21(I64 *p) {"%d\n", *p;}
+U0 P22(I64 *p, I64 i) {"%d\n", p[i];}
+U0 P23(F64 *p) {"%f\n", p[1];}
+U0 P24(I64 x) {"%d %d\n", x++, x;}
+U0 P25(I64 x) {if (x) "yes\n"; else "no\n";}
+U0 P26(I64 x) {while (x-- > 0) "tick %d\n", x;}
+U0 P27(I64 x) {switch (x) {case 0: "zero\n"; break; case 1: "one\n"; break; default: "other\n";}}
+U0 P28() {"a"; "b"; "c";}
+U0 P29(I64 x) {"%d\n", x; "%d\n", x + 1;}
+U0 P33() {"\x41\x42\n";}
+U0 P34() {"\101\102\n";}
+U0 P35() {"\e[0m\r\n";}
+U0 P36() {"long string long string long string long string long string long string long string long string\n";}
+U0 C1() {'A';}
+U0 C2() {'AB';}
+U0 C3() {'ABCDEFG';}
+U0 C4() {'\n';}
+U0 C5(I64 c) {PutChars(c);}
+U0 C6() {PutChars('X'); PutChars(10);}
+U0 C7() {'\x41';}
+U0 C8() {'a'; 'b'; 'c';}
+U0 C9() {'\\'; '\'';}
+U0 C11() {'\t'; '\r';}
+U0 C12(I64 c) {if (c) 'y'; else 'n';}
+U0 C13(I64 c) {PutChars(c + 1);}
+U0 C14(I64 c) {PutChars(c & 0xFF); PutChars(c >> 8 & 0xFF);}
+U0 C15() {"a"; 'b'; "c\n";}
+U0 D1() {Print("plain\n");}
+U0 D2(I64 x) {Print("%d\n", x);}
+U0 D3(U8 *fmt, I64 x) {Print(fmt, x);}
+U0 D4(F64 x) {Print("%f %d\n", x, x(I64));}
+U0 D5() {Print("%d %d %d\n", 1, 2, 3);}
+U0 D6(I64 a, F64 b, U8 *s) {Print("%d %f %s\n", a, b, s);}
+U0 D7() {Print("%s %s\n", "a", "b");}
+U0 D8(I64 x) {Print("%d\n", x); Print("%d\n", x + 1);}

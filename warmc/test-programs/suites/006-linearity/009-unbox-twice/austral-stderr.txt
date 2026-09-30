@@ -7,7 +7,7 @@
     { "type": "text", "content": " has already been consumed." }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/009-unbox-twice/Test.aum",
+    "filename": "test-programs/suites/006-linearity/009-unbox-twice/Test.warm",
     "startp": { "line": 47, "column": 16 },
     "end": { "line": 47, "column": 28 }
   },

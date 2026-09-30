@@ -11,7 +11,7 @@
     { "type": "text", "content": " universe." }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/004-expect-free/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/004-expect-free/Test.warm",
     "startp": { "line": 7, "column": 8 },
     "end": { "line": 14, "column": 8 }
   },

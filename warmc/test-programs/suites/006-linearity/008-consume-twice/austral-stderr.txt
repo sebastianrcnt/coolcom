@@ -7,7 +7,7 @@
     { "type": "text", "content": " has already been consumed." }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/008-consume-twice/Test.aum",
+    "filename": "test-programs/suites/006-linearity/008-consume-twice/Test.warm",
     "startp": { "line": 14, "column": 8 },
     "end": { "line": 14, "column": 19 }
   },

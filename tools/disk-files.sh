@@ -1,8 +1,8 @@
 #!/bin/sh
 # Copy the C: drive's files into a FAT32 disk image with mtools: the programs of os/Disk,
-# and the kernel's own sources: os/Kernel in C:/Kernel, and the library files Kernel.HC
-# includes as ../../coolc/Runtime/... and ../../coolc/Fmt/HCTok.HC in C:/coolc (".." stops
-# at the root), so Cmp("C:/Kernel/Kernel.HC") in the OS compiles the kernel and Man finds
+# and the kernel's own sources: os/Kernel in C:/Kernel, and the library files Kernel.cool
+# includes as ../../coolc/Runtime/... and ../../coolc/Fmt/HCTok.cool in C:/coolc (".." stops
+# at the root), so Cmp("C:/Kernel/Kernel.cool") in the OS compiles the kernel and Man finds
 # definitions. With build/BootStub.BIN (the prebuilt assembly, tools/mkbootstub.py) the
 # OS's MakeKernel rebuilds the whole Image (docs/kernel-rebuild.md).
 # Usage: disk-files.sh image [-n]   (-n: leave files that are already there alone)
@@ -13,7 +13,7 @@ FLAG=-o
 [ "${2:-}" = "-n" ] && FLAG=-n
 cd "$ROOT"
 # Build once, and refresh only when the compiler or its embedded sources change.
-make build/warmcool/Kernel.HC
+make build/warmcool/Kernel.cool
 for d in Kernel coolc coolc/Runtime coolc/Fmt; do
     # mmd asks on the terminal when the directory exists, so only make missing ones.
     mdir -i "$IMG" ::$d >/dev/null 2>&1 || mmd -i "$IMG" ::$d </dev/null
@@ -29,12 +29,12 @@ put() {
         mcopy -o -i "$IMG" "$f" "::$dir"
     done
 }
-put "" os/Disk/*.HC os/Disk/*.aum
+put "" os/Disk/*.cool os/Disk/*.warm
 # Install the generated package under its public shell name.
-if [ "$FLAG" != -n ] || ! mdir -i "$IMG" ::Warm.HC >/dev/null 2>&1; then
-    mcopy -o -i "$IMG" build/warmcool/Kernel.HC ::Warm.HC
+if [ "$FLAG" != -n ] || ! mdir -i "$IMG" ::Warm.cool >/dev/null 2>&1; then
+    mcopy -o -i "$IMG" build/warmcool/Kernel.cool ::Warm.cool
 fi
 put Kernel/ os/Kernel/*
 [ ! -f build/BootStub.BIN ] || put Kernel/ build/BootStub.BIN
-put coolc/Runtime/ coolc/Runtime/*.HC
-put coolc/Fmt/ coolc/Fmt/HCTok.HC
+put coolc/Runtime/ coolc/Runtime/*.cool
+put coolc/Fmt/ coolc/Fmt/HCTok.cool

@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/002-constants/002-assign/Test.aum",
+    "filename": "test-programs/suites/002-constants/002-assign/Test.warm",
     "startp": { "line": 5, "column": 8 },
     "end": { "line": 5, "column": 18 }
   },

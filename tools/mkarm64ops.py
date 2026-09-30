@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Make os/Kernel/Arm64Ops.csv, the opcode table of the ARM64 disassembler
-(os/Kernel/UAsmARM64.HC), from Aiwnios's Src/AArch64_ops.csv (commit e155e87,
+(os/Kernel/UAsmARM64.cool), from Aiwnios's Src/AArch64_ops.csv (commit e155e87,
 clone it into vendor/aiwnios). Only the columns the disassembler reads are
 kept: number, name, prependage, appendage, register kind, then one cell per
 instruction bit 31..0 ("0", "1", a field name at its top bit, empty below)

@@ -8,7 +8,7 @@
     { "type": "text", "content": "defined more than once" }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/023-duplicate-method/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/023-duplicate-method/Test.warm",
     "startp": { "line": 4, "column": 8 },
     "end": { "line": 12, "column": 8 }
   },

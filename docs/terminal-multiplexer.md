@@ -1,6 +1,6 @@
 # Terminals and Tmux
 
-Run `Tmux;` at the Cool shell. `Init.HC` loads it automatically from C:.
+Run `Tmux;` at the Cool shell. `Init.cool` loads it automatically from C:.
 Install updated disk programs with `make disk-install` before using an existing
 persistent disk (`make run` only adds files that are missing).
 
@@ -22,11 +22,11 @@ Run `Tmux;` again from the same calling shell to reattach. The status line
 marks the selected window. There are up to eight windows and sixteen panes
 per session. Splits preserve at least ten columns or three rows per pane;
 closing a pane gives its area to its sibling. Closing the last pane ends the
-session. Each pane runs `Init.HC` and an independent interactive Cool shell.
+session. Each pane runs `Init.cool` and an independent interactive Cool shell.
 
 ## Kernel implementation
 
-`Term.HC` stores Unicode cells, their width and 16-color foreground/background,
+`Term.cool` stores Unicode cells, their width and 16-color foreground/background,
 cursor, UTF-8/ANSI parser state, primary/alternate buffers, and a 256-slot key
 ring (255 usable entries) in `CVTerm`. It handles cursor positioning/movement,
 SGR (including reverse), erase, lazy wrap, scrolling, and DEC alternate screen
@@ -85,7 +85,7 @@ routing/isolation, not a security boundary for privileged HolyC programs.
 ## Verification
 
 `make test` includes `make tmux-test`, plus the existing relocated boot, device,
-Vim, key and memory-safety recovery tests. `TermTest.HC` checks ANSI state,
+Vim, key and memory-safety recovery tests. `TermTest.cool` checks ANSI state,
 alternate-screen restore, UTF-8 width, output/input isolation, queue bounds,
 scrolling and resize preservation without consuming physical input.
 

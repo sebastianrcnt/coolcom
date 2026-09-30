@@ -16,7 +16,7 @@ for name in B05ClassCopy B06LargeFloat B07StringDefault B08FunctionPointerArray 
         B09StringIndex) symbol=StringIndexSum ;;
     esac
     COOLC_COMPILER_BIN=$BASE gtimeout 20 build/coolc \
-        "coolc/tests/behavior/native/$name.HC" "$OUT/$name.BIN" \
+        "coolc/tests/behavior/native/$name.cool" "$OUT/$name.BIN" \
         > "$OUT/$name.compile.log"
     gtimeout 10 build/coolc --probe "$OUT/$name.BIN" "$symbol" \
         > "$OUT/$name.actual"

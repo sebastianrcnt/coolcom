@@ -7,7 +7,7 @@ Unifont glyphs are 16 rows tall and 8 or 16 pixels wide; a hex line is
 "CODEPOINT:HEXROWS" with 32 (8 wide) or 64 (16 wide) hex digits. The console
 draws them in 8x16 cells: one cell for the narrow glyphs, two for the wide.
 Only the code points in RANGES are kept, and only where the glyph's width
-matches Utf8Width() in os/Kernel/Console.HC (the shell's line editing counts
+matches Utf8Width() in os/Kernel/Console.cool (the shell's line editing counts
 columns with it), so the cursor arithmetic on the UART and on the
 framebuffer agree. Combining marks (width 0) are not drawn at all.
 
@@ -46,7 +46,7 @@ RANGES = [
 
 
 def utf8_width(cp):
-    """Mirror of Utf8Width() in os/Kernel/Console.HC."""
+    """Mirror of Utf8Width() in os/Kernel/Console.cool."""
     if 0x300 <= cp <= 0x36F or 0x200B <= cp <= 0x200F or 0xFE00 <= cp <= 0xFE0F:
         return 0
     if (0x1100 <= cp <= 0x115F or 0x2E80 <= cp <= 0xA4CF or 0xAC00 <= cp <= 0xD7A3 or

@@ -1,11 +1,11 @@
 #!/bin/sh
 # The OS rebuilds its own kernel and boots it (docs/kernel-rebuild.md). Boot the
 # Image with the kernel sources on C: (tools/disk-files.sh), the prebuilt
-# assembly (build/BootStub.BIN) and the shell prelude; C:/Init.HC runs
+# assembly (build/BootStub.BIN) and the shell prelude; C:/Init.cool runs
 # MakeKernel, which must write C:/Kernel.Image equal to the host's Image and
 # C:/Kernel/Syms.ld equal to the host's syms.ld, byte for byte. Then it adds a
-# function to C:/Kernel/Kernel.HC, builds C:/Kernel2.Image and boots it with
-# Reboot; on that boot Init.HC types a line at the shell prompt that calls the
+# function to C:/Kernel/Kernel.cool, builds C:/Kernel2.Image and boots it with
+# Reboot; on that boot Init.cool types a line at the shell prompt that calls the
 # new function and powers off. Needs mtools. Extra arguments go to coolvm.
 # Usage: kernel-rebuild-test.sh build/kernel.Image [coolvm options]
 set -eu
@@ -19,8 +19,8 @@ mkfile -n 64m "$disk"
 mformat -i "$disk" -F -v REBUILD ::
 tools/disk-files.sh "$disk"
 mcopy -o -i "$disk" "$b/BootStub.BIN" ::Kernel/
-mcopy -i "$disk" "$b/ShellPrelude.HH" ::Kernel.HH
-cat >"$dir/Init.HC" <<'EOF'
+mcopy -i "$disk" "$b/ShellPrelude.coolh" ::Kernel.coolh
+cat >"$dir/Init.cool" <<'EOF'
 U8 *s, *t;
 I64 n;
 if (FileFind("C:/Booted.TXT")) {
@@ -31,16 +31,16 @@ if (FileFind("C:/Booted.TXT")) {
 } else {
     Print("makekernel %d\n", MakeKernel);
     Copy("C:/Kernel/Syms.ld", "C:/Syms1.ld");
-    s = FileRead("C:/Kernel/Kernel.HC", &n);
+    s = FileRead("C:/Kernel/Kernel.cool", &n);
     t = MStrPrint("%s\nI64 RebuildMark()\n{\n    return 4242;\n}\n", s);
-    FileWrite("C:/Kernel/Kernel.HC", t, StrLen(t));
+    FileWrite("C:/Kernel/Kernel.cool", t, StrLen(t));
     Print("makekernel2 %d\n", MakeKernel("C:/Kernel2.Image"));
     FileWrite("C:/Booted.TXT", "1", 1);
     Reboot("C:/Kernel2.Image");
     Print("reboot returned\n");
 }
 EOF
-mcopy -o -i "$disk" "$dir/Init.HC" ::
+mcopy -o -i "$disk" "$dir/Init.cool" ::
 log=$dir/log
 status=0
 # coolvm keeps the Image passed by Reboot in $TMPDIR while it runs it.

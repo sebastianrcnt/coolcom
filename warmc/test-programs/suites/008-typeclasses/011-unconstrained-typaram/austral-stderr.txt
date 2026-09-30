@@ -13,7 +13,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/011-unconstrained-typaram/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/011-unconstrained-typaram/Test.warm",
     "startp": { "line": 14, "column": 8 },
     "end": { "line": 14, "column": 22 }
   },

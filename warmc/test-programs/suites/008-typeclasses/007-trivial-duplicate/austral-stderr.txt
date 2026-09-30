@@ -3,7 +3,7 @@
   "kind": "Generic Error",
   "text": [ { "type": "text", "content": "Instance overlaps." } ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/007-trivial-duplicate/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/007-trivial-duplicate/Test.warm",
     "startp": { "line": 10, "column": 8 },
     "end": { "line": 16, "column": 8 }
   },

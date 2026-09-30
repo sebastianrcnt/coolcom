@@ -7,7 +7,7 @@
     { "type": "text", "content": " has already been consumed." }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/003-destructure-twice/Test.aum",
+    "filename": "test-programs/suites/006-linearity/003-destructure-twice/Test.warm",
     "startp": { "line": 9, "column": 8 },
     "end": { "line": 9, "column": 36 }
   },

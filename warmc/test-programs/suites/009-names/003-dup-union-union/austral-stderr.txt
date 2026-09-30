@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/009-names/003-dup-union-union/Test.aum",
+    "filename": "test-programs/suites/009-names/003-dup-union-union/Test.warm",
     "startp": { "line": 4, "column": 4 },
     "end": { "line": 4, "column": 25 }
   },

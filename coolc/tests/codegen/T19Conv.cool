@@ -1,0 +1,74 @@
+#include "TestBase.coolh"
+I64 R1(I64 a) {return a(U8);}
+I64 R2(I64 a) {return a(I8);}
+I64 R3(I64 a) {return a(U16);}
+I64 R4(I64 a) {return a(I16);}
+I64 R5(I64 a) {return a(U32);}
+I64 R6(I64 a) {return a(I32);}
+I64 R7(I64 a) {return a(U64);}
+F64 R8(I64 a) {return a(F64);}
+I64 R9(F64 a) {return a(I64);}
+I64 R10(F64 a) {return a(U8);}
+F64 R11(U8 a) {return a(F64);}
+F64 R12(I8 a) {return a(F64);}
+F64 R13(U16 a) {return a(F64);}
+F64 R14(I16 a) {return a(F64);}
+F64 R15(U32 a) {return a(F64);}
+F64 R16(I32 a) {return a(F64);}
+F64 R17(U64 a) {return a(F64);}
+I64 R18(F64 a) {return a(U64);}
+I64 R19(F64 a) {return a(I32);}
+I64 R20(I64 a, I64 b) {return (a + b)(U8);}
+I64 R21(I64 a, I64 b) {return (a * b)(I16) + 1;}
+I64 R22(I64 a) {return (a >> 3)(U8) << 3;}
+I64 R23(I64 a) {return (a(I8))(I64) * 2;}
+I64 R24(U8 *p) {return p[0](I8);}
+F64 R25(I64 a, I64 b) {return a(F64) / b(F64);}
+F64 R26(I64 a, I64 b) {return (a / b)(F64);}
+F64 R27(F64 a, F64 b) {return (a / b)(I64)(F64);}
+I64 R28(I64 a) {return a(Bool);}
+I64 R29(F64 *p) {return p[0](I64) + p[1](I64);}
+I64 R30(I64 *p) {return p[0](F64) * 2;}
+I64 R31(I64 a) {return a(I64 *)[0];}
+I64 R32(I64 a) {return a(U8 *) - (0)(U8 *);}
+I64 R33(U8 *a) {return a(I64) & 0xFFF;}
+U32 R34(F64 a) {return a;}
+I32 R35(F64 a) {return a;}
+U64 R36(F64 a) {return a;}
+U16 R37(F64 a) {return a;}
+F64 R38() {return 3;}
+F64 R39() {return 3 + 4;}
+F64 R40() {return 1 / 2;}
+F64 R41() {return 1 / 2.0;}
+I64 R42() {return 1.9;}
+I64 R43() {return -1.9;}
+I64 R44() {return 1e3;}
+F64 R45() {return 0x7FFFFFFF;}
+F64 R46() {return 12345678901234;}
+F64 R47() {return 1e18;}
+F64 R48() {return 1.0e-5;}
+F64 R49() {return 0.1;}
+F64 R50() {return 3.141592653589793;}
+F64 R51() {return 2.718281828459045;}
+F64 R52() {return 255.0;}
+F64 R53() {return 65536.0;}
+F64 R54() {return 0.5;}
+F64 R55() {return 1e308;}
+F64 R56() {return 1.5e-320;}
+F64 R57() {return -0.0;}
+F64 R58() {return 1.0 * 2.0 * 3.0;}
+F64 R59() {return 6.0 / 4.0;}
+F64 R60() {return 1e10;}
+I64 S1(F64 a, I64 b) {return a < b;}
+I64 S2(U8 a, F64 b) {return a > b;}
+F64 S3(I64 a, I64 b, F64 c, F64 d) {return a * c + b * d;}
+F64 S4(F64 a, I64 b) {return a + b + b + b;}
+F64 S5(I64 a, F64 b) {return a + a + a + b;}
+F64 S6(U64 a, F64 b) {return a * b;}
+F64 S7(F64 a) {I64 i = a; F64 b = i; return a - b;}
+F64 S8(F64 a) {U8 i = a; return i;}
+I64 S9(F64 a) {F64 b = a * 10.0; return b;}
+I64 S10(I64 n) {F64 s = 0; I64 i; for (i = 1; i <= n; i++) s += 1.0 / i; return s * 1000;}
+F64 S11(I64 n) {F64 x = 1; while (n--) x *= 1.5; return x;}
+I64 S12(F64 x) {I64 n = 0; while (x > 1) {x /= 2; n++;} return n;}
+F64 S13(F64 x, I64 n) {F64 r = 1; I64 i; for (i = 0; i < n; i++) r *= x; return r;}

@@ -9,7 +9,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/019-capability/001-forge-root/Test.aum",
+    "filename": "test-programs/suites/019-capability/001-forge-root/Test.warm",
     "startp": { "line": 3, "column": 8 },
     "end": { "line": 3, "column": 53 }
   },

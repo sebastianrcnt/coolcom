@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Make the shell prelude from the kernel sources (os/Kernel/Kernel.HC and
+"""Make the shell prelude from the kernel sources (os/Kernel/Kernel.cool and
 what it #includes, in order).
 
 The shell JIT-compiles the prelude before the first command line. It holds
 the kernel's #defines, classes and unions verbatim, and an `extern` prototype
 for every function the kernel defines (assembly `import`s become `extern`
 too). In JIT mode `extern` binds a prototype to the system symbol of the same
-name, and the shell registers every kernel symbol as one (Shell.HC, from the
+name, and the shell registers every kernel symbol as one (Shell.cool, from the
 table tools/binlink.py puts in the Image), so shell code calls the kernel
 directly. Global variables and function bodies are left out.
 A function defined twice is an error (HolyC would silently keep the later one).
 (#includes are followed, so the prelude sees the same #defines, e.g.
 COOLCOM_KERNEL, as the kernel did.)
-Usage: mkprelude.py os/Kernel/Kernel.HC > build/ShellPrelude.HH
+Usage: mkprelude.py os/Kernel/Kernel.cool > build/ShellPrelude.coolh
 """
 import pathlib
 import re

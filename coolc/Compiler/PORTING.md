@@ -1,6 +1,6 @@
 # Porting the Aiwnios AArch64 backend from C to Cool
 
-The owned HolyC frontend (`coolc/Frontend/*.HC`) builds IR
+The owned HolyC frontend (`coolc/Frontend/*.cool`) builds IR
 through `__HC_*` functions implemented in C, and the C code optimizes the IR
 and emits AArch64 machine code. To make the whole compiler Cool (and so
 editable inside the OS) we translate that C code to Cool here.
@@ -13,12 +13,12 @@ BSD-3; keep a credit line at the top of every translated file:
 
 | Cool file | Translated from |
 |---|---|
-| `BackendA.HH` | `c/aiwn_lexparser.h`, `c/aiwn_arm.h` (types, enums, macros needed by the files below) |
-| `IRBind.HC` | `c/parser.c`: the `__HC_*` binding functions (~lines 4581-5109) and the helpers the backend calls (`AssignRawTypeToNode`, `CodeMiscNew`, `CodeMiscAddRef`, `ICArgN`, `ICFree`, `ICFwd`, `__HC_SetAOTRelocBeforeRIP`, `CodeCtrlPush/Pop`, `CmpCtrlNew/Del`, ...) |
-| `Arm64Enc.HC` | `c/arm64_asm.c` |
-| `OptPass.HC` | `c/optpass.c` (skip the bytecode `CompileBC` part) |
-| `ArmBackendA.HC` | `c/arm_backend.c` lines 1-2529 (up to, not including, `FuncProlog`) |
-| `ArmBackendB.HC` | `c/arm_backend.c` lines 2530-end |
+| `BackendA.coolh` | `c/aiwn_lexparser.h`, `c/aiwn_arm.h` (types, enums, macros needed by the files below) |
+| `IRBind.cool` | `c/parser.c`: the `__HC_*` binding functions (~lines 4581-5109) and the helpers the backend calls (`AssignRawTypeToNode`, `CodeMiscNew`, `CodeMiscAddRef`, `ICArgN`, `ICFree`, `ICFwd`, `__HC_SetAOTRelocBeforeRIP`, `CodeCtrlPush/Pop`, `CmpCtrlNew/Del`, ...) |
+| `Arm64Enc.cool` | `c/arm64_asm.c` |
+| `OptPass.cool` | `c/optpass.c` (skip the bytecode `CompileBC` part) |
+| `ArmBackendA.cool` | `c/arm_backend.c` lines 1-2529 (up to, not including, `FuncProlog`) |
+| `ArmBackendB.cool` | `c/arm_backend.c` lines 2530-end |
 
 ## Rules
 
@@ -78,7 +78,7 @@ mask or by assigning to a `U32`/`I32` variable.
   for clarity. Default arguments exist and are fine.
 - String/char literals and `printf`-style calls: `printf(fmt, ...)` ->
   `Print(fmt, ...)`; HolyC `%` formats are close to C's.
-- `assert(x)` -> `BAssert(x, "text")`, declared in `BackendA.HH`.
+- `assert(x)` -> `BAssert(x, "text")`, declared in `BackendA.coolh`.
 
 **Runtime calls.** Map C library/runtime calls to TempleOS names:
 `A_MALLOC(sz, hc)` -> `MAlloc(sz)`, `A_CALLOC(sz, hc)` -> `CAlloc(sz)`,
@@ -97,7 +97,7 @@ Compile a HolyC entry point with the native host and checked-in seed:
 ```sh
 make build/coolc
 COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
-  build/coolc path/to/Entry.HC build/Output.BIN
+  build/coolc path/to/Entry.cool build/Output.BIN
 ```
 
 Every translated function should keep the C function's name (after

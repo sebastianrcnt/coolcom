@@ -8,7 +8,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/008-typeclasses/019-instance-method-typaram-overlap/Test.aum",
+    "filename": "test-programs/suites/008-typeclasses/019-instance-method-typaram-overlap/Test.warm",
     "startp": { "line": 6, "column": 4 },
     "end": { "line": 12, "column": 8 }
   },

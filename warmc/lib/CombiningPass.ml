@@ -325,7 +325,7 @@ let private_def module_name im def =
                 docstring)
 
 let rec combine (env: env) (cmi: concrete_module_interface) (cmb: concrete_module_body): combined_module =
-  with_frame "Module combining pass: combining .aui and .aum files"
+  with_frame "Module combining pass: combining .warmh and .warm files"
     (fun _ ->
       let (ConcreteModuleInterface (mn, interface_docstring, interface_imports, decls)) = cmi
       and (ConcreteModuleBody (mn', kind, body_docstring, body_imports, defs)) = cmb

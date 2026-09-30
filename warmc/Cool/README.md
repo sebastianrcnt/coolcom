@@ -14,13 +14,13 @@ From the repository root:
 ./warmc/Cool/build.sh
 export COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN"
 build/coolc --run build/warmcool/Warm.BIN compile \
-  warmc/test-programs/suites/018-hc-backend/002-record-flow-float/Test.aum \
-  --entrypoint=Test:main --target-type=hc --output=build/warmcool/Test.HC
-build/coolc build/warmcool/Test.HC build/warmcool/Test.BIN
+  warmc/test-programs/suites/018-hc-backend/002-record-flow-float/Test.warm \
+  --entrypoint=Test:main --target-type=hc --output=build/warmcool/Test.cool
+build/coolc build/warmcool/Test.cool build/warmcool/Test.BIN
 build/coolc --run build/warmcool/Test.BIN
 ```
 
-Supply module pairs as `path/Module.aui,path/Module.aum`; all dependencies must
+Supply module pairs as `path/Module.warmh,path/Module.warm`; all dependencies must
 be provided. Pervasive and Memory sources are embedded automatically. Options:
 
 - `--parse`: lexer/parser only; `--dump-ast`: print the parsed tree.
@@ -39,14 +39,14 @@ The host adapter supports HC output, not the OCaml CLI's C/executable targets.
 python3 warmc/Cool/package_kernel.py
 ```
 
-Copy `build/warmcool/Kernel.HC` to `C:/Warm.HC` and Warm sources to the OS disk.
+Copy `build/warmcool/Kernel.cool` to `C:/Warm.cool` and Warm sources to the OS disk.
 On the kernel compiler/shell task:
 
 ```c
-#include "C:/Warm.HC"
-WarmRun("C:/Test.aum");
-WarmRun("C:/Api.aui,C:/Api.aum,C:/Main.aum", "Main:main");
-WarmCompile("C:/Test.aum", "Test:main", "C:/Test.HC");
+#include "C:/Warm.cool"
+WarmRun("C:/Test.warm");
+WarmRun("C:/Api.warmh,C:/Api.warm,C:/Main.warm", "Main:main");
+WarmCompile("C:/Test.warm", "Test:main", "C:/Test.cool");
 ```
 
 `WarmRun` compiles and immediately JIT-executes through `ShellExe`, returning

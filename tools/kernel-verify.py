@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host side of `make test` for the kernel's VM devices (see os/Kernel/DevTest.HC).
+"""Host side of `make test` for the kernel's VM devices (see os/Kernel/DevTest.cool).
 
   kernel-verify.py prepare DIR   write DIR/disk.img, DIR/fat.img and DIR/input.txt for coolvm
   kernel-verify.py verify DIR    check DIR/screen.png (640x480), DIR/disk.img and DIR/fat.img afterwards
@@ -8,8 +8,8 @@
 Disk: 128 sectors, sector s byte j = (s*31 + j*7) & 255. The kernel overwrites
 sectors 9 and 10 with byte j (0..1023) = (j*3 + 17) & 255.
 FAT: a 40 MiB FAT32 volume made by newfs_msdos (512-byte clusters) holding
-HostNote.txt and Test.HC, copied in with mtools (the shell #includes Test.HC). The kernel reads it and writes
-FromCoolcom.txt and Sub/Inner.TXT (os/Kernel/DevTest.HC DevTestFs); afterwards
+HostNote.txt and Test.cool, copied in with mtools (the shell #includes Test.cool). The kernel reads it and writes
+FromCoolcom.txt and Sub/Inner.TXT (os/Kernel/DevTest.cool DevTestFs); afterwards
 mtools must read them back and fsck_msdos must find the volume clean.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
 h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
@@ -71,7 +71,7 @@ SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
          ("text", r'Print("%d\n", 7);'), ("key", KEY_LEFT), ("key", KEY_LEFT), ("key", KEY_BACKSPACE),
          ("text", "42"), ("key", ENTER),
          ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER),
-         '#include "Test.HC"', r'Print("%d\n", Tripled(21));', r"""Print("%s%d\n", "\101", '\101' + '\e');""", 'I64 bad = ;']  # a compile error prints ERROR, the line and a caret
+         '#include "Test.cool"', r'Print("%d\n", Tripled(21));', r"""Print("%s%d\n", "\101", '\101' + '\e');""", 'I64 bad = ;']  # a compile error prints ERROR, the line and a caret
 
 # One shell regression exercises all three protections and prompt recovery.
 SHELL += [
@@ -83,7 +83,7 @@ SHELL += [
     r'Print("MEMSAFE RECOVERED %d\n", Sq(9));',
 ]
 
-# US layout, Linux key codes, as in os/Kernel/Input.HC: char -> (code, shifted).
+# US layout, Linux key codes, as in os/Kernel/Input.cool: char -> (code, shifted).
 KEYS = {" ": (57, False), "`": (41, False), "~": (41, True), "\\": (43, False), "|": (43, True)}
 for first, lo, up in ((2, "1234567890-=", "!@#$%^&*()_+"), (16, "qwertyuiop[]", "QWERTYUIOP{}"),
                       (30, "asdfghjkl;'", 'ASDFGHJKL:"'), (44, "zxcvbnm,./", "ZXCVBNM<>?")):
@@ -142,8 +142,8 @@ def prepare_fat(d):
     run("mcopy", "-i", str(img), str(d / "note.txt"), "::HostNote.txt")
     for name in ("Host-long-name-" + "h" * (251-15) + ".txt", "호스트에서 만든 긴 한글 파일 이름입니다.txt"):
         run("mcopy", "-i", str(img), str(d / "note.txt"), "::" + name)
-    (d / "Test.HC").write_bytes(TEST_HC)
-    run("mcopy", "-i", str(img), str(d / "Test.HC"), "::Test.HC")
+    (d / "Test.cool").write_bytes(TEST_HC)
+    run("mcopy", "-i", str(img), str(d / "Test.cool"), "::Test.cool")
 
 
 def verify_fat(d):

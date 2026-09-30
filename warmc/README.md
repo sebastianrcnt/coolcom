@@ -2,7 +2,7 @@
 
 Warm is coolcom's fork of the Austral programming language. This directory
 starts from Austral commit `0962d2a8a5d77f7daacd7f696819520733f4897d`
-and builds an OCaml compiler named `warmc`. The source language and `.aui`/`.aum`
+and builds an OCaml compiler named `warmc`. The source language and `.warmh`/`.warm`
 formats are currently compatible with that upstream commit.
 
 The original project was created by Fernando Borretti and Austral contributors.
@@ -24,7 +24,7 @@ Use the existing opam switch named `austral`:
 not modify coolcom's root Makefile. To compile a program:
 
 ```sh
-./warmc/warmc compile example.aum --entrypoint=Example:main --output=example
+./warmc/warmc compile example.warm --entrypoint=Example:main --output=example
 ```
 
 From `warmc/`, run `opam exec --switch=austral -- ./run-tests.sh` for the full
@@ -42,7 +42,7 @@ the host `size_t` width.
 `--target-type=hc` emits standalone Cool source. It shares the existing
 monomorphization and `CRepr` code generation with the C backend, then uses an
 OCaml renderer (`lib/HCRenderer.ml`) and a Cool runtime (`lib/HCRuntime.ml`).
-No C compiler or external C-to-HolyC translator is needed to emit `.HC`.
+No C compiler or external C-to-HolyC translator is needed to emit `.cool`.
 
 From the repository root, on the native Apple Silicon host:
 
@@ -50,10 +50,10 @@ From the repository root, on the native Apple Silicon host:
 ./warmc/build.sh
 make build/coolc
 ./warmc/warmc compile \
-  warmc/test-programs/suites/001-trivial/005-hello-world/Test.aum \
-  --entrypoint=Test:main --target-type=hc --output=build/Hello.HC
+  warmc/test-programs/suites/001-trivial/005-hello-world/Test.warm \
+  --entrypoint=Test:main --target-type=hc --output=build/Hello.cool
 COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
-  build/coolc build/Hello.HC build/Hello.BIN
+  build/coolc build/Hello.cool build/Hello.BIN
 build/coolc --run build/Hello.BIN
 ```
 
@@ -110,7 +110,7 @@ python3 warmc/test-programs/compare-hc.py --filter 018-hc-backend
 
 The script selects every test with `program-stdout.txt` or `program-stderr.txt`,
 including custom `cli.txt` module lists. It emits and builds C with `-fwrapv`,
-emits `.HC`, compiles with `build/coolc` and the checked-in seed, and runs both.
+emits `.cool`, compiles with `build/coolc` and the checked-in seed, and runs both.
 It first checks C against the recorded expectation, then compares stdout,
 stderr, and process exit status **exactly** between C and Cool. Both programs
 receive the same argv[0]; only the CLI fixture's historical `/tmp` path in its
@@ -151,10 +151,10 @@ TMPDIR="$PWD/build/tmp" make test
 
 ## Kernel bindings and capabilities
 
-`standard/src/Kernel/Kernel.aui,Kernel.aum` provides `Warm.Kernel`.
+`standard/src/Kernel/Kernel.warmh,Kernel.warm` provides `Warm.Kernel`.
 Its 45 operations, plus resource/capability lifecycle functions, use the
-kernel's actual FAT32, console, Key.HC, framebuffer, clock and scheduler APIs.
-The HolyC boundary is `standard/src/Kernel/Adapter.HC`.
+kernel's actual FAT32, console, Key.cool, framebuffer, clock and scheduler APIs.
+The HolyC boundary is `standard/src/Kernel/Adapter.cool`.
 
 | Area | Warm operations | Kernel implementation |
 | --- | --- | --- |
@@ -163,7 +163,7 @@ The HolyC boundary is `standard/src/Kernel/Adapter.HC`.
 | Output | write, putByte, putCodepoint | PutS, ConsPut, ConsPutCp |
 | Filesystem | readFile, writeFile, dir, mkdir, cd, exists, delete, validName | FileRead, FileWrite, Dir, DirMk, Cd, FileFind, Del, FileNameChk |
 | Time | now, unixNow, ticks, ticksHP, dateToUnix, unixToDate | Now, UnixNow, __GetTicks, __GetTicksHP, CDate2Unix, Unix2CDate |
-| Keys | getKey, keyPending, keyPop, keyChar, utf8Width | Key.HC GetKey(FALSE), KeyPending, KeyPop, KeyChar; Utf8Width |
+| Keys | getKey, keyPending, keyPop, keyChar, utf8Width | Key.cool GetKey(FALSE), KeyPending, KeyPop, KeyChar; Utf8Width |
 | Screen | clear, cursorHide, cursorShow, setColor, fillRect, scroll, screenCodepoint, alternate, ansiColor | ConsClear, FbCursorHide/Show, FbSetColor, FbFillRect, FbScroll, FbPutCp, FbAlt, FbAnsiColor |
 | Tasks | yieldTask, sleep, sleepUntil, taskReport, isSilent | Yield, Sleep, SleepUntil, TaskRep, IsSilent |
 
@@ -221,12 +221,12 @@ From the repository root:
 ```sh
 ./warmc/build.sh
 ./warmc/warmc compile \
-  warmc/standard/src/Kernel/Kernel.aui,warmc/standard/src/Kernel/Kernel.aum \
-  warmc/examples/kernel/Files.aum \
-  --entrypoint=Files:main --target-type=hc --output=build/Files.HC
-# Put Adapter.HC and Files.HC on the FAT32 drive, then in the kernel shell:
-# #include "C:/Adapter.HC"
-# #include "C:/Files.HC"
+  warmc/standard/src/Kernel/Kernel.warmh,warmc/standard/src/Kernel/Kernel.warm \
+  warmc/examples/kernel/Files.warm \
+  --entrypoint=Files:main --target-type=hc --output=build/Files.cool
+# Put Adapter.cool and Files.cool on the FAT32 drive, then in the kernel shell:
+# #include "C:/Adapter.cool"
+# #include "C:/Files.cool"
 make warm-kernel-test
 ```
 
@@ -234,7 +234,7 @@ The automated harness prepends the adapter include, creates an isolated FAT32
 image under `build/warm-kernel`, and boots each example in a fresh shell.
 Files writes and reads Warm.txt (also checked with host mtools); Screen draws
 a rectangle whose exact pixels are checked in the VM screenshot; Key waits
-for a scripted 'x' through Key.HC. Errors injects a throwing FileWrite at the
+for a scripted 'x' through Key.cool. Errors injects a throwing FileWrite at the
 adapter boundary and checks exception conversion, missing files, memory
 bounds and string operations. Four negative compilation fixtures check
 capabilities and linear ownership. A native execution fixture also checks

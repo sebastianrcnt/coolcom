@@ -1,10 +1,10 @@
 #include "Asm.h"
 // AArch64 glue that HolyC can't express: exception entry/exit and system
 // register access. HolyC calls the Arch* routines through `import`
-// declarations (see ArchA.HH); binlink.py resolves them from this object.
+// declarations (see ArchA.coolh); binlink.py resolves them from this object.
 // HolyC functions are visible here as HC_<name> (see build/syms.ld).
 
-// Exception frame layout, must match CExceptFrame in ArchA.HH.
+// Exception frame layout, must match CExceptFrame in ArchA.coolh.
 #define FR_X      0       // x0..x30
 #define FR_ELR    (31 * 8)
 #define FR_SPSR   (32 * 8)
@@ -452,7 +452,7 @@ ArchLongJmp:
   mov x0, #1
   ret
 
-// Names the TempleOS library calls (coolc/Runtime NativeExcept.HC: try/catch).
+// Names the TempleOS library calls (coolc/Runtime NativeExcept.cool: try/catch).
 .global AIWNIOS_SetJmp
 AIWNIOS_SetJmp:
   b ArchSetJmp
@@ -460,7 +460,7 @@ AIWNIOS_SetJmp:
 AIWNIOS_LongJmp:
   b ArchLongJmp
 
-// F64 functions that are one instruction (KMathC.HC has the rest).
+// F64 functions that are one instruction (KMathC.cool has the rest).
 .global Sqrt
 Sqrt:
   fsqrt d0, d0

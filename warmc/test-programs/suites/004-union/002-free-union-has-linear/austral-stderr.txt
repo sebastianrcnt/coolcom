@@ -12,7 +12,7 @@
     { "type": "text", "content": " universe." }
   ],
   "span": {
-    "filename": "test-programs/suites/004-union/002-free-union-has-linear/Test.aum",
+    "filename": "test-programs/suites/004-union/002-free-union-has-linear/Test.warm",
     "startp": { "line": 5, "column": 4 },
     "end": { "line": 8, "column": 8 }
   },

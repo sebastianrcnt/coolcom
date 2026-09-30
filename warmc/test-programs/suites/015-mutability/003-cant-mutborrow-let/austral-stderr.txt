@@ -10,7 +10,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/015-mutability/003-cant-mutborrow-let/Test.aum",
+    "filename": "test-programs/suites/015-mutability/003-cant-mutborrow-let/Test.warm",
     "startp": { "line": 6, "column": 8 },
     "end": { "line": 8, "column": 19 }
   },

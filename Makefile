@@ -1,4 +1,4 @@
-KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
+KSRC    := $(wildcard os/Kernel/*.cool os/Kernel/*.coolh coolc/Runtime/*.cool) coolc/Fmt/HCTok.cool
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
 .PHONY: c2hc-test stbtt-test all run test kernel-test kernel-test-reloc vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test cmdline-test
@@ -13,7 +13,7 @@ native-kernel: build/Kernel.BIN
 
 # Rebuild the seed from the current compiler sources: the old seed compiles
 # gen1, gen1 compiles gen2, gen2 compiles gen3; gen2 must equal gen3.
-SEEDC = COOLC_COMPILER_BIN=$(abspath $(1)) gtimeout 90 build/coolc build/native-src/Native.HC $(2) > $(2).log 2>&1 || { tail -5 $(2).log; exit 1; }
+SEEDC = COOLC_COMPILER_BIN=$(abspath $(1)) gtimeout 90 build/coolc build/native-src/Native.cool $(2) > $(2).log 2>&1 || { tail -5 $(2).log; exit 1; }
 seed: build/coolc
 	tools/native/prepare.sh
 	$(call SEEDC,$(COOLC_SEED),build/seed1.BIN)
@@ -36,11 +36,11 @@ IMAGE_BASE ?= 0x800200000
 MODULE_BASE := $(shell printf '0x%x' $$(($(IMAGE_BASE) + 0x200000)))
 
 $(B)/Kernel.BIN: $(KSRC) coolc/seed/Compiler.BIN build/coolc | $(B)
-	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc os/Kernel/Kernel.HC $@ > $(B)/coolc-kernel.log 2>&1
+	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc os/Kernel/Kernel.cool $@ > $(B)/coolc-kernel.log 2>&1
 	tail -1 $(B)/coolc-kernel.log
 
-build/hcfmt.BIN: coolc/Fmt/Native.HC coolc/Fmt/HCFmt.HC coolc/Fmt/HCTok.HC coolc/seed/Compiler.BIN build/coolc | build
-	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc coolc/Fmt/Native.HC $@ > build/hcfmt-compile.log 2>&1
+build/hcfmt.BIN: coolc/Fmt/Native.cool coolc/Fmt/HCFmt.cool coolc/Fmt/HCTok.cool coolc/seed/Compiler.BIN build/coolc | build
+	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc coolc/Fmt/Native.cool $@ > build/hcfmt-compile.log 2>&1
 	tail -1 build/hcfmt-compile.log
 
 # -q keeps relocations in the ELF for tools/reloc-check.py.
@@ -53,8 +53,8 @@ $(B)/%.o: os/Kernel/%.S os/Kernel/Asm.h | $(B)
 $(B)/Blob.o: coolc/seed/Compiler.BIN
 # FontData.S embeds the console font (os/Kernel/Unifont.BIN, made by `make font`).
 $(B)/FontData.o: os/Kernel/Unifont.BIN
-build/ShellPrelude.HH: $(KSRC) tools/mkprelude.py | build
-	python3 tools/mkprelude.py os/Kernel/Kernel.HC > $@
+build/ShellPrelude.coolh: $(KSRC) tools/mkprelude.py | build
+	python3 tools/mkprelude.py os/Kernel/Kernel.cool > $@
 
 # Pass 1: link the assembly alone (HolyC symbols unresolved) to learn where its
 # routines land; the addresses don't depend on the HolyC module. The unresolved
@@ -75,7 +75,7 @@ $(B)/BootStub.BIN: $(B)/arch.syms tools/mkbootstub.py
 	$(LD) $(B)/pre/stub-syms.ld $(ASM_OBJS) -o $(B)/pre/stub.elf
 	python3 tools/mkbootstub.py $(B)/pre/stub.elf $(B)/arch.syms $@
 
-BLOBS := SHELL_PRELUDE=build/ShellPrelude.HH ARM64_OPS=os/Kernel/Arm64Ops.csv
+BLOBS := SHELL_PRELUDE=build/ShellPrelude.coolh ARM64_OPS=os/Kernel/Arm64Ops.csv
 $(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
 	python3 tools/binlink.py --org $(MODULE_BASE) $(addprefix --blob ,$(BLOBS)) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
 
@@ -117,30 +117,30 @@ build/disk.img: | build
 
 # make run only adds files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
-# tools/disk-files.sh copies os/Disk programs/examples, Warm.HC, and kernel sources (C:/Kernel, for Man).
-# C:/Kernel.HH (the shell prelude) declares the kernel for programs compiled
+# tools/disk-files.sh copies os/Disk programs/examples, Warm.cool, and kernel sources (C:/Kernel, for Man).
+# C:/Kernel.coolh (the shell prelude) declares the kernel for programs compiled
 # with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
-# Cmp("C:/Compiler/Native.HC") in the OS rebuilds coolc/seed/Compiler.BIN.
+# Cmp("C:/Compiler/Native.cool") in the OS rebuilds coolc/seed/Compiler.BIN.
 # tools/disk-files.sh puts os/Kernel in C:/Kernel and the runtime files it
 # includes as ../../coolc/... in C:/coolc (".." stops at the root), and the
 # prebuilt assembly C:/Kernel/BootStub.BIN, so `MakeKernel` in the OS rebuilds
 # build/kernel.Image (docs/kernel-rebuild.md).
 # Package the Cool implementation of Warm for the kernel shell. disk-files.sh
 # also requests this target when populating a test or external disk image.
-build/warmcool/Kernel.HC: $(wildcard warmc/Cool/*.HC warmc/lib/builtin/*.aui warmc/lib/builtin/*.aum) warmc/Cool/build.sh warmc/Cool/embed_builtins.py warmc/Cool/package_kernel.py coolc/seed/Compiler.BIN build/coolc
+build/warmcool/Kernel.cool: $(wildcard warmc/Cool/*.cool warmc/lib/builtin/*.warmh warmc/lib/builtin/*.warm) warmc/Cool/build.sh warmc/Cool/embed_builtins.py warmc/Cool/package_kernel.py coolc/seed/Compiler.BIN build/coolc
 	./warmc/Cool/build.sh
 	python3 warmc/Cool/package_kernel.py
 
-disk-install: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
+disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
-	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
+	mcopy -o -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	tools/native/prepare.sh
 	mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || mmd -i build/disk.img ::Compiler </dev/null
 	mcopy -o -i build/disk.img build/native-src/* ::Compiler/
 
-disk-seed: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
+disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img -n
-	@mdir -i build/disk.img ::Kernel.HH >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
+	@mdir -i build/disk.img ::Kernel.coolh >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	@mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
 	  mmd -i build/disk.img ::Compiler && mcopy -i build/disk.img build/native-src/* ::Compiler/; }
 
@@ -153,51 +153,51 @@ run-net: build/kernel.Image coolvm disk-seed
 	build/coolvm --cpus 2 --mem 1024 --disk build/disk.img --net-forward 2323:23 --net-forward 8080:80 $<
 
 # Boots at the link address and again 4 MiB higher, so Boot.S relocates.
-vim-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+vim-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/vim-test.py $<
 
 # Ctrl+B, Up and Esc must give the same key events from the window and the UART.
-key-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+key-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/key-test.py $<
 
-tmux-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+tmux-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/tmux-test.py $<
 
-# 256-color/truecolor SGR, cursor save/restore and AnsiTermSize (os/Kernel/Ansi.HC), on the console and in Tmux.
-ansi-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+# 256-color/truecolor SGR, cursor save/restore and AnsiTermSize (os/Kernel/Ansi.cool), on the console and in Tmux.
+ansi-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/ansi-test.py $<
 
-# Vim highlighting by file extension, block-comment state and compiler symbol-table colors (os/Kernel/Syntax.HC).
-syntax-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+# Vim highlighting by file extension, block-comment state and compiler symbol-table colors (os/Kernel/Syntax.cool).
+syntax-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/syntax-test.py $<
 
 # The OS compiles its own compiler: Cmp in the shell must reproduce the seed.
-selfhost-test: build/kernel.Image coolvm build/ShellPrelude.HH build/warmcool/Kernel.HC
+selfhost-test: build/kernel.Image coolvm build/ShellPrelude.coolh build/warmcool/Kernel.cool
 	tools/selfhost-test.sh $<
 
 # The OS rebuilds its own kernel: MakeKernel in the shell must reproduce build/kernel.Image,
 # and a kernel it changed and rebuilt must boot to a shell prompt through Reboot (about 6 s).
-kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.HH coolvm build/warmcool/Kernel.HC
+kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.coolh coolvm build/warmcool/Kernel.cool
 	tools/kernel-rebuild-test.sh $<
 
 # Find, HexDump, Diff, Less and Man on C: (os/Disk); the kernel sources go to C:/Kernel (tools/disk-files.sh).
-text-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+text-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/text-test.py $<
 
-# Hangul 2-beolsik input from the window's keyboard (os/Kernel/Ime.HC).
-ime-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+# Hangul 2-beolsik input from the window's keyboard (os/Kernel/Ime.cool).
+ime-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/ime-test.py $<
 
-# coolvm --net-forward into ShellServe (remote shells) and HttpServe, and Wget to C: (os/Kernel/NetShell.HC, NetHttp.HC).
-net-forward-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+# coolvm --net-forward into ShellServe (remote shells) and HttpServe, and Wget to C: (os/Kernel/NetShell.cool, NetHttp.cool).
+net-forward-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/net-forward-test.py $<
 
 # Top: tasks per core with state and CPU share, heap and FAT32 lines, sort, kill.
-top-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+top-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/top-test.py $<
 
-# Unix-style command lines (vim a.HC, find foo) and Tab completion in the shell (os/Kernel/ShellCmd.HC).
-cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+# Unix-style command lines (vim a.cool, find foo) and Tab completion in the shell (os/Kernel/ShellCmd.cool).
+cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/cmdline-test.py $<
 
 # Every check boots its own VMs with its own disk images and output directory, so
@@ -205,10 +205,10 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
 test: reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
 
-# The device and shell self-tests (DevTest.HC), at the link address and 4 MiB higher.
-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+# The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
+kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	tools/kernel-test.sh $<
-kernel-test-reloc: build/kernel.Image coolvm build/warmcool/Kernel.HC
+kernel-test-reloc: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	tools/kernel-test.sh $< --load-offset 0x600000
 
 $(B):
@@ -218,7 +218,7 @@ clean:
 	rm -rf build
 
 # HolyC formatting (coolc/Fmt). The pre-commit hook runs fmt-check on staged files.
-HC_FILES = $(shell git ls-files -- '*.HC' '*.HH' | grep -v -e '^coolc/third_party/' -e '^coolc/Fmt/tests/')
+HC_FILES = $(shell git ls-files -- '*.cool' '*.coolh' | grep -v -e '^coolc/third_party/' -e '^coolc/Fmt/tests/')
 fmt:
 	tools/hcfmt.sh $(HC_FILES)
 fmt-check:
@@ -250,7 +250,7 @@ stbtt-test: build/coolc build/hcfmt.BIN
 	python3 tools/c2hc/stbtt_test.py
 
 .PHONY: warm-kernel-test
-warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.HC
+warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	mkdir -p build/tmp
 	TMPDIR="$(CURDIR)/build/tmp" ./warmc/build.sh
 	python3 tools/warm-kernel-test.py

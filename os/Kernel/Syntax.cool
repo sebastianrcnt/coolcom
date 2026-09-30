@@ -1,0 +1,334 @@
+// Syntax highlighting rules, for Vim and the pager: which language a file is (by its
+// extension), how a line of it splits into highlight groups, and what color each group
+// gets. Cool text (.cool/.coolh) uses the shared lexer HCTok.cool (the formatter's), then asks the
+// shell compiler's symbol table what an identifier is (function, type, global, #define).
+// Warm text (.warm/.warmh) has its own small lexer; plain text has no highlighting.
+//
+//     CSyn st;  SynStart(&st, SynLang("C:/Vim.cool"), FALSE);
+//     while (more lines) {st = SynLine(&st, line, n, groups) ...}   // groups[i] is byte i's group
+// A CSyn carries what spans lines (a /* */ comment, a string, a Warm """ string), so a
+// viewer that starts in the middle of a file scans the lines above with SynStart(..., TRUE)
+// (no symbol lookups) first.
+//
+// The colors are the table syn_color[group]: an Ansi.cool color number each, changeable
+// from the shell (syn_color[SYN_G_COMMENT] = ANSI_GREEN;).
+#define SYN_TEXT     0
+#define SYN_COOL     1
+#define SYN_WARM     2
+
+#define SYN_G_NORMAL   0
+#define SYN_G_COMMENT  1
+#define SYN_G_STRING   2
+#define SYN_G_NUMBER   3
+#define SYN_G_KEYWORD  4
+#define SYN_G_TYPE     5
+#define SYN_G_STORAGE  6   // extern, public, import, ...
+#define SYN_G_PREPROC  7   // #include, #define, ...
+#define SYN_G_LABEL    8
+#define SYN_G_CONSTANT 9   // TRUE, NULL, a #define
+#define SYN_G_FUNCTION 10
+#define SYN_G_GLOBAL   11  // a global variable
+#define SYN_G_LINENR   12  // Vim's line numbers
+#define SYN_G_NONTEXT  13  // Vim's ~ after the last line
+#define SYN_G_COUNT    14
+
+// What the compiler's symbol table says an identifier is.
+#define SYN_SYM_NONE   0
+#define SYN_SYM_FUN    1
+#define SYN_SYM_TYPE   2
+#define SYN_SYM_GLOBAL 3
+#define SYN_SYM_DEFINE 4
+
+I64 syn_color[SYN_G_COUNT];
+Bool syn_ready;
+
+class CSyn
+{
+    CHCTok tok;
+    I64 lang, triple, prev_dot, fast;
+};
+
+U0 SynColorsDefault()
+{
+    syn_color[SYN_G_NORMAL] = ANSI_WHITE;
+    syn_color[SYN_G_COMMENT] = ANSI_GRAY;
+    syn_color[SYN_G_STRING] = ANSI_GREEN;
+    syn_color[SYN_G_NUMBER] = ANSI_YELLOW;
+    syn_color[SYN_G_KEYWORD] = ANSI_MAGENTA;
+    syn_color[SYN_G_TYPE] = ANSI_CYAN;
+    syn_color[SYN_G_STORAGE] = ANSI_MAGENTA;
+    syn_color[SYN_G_PREPROC] = ANSI_MAGENTA;
+    syn_color[SYN_G_LABEL] = ANSI_YELLOW;
+    syn_color[SYN_G_CONSTANT] = ANSI_YELLOW;
+    syn_color[SYN_G_FUNCTION] = 12;  // bright blue
+    syn_color[SYN_G_GLOBAL] = 14;    // bright cyan
+    syn_color[SYN_G_LINENR] = ANSI_GRAY;
+    syn_color[SYN_G_NONTEXT] = ANSI_GRAY;
+    syn_ready = TRUE;
+}
+
+I64 SynColor(I64 group)
+{
+    if (!syn_ready)
+        SynColorsDefault;
+    if (group < 0 || group >= SYN_G_COUNT)
+        group = SYN_G_NORMAL;
+    return syn_color[group];
+}
+
+I64 SynLang(U8 *name)
+{//The language of a file by its extension: .cool .coolh (or the legacy .HC .HH) Cool, .warm .warmh (.aum .aui) Warm, else text.
+    U8 *ext = NULL;
+    while (*name) {
+        if (*name == '.')
+            ext = name + 1;
+        else if (*name == '/')
+            ext = NULL;
+        name++;
+    }
+    if (!ext)
+        return SYN_TEXT;
+    if (!StrICmp(ext, "cool") || !StrICmp(ext, "coolh") || !StrICmp(ext, "HC") || !StrICmp(ext, "HH"))
+        return SYN_COOL;
+    if (!StrICmp(ext, "warm") || !StrICmp(ext, "warmh") || !StrICmp(ext, "aum") || !StrICmp(ext, "aui"))
+        return SYN_WARM;
+    return SYN_TEXT;
+}
+
+U8 *SynGroupName(I64 g)
+{//The name :hi takes.
+    switch (g) {
+        case SYN_G_NORMAL: return "normal";
+        case SYN_G_COMMENT: return "comment";
+        case SYN_G_STRING: return "string";
+        case SYN_G_NUMBER: return "number";
+        case SYN_G_KEYWORD: return "keyword";
+        case SYN_G_TYPE: return "type";
+        case SYN_G_STORAGE: return "storage";
+        case SYN_G_PREPROC: return "preproc";
+        case SYN_G_LABEL: return "label";
+        case SYN_G_CONSTANT: return "constant";
+        case SYN_G_FUNCTION: return "function";
+        case SYN_G_GLOBAL: return "global";
+        case SYN_G_LINENR: return "linenr";
+        case SYN_G_NONTEXT: return "nontext";
+    }
+    return "";
+}
+
+U8 *SynLangName(I64 lang)
+{
+    if (lang == SYN_COOL)
+        return "cool";
+    if (lang == SYN_WARM)
+        return "warm";
+    return "text";
+}
+
+U0 SynStart(CSyn *st, I64 lang, Bool fast = FALSE)
+{//Begin a file at its first line. fast: only track the line state, no symbol lookups.
+    MemSet(st, 0, sizeof(CSyn));
+    st->lang = lang;
+    st->fast = fast;
+    st->tok.label_ok = TRUE;
+    st->tok.track = TRUE;
+}
+
+I64 SynSymKind(U8 *s, I64 n)
+{//What the current shell's compiler knows the identifier s[0..n) as: SYN_SYM_*.
+    U8 name[80];
+    CHash *h;
+    if (!ShellCur || !ShellCur->hash || n < 1 || n > 78)
+        return SYN_SYM_NONE;
+    MemCpy(name, s, n);
+    name[n] = 0;
+    h = HashFind(name, ShellCur->hash,
+                 HTT_FUN | HTT_CLASS | HTT_INTERNAL_TYPE | HTT_GLBL_VAR | HTT_DEFINE_STR | HTT_EXPORT_SYS_SYM);
+    if (!h)
+        return SYN_SYM_NONE;
+    if (h->type & (HTT_FUN | HTT_EXPORT_SYS_SYM))
+        return SYN_SYM_FUN;
+    if (h->type & (HTT_CLASS | HTT_INTERNAL_TYPE))
+        return SYN_SYM_TYPE;
+    if (h->type & HTT_GLBL_VAR)
+        return SYN_SYM_GLOBAL;
+    return SYN_SYM_DEFINE;
+}
+
+I64 SynCoolWord(CSyn *st, U8 *p, I64 n, Bool call)
+{//The group of the Cool identifier p[0..n); call: it is followed by a "(".
+    I64 sym;
+    if (st->prev_dot)
+        return SYN_G_NORMAL;  // a member name
+    if (HCTIsKwSp(p, n) || HCTIsKw2(p, n))
+        return SYN_G_KEYWORD;
+    if (HCTIsMod(p, n))
+        return SYN_G_STORAGE;
+    if (HCTIsType(p, n))
+        return SYN_G_TYPE;
+    if (HCTIsConst(p, n))
+        return SYN_G_CONSTANT;
+    if (!st->fast) {
+        sym = SynSymKind(p, n);
+        if (sym == SYN_SYM_FUN)
+            return SYN_G_FUNCTION;
+        if (sym == SYN_SYM_TYPE)
+            return SYN_G_TYPE;
+        if (sym == SYN_SYM_GLOBAL)
+            return SYN_G_GLOBAL;
+        if (sym == SYN_SYM_DEFINE)
+            return SYN_G_CONSTANT;
+    }
+    if (HCTIsClsName(p, n))
+        return SYN_G_TYPE;
+    if (call)
+        return SYN_G_FUNCTION;  // not compiled yet: a call still looks like one
+    return SYN_G_NORMAL;
+}
+
+U0 SynSet(U8 *g, I64 from, I64 len, I64 group)
+{
+    MemSet(g + from, group, len);
+}
+
+U0 SynLineCool(CSyn *st, U8 *ls, I64 n, U8 *g)
+{
+    CHCTok *t = &st->tok;
+    I64 i = 0, k, a, e, group;
+    while (i < n) {
+        k = HCTNext(t, ls, i, n);
+        if (k == HCT_END)
+            break;
+        a = t->start;
+        e = a + t->len;
+        group = SYN_G_NORMAL;
+        if (k == HCT_BCOPEN || k == HCT_BCBODY || k == HCT_LINECMT)
+            group = SYN_G_COMMENT;
+        else if (k == HCT_STROPEN || k == HCT_STRBODY || k == HCT_CHAR)
+            group = SYN_G_STRING;
+        else if (k == HCT_NUM)
+            group = SYN_G_NUMBER;
+        else if (k == HCT_PP)
+            group = SYN_G_PREPROC;
+        else if (k == HCT_LABEL)
+            group = SYN_G_LABEL;
+        else if (k == HCT_ID) {
+            e = a + t->len;
+            k = e;
+            while (k < n && ls[k] == ' ')
+                k++;
+            group = SynCoolWord(st, ls + a, t->len, k < n && ls[k] == '(');
+        }
+        if (k == HCT_PUNCT)
+            st->prev_dot = ls[a] == '.' || (ls[a] == '-' && t->len == 2 && ls[a + 1] == '>');
+        else if (k != HCT_BCOPEN && k != HCT_BCBODY && k != HCT_LINECMT)
+            st->prev_dot = FALSE;
+        SynSet(g, a, e - a, group);
+        i = e;
+    }
+}
+
+Bool SynWarmKw(U8 *p, I64 n)
+{
+    return HCTStrEq(p, n, "module") || HCTStrEq(p, n, "is") || HCTStrEq(p, n, "body") ||
+            HCTStrEq(p, n, "import") || HCTStrEq(p, n, "as") || HCTStrEq(p, n, "end") ||
+            HCTStrEq(p, n, "constant") || HCTStrEq(p, n, "type") || HCTStrEq(p, n, "function") ||
+            HCTStrEq(p, n, "generic") || HCTStrEq(p, n, "record") || HCTStrEq(p, n, "union") ||
+            HCTStrEq(p, n, "case") || HCTStrEq(p, n, "of") || HCTStrEq(p, n, "when") ||
+            HCTStrEq(p, n, "typeclass") || HCTStrEq(p, n, "instance") || HCTStrEq(p, n, "method") ||
+            HCTStrEq(p, n, "if") || HCTStrEq(p, n, "else") || HCTStrEq(p, n, "then") ||
+            HCTStrEq(p, n, "let") || HCTStrEq(p, n, "var") || HCTStrEq(p, n, "while") ||
+            HCTStrEq(p, n, "for") || HCTStrEq(p, n, "do") || HCTStrEq(p, n, "from") ||
+            HCTStrEq(p, n, "to") || HCTStrEq(p, n, "borrow") || HCTStrEq(p, n, "return") ||
+            HCTStrEq(p, n, "skip") || HCTStrEq(p, n, "sizeof") || HCTStrEq(p, n, "and") ||
+            HCTStrEq(p, n, "or") || HCTStrEq(p, n, "not");
+}
+
+U0 SynLineWarm(CSyn *st, U8 *ls, I64 n, U8 *g)
+{//Warm: -- comments, "strings" and """docstrings""" (which span lines), 'c', numbers, #xFF.
+    I64 i = 0, j, k, group;
+    while (i < n) {
+        group = SYN_G_NORMAL;
+        j = i + 1;
+        if (st->triple) {
+            group = SYN_G_STRING;
+            j = i;
+            while (j < n && !(ls[j] == '"' && j + 2 < n && ls[j + 1] == '"' && ls[j + 2] == '"'))
+                j++;
+            if (j < n) {
+                j += 3;
+                st->triple = FALSE;
+            } else
+                j = n;
+        } else if (ls[i] == '-' && i + 1 < n && ls[i + 1] == '-') {
+            group = SYN_G_COMMENT;
+            j = n;
+        } else if (ls[i] == '"' && i + 2 < n && ls[i + 1] == '"' && ls[i + 2] == '"') {
+            group = SYN_G_STRING;
+            st->triple = TRUE;
+            j = i + 3;
+            while (j < n && !(ls[j] == '"' && j + 2 < n && ls[j + 1] == '"' && ls[j + 2] == '"'))
+                j++;
+            if (j < n) {
+                j += 3;
+                st->triple = FALSE;
+            } else
+                j = n;
+        } else if (ls[i] == '"') {
+            group = SYN_G_STRING;
+            while (j < n && ls[j] != '"') {
+                if (ls[j] == '\\')
+                    j++;
+                j++;
+            }
+            if (j < n)
+                j++;
+            else
+                j = n;
+        } else if (ls[i] == '\'' && i + 2 < n && (ls[i + 2] == '\'' || (ls[i + 1] == '\\' && i + 3 < n && ls[i + 3] == '\''))) {
+            group = SYN_G_STRING;
+            j = i + 3;
+            if (ls[i + 1] == '\\')
+                j++;
+        } else if (ls[i] == '#' && i + 1 < n && (ls[i + 1] == 'x' || ls[i + 1] == 'b' || ls[i + 1] == 'o')) {
+            group = SYN_G_NUMBER;
+            while (j < n && HCTIsId(ls[j]))
+                j++;
+        } else if (HCTIsDigit(ls[i])) {
+            group = SYN_G_NUMBER;
+            while (j < n && (HCTIsId(ls[j]) || ls[j] == '\'' || (ls[j] == '.' && j + 1 < n && HCTIsDigit(ls[j + 1]))))
+                j++;
+        } else if (ls[i] == '@') {
+            group = SYN_G_PREPROC;
+            while (j < n && HCTIsId(ls[j]))
+                j++;
+        } else if (HCTIsId(ls[i])) {
+            while (j < n && HCTIsId(ls[j]))
+                j++;
+            k = j;
+            while (k < n && ls[k] == ' ')
+                k++;
+            if (SynWarmKw(ls + i, j - i))
+                group = SYN_G_KEYWORD;
+            else if (HCTStrEq(ls + i, j - i, "true") || HCTStrEq(ls + i, j - i, "false") || HCTStrEq(ls + i, j - i, "nil"))
+                group = SYN_G_CONSTANT;
+            else if (HCTStrEq(ls + i, j - i, "pragma"))
+                group = SYN_G_PREPROC;
+            else if (HCTIsUp(ls[i]))
+                group = SYN_G_TYPE;
+            else if (k < n && ls[k] == '(')
+                group = SYN_G_FUNCTION;
+        }
+        SynSet(g, i, j - i, group);
+        i = j;
+    }
+}
+
+U0 SynLine(CSyn *st, U8 *ls, I64 n, U8 *g)
+{//Fill g[0..n) with the highlight group of each byte of the line ls[0..n) (no newline).
+    MemSet(g, SYN_G_NORMAL, n);
+    if (st->lang == SYN_COOL)
+        SynLineCool(st, ls, n, g);
+    else if (st->lang == SYN_WARM)
+        SynLineWarm(st, ls, n, g);
+}

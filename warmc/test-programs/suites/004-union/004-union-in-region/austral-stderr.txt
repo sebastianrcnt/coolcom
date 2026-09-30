@@ -22,7 +22,7 @@
     { "type": "text", "content": " instead." }
   ],
   "span": {
-    "filename": "test-programs/suites/004-union/004-union-in-region/Test.aum",
+    "filename": "test-programs/suites/004-union/004-union-in-region/Test.warm",
     "startp": { "line": 2, "column": 4 },
     "end": { "line": 2, "column": 29 }
   },

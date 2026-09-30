@@ -56,12 +56,12 @@ def main():
                        else x for x in cmd]
                 cmd = [x.replace('--target-type=c', '--target-type=' + target) for x in cmd]
                 return cmd
-            return [WARM / 'warmc', 'compile', case / 'Test.aum', '--entrypoint=Test:main',
+            return [WARM / 'warmc', 'compile', case / 'Test.warm', '--entrypoint=Test:main',
                     '--target-type=' + target, '--output=' + str(path)]
 
         try:
             c = dest / 'program.c'
-            hc = dest / 'program.HC'
+            hc = dest / 'program.cool'
             binary = dest / 'program.BIN'
             for stage, cmd in (
                 ('warm-c', command('c', c)),

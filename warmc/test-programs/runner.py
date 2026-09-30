@@ -363,7 +363,7 @@ def _test_cmd(test: Test) -> list[str]:
         cli: str = cli.replace("$C_PATH", test.c_path)
         return cli.split(" ")
     else:
-        body_path: str = os.path.join(test.directory, "Test.aum")
+        body_path: str = os.path.join(test.directory, "Test.warm")
         return [
             "./warmc",
             "compile",

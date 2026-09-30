@@ -12,7 +12,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/012-numbers/sub-Int16-Index/Test.aum",
+    "filename": "test-programs/suites/012-numbers/sub-Int16-Index/Test.warm",
     "startp": { "line": 5, "column": 8 },
     "end": { "line": 5, "column": 33 }
   },

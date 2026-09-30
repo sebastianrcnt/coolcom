@@ -10,7 +10,7 @@
     }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/001-forget-variable/Test.aum",
+    "filename": "test-programs/suites/006-linearity/001-forget-variable/Test.warm",
     "startp": { "line": 8, "column": 8 },
     "end": { "line": 8, "column": 29 }
   },

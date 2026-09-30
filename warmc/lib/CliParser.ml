@@ -24,9 +24,9 @@ module Errors = struct
       Code source;
       Break;
       Text "Sources must be supplied as either";
-      Code "interface.aui,body.aum";
+      Code "interface.warmh,body.warm";
       Text " or ";
-      Code "body.aum"
+      Code "body.warm"
     ]
 
   let missing_entrypoint () =

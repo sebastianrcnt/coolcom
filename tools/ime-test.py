@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hangul input (os/Kernel/Ime.HC) from the VM window's keyboard: 2-beolsik composition in the shell's
+"""Hangul input (os/Kernel/Ime.cool) from the VM window's keyboard: 2-beolsik composition in the shell's
 line editor and in Vim's insert mode, toggled by Shift+Space and by Right Alt. Input script -> UART
 stream, screenshot and the file Vim saved. (The UART is not touched by the IME.)"""
 import importlib.util

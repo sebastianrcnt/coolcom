@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Top (os/Disk/Top.HC): the task monitor, driven by typed keys. Two tasks are started on core 1, a
+"""Top (os/Disk/Top.cool): the task monitor, driven by typed keys. Two tasks are started on core 1, a
 busy one (Burner: computes, yields) and a sleeping one (Napper); Top must list both with their core,
 show the busy one with a high CPU share and the sleeping one with a low one, list the FAT32 free space
 (compared with mtools' `mdir`), sort by name, and kill the selected task on `k`,`y`."""
@@ -59,7 +59,7 @@ def main():
                         '--disk', str(disk), sys.argv[1]], stdout=out, stderr=subprocess.STDOUT)
     raw = (d / 'vm.log').read_text(errors='replace')
     vim.check_init_log(raw)
-    after = raw.split('Running C:/Init.HC', 1)[-1]
+    after = raw.split('Running C:/Init.cool', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
     failures = []
     if 'TOPDONE1' not in raw:

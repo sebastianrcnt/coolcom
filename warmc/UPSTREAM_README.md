@@ -73,7 +73,7 @@ end module body.
 Build and run:
 
 ```bash
-$ austral compile fib.aum --entrypoint=Fib:main --output=fib
+$ austral compile fib.warm --entrypoint=Fib:main --output=fib
 $ ./fib
 fib(10) = 55
 ```
@@ -143,23 +143,23 @@ Suppose you have a program with modules `A`, `B`, and `C`, in the following
 files:
 
 ```
-src/A.aui
-src/A.aum
+src/A.warmh
+src/A.warm
 
-src/B.aui
-src/B.aum
+src/B.warmh
+src/B.warm
 
-src/C.aui
-src/C.aum
+src/C.warmh
+src/C.warm
 ```
 
 To compile this, run:
 
 ```bash
 $ austral compile \
-    src/A.aui,src/A.aum \
-    src/B.aui,src/B.aum \
-    src/C.aui,src/C.aum \
+    src/A.warmh,src/A.warm \
+    src/B.warmh,src/B.warm \
+    src/C.warmh,src/C.warm \
     --entrypoint=C:main \
     --output=program
 ```

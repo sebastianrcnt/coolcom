@@ -16,7 +16,7 @@
     { "type": "text", "content": "." }
   ],
   "span": {
-    "filename": "test-programs/suites/006-linearity/004-if-true/Test.aum",
+    "filename": "test-programs/suites/006-linearity/004-if-true/Test.warm",
     "startp": { "line": 8, "column": 8 },
     "end": { "line": 12, "column": 15 }
   },

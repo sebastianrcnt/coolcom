@@ -7,7 +7,7 @@
     { "type": "text", "content": " because it is not a record." }
   ],
   "span": {
-    "filename": "test-programs/suites/013-ref-transforms/002-not-a-record/Test.aum",
+    "filename": "test-programs/suites/013-ref-transforms/002-not-a-record/Test.warm",
     "startp": { "line": 9, "column": 12 },
     "end": { "line": 9, "column": 27 }
   },

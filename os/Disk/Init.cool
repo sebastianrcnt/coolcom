@@ -1,0 +1,18 @@
+// Startup commands for each independent shell/compiler task.
+#include "C:/Vim.cool"
+#include "C:/Nyan.cool"
+#include "C:/Tmux.cool"
+#include "C:/Text.cool"
+#include "C:/Find.cool"
+#include "C:/HexDump.cool"
+#include "C:/Less.cool"
+#include "C:/Man.cool"
+#include "C:/Diff.cool"
+#include "C:/Top.cool"
+#include "C:/Warm.cool"
+
+U0 Cls()
+{//TempleOS's clear screen, as ANSI so the screen and the host terminal both clear.
+    AnsiClear;
+    AnsiHome;
+}
