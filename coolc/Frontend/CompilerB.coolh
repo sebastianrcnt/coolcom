@@ -32,6 +32,7 @@ extern CD2I32 *LexD2I32(CCmpCtrl *cc, CD2I32 *p);
 extern CD3I32 *LexD3I32(CCmpCtrl *cc, CD3I32 *p);
 extern U0 LexError(CCmpCtrl *cc, U8 *str);
 extern U0 LexErrorAt(CCmpCtrl *cc, U8 *str, U8 *pos);
+extern Bool CompatHere(CCmpCtrl *cc, U8 *pos = NULL);
 extern U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL);
 extern U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str, U8 *pos = NULL);
 extern I64 LexExpression(CCmpCtrl *cc);
@@ -60,7 +61,7 @@ extern CHashClass *OptClassFwd(CHashClass *tmpc);
 extern I64 PrsKeyWord(CCmpCtrl *cc);
 
 extern I64 Cmp(U8 *filename,
-               U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_let = 0);
+               U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_let = 0, Bool compat = FALSE);
 
 extern U8 *U(U8 *rip, I64 cnt = 20, I64 seg_size = 64);
 extern U0 Ui(U8 *buf, U8 **_rip, I64 seg_size = 64,

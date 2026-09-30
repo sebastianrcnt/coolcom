@@ -62,7 +62,9 @@ ExeFile("Inc");
 Print("bad %d\n", ExeFile("Bad"));
 ExeFile("BadPtr");
 ExeFile("BadJit");
+ExeFile("BadJit", TRUE);
 Print("forgot %d\n", Cmp("Forgot"));
+Print("compat %d\n", Cmp("Forgot", NULL, TRUE));
 Print("vet %d\n", Vet("VetMe"));
 Print("self %d\n", Cmp("C:/Compiler/Native.cool", "C:/Self.BIN"));
 Shutdown;
@@ -79,10 +81,10 @@ fail() {
     exit 1
 }
 [ "$status" = 0 ] || fail "coolvm exited with status $status"
-for line in 'Running C:/Init.HC' 'cmp 0' 'Hello loaded 8' 'twice 40 calls 2' 'ex 15' 'exe 35' 'old-hc' 'both-cool' 'ERROR: Expected an expression' '  C:/Bad.cool,1' 'bad 0' 'ERROR: Integer constant for a pointer parameter' 'ERROR: Integer constant assigned to a pointer (cast it)' "ERROR: Unused local variable 'forgotten' in fun 'Unused'" 'forgot 1' 'vet: [assign-cond] assignment used as a condition (== intended? else add parentheses)' 'Vet: assign-cond=1 empty-stmt=0 unreachable=0 unused-arg=0 unneeded-no-warn=0 dup-type=0 unused-extern=0 u0-ptr=0 arg-name=0 Errs:0' 'vet 1' 'self 0'; do
+for line in 'Running C:/Init.HC' 'cmp 0' 'Hello loaded 8' 'twice 40 calls 2' 'ex 15' 'exe 35' 'old-hc' 'both-cool' 'ERROR: Expected an expression' '  C:/Bad.cool,1' 'bad 0' 'ERROR: Integer constant for a pointer parameter' 'ERROR: Integer constant assigned to a pointer (cast it)' "ERROR: Unused local variable 'forgotten' in fun 'Unused'" 'forgot 1' 'compat 0' 'vet: [assign-cond] assignment used as a condition (== intended? else add parentheses)' 'Vet: assign-cond=1 empty-stmt=0 unreachable=0 unused-arg=0 unneeded-no-warn=0 dup-type=0 unused-extern=0 u0-ptr=0 arg-name=0 strict=0 Errs:0' 'vet 1' 'self 0'; do
     grep -qxF "$line" "$dir/out" || fail "missing line: $line"
 done
-! grep -qx 'jit-ran' "$dir/out" || fail "a JIT statement with a compile error ran"
+[ "$(grep -cx 'jit-ran' "$dir/out")" = 1 ] || fail "a JIT statement with a compile error ran, or not with compat"
 ! grep -qx 'both-hc' "$dir/out" || fail "an extensionless name picked Both.HC over Both.cool"
 mcopy -i "$disk" ::Self.BIN "$dir/Self.BIN"
 cmp "$dir/Self.BIN" coolc/seed/Compiler.BIN || fail "C:/Self.BIN differs from coolc/seed/Compiler.BIN"

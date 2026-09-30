@@ -39,4 +39,5 @@ extern CCodeMisc *CodeMiscHashNew(CCmpCtrl *cc, CHash *h);
 #define VET_UNUSED_EXTERN 6 //an extern variable that is never used
 #define VET_U0_PTR 7 //U0 * where U8 * is meant
 #define VET_ARG_NAME 8 //a definition names an argument differently than its declaration
-#define VET_CHECKS 9
+#define VET_STRICT 9 //an error that compat mode (.HC/.HH files, --compat) only reports here
+#define VET_CHECKS 10

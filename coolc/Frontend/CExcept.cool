@@ -123,9 +123,35 @@ U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL)
     throw('Compiler');
 }
 
+Bool CompatName(U8 *name)
+{//A legacy TempleOS/Aiwnios file (.HC, .HH): "file" or "file,line".
+    I64 n = StrLen(name);
+    while (n > 0 && name[n - 1] >= '0' && name[n - 1] <= '9')
+        n--;
+    if (n > 0 && n < StrLen(name) && name[n - 1] == ',')
+        n--;
+    if (n < 3 || name[n - 3] != '.')
+        return FALSE;
+    return (name[n - 2] == 'H' || name[n - 2] == 'h') && (name[n - 1] == 'C' || name[n - 1] == 'c' || name[n - 1] == 'H' || name[n - 1] == 'h');
+}
+
+Bool CompatHere(CCmpCtrl *cc, U8 *pos = NULL)
+{//Are the Go-style errors only Vet findings here: compat mode, or a legacy file?
+    if (cc->flags & CCF_COMPAT)
+        return TRUE;
+    if (pos)
+        return CompatName(pos);
+    return CompatName(cc->lex_include_stk->full_name);
+}
+
 U0 LexError(CCmpCtrl *cc, U8 *str)
 {//Report a definite bug at the current token. Ahead-of-time compiles go on, so the file gets
     //all its errors reported (Cmp then writes no BIN); JIT code must not run: as LexExcept.
+    //In compat mode or a legacy file it is only a Vet finding.
+    if (CompatHere(cc)) {
+        LexVet(cc, VET_STRICT, str);
+        return;
+    }
     if (!(cc->flags & CCF_AOT_COMPILE))
         LexExcept(cc, str);
     if (IsRaw)
@@ -139,6 +165,10 @@ U0 LexError(CCmpCtrl *cc, U8 *str)
 U0 LexErrorAt(CCmpCtrl *cc, U8 *str, U8 *pos)
 {//As LexError for a problem not at the current token (found after the token moved on, maybe out
     //of an #included file): pos is "file,line".
+    if (CompatHere(cc, pos)) {
+        LexVet(cc, VET_STRICT, str, pos);
+        return;
+    }
     if (!(cc->flags & CCF_AOT_COMPILE))
         LexExcept(cc, str);
     if (IsRaw)
@@ -162,6 +192,7 @@ U8 *VetName(I64 check)
         case VET_DUP_TYPE: return "dup-type";
         case VET_UNUSED_EXTERN: return "unused-extern";
         case VET_U0_PTR: return "u0-ptr";
+        case VET_STRICT: return "strict";
     }
     return "arg-name";
 }

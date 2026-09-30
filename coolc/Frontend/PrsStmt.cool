@@ -232,10 +232,16 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
                 // An unused local is an error (an unused argument only shows in Vet: callbacks have them;
                 // so do argc and argv, which "..." declares).
                 if (!(Bt(&cc->htc.fun->flags, Ff_DOT_DOT_DOT) && (!StrCmp(tmpm->str, "argc") || !StrCmp(tmpm->str, "argv")))) {
-                    PrintErr("Unused local variable '%s' in fun '%s'\n  %s\n", tmpm->str, cc->htc.fun->str,
-                             cc->htc.fun->src_link + 3);
-                    cc->error_cnt++;
-                    unused_locals = TRUE;
+                    if (CompatHere(cc, cc->htc.fun->src_link + 3)) {
+                        msg = MStrPrint("Unused local variable '%s' in fun '%s'", tmpm->str, cc->htc.fun->str);
+                        LexVet(cc, VET_STRICT, msg, cc->htc.fun->src_link + 3);
+                        Free(msg);
+                    } else {
+                        PrintErr("Unused local variable '%s' in fun '%s'\n  %s\n", tmpm->str, cc->htc.fun->str,
+                                 cc->htc.fun->src_link + 3);
+                        cc->error_cnt++;
+                        unused_locals = TRUE;
+                    }
                 }
             } else {
                 msg = MStrPrint("argument '%s' of fun '%s' is never used", tmpm->str, cc->htc.fun->str);

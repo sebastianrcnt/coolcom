@@ -207,6 +207,11 @@ Errors:
 - a definition whose return type, argument types, argument count or default values differ from its declaration;
 - a failed `#assert`.
 
+Compat mode: in `.HC` and `.HH` files (legacy TempleOS and Aiwnios code) these errors are only Vet findings,
+named `[strict]`, so such code compiles as before. `.cool` and `.coolh` files stay strict. `build/coolc --compat file.cool out.BIN`,
+`Cmp("file", NULL, TRUE);` and `ExeFile("file", TRUE);` in the OS turn it on for any file; `Vet` takes it too.
+(A duplicate `case` and a constant integer passed as a pointer argument are errors in every mode.)
+
 `Vet("file");` in the OS (`build/coolc --vet file.cool` on the host, `make vet` for the repository's own
 programs) compiles the file without output and prints the style findings, each named by its check, with the
 position; nothing of this is reported during a normal compile:
@@ -221,6 +226,7 @@ position; nothing of this is reported during a normal compile:
 | `[unneeded-no-warn]` | `no_warn` on a variable that is used |
 | `[unused-extern]` | an extern variable that is never used |
 | `[u0-ptr]` | `U0 *` where `U8 *` is meant |
+| `[strict]` | in compat mode: an error the compiler would otherwise give |
 | `[dup-type]` | with `Option(OPTf_WARN_DUP_TYPES, ON)`: a local declared in its own statement with a type another local has |
 
 ## Networking

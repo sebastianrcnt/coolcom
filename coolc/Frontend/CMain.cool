@@ -226,7 +226,7 @@ CAOT *CmpJoin(CCmpCtrl *cc, I64 cmp_flags, U8 *map_name = NULL, U8 mapfile_drv_l
 }
 
 CAOT *CmpBuf(U8 *buf, U8 *map_name = NULL,
-             I64 *error_cnt = NULL, I64 *warning_cnt = NULL, U8 mapfile_drv_let = 0, Bool vet = FALSE)
+             I64 *error_cnt = NULL, I64 *warning_cnt = NULL, U8 mapfile_drv_let = 0, Bool vet = FALSE, Bool compat = FALSE)
 {
     CCmpCtrl *cc;
     CAOT *res = NULL;
@@ -234,6 +234,8 @@ CAOT *CmpBuf(U8 *buf, U8 *map_name = NULL,
     cc->flags |= CCF_AOT_COMPILE;
     if (vet)
         cc->opts |= 1 << OPTf_VET;
+    if (compat)
+        cc->flags |= CCF_COMPAT;
 #ifdef TARGET_AARCH64
     //For MacOS RWX protections.
     cc->opts |= 1 << OPTf_GLBLS_ON_DATA_HEAP;
@@ -254,7 +256,7 @@ CAOT *CmpBuf(U8 *buf, U8 *map_name = NULL,
     return res;
 }
 
-I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_let = 0)
+I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_let = 0, Bool compat = FALSE)
 {//AOT Compile HC or PRJ file a and output BIN file. Returns err_cnt.
     U8 *ptr, *fbuf = NULL, *fbuf2 = NULL, *fbuf3 = NULL,
             *patch_table = MAlloc(0x800000);
@@ -271,7 +273,7 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
     if (map_name)
         fbuf3 = ExtDft(map_name, "MAP.Z");
 
-    tmpaot = CmpBuf(fbuf2, fbuf3, &error_cnt, &warning_cnt, mapfile_drv_let);
+    tmpaot = CmpBuf(fbuf2, fbuf3, &error_cnt, &warning_cnt, mapfile_drv_let, FALSE, compat);
     if (tmpaot && error_cnt) {
         // Errors that did not stop the parse (LexError): no BIN.
         Free(tmpaot->buf);
@@ -446,7 +448,7 @@ I64 Cmp(U8 *filename, U8 *map_name = NULL, U8 *out_name = NULL, U8 mapfile_drv_l
     return error_cnt;
 }
 
-I64 Vet(U8 *filename)
+I64 Vet(U8 *filename, Bool compat = FALSE)
 {//Compile filename (no BIN) with the style checks on: assign-cond, empty-stmt and
     //unreachable are printed as "vet: [check] message" with the position. Returns the number of findings.
     U8 *fbuf = ExtDft(filename, "PRJ.Z"), *fbuf2 = MStrPrint("#include \"%s\"", fbuf);
@@ -454,7 +456,7 @@ I64 Vet(U8 *filename)
     I64 i, total = 0, error_cnt = 0, warning_cnt = 0;
     for (i = 0; i < VET_CHECKS; i++)
         vet_cnt[i] = 0;
-    if (tmpaot = CmpBuf(fbuf2, NULL, &error_cnt, &warning_cnt, 0, TRUE)) {
+    if (tmpaot = CmpBuf(fbuf2, NULL, &error_cnt, &warning_cnt, 0, TRUE, compat)) {
         Free(tmpaot->buf);
         QueDel(tmpaot);
         Free(tmpaot);

@@ -54,7 +54,17 @@ I64 CoolCMain(U8 *entry, U8 *output)
     return Cmp(entry, NULL, output);
 }
 
+I64 CoolCMainCompat(U8 *entry, U8 *output)
+{
+    return Cmp(entry, NULL, output, 0, TRUE);
+}
+
 I64 CoolCVet(U8 *entry)
 {
     return Vet(entry);
+}
+
+I64 CoolCVetCompat(U8 *entry)
+{
+    return Vet(entry, TRUE);
 }
