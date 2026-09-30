@@ -1,0 +1,121 @@
+// GICv2 MMIO CPU interface and GICv3 system-register CPU interface.
+// SGI 0 wakes idle cores; the virtual timer uses the FDT's third timer PPI.
+I64 gic_irqs;
+
+U0 GicWait(I64 base)
+{
+    while (ArchMmioRead32(base) & (1 << 31)) {}
+    ArchDsb;
+}
+
+U0 GicInit()
+{
+    I64 i, boot = ArchMpidr, route;
+    gic_irqs = 32 * ((ArchMmioRead32(fdt_gic + 4) & 31) + 1);
+    if (gic_irqs > 1020) gic_irqs = 1020;
+    ArchMmioWrite32(fdt_gic, 0);
+    GicWait(fdt_gic);
+    if (fdt_gic_version == 3) {
+        ArchMmioWrite32(fdt_gic, 1 << 4); // ARE_NS while disabled
+        GicWait(fdt_gic);
+    }
+    route = (boot & 0xFFFFFF) | ((boot >> 32 & 255) << 32);
+    for (i = 32; i < gic_irqs; i += 32) {
+        ArchMmioWrite32(fdt_gic + 0x180 + i / 8, 0xFFFFFFFF);
+        ArchMmioWrite32(fdt_gic + 0x280 + i / 8, 0xFFFFFFFF);
+        ArchMmioWrite32(fdt_gic + 0x80 + i / 8, 0xFFFFFFFF); // Group 1
+    }
+    for (i = 32; i < gic_irqs; i += 4) {
+        ArchMmioWrite32(fdt_gic + 0x400 + i, 0xA0A0A0A0);
+        if (fdt_gic_version == 2) ArchMmioWrite32(fdt_gic + 0x800 + i, 0x01010101);
+    }
+    for (i = 32; i < gic_irqs; i++) {
+        if (fdt_gic_version == 3) {
+            ArchMmioWrite64(fdt_gic + 0x6000 + i * 8, route);
+        }
+    }
+    GicWait(fdt_gic);
+    if (fdt_gic_version == 3) ArchMmioWrite32(fdt_gic, 0x12);
+    else ArchMmioWrite32(fdt_gic, 3);
+    GicWait(fdt_gic);
+}
+
+I64 GicRedist()
+{//Walk redistributors by affinity, rather than assuming CPU index == frame index.
+    I64 r = fdt_gic_cpu, end = r + fdt_gic_cpu_size, mp = ArchMpidr;
+    I64 aff = (mp & 0xFFFFFF) | ((mp >> 32 & 255) << 24), hi, lo;
+    while (r < end) {
+        lo = ArchMmioRead64(r + 8); hi = lo >> 32;
+        if (hi == aff) return r;
+        if (lo & 16) break; // Last
+        if (lo & 2) r += 0x40000; // VLPIS adds two frames
+        else r += 0x20000;
+    }
+    return 0;
+}
+
+U0 GicCpuInit()
+{
+    I64 base = fdt_gic, r, i;
+    ArchCntvCtlSet(0);
+    if (fdt_gic_version == 3) {
+        r = GicRedist;
+        if (!r) while (TRUE) {}
+        ArchMmioWrite32(r + 0x14, ArchMmioRead32(r + 0x14) & ~2);
+        while (ArchMmioRead32(r + 0x14) & 4) {}
+        base = r + 0x10000;
+    }
+    ArchMmioWrite32(base + 0x180, 0xFFFFFFFF);
+    ArchMmioWrite32(base + 0x280, 0xFFFFFFFF);
+    ArchMmioWrite32(base + 0x80, 0xFFFFFFFF);
+    for (i = 0; i < 32; i += 4) ArchMmioWrite32(base + 0x400 + i, 0xA0A0A0A0);
+    ArchMmioWrite32(base + 0x100, 1 | (1 << fdt_timer_irq));
+    ArchDsb;
+    if (fdt_gic_version == 3) ArchGicCpuInit;
+    else {
+        ArchMmioWrite32(fdt_gic_cpu + 4, 0xFF); // PMR
+        ArchMmioWrite32(fdt_gic_cpu + 8, 0); // BPR
+        ArchMmioWrite32(fdt_gic_cpu, 3);
+    }
+    ArchDsb;
+}
+
+U0 GicIrqSet(I64 irq)
+{
+    I64 i, cfg, shift = (irq & 15) * 2;
+    for (i = 0; i < fdt_nblk; i++) {
+        if (fdt_blk[i].irq == irq && (fdt_blk[i].flags & 3)) {
+            cfg = fdt_gic + 0xC00 + (irq / 16) * 4;
+            ArchMmioWrite32(cfg, ArchMmioRead32(cfg) | (2 << shift));
+        }
+    }
+    ArchDsb;
+    ArchMmioWrite32(fdt_gic + 0x100 + (irq / 32) * 4, 1 << (irq & 31));
+    GicWait(fdt_gic);
+}
+
+U0 GicDispatch()
+{
+    I64 ack, irq;
+    U0 (*fp)(I64 irq);
+    if (fdt_gic_version == 3) ack = ArchGicAck;
+    else ack = ArchMmioRead32(fdt_gic_cpu + 0xC);
+    irq = ack & 0x3FF;
+    if (irq >= 1020) return;
+    if (!irq) ArchAdd(&ipi_count, 1);
+    else if (irq == fdt_timer_irq) TimerFiq;
+    else if (irq < AIC_IRQS_NUM && (fp = irq_handlers[irq])) (*fp)(irq);
+    else irq_unexpected++;
+    ArchDsb;
+    if (fdt_gic_version == 3) ArchGicEoi(ack);
+    else ArchMmioWrite32(fdt_gic_cpu + 0x10, ack);
+}
+
+U0 GicSendIpi(I64 mpidr)
+{
+    ArchDsb;
+    if (fdt_gic_version == 3)
+        ArchGicSgi((mpidr >> 32 & 255) << 48 | (mpidr >> 16 & 255) << 32 |
+                   (mpidr >> 8 & 255) << 16 | (1 << (mpidr & 15)));
+    else ArchMmioWrite32(fdt_gic + 0xF00, 1 << (16 + (mpidr & 7)));
+}

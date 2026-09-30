@@ -23,7 +23,10 @@ U0 PowerHalt(I64 finisher_code, U8 *what)
     FbFlush;
     if (fdt_finisher)
         ArchMmioWrite32(fdt_finisher, finisher_code);
-    else
+    else if (fdt_psci) {
+        if (finisher_code == FINISHER_POWER_OFF) ArchPsci(0x84000008, 0, 0, 0, fdt_psci);
+        else ArchPsci(0x84000009, 0, 0, 0, fdt_psci);
+    } else
         "No power control on this machine yet: halted.\n";  // (real M1: SMC, TODO)
     ArchIrqOff;
     while (TRUE)

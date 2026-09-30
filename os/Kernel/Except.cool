@@ -45,6 +45,8 @@ U0 KExcept(I64 vec, CExceptFrame *f)
     if (vec == EXC_CUR_SPX_IRQ) {
         JiffiesUpdate;  // the core may have slept without ticks (IdleWait)
         IrqDispatch;
+        brk = shell_tick_hook;
+        if (fdt_gic_version && brk) (*brk)(f);
         TaskEventWake;  // input, network, ...: event waits look again
         if (break_req) {
             break_req = 0;

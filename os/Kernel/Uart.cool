@@ -1,12 +1,21 @@
 // Apple S5L UART, driven through simple 32-bit MMIO accessors.
 U0 UartPut(U8 c)
 {
+    if (fdt_pl011) {
+        while (ArchMmioRead32(fdt_uart + 0x18) & 0x20) {}
+        ArchMmioWrite32(fdt_uart, c);
+        return;
+    }
     while (!(ArchMmioRead32(fdt_uart + 0x10) & 2)) {}
     ArchMmioWrite32(fdt_uart + 0x20, c);
 }
 
 I64 UartGet()
 {//A received byte, or -1 if none (UTRSTAT.RXD, then URXH).
+    if (fdt_pl011) {
+        if (ArchMmioRead32(fdt_uart + 0x18) & 0x10) return -1;
+        return ArchMmioRead32(fdt_uart) & 0xFF;
+    }
     if (!(ArchMmioRead32(fdt_uart + 0x10) & 1))
         return -1;
     return ArchMmioRead32(fdt_uart + 0x24) & 0xFF;
@@ -16,4 +25,29 @@ U0 UartPutS(U8 *s)
 {
     while (*s)
         UartPut(*s++);
+}
+
+U0 UartIrqAck()
+{
+    if (fdt_pl011) ArchMmioWrite32(fdt_uart + 0x44, 0x7FF);
+    else ArchMmioWrite32(fdt_uart + 0x10, (1 << 3) | (1 << 4) | (1 << 9));
+}
+
+U0 UartRxInit()
+{
+    I64 ucon;
+    if (fdt_pl011) {
+        ArchMmioWrite32(fdt_uart + 0x30, 0); // disable while configuring
+        ArchMmioWrite32(fdt_uart + 0x24, 13); // 24 MHz, 115200 baud
+        ArchMmioWrite32(fdt_uart + 0x28, 1);
+        ArchMmioWrite32(fdt_uart + 0x2C, 0x70); // 8 bits, FIFO
+        ArchMmioWrite32(fdt_uart + 0x34, 0); // RX threshold 1/8
+        UartIrqAck;
+        ArchMmioWrite32(fdt_uart + 0x38, 0x50); // RX and receive timeout
+        ArchMmioWrite32(fdt_uart + 0x30, 0x301); // UART, TX, RX enable
+    } else {
+        ucon = ArchMmioRead32(fdt_uart + 0x04);
+        ucon = (ucon & ~(3 | (1 << 13))) | 1 | (1 << 9) | (1 << 12);
+        ArchMmioWrite32(fdt_uart + 0x04, ucon);
+    }
 }
