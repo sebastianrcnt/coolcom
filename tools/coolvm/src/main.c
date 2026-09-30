@@ -352,19 +352,24 @@ int main(int argc, char **argv)
     struct timespec t0;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     for (;;) {
-        pthread_mutex_lock(&g.stop_lock);
-        if (!atomic_load(&g.stop)) {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_nsec += 50 * 1000 * 1000;
-            if (ts.tv_nsec >= 1000000000L) {
-                ts.tv_sec++;
-                ts.tv_nsec -= 1000000000L;
+        /* With a window, the main thread runs the Cocoa event loop for 50 ms at a time:
+         * keys reach the guest as they arrive and the window follows the framebuffer. */
+        if (!g.headless) {
+            display_pump(0.05);
+        } else {
+            pthread_mutex_lock(&g.stop_lock);
+            if (!atomic_load(&g.stop)) {
+                struct timespec ts;
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_nsec += 50 * 1000 * 1000;
+                if (ts.tv_nsec >= 1000000000L) {
+                    ts.tv_sec++;
+                    ts.tv_nsec -= 1000000000L;
+                }
+                pthread_cond_timedwait(&g.stop_cv, &g.stop_lock, &ts);
             }
-            pthread_cond_timedwait(&g.stop_cv, &g.stop_lock, &ts);
+            pthread_mutex_unlock(&g.stop_lock);
         }
-        pthread_mutex_unlock(&g.stop_lock);
-        display_pump();
         if (atomic_load(&g.stop))
             break;
         if (got_signal) {

@@ -181,7 +181,7 @@ void net_start(void);
 bool net_add_forward(const char *spec); /* --net-forward [addr:]host:guest */
 void net_report(void);
 void display_init(void);
-void display_pump(void);
+void display_pump(double seconds); /* run the window's event loop for that long */
 bool display_screenshot(const char *path);
 
 /* aic.c (all called with g.lock held except the fast-IPI helpers) */
