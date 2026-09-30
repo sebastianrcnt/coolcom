@@ -76,6 +76,10 @@ static const char *host_arg(int64_t index) {
         return NULL;
     return native_argv[index];
 }
+static int64_t host_get_char(void) {
+    fflush(stdout);  // a prompt printed before the read must show first
+    return getchar();  // the next byte of standard input, or -1 at the end
+}
 static void host_err_puts(const char *text) {
     fputs(text, stderr);
     fflush(stderr);
@@ -343,6 +347,7 @@ static void register_host_symbols(Module *m) {
     HOST("NativeErrPutS", host_err_puts);
     HOST("NativeArgCount", host_arg_count);
     HOST("NativeArg", host_arg);
+    HOST("NativeGetChar", host_get_char);
     HOST("AIWNIOS_SetJmp", AIWNIOS_SetJmp);
     HOST("AIWNIOS_LongJmp", AIWNIOS_LongJmp);
     HOST("ExtDft", host_ext_dft);

@@ -1,9 +1,9 @@
 .DEFAULT: all
-# greet is left out: it reads standard input, which the Cool backend does not support yet.
 all:
 	cd ffi && $(MAKE)
 	cd fib && $(MAKE)
 	cd generic-record && $(MAKE)
+	cd greet && $(MAKE)
 	cd haversine && $(MAKE)
 	cd hello-world && $(MAKE)
 	cd identity && $(MAKE)

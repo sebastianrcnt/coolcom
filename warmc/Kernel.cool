@@ -9,6 +9,20 @@ U0 WKernelExit(I64 status) {if (status) throw('Warm');}
 U0 WKernelErrPutS(U8 *text) {Print("%s", text);}
 I64 WKernelArgCount() {return 1;}
 U8 *WKernelArg(I64 index) {if (index == 0) return warm_kernel_argv0; return NULL;}
+// Standard input is the shell's terminal, read a line at a time (GetLine: editing, history)
+// and handed out byte by byte with the newline; there is no end of input.
+U8 warm_kernel_line[520];
+I64 warm_kernel_line_pos, warm_kernel_line_len;
+I64 WKernelGetChar()
+{
+    if (warm_kernel_line_pos >= warm_kernel_line_len) {
+        GetLine(warm_kernel_line, 512);
+        warm_kernel_line_len = StrLen(warm_kernel_line);
+        warm_kernel_line[warm_kernel_line_len++] = '\n';
+        warm_kernel_line_pos = 0;
+    }
+    return warm_kernel_line[warm_kernel_line_pos++];
+}
 
 Bool WarmCompile(U8 *paths, U8 *entry = "Test:main", U8 *output = NULL)
 {
