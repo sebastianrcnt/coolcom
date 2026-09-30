@@ -636,3 +636,11 @@ Reproduction before Logos retirement: `tools/scroll-bench.py` labels
 Logos uses the default executable. Use `--compare venus-m3-cpu` for both GPU
 runs. Results are in `build/scroll-bench/venus-m3-*.json`; the prepared test disk
 can also be made with `tools/venus/install.sh` on a formatted FAT32 image.
+
+
+Terminal scanout publication now alternates **two coherent readback blobs**.
+The GPU writes the buffer currently off screen; after its fence completes,
+SET_SCANOUT_BLOB publishes it under the same host device lock used by snapshots.
+This preserves the displayed pixels while the next frame is being copied. GPU
+submission remains synchronous. The benchmark table records the validated
+pre-retirement `b2aaeb6` run (before this publication fix).

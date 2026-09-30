@@ -9,7 +9,7 @@ class CVenusCell {U32 glyph, fg, bg, flags;};
 class CVenusTerm
 {
     CGfxImage atlas, overlay, target;
-    CGfxBuffer atlas_upload, overlay_upload, cells, readback;
+    CGfxBuffer atlas_upload, overlay_upload, cells, readback[2];
     U32 *glyphs;
     I64 slots, atlas_y0, atlas_y1, overlay_y0, overlay_y1;
     I64 w, h, cols, rows, first, cx, cy, cw;
@@ -96,12 +96,13 @@ U0 VenusGrid(I64 w, I64 h)
     if (vterm.w) {
         GfxBegin; vn_encode_vkDestroyPipeline(&gfx.enc, 0, gfx.device, vterm.pipeline, NULL);
         vn_encode_vkDestroyPipelineLayout(&gfx.enc, 0, gfx.device, vterm.layout, NULL); GfxSubmit;
-        GfxBufferDestroy(&vterm.cells); GfxBufferDestroy(&vterm.readback); GfxBufferDestroy(&vterm.overlay_upload);
+        GfxBufferDestroy(&vterm.cells); GfxBufferDestroy(&vterm.readback[0]); GfxBufferDestroy(&vterm.readback[1]); GfxBufferDestroy(&vterm.overlay_upload);
         GfxImageDestroy(&vterm.target); GfxImageDestroy(&vterm.overlay);
     }
     vterm.w = w; vterm.h = h; vterm.cols = w / 8; vterm.rows = h / 16; vterm.first = 0; vterm.cw = 0;
     GfxBufferCreate(&vterm.cells, ((vterm.cols * vterm.rows * 16 + 16383) & ~16383), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    GfxBufferCreate(&vterm.readback, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    GfxBufferCreate(&vterm.readback[0], ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    GfxBufferCreate(&vterm.readback[1], ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     GfxBufferCreate(&vterm.overlay_upload, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     MemSet(vterm.overlay_upload.mapping, 0, w * h * 4);
     GfxImageCreate(&vterm.overlay, w, h, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -112,6 +113,9 @@ U0 VenusGrid(I64 w, I64 h)
 }
 U0 VenusDraw()
 {
+    // Draw into the buffer the window is not scanning. Publication happens only
+    // after the GPU fence; host snapshot/publication share the device lock.
+    CGfxBuffer *next = &vterm.readback[vterm.frames & 1];
     I64 atlas_layout = VK_IMAGE_LAYOUT_UNDEFINED, atlas_access = 0;
     I64 overlay_layout = VK_IMAGE_LAYOUT_UNDEFINED, overlay_access = 0;
     I64 target_layout = VK_IMAGE_LAYOUT_UNDEFINED, target_access = 0;
@@ -151,11 +155,11 @@ U0 VenusDraw()
     vn_encode_vkCmdPushConstants(&gfx.enc, 0, gfx.cmd, vterm.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 36, params);
     vn_encode_vkCmdDraw(&gfx.enc, 0, gfx.cmd, 3, 1, 0, 0); vn_encode_vkCmdEndRendering(&gfx.enc, 0, gfx.cmd);
     GfxImageBarrier(&vterm.target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, vterm.target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, vterm.readback.buffer, 1, &copy);
+    vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, vterm.target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, next->buffer, 1, &copy);
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
     vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
     GfxExecute;
-    GfxCheck(GpuScanoutBlob(vterm.readback.blob, vterm.w, vterm.h, vterm.w * 4), "terminal scanout");
+    GfxCheck(GpuScanoutBlob(next->blob, vterm.w, vterm.h, vterm.w * 4), "terminal scanout");
     vterm.images_ready = TRUE; vterm.frames++; fb.venus_frames++; vterm.atlas_y0 = vterm.atlas_y1 = 0; vterm.overlay_y0 = vterm.overlay_y1 = 0;
 }
 U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
