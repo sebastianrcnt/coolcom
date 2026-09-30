@@ -1,0 +1,70 @@
+-- The Cool/Warm boundary of the packet parser (NetParse.warm), and its only unsafe part.
+-- Net.cool calls the two exports with a pointer and a length, and they make that the span
+-- the parser reads; every other access is checked. The result goes out as the 22 I64s
+-- of a CNetPkt (Net.cool), in the order of the fields below; the return value is its kind.
+pragma Unsafe_Module;
+
+import Austral.Memory (Pointer, span, spanWrite);
+import NetParse (Packet, parseFrame, parseIp, blank, dropRunt, dropIp);
+
+module body NetParseExport is
+    function write(p: Packet, out: Pointer[Nat64]): Nat64 is
+        var o: Pointer[Nat64] := out;
+        borrow ref: &![Pointer[Nat64], W] := &!o do
+            var fields: Span![Nat64, W] := spanWrite(ref, 0, 21);
+            fields[0] := p.kind;
+            fields[1] := p.op;
+            fields[2] := p.sha;
+            fields[3] := p.src;
+            fields[4] := p.dst;
+            fields[5] := p.ttl;
+            fields[6] := p.proto;
+            fields[7] := p.l4;
+            fields[8] := p.l4len;
+            fields[9] := p.sport;
+            fields[10] := p.dport;
+            fields[11] := p.data;
+            fields[12] := p.dlen;
+            fields[13] := p.seq;
+            fields[14] := p.ack;
+            fields[15] := p.flags;
+            fields[16] := p.win;
+            fields[17] := p.mss;
+            fields[18] := p.itype;
+            fields[19] := p.icode;
+            fields[20] := p.iid;
+            fields[21] := p.iseq;
+        end borrow;
+        return p.kind;
+    end;
+
+    """
+    I64 NetParseFrame(U8 *frame, I64 len, CNetPkt *out): an Ethernet frame.
+    """
+    pragma Foreign_Export(External_Name => "NetParseFrame");
+    function exportFrame(frame: Pointer[Nat8], length: Index, out: Pointer[Nat64]): Nat64 is
+        if length = 0 then
+            return write(blank(dropRunt), out);
+        end if;
+        var p: Packet := blank(dropRunt);
+        borrow ref: &[Pointer[Nat8], R] := &frame do
+            p := parseFrame(span(ref, 0, length - 1));
+        end borrow;
+        return write(p, out);
+    end;
+
+    """
+    I64 NetParsePacket(U8 *packet, I64 len, CNetPkt *out): an IPv4 packet.
+    """
+    pragma Foreign_Export(External_Name => "NetParsePacket");
+    function exportIp(packet: Pointer[Nat8], length: Index, out: Pointer[Nat64]): Nat64 is
+        if length = 0 then
+            return write(blank(dropIp), out);
+        end if;
+        var p: Packet := blank(dropIp);
+        borrow ref: &[Pointer[Nat8], R] := &packet do
+            p := parseIp(span(ref, 0, length - 1));
+        end borrow;
+        return write(p, out);
+    end;
+end module body.

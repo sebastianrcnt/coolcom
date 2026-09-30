@@ -189,6 +189,8 @@ U0 NetRep()
             net_stats.udp_rx, net_stats.udp_drop, net_stats.loop_pkts);
     Print("tcp    %d segments in, %d out, %d retransmission timeouts, %d resets\n", net_stats.tcp_rx,
             net_stats.tcp_tx, net_stats.tcp_retx, net_stats.tcp_rst);
+    if (net_stats.parse_abort)  // a failed check in NetParse.warm, with its message
+        Print("parser %d aborts, the last: %s\n", net_stats.parse_abort, NetParse_wh_abort_message);
     // The tables change under the lock; format them there and print afterwards.
     out = MAlloc(64 * 128);
     o = out;

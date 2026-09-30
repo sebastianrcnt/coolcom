@@ -137,22 +137,22 @@ U0 TcpSeg(CTcb *t, I64 flags, I64 seq, U8 *data = NULL, I64 len = 0)
     net_stats.tcp_tx++;
 }
 
-U0 TcpRstReply(I64 src, I64 dst, U8 *seg, I64 dl)
+U0 TcpRstReply(CNetPkt *k)
 {//Answer a segment that has no connection (RFC 793 "reset generation").
     CTcb t;
-    I64 flags = seg[13];
+    I64 flags = k->flags;
     if (flags & TCP_RST)
         return;
     MemSet(&t, 0, sizeof(CTcb));
-    t.lip = dst;
-    t.rip = src;
-    t.lport = NetGet16(seg + 2);
-    t.rport = NetGet16(seg);
+    t.lip = k->dst;
+    t.rip = k->src;
+    t.lport = k->dport;
+    t.rport = k->sport;
     net_stats.tcp_rst++;
     if (flags & TCP_ACK)
-        TcpSeg(&t, TCP_RST, NetGet32(seg + 8));
+        TcpSeg(&t, TCP_RST, k->ack);
     else {
-        t.rcv_nxt = SeqAdd(NetGet32(seg + 4), dl);
+        t.rcv_nxt = SeqAdd(k->seq, k->dlen);
         if (flags & TCP_SYN)
             t.rcv_nxt = SeqAdd(t.rcv_nxt, 1);
         if (flags & TCP_FIN)
@@ -203,27 +203,11 @@ U0 TcbFree(CTcb *t)
     Free(t);
 }
 
-U0 TcpMssOpt(CTcb *t, U8 *seg, I64 hl)
-{//Take the peer's MSS option from a SYN.
-    I64 i = 20, kind, olen;
+U0 TcpMssOpt(CTcb *t, CNetPkt *k)
+{//Take the peer's MSS option from a SYN (NetParse.warm found it).
     t->mss = 536;
-    while (i < hl) {
-        kind = seg[i];
-        if (kind == 0)
-            break;
-        if (kind == 1)
-            i++;
-        else {
-            if (i + 1 >= hl)
-                break;
-            olen = seg[i + 1];
-            if (olen < 2)
-                break;
-            if (kind == 2 && olen == 4 && i + 4 <= hl)
-                t->mss = MinI64(NetGet16(seg + i + 2), TCP_MSS);
-            i += olen;
-        }
-    }
+    if (k->mss)
+        t->mss = MinI64(k->mss, TCP_MSS);
     if (t->mss < 64)
         t->mss = 64;
 }
@@ -331,28 +315,14 @@ Bool TcpFinAcked(CTcb *t)
     return t->fin_sent && t->snd_una == t->snd_nxt;
 }
 
-U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len)
-{
-    I64 sport, dport, seq, ack, hl, flags, win, dl, off, n, i, pos;
-    U8 *data;
+U0 TcpRx(CNetPkt *k, U8 *b)
+{//A segment checked by NetParse.warm, in the buffer b.
+    I64 src = k->src, dst = k->dst, sport = k->sport, dport = k->dport, seq = k->seq, ack = k->ack,
+            flags = k->flags, win = k->win, dl = k->dlen, off, n, i, pos;
+    U8 *data = b + k->data;
     Bool need_ack = FALSE;
     CTcb *t, *l = NULL, *c;
-    if (len < 20 || NetFold(NetSum(seg, len, NetPseudo(src, dst, IP_P_TCP, len)))) {
-        net_stats.csum_bad++;
-        return;
-    }
-    hl = (seg[12] >> 4) * 4;
-    if (hl < 20 || hl > len)
-        return;
     net_stats.tcp_rx++;
-    sport = NetGet16(seg);
-    dport = NetGet16(seg + 2);
-    seq = NetGet32(seg + 4);
-    ack = NetGet32(seg + 8);
-    flags = seg[13];
-    win = NetGet16(seg + 14);
-    data = seg + hl;
-    dl = len - hl;
     for (t = tcp_list; t; t = t->next) {
         if (t->lport == dport) {
             if (t->state == TCP_LISTEN) {
@@ -366,7 +336,7 @@ U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len)
         if (flags & TCP_RST)
             return;
         if (flags & TCP_ACK) {
-            TcpRstReply(src, dst, seg, dl);
+            TcpRstReply(k);
             return;
         }
         if (!(flags & TCP_SYN))
@@ -382,18 +352,18 @@ U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len)
         c->irs = seq;
         c->rcv_nxt = SeqAdd(seq, 1);
         c->snd_wnd = win;
-        TcpMssOpt(c, seg, hl);
+        TcpMssOpt(c, k);
         TcpSeg(c, TCP_SYN | TCP_ACK, c->iss);
         c->rtx_at = jiffies + c->rto;
         return;
     }
     if (!t) {
-        TcpRstReply(src, dst, seg, dl);
+        TcpRstReply(k);
         return;
     }
     if (t->state == TCP_SYN_SENT) {
         if ((flags & TCP_ACK) && ack != SeqAdd(t->iss, 1)) {
-            TcpRstReply(src, dst, seg, dl);
+            TcpRstReply(k);
             return;
         }
         if (flags & TCP_RST) {
@@ -406,7 +376,7 @@ U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len)
         t->irs = seq;
         t->rcv_nxt = SeqAdd(seq, 1);
         t->snd_wnd = win;
-        TcpMssOpt(t, seg, hl);
+        TcpMssOpt(t, k);
         if (flags & TCP_ACK) {
             t->snd_una = ack;
             t->state = TCP_EST;
@@ -446,7 +416,7 @@ U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len)
         return;
     if (t->state == TCP_SYN_RCVD) {
         if (ack != SeqAdd(t->iss, 1)) {
-            TcpRstReply(src, dst, seg, dl);
+            TcpRstReply(k);
             return;
         }
         t->state = TCP_EST;

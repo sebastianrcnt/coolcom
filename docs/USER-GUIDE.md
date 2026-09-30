@@ -273,6 +273,10 @@ compiler, written in Cool (`warmc`), and it runs in two places:
   On an existing disk, run `make disk-install` once to update `Init.cool`; `disk-seed` (also used by
   `make run`) preserves existing files, including `Init.cool`, Warm, and the example. A disk from before
   the rename has `Init.HC` and `Warm.HC`: `make run` adds `Init.cool` and `Warm.cool`, and `Init.cool` wins.
+- **In the kernel:** the network stack's packet parser is Warm (`os/Kernel/NetParse.warm`), so a
+  malformed packet from the network cannot make the kernel read or write outside the frame. `make` compiles
+  it with `build/warmc --kernel-module=NetParse` into a Cool file the kernel includes
+  ([networking.md](networking.md#the-packet-parser-in-warm), [warmc/README.md](../warmc/README.md#kernel-modules)).
 
 <a id="vm-only"></a>
 ## What is VM-only

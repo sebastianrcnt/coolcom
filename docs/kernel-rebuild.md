@@ -11,7 +11,7 @@ of what the host build does after `coolc` is ported to Cool.
 
 | On C: | From the repository |
 |---|---|
-| `C:/Kernel/*` | `os/Kernel/*` |
+| `C:/Kernel/*` | `os/Kernel/*`, including `NetParse.cool`, which `make` generates from `NetParse.warm` |
 | `C:/coolc/Runtime/*.cool` | `coolc/Runtime/*.cool` |
 | `C:/coolc/Fmt/HCTok.cool` | `coolc/Fmt/HCTok.cool` |
 | `C:/Kernel/BootStub.BIN` | `build/BootStub.BIN` (the prebuilt assembly, below) |

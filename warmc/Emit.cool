@@ -28,7 +28,12 @@ U8 *WGDec(CWUnit *u, I64 i)
     do {buf[--n] = '0' + (i % 10); i /= 10;} while (i);
     return WText(u, buf + n, 31 - n);
 }
-U8 *WGFresh(CWGen *g, U8 *prefix) {return WGCat(g->unit, prefix, WGDec(g->unit, ++g->serial));}
+U8 *WGFresh(CWGen *g, U8 *prefix)
+{
+    U8 *name = WGCat(g->unit, prefix, WGDec(g->unit, ++g->serial));
+    if (g->unit->prefix) name = WG3(g->unit, g->unit->prefix, "_", name);
+    return name;
+}
 U8 *WGName(CWGen *g, CWNode *d)
 {
     CWNode *n;
@@ -104,7 +109,7 @@ U8 *WGTemp(CWGen *g, CWNode *t)
 U0 WGCopy(CWGen *g, U8 *dst, U8 *src, CWNode *ty)
 {
     CWUnit *u = g->unit;
-    if (WGAggregate(ty)) WGLine(g, WG3(u, "MemCpy(&(", dst, WG3(u, "), &(", src, WG3(u, "), sizeof(", WGType(g, ty), "));"))));
+    if (WGAggregate(ty)) WGLine(g, WG3(u, "(", dst, WG3(u, ") = (", src, ");")));  // a class assignment
     else {
         I64 bits = WIntBits(ty->name);
         U8 *mask, *sign;
@@ -210,13 +215,23 @@ U8 *WGPath(CWGen *g, CWNode *n)
 {
     CWUnit *u = g->unit;
     CWNode *p, *ty = WGConcrete(g, WDeclType(n->resolved)), *inner;
-    U8 *result = WGName(g, n->resolved), *idx, *ptr;
+    U8 *result = WGName(g, n->resolved), *idx, *ptr, *ix, *size;
     Bool transform = WEq(n->tag, "ref-path");
     for (p = n->first; p; p = p->next) if (WEq(p->role, "path")) {
             if (WEq(p->tag, "index")) {
                 idx = WGExpr(g, WChild(p, "value")); inner = ty;
                 if (transform && (WEq(ty->name, "&") || WEq(ty->name, "&!"))) {result = WG3(u, "(*(", result, "))"); inner = ty->first;}
-                ptr = WG3(u, "au_array_index(&(", result, WG3(u, "), ", idx, WG3(u, ", sizeof(", WGType(g, inner->first), "))")));
+                // au_array_index's checks, open-coded (U64 variables, as its parameters are).
+                // Bytes cannot overflow the multiplication.
+                ix = WGFresh(g, "wt"); WGLine(g, WG3(u, "U64 ", ix, ";")); WGLine(g, WG3(u, ix, " = ", WGCat(u, idx, ";")));
+                WGLine(g, WG3(u, "if (", ix, WG3(u, " >= (", result, ").wh_size) wh_abort(\"Array index out of bounds.\");")));
+                if (WEq(WGType(g, inner->first), "U8") || WEq(WGType(g, inner->first), "I8")) ptr = WG3(u, "((", result, WG3(u, ").wh_data + ", ix, ")"));
+                else {
+                    size = WGFresh(g, "wt"); WGLine(g, WG3(u, "U64 ", size, ";"));
+                    WGLine(g, WG3(u, size, " = sizeof(", WGCat(u, WGType(g, inner->first), ");")));
+                    WGLine(g, WG3(u, "if (", size, WG3(u, " && ", ix, WG3(u, " > (0xffffffffffffffff / ", size, ")) wh_abort(\"Multiplication overflow in array indexing operation.\");"))));
+                    ptr = WG3(u, "((", result, WG3(u, ").wh_data + ", ix, WG3(u, " * ", size, ")")));
+                }
                 result = WG3(u, "(", ptr, WG3(u, ")(", WGType(g, inner->first), " *)"));
                 if (!transform) result = WG3(u, "(*(", result, "))");
             } else {
@@ -359,6 +374,39 @@ CWNode *WGArguments(CWGen *g, CWNode *n)
         }
     return args;
 }
+// Pervasive's integer primitives are open-coded instead of called: the unsigned trapping
+// +, - and * (the checks and messages of their Pervasive bodies), the bitwise and/or/xor and
+// the widening conversions. Everything else is a call. NULL: not one of these.
+U8 *WGOpenCode(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
+{
+    CWUnit *u = g->unit; CWNode *p, *v, *vals[2]; U8 *op = NULL, *check = NULL, *max, *flag, *tmp, *name = d->name;
+    I64 n = 0, bits = WIntBits(ty->name);
+    if (!bits || !d->token || !d->token->source || !WEq(d->token->source->path, "builtin/Pervasive.warm")) return NULL;
+    for (p = d->first; p; p = p->next) if (WEq(p->role, "parameter")) {
+            if (n == 2) return NULL;
+            for (v = args; v; v = v->next) if (v->resolved == p) break;
+            if (!v) return NULL;
+            vals[n++] = v;
+        }
+    if ((WEq(name, "widenToNat64") || WEq(name, "widenToIndex")) && n == 1) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[0]->name, ty); return tmp;}
+    if (n != 2 || WPrefix(ty->name, "Int")) return NULL;
+    // Operands in variables of their type, as in the Pervasive bodies: HolyC folds constant
+    // operands as signed I64 (0xffffffffffffffff / 256 would be 0).
+    for (n = 0; n < 2; n++) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[n]->name, ty); vals[n]->name = tmp;}
+    if (WEq(name, "bitwiseAnd")) op = " & "; else if (WEq(name, "bitwiseOr")) op = " | "; else if (WEq(name, "bitwiseXor")) op = " ^ ";
+    max = "0xffffffffffffffff"; if (bits == 8) max = "255"; else if (bits == 16) max = "65535"; else if (bits == 32) max = "4294967295";
+    if (WEq(name, "trappingAdd")) {op = " + "; check = WG3(u, "(", vals[0]->name, WG3(u, " > (", max, WG3(u, " - ", vals[1]->name, "))")));}
+    else if (WEq(name, "trappingSubtract")) {op = " - "; check = WG3(u, "(", vals[0]->name, WG3(u, " < ", vals[1]->name, ")"));}
+    else if (WEq(name, "trappingMultiply")) {
+        op = " * "; check = WG3(u, "(", vals[1]->name, WG3(u, " && (", vals[0]->name, WG3(u, " > (", max, WG3(u, " / ", vals[1]->name, ")))"))));
+    }
+    if (!op) return NULL;
+    if (check) {
+        flag = WGFresh(g, "wt"); WGLine(g, WG3(u, "U8 ", flag, ";")); WGLine(g, WG3(u, flag, " = ", WGCat(u, check, ";")));
+        WGLine(g, WG3(u, "if (", flag, WG3(u, ") wh_abort(\"Overflow in ", name, WG3(u, " (", ty->name, ")\");"))));
+    }
+    tmp = WGTemp(g, ty); WGCopy(g, tmp, WG3(u, "(", vals[0]->name, WG3(u, op, vals[1]->name, ")")), ty); return tmp;
+}
 U8 *WGCallExpr(CWGen *g, CWNode *n)
 {
     CWUnit *u = g->unit; CWNode *d = n->resolved, *args = WGArguments(g, n), *p, *v, *env = WScope(u, NULL), *f, *tc, *inst, *ty = WGConcrete(g, n->ty), *b, *bound, *q;
@@ -431,6 +479,7 @@ U8 *WGCallExpr(CWGen *g, CWNode *n)
         d = d->pair;
     }
     if (!WChild(d, "body")) {WFail(u, n->token, "Unsupported Feature", "No function implementation for output"); return "0";}
+    tmp = WGOpenCode(g, d, args, ty); if (tmp) return tmp;
     for (p = d->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Import")) {
             q = WChild(p, "argument"); if (q) foreign = WChild(q, "value")->name;
         }
@@ -600,6 +649,30 @@ U8 *WGSignature(CWGen *g, CWNode *f)
         }
     WGPut(u, b, ")"); return b->data;
 }
+// A kernel module (--kernel-module=NAME) shares the kernel's global namespace: the
+// runtime's names (au_, wh_, wc_) become NAME_au_... like the generated ones (WGFresh).
+// Identifiers are renamed outside string and character literals and comments.
+U8 *WGPrefixRuntime(CWUnit *u, U8 *text)
+{
+    CWBuffer *b = WAlloc(u, sizeof(CWBuffer)); I64 i = 0, j; U8 ch[2], q; ch[1] = 0;
+    while (text[i]) {
+        if (text[i] == '"' || text[i] == 39) {
+            q = text[i]; j = i + 1;
+            while (text[j] && text[j] != q) {if (text[j] == 92 && text[j + 1]) j++; j++;}
+            if (text[j]) j++;
+            WGPut(u, b, WText(u, text + i, j - i)); i = j;
+        } else if (text[i] == '/' && text[i + 1] == '/') {
+            j = i; while (text[j] && text[j] != '\n') j++;
+            WGPut(u, b, WText(u, text + i, j - i)); i = j;
+        } else if (WAlpha(text[i]) || text[i] == '_') {
+            j = i; while (WAlpha(text[j]) || text[j] == '_' || (text[j] >= '0' && text[j] <= '9')) j++;
+            if (WPrefix(text + i, "au_") || WPrefix(text + i, "wh_") || WPrefix(text + i, "wc_")) {WGPut(u, b, u->prefix); WGPut(u, b, "_");}
+            WGPut(u, b, WText(u, text + i, j - i)); i = j;
+        } else {ch[0] = text[i++]; WGPut(u, b, ch);}
+    }
+    if (!b->data) return "";
+    return b->data;
+}
 U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
 {
     CWGen *g = WAlloc(u, sizeof(CWGen)); CWNode *m, *d, *f, *p, *ty, *entryfun = NULL;
@@ -655,5 +728,7 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
     WGPut(u, result, runtime); if (g->types_text->data) WGPut(u, result, g->types_text->data);
     if (protos->data) WGPut(u, result, protos->data);
     for (f = g->functions; f; f = f->next) WGPut(u, result, f->role);
-    if (g->body->data) WGPut(u, result, g->body->data); return result->data;
+    if (g->body->data) WGPut(u, result, g->body->data);
+    if (u->prefix) return WGPrefixRuntime(u, result->data);
+    return result->data;
 }

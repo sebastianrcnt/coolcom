@@ -4,3 +4,5 @@ build/
 tools/zed-holyc/grammars/
 __pycache__/
 vendor/
+# Generated from Warm (Makefile, WARM_KMODS)
+os/Kernel/NetParse.cool

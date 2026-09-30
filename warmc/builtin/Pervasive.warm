@@ -2142,4 +2142,70 @@ module body Austral.Pervasive is
             return @embed(Index, "($1 % $2)", lhs, rhs);
         end;
     end;
+
+    instance WidenToNat64(Nat8) is
+        method widenToNat64(value: Nat8): Nat64 is
+            return @embed(Nat64, "((au_nat64_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToNat64(Nat16) is
+        method widenToNat64(value: Nat16): Nat64 is
+            return @embed(Nat64, "((au_nat64_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToNat64(Nat32) is
+        method widenToNat64(value: Nat32): Nat64 is
+            return @embed(Nat64, "((au_nat64_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToNat64(Nat64) is
+        method widenToNat64(value: Nat64): Nat64 is
+            return @embed(Nat64, "((au_nat64_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToNat64(Index) is
+        method widenToNat64(value: Index): Nat64 is
+            return @embed(Nat64, "((au_nat64_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToNat64(ByteSize) is
+        method widenToNat64(value: ByteSize): Nat64 is
+            return @embed(Nat64, "((au_nat64_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToIndex(Nat8) is
+        method widenToIndex(value: Nat8): Index is
+            return @embed(Index, "((au_index_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToIndex(Nat16) is
+        method widenToIndex(value: Nat16): Index is
+            return @embed(Index, "((au_index_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToIndex(Nat32) is
+        method widenToIndex(value: Nat32): Index is
+            return @embed(Index, "((au_index_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToIndex(Nat64) is
+        method widenToIndex(value: Nat64): Index is
+            return @embed(Index, "((au_index_t)($1))", value);
+        end;
+    end;
+
+    instance WidenToIndex(Index) is
+        method widenToIndex(value: Index): Index is
+            return @embed(Index, "((au_index_t)($1))", value);
+        end;
+    end;
 end module body.

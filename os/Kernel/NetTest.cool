@@ -1,8 +1,237 @@
 // Network test, run by DevTest under coolvm --net (tools/kernel-test.sh):
+// the packet parser on malformed frames (below),
 // DHCP from coolvm's NAT, ICMP to the gateway, UDP and TCP over loopback
 // (listen/accept, both directions, orderly close), then DNS and an HTTP GET of
 // http://example.com through the NAT. If DNS fails the host is taken to be
 // offline and the external part is skipped.
+
+// ---- The packet parser (NetParse.warm) on malformed input ----------------------
+// Frames built here go to NetParsePkt and must get the expected kind, never NP_ABORT and
+// never a fault; the dropped ones also go through EthRx and must only move its counters.
+// Then random corruptions of a valid TCP SYN (checksums mostly fixed up, so the checks
+// behind them run too) must parse without an abort, with every offset inside the frame.
+
+I64 NtIp(U8 *f, I64 proto, I64 l4len, I64 ihl = 5)
+{//Ethernet + IPv4 header (10.0.2.99 -> 10.0.2.15) at f; returns the offset of the payload.
+    I64 hl = ihl * 4;
+    MemSet(f, 0, 14 + hl);
+    MemCpy(f, net_mac, 6);
+    NetPut16(f + 12, ETH_T_IP);
+    f[14] = 0x40 | ihl;
+    NetPut16(f + 16, hl + l4len);
+    f[22] = 64;
+    f[23] = proto;
+    NetPut32(f + 26, 0x0A000263);
+    NetPut32(f + 30, 0x0A00020F);
+    NetPut16(f + 24, NetFold(NetSum(f + 14, hl)));
+    return 14 + hl;
+}
+
+U0 NtL4Sum(U8 *f, I64 at, I64 len, I64 proto, I64 sum_at)
+{//Fill in the checksum of the ICMP (proto 0: no pseudo header), UDP or TCP part at f + at.
+    I64 ps = 0;
+    NetPut16(f + at + sum_at, 0);
+    if (proto)
+        ps = NetPseudo(0x0A000263, 0x0A00020F, proto, len);
+    NetPut16(f + at + sum_at, NetFold(NetSum(f + at, len, ps)));
+}
+
+I64 NtTcp(U8 *f, I64 hl, I64 flags, U8 *opts = NULL, I64 nopts = 0, I64 data = 0)
+{//A TCP segment 12345 -> 80 with a header of hl bytes and data bytes; the frame length.
+    I64 at = NtIp(f, IP_P_TCP, hl + data);
+    MemSet(f + at, 0, MaxI64(hl, 20) + data);
+    NetPut16(f + at, 12345);
+    NetPut16(f + at + 2, 80);
+    NetPut32(f + at + 4, 1000);
+    f[at + 12] = (hl / 4) << 4;
+    f[at + 13] = flags;
+    NetPut16(f + at + 14, 4096);
+    if (nopts)
+        MemCpy(f + at + 20, opts, nopts);
+    NtL4Sum(f, at, hl + data, IP_P_TCP, 16);
+    return at + hl + data;
+}
+
+Bool NtInside(CNetPkt *k, I64 len)
+{//Every offset and length of k lies inside a frame of len bytes.
+    if (k->kind == NP_ARP)
+        return k->sha >= 0 && k->sha + 6 <= len;
+    if (k->kind >= NP_ICMP && k->kind <= NP_IP || k->kind == NP_BAD_L4 || k->kind == NP_L4_SUM)
+        if (k->l4 < 0 || k->l4len < 0 || k->l4 + k->l4len > len)
+            return FALSE;
+    if (k->kind == NP_UDP || k->kind == NP_TCP)
+        return k->data >= k->l4 && k->dlen >= 0 && k->data + k->dlen <= k->l4 + k->l4len;
+    return TRUE;
+}
+
+U0 NtExpect(U8 *what, U8 *f, I64 len, I64 kind, Bool eth = TRUE)
+{
+    CNetPkt k;
+    I64 got = NetParsePkt(&k, f, len, eth), daif, before;
+    if (got != kind || !NtInside(&k, len)) {
+        Print("net: parse %s: kind %d, expected %d\n", what, got, kind);
+        KTFail("net: packet parser");
+    }
+    if (eth && kind >= NP_RUNT) {  // dropped by the stack as well, and counted
+        daif = NetLock;
+        before = net_stats.ip_drop + net_stats.csum_bad;
+        EthRx(f, len);
+        if (net_stats.ip_drop + net_stats.csum_bad == before && kind != NP_RUNT && kind != NP_BAD_ARP)
+            KTFail("net: a dropped packet was not counted");
+        NetUnlock(daif);
+    }
+}
+
+U0 DevTestNetParse()
+{
+    U8 f[NET_FRAME + 64], g[NET_FRAME + 64], opts[40];
+    CNetPkt k;
+    I64 i, j, n, at, len, aborts = net_stats.parse_abort, f0 = kt_fails, accepted = 0;
+    MemSet(f, 0, sizeof(f));
+    NtExpect("empty", f, 0, NP_RUNT);
+    NtExpect("empty IP", f, 0, NP_BAD_IP, FALSE);
+    NtExpect("runt", f, 13, NP_RUNT);
+    NetPut16(f + 12, 0x86DD);
+    NtExpect("IPv6", f, 60, NP_OTHER);
+    // ARP
+    NetPut16(f + 12, ETH_T_ARP);
+    NetPut16(f + 14, 1);
+    NetPut16(f + 16, ETH_T_IP);
+    f[18] = 6;
+    f[19] = 4;
+    NetPut16(f + 20, 1);
+    NetPut32(f + 28, 0x0A000263);
+    NetPut32(f + 38, 0x0A00020E);  // not us: learns nothing
+    NtExpect("ARP", f, 42, NP_ARP);
+    if (NetParsePkt(&k, f, 42, TRUE) != NP_ARP || k.sha != 22 || k.src != 0x0A000263 || k.op != 1)
+        KTFail("net: ARP fields");
+    NtExpect("short ARP", f, 41, NP_BAD_ARP);
+    f[18] = 7;
+    NtExpect("ARP hlen 7", f, 42, NP_BAD_ARP);
+    // IPv4
+    at = NtIp(f, 99, 8);
+    NtExpect("IP proto 99", f, at + 8, NP_IP);
+    NtExpect("IP header cut", f, 14 + 19, NP_BAD_IP);
+    NtExpect("IP total length past the frame", f, at + 7, NP_BAD_IP);
+    f[14] = 0x65;
+    NtExpect("IP version 6", f, at + 8, NP_BAD_IP);
+    at = NtIp(f, 99, 8, 4);
+    NtExpect("IP IHL 4", f, at + 8, NP_BAD_IP);
+    NtIp(f, 99, 8, 15);
+    NtExpect("IP IHL 15 past the frame", f, 14 + 40, NP_BAD_IP);
+    at = NtIp(f, 99, 8);
+    NetPut16(f + 16, 2000);
+    NtExpect("IP total length 2000", f, at + 8, NP_BAD_IP);
+    at = NtIp(f, 99, 8);
+    f[24] ^= 1;
+    NtExpect("IP checksum", f, at + 8, NP_IP_SUM);
+    at = NtIp(f, 99, 8);
+    f[20] = 0x20;  // more fragments
+    NetPut16(f + 24, 0);
+    NetPut16(f + 24, NetFold(NetSum(f + 14, 20)));
+    NtExpect("IP fragment", f, at + 8, NP_FRAG);
+    // ICMP
+    at = NtIp(f, IP_P_ICMP, 4);
+    NtExpect("ICMP of 4 bytes", f, at + 4, NP_BAD_L4);
+    at = NtIp(f, IP_P_ICMP, 16);
+    MemSet(f + at, 0x5A, 16);
+    f[at] = 8;
+    f[at + 1] = 0;
+    NtL4Sum(f, at, 16, 0, 2);
+    f[at + 9] ^= 0x10;
+    NtExpect("ICMP checksum", f, at + 16, NP_L4_SUM);
+    // UDP
+    at = NtIp(f, IP_P_UDP, 12);
+    MemSet(f + at, 0, 12);
+    NetPut16(f + at, 53);
+    NetPut16(f + at + 2, 9);
+    NetPut16(f + at + 4, 12);
+    NtExpect("UDP without checksum", f, at + 12, NP_UDP);
+    if (NetParsePkt(&k, f, at + 12, TRUE) != NP_UDP || k.data != at + 8 || k.dlen != 4 || k.sport != 53)
+        KTFail("net: UDP fields");
+    NetPut16(f + at + 4, 9000);
+    NtExpect("UDP length past the packet", f, at + 12, NP_BAD_L4);
+    NetPut16(f + at + 4, 4);
+    NtExpect("UDP length 4", f, at + 12, NP_BAD_L4);
+    NetPut16(f + at + 4, 12);
+    NtL4Sum(f, at, 12, IP_P_UDP, 6);
+    f[at + 10] = 1;
+    NtExpect("UDP checksum", f, at + 12, NP_L4_SUM);
+    // TCP
+    len = NtTcp(f, 20, TCP_ACK);
+    NtExpect("TCP", f, len, NP_TCP);
+    at = NtIp(f, IP_P_TCP, 12);
+    NtExpect("TCP of 12 bytes", f, at + 12, NP_BAD_L4);
+    len = NtTcp(f, 20, TCP_ACK);
+    f[len - 20 + 12] = 15 << 4;  // a 60-byte header in a 20-byte segment
+    NtL4Sum(f, len - 20, 20, IP_P_TCP, 16);
+    NtExpect("TCP data offset 15", f, len, NP_BAD_L4);
+    f[len - 20 + 12] = 3 << 4;
+    NtL4Sum(f, len - 20, 20, IP_P_TCP, 16);
+    NtExpect("TCP data offset 3", f, len, NP_BAD_L4);
+    f[len - 20 + 12] = 5 << 4;
+    f[len - 1] ^= 0x40;
+    NtExpect("TCP checksum", f, len, NP_L4_SUM);
+    MemSet(opts, 0, 8);
+    opts[0] = 1;
+    opts[1] = 2;
+    opts[2] = 4;
+    opts[3] = 0x05;
+    opts[4] = 0xB4;
+    len = NtTcp(f, 28, TCP_SYN, opts, 8, 5);
+    if (NetParsePkt(&k, f, len, TRUE) != NP_TCP || k.mss != 1460 || k.dlen != 5 || k.data != len - 5)
+        KTFail("net: TCP MSS option");
+    opts[2] = 0;  // an option of length 0
+    len = NtTcp(f, 28, TCP_SYN, opts, 8);
+    if (NetParsePkt(&k, f, len, TRUE) != NP_TCP || k.mss)
+        KTFail("net: TCP option of length 0");
+    opts[2] = 255;  // an option running past the header
+    len = NtTcp(f, 28, TCP_SYN, opts, 8);
+    if (NetParsePkt(&k, f, len, TRUE) != NP_TCP || k.mss)
+        KTFail("net: TCP option past the header");
+    opts[0] = 1;
+    opts[1] = 1;
+    opts[2] = 1;
+    opts[3] = 2;  // kind 2 in the last byte: no length
+    len = NtTcp(f, 24, TCP_SYN, opts, 4);
+    if (NetParsePkt(&k, f, len, TRUE) != NP_TCP || k.mss)
+        KTFail("net: TCP option cut at the header's end");
+    // Random corruption of a SYN with an MSS option and 64 bytes of data.
+    opts[0] = 2;
+    opts[1] = 4;
+    opts[2] = 0x05;
+    opts[3] = 0xB4;
+    n = NtTcp(g, 40, TCP_SYN, opts, 4, 64);
+    for (i = 0; i < 20000; i++) {
+        MemCpy(f, g, n);
+        for (j = NetRand % 4; j >= 0; j--)
+            f[12 + NetRand % (n - 12)] = NetRand;
+        len = n;
+        if (!(NetRand % 4))
+            len = NetRand % (n + 1);
+        if (NetRand % 2) {  // fix up the checksums that the corrupted lengths still allow
+            at = (f[14] & 15) * 4;
+            if (at >= 20 && 14 + at <= len) {
+                NetPut16(f + 24, 0);
+                NetPut16(f + 24, NetFold(NetSum(f + 14, at)));
+                j = NetGet16(f + 16) - at;
+                if (j >= 20 && 14 + at + j <= len)
+                    NtL4Sum(f, 14 + at, j, IP_P_TCP, 16);
+            }
+        }
+        if (NetParsePkt(&k, f, len, TRUE) == NP_ABORT || !NtInside(&k, len)) {
+            Print("net: parse fuzz %d: kind %d\n", i, k.kind);
+            KTFail("net: packet parser fuzz");
+            break;
+        }
+        if (k.kind == NP_TCP)
+            accepted++;
+    }
+    if (net_stats.parse_abort != aborts)
+        KTFail("net: packet parser aborted");
+    if (kt_fails == f0)
+        Print("net: parser ok (%d of 20000 corrupted frames were valid TCP)\n", accepted);
+}
 
 U0 DevTestNet()
 {
@@ -14,6 +243,7 @@ U0 DevTestNet()
         KTFail("net: no NIC");
         return;
     }
+    DevTestNetParse;
     for (i = 0; i < 5000 && !net_ip; i++)
         Sleep(1);
     Print("net: address %s\n", NetIpStr(buf, net_ip));
