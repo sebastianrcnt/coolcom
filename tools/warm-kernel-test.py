@@ -109,7 +109,7 @@ def fmt_test(OUT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Screen", "Key", "Errors", "Stdin", "Fmt"))
+    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Screen", "Key", "Errors", "Stdin", "Fmt"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:
@@ -141,9 +141,9 @@ def main():
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
     adapter = OUT / "Adapter.cool"
-    adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool"]))
+    adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool", "OSNetCommon.cool", "OSNetKernel.cool"]))
     run("mcopy", "-o", "-i", disk, adapter, "::Adapter.cool")
-    for name in ("Files", "Streams", "Screen", "Key", "Errors"):
+    for name in ("Files", "Streams", "Sockets", "Screen", "Key", "Errors"):
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
@@ -185,8 +185,9 @@ def main():
             assert all(row[10*3:50*3] == bytes([0, 255, 0]) * 40
                        for row in rows[400:420]), "Warm framebuffer rectangle missing"
         print("warm-kernel: " + name + " PASS", flush=True)
-    if not args.filter or args.filter == "Streams":
-        portable_test(OUT, "Streams")
+    for name in ("Streams", "Sockets"):
+        if not args.filter or args.filter == name:
+            portable_test(OUT, name)
     if not args.filter or args.filter == "Stdin":
         stdin_test(OUT)
     if not args.filter or args.filter == "Fmt":

@@ -96,5 +96,10 @@
   "stdout": "11\n",
   "stderr": "",
   "exit": 0
+ },
+ "record-named-address": {
+  "stdout": "42\n",
+  "stderr": "",
+  "exit": 0
  }
 }

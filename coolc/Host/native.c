@@ -346,6 +346,8 @@ static HostDirEntry *host_dir_list(const char *path, int64_t *error) {
     return head;
 }
 
+#include "warm_net.h"
+
 static void register_host_symbols(Module *m) {
 #define HOST(name, fn) add_symbol(m, name, (uintptr_t)(fn))
     HOST("NativeJitAlloc", NativeJitAlloc);
@@ -397,6 +399,20 @@ static void register_host_symbols(Module *m) {
     HOST("FileWrite", host_file_write);
     HOST("NativeFileStat", host_file_stat);
     HOST("NativeDirList", host_dir_list);
+    HOST("NativeNetResolve", warm_net_resolve);
+    HOST("NativeNetConnect", warm_net_connect);
+    HOST("NativeNetListen", warm_net_listen);
+    HOST("NativeNetAccept", warm_net_accept);
+    HOST("NativeNetSend", warm_net_send);
+    HOST("NativeNetReceive", warm_net_receive);
+    HOST("NativeNetUdpOpen", warm_net_udp_open);
+    HOST("NativeNetUdpSend", warm_net_udp_send);
+    HOST("NativeNetUdpReceive", warm_net_udp_receive);
+    HOST("NativeNetSource", warm_net_source);
+    HOST("NativeNetSourcePort", warm_net_source_port);
+    HOST("NativeNetPort", warm_net_port);
+    HOST("NativeNetClose", warm_net_close);
+
     HOST("NativeFileDelete", host_file_delete);
     HOST("NativeFileMkdir", host_file_mkdir);
     HOST("C2HFloor", floor);

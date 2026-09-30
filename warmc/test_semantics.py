@@ -21,6 +21,8 @@ def program(decls='', body='return ExitSuccess();'):
 
 
 cases = {
+    'record-named-address': (True, program('record Address: Free is ip: Nat32; end;', 'let a: Address := Address(ip => 42); printLn(a.ip); return ExitSuccess();')),
+
     'mutable-span-length-loop': (True, program('function fillSpan(bytes: Span![Nat8]): Unit is var i: Index := 0; while i < spanWriteLength(bytes) do bytes[i] := 42; i := i + 1; end while; return nil; end;')),
     'positive-int64-index': (True, program(body='case toIndex(11 : Int64) of when Some(value as n: Index) do printLn(n); when None do abort("conversion failed"); end case; return ExitSuccess();')),
 

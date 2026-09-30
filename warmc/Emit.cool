@@ -53,12 +53,17 @@ U8 *WGName(CWGen *g, CWNode *d)
     n = WNode(g->unit, "name", NULL); n->resolved = d; n->name = WGFresh(g, "w"); n->next = g->names; g->names = n; return n->name;
 }
 U0 WGLine(CWGen *g, U8 *text) {WGPut(g->unit, g->body, text); WGPut(g->unit, g->body, "\n");}
+Bool WGMemoryPointer(CWNode *t)
+{
+    CWNode *d = WCanon(t->resolved), *m = WDeclModule(d);
+    return (WEq(t->name, "Pointer") || WEq(t->name, "Address")) && m && WEq(m->name, "Austral.Memory");
+}
 Bool WGAggregate(CWNode *t)
 {
     CWNode *d;
     if (!t) return FALSE;
     if (WEq(t->name, "Span") || WEq(t->name, "Span!")) return TRUE;
-    if (WEq(t->name, "Pointer") || WEq(t->name, "Address") || WEq(t->name, "&") || WEq(t->name, "&!") || WEq(t->name, "Fn")) return FALSE;
+    if (WGMemoryPointer(t) || WEq(t->name, "&") || WEq(t->name, "&!") || WEq(t->name, "Fn")) return FALSE;
     d = WCanon(t->resolved); return d && (WEq(d->tag, "record") || WEq(d->tag, "union") || WEq(d->name, "RootCapability"));
 }
 extern U8 *WGType(CWGen *g, CWNode *t);
@@ -80,7 +85,7 @@ U8 *WGType(CWGen *g, CWNode *t)
     if (WEq(t->name, "Float64")) return "F64";
     if (WEq(t->name, "Float32")) return "U32";
     if (WEq(t->name, "Span") || WEq(t->name, "Span!")) return "au_span_t";
-    if (WEq(t->name, "&") || WEq(t->name, "&!") || WEq(t->name, "Pointer") || WEq(t->name, "Address")) return WGCat(u, WGType(g, t->first), " *");
+    if (WEq(t->name, "&") || WEq(t->name, "&!") || WGMemoryPointer(t)) return WGCat(u, WGType(g, t->first), " *");
     if (WEq(t->name, "Fn")) return "U8 *";
     for (n = g->types; n; n = n->next) if (WTypeEq(n->ty, t)) return n->name;
     d = WCanon(t->resolved);

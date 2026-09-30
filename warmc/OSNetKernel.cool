@@ -1,0 +1,61 @@
+class WnSocket {CTcb *tcp; CUdpSock *udp; I64 source; I64 port;};
+I64 WnTcpError(I64 code) {
+    if (code == TCP_ERR_REFUSED) return -18; if (code == TCP_ERR_RESET) return -19;
+    if (code == TCP_ERR_TIMEOUT) return -17; if (code == TCP_ERR_CLOSED) return -16; if (code == TCP_ERR_UNREACHABLE) return -20; return code;
+}
+I64 WnResolve(WnPolicy * p, U8 *name, U64 n) {
+    if (!p) return -13; U8 *s = 0; I64 result = -1, ip;
+    try {s = WkString(name, n); if (!s) result = -12; else if (DnsResolve(s, &ip)) result = ip; else result = -20;}
+    catch {Fs->catch_except = TRUE;} Free(s); return result;
+}
+I64 WnConnect(WnPolicy * p, I64 ip, I64 port, I64 timeout) {
+    if (!WnEndpoint(p, ip, port) || timeout < 0) return -12;
+    WnSocket *s = 0; I64 r = -1, error = 0;
+    try {s = CAlloc(sizeof(WnSocket)); s->tcp = TcpConnect(ip, port, timeout, &error); if (s->tcp) r = s(I64); else r = WnTcpError(error);}
+    catch {Fs->catch_except = TRUE;}
+    if (r < 0) Free(s); return r;
+}
+I64 WnListen(WnPolicy * p, I64 port) {
+    if (!p || port < 0 || port > 65535) return -12;
+    if (!port) {I64 daif = NetLock; port = NetEphemeral; NetUnlock(daif); if (!port) return -11;}
+    WnSocket *s = 0; I64 r = -1;
+    try {s = CAlloc(sizeof(WnSocket)); s->tcp = TcpListen(port); if (s->tcp) r = s(I64); else r = -11;}
+    catch {Fs->catch_except = TRUE;}
+    if (r < 0) Free(s); return r;
+}
+I64 WnAccept(WnSocket *listener, I64 timeout) {
+    WnSocket *s = 0; I64 r = -1;
+    try {s = CAlloc(sizeof(WnSocket)); s->tcp = TcpAccept(listener->tcp, timeout); if (s->tcp) r = s(I64); else r = -17;}
+    catch {Fs->catch_except = TRUE;}
+    if (r < 0) Free(s); return r;
+}
+I64 WnSend(WnSocket *s, U8 *data, U64 n) {
+    if (n > 0x7fffffff) return -12; I64 r = -1;
+    try {r = WnTcpError(TcpSend(s->tcp, data, n)); if (n && !r) r = -17;} catch {Fs->catch_except = TRUE;} return r;
+}
+I64 WnReceive(WnSocket *s, U8 *data, U64 n, I64 timeout) {
+    if (n > 0x7fffffff) return -12; if (!n) return 0; I64 r = -1;
+    try {r = WnTcpError(TcpRecv(s->tcp, data, n, timeout));} catch {Fs->catch_except = TRUE;} return r;
+}
+I64 WnUdpOpen(WnPolicy * p, I64 port) {
+    if (!p || port < 0 || port > 65535) return -12;
+    WnSocket *s = 0; I64 r = -1;
+    try {s = CAlloc(sizeof(WnSocket)); s->udp = UdpOpen(port); if (s->udp) r = s(I64); else r = -11;}
+    catch {Fs->catch_except = TRUE;}
+    if (r < 0) Free(s); return r;
+}
+I64 WnUdpSend(WnSocket *s, I64 ip, I64 port, U8 *data, U64 n) {
+    if (ip < 0 || ip > 0xffffffff || port <= 0 || port > 65535 || n > 1486) return -12; I64 r = -1;
+    try {r = UdpSend(s->udp, ip, port, data, n); if (r < 0) r = -20;} catch {Fs->catch_except = TRUE;} return r;
+}
+I64 WnUdpReceive(WnSocket *s, U8 *data, U64 n, I64 timeout) {
+    if (n > 65535) return -12; I64 r = -1;
+    try {r = UdpRecv(s->udp, data, n, &s->source, &s->port, timeout); if (r < 0) r = -17;} catch {Fs->catch_except = TRUE;} return r;
+}
+I64 WnSource(WnSocket *s) {return s->source;}
+I64 WnSourcePort(WnSocket *s) {return s->port;}
+I64 WnPort(WnSocket *s) {if (s->udp) return s->udp->port; return s->tcp->lport;}
+I64 WnClose(WnSocket *s) {
+    I64 r = -1;
+    try {if (s->udp) UdpClose(s->udp); else TcpClose(s->tcp); r = 0;} catch {Fs->catch_except = TRUE;} Free(s); return r;
+}

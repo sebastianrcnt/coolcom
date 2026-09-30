@@ -1,0 +1,35 @@
+import I64 NativeNetResolve(U8 *host);
+import I64 NativeNetConnect(I64 ip, I64 port, I64 timeout);
+import I64 NativeNetListen(I64 port);
+import I64 NativeNetAccept(I64 handle, I64 timeout);
+import I64 NativeNetSend(I64 handle, U8 *data, I64 size);
+import I64 NativeNetReceive(I64 handle, U8 *data, I64 size, I64 timeout);
+import I64 NativeNetUdpOpen(I64 port);
+import I64 NativeNetUdpSend(I64 handle, I64 ip, I64 port, U8 *data, I64 size);
+import I64 NativeNetUdpReceive(I64 handle, U8 *data, I64 size, I64 timeout);
+import I64 NativeNetSource(I64 handle);
+import I64 NativeNetSourcePort(I64 handle);
+import I64 NativeNetPort(I64 handle);
+import I64 NativeNetClose(I64 handle);
+I64 WnResolve(WnPolicy * p, U8 *name, U64 n) {
+    if (!p) return -13; U8 *s = WkString(name, n); if (!s) return -12;
+    I64 r = NativeNetResolve(s); Free(s); return r;
+}
+I64 WnConnect(WnPolicy * p, I64 ip, I64 port, I64 timeout) {
+    if (!WnEndpoint(p, ip, port) || timeout < 0) return -12;
+    return NativeNetConnect(ip, port, timeout);
+}
+I64 WnListen(WnPolicy * p, I64 port) {if (!p || port < 0 || port > 65535) return -12; return NativeNetListen(port);}
+I64 WnAccept(I64 handle, I64 timeout) {return NativeNetAccept(handle, timeout);}
+I64 WnSend(I64 handle, U8 *data, U64 n) {if (n > 0x7fffffff) return -12; return NativeNetSend(handle, data, n);}
+I64 WnReceive(I64 handle, U8 *data, U64 n, I64 timeout) {if (n > 0x7fffffff) return -12; return NativeNetReceive(handle, data, n, timeout);}
+I64 WnUdpOpen(WnPolicy * p, I64 port) {if (!p || port < 0 || port > 65535) return -12; return NativeNetUdpOpen(port);}
+I64 WnUdpSend(I64 handle, I64 ip, I64 port, U8 *data, U64 n) {
+    if (ip < 0 || ip > 0xffffffff || port <= 0 || port > 65535 || n > 65507) return -12;
+    return NativeNetUdpSend(handle, ip, port, data, n);
+}
+I64 WnUdpReceive(I64 handle, U8 *data, U64 n, I64 timeout) {if (n > 65535) return -12; return NativeNetUdpReceive(handle, data, n, timeout);}
+I64 WnSource(I64 handle) {return NativeNetSource(handle);}
+I64 WnSourcePort(I64 handle) {return NativeNetSourcePort(handle);}
+I64 WnPort(I64 handle) {return NativeNetPort(handle);}
+I64 WnClose(I64 handle) {return NativeNetClose(handle);}

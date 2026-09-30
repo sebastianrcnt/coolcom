@@ -1,7 +1,7 @@
 # The Warm standard library: design
 
 Status: reviewed; the decisions are at the end. Stage 0 is implemented (see
-[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-2 are implemented; stages 3-5 are pending. The
+[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-3 are implemented; stages 4-5 are pending. The
 options and recommendations (**Rec.**) below are kept as the reasoning behind the decisions.
 
 Warm today has two unrelated libraries: `Standard.*` from Austral (String, Buffer, Box,
@@ -281,3 +281,11 @@ zero-fills the gap on the next write. Stream snapshots survive closing their
 parent directory, and closing a stream releases it even when persistence fails.
 `OS.File.byteSize` queries `Bytes`; `size` queries `File`. Stream snapshots are
 limited to 256 MiB. Directory entries own names; close the iterator on early exit.
+
+Stage 3: `OS.Net` has IPv4 address resolution, owned TCP streams/listeners and
+UDP sockets on both backends. Receive and accept take millisecond timeouts
+(`-1` waits indefinitely). TCP receive returns zero at EOF; UDP receive returns
+a `Datagram` with the sender and source port, including empty datagrams.
+`listenPort`/`udpPort` report dynamically assigned ports. Host sockets use
+nonblocking descriptors with polling; the kernel keeps its existing network
+stack and translates its errors. The kernel UDP payload limit is 1486 bytes.

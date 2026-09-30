@@ -1,0 +1,5 @@
+// Network authority and portable argument checks. Policy attenuation is added in stage 5.
+class WnPolicy {I64 kind; I64 ip; I64 port;};
+I64 WnAcquire() {return CAlloc(sizeof(WnPolicy))(I64);}
+U0 WnRelease(WnPolicy *p) {Free(p);}
+Bool WnEndpoint(WnPolicy *p, I64 ip, I64 port) {return p && ip >= 0 && ip <= 0xffffffff && port > 0 && port <= 65535;}
