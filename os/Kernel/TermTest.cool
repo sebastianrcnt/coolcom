@@ -6,7 +6,8 @@ U0 DevTestTerm()
     VtBind(Fs, a);
     ConsPutS("AB\x1b[2;3H\x1b[31mR\x1b[7m\x1b[7mI\x1b[27mN");
     if (a->cells[0].cp != 'A' || a->cells[10].cp != 'R' || a->cells[10].fg != 1 ||
-            a->cells[11].bg != 1 || a->cells[12].fg != 1)
+            a->cells[11].fg != 1 || !(a->cells[11].attr & VT_ATTR_REVERSE) ||
+            a->cells[12].fg != 1 || (a->cells[12].attr & VT_ATTR_REVERSE))
         KTFail("terminal cursor/SGR/reverse");
     ConsPutS("\x1b[?1049hALT\x1b[?1049l");
     if (a->cells[0].cp != 'A' || a->cx != 5 || a->cy != 1)

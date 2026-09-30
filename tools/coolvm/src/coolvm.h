@@ -46,12 +46,16 @@
  * arm64 Image in RAM to FINISHER_BOOT_ADDR and its size to FINISHER_BOOT_SIZE (32-bit halves,
  * low word first, or one 64-bit store), then 0x7777: coolvm saves those bytes to a temporary
  * file and starts again with it as the kernel (later plain resets boot it again).
+ * Framebuffer damage (VM-only): a 32-bit write of (end << 16) | start to FINISHER_FB_DAMAGE says
+ * the guest changed framebuffer rows start..end-1. Once a guest has written it, the window
+ * redraws on those reports instead of comparing the whole framebuffer every frame.
  * Advertised in the device tree as /soc/finisher@1ff000000; NOT present on real hardware.
  * Unlike the PSCI-style HVC it also works for guests running at EL2. */
 #define FINISHER_BASE 0x1ff000000ULL
 #define FINISHER_SIZE 0x1000ULL
 #define FINISHER_BOOT_ADDR 0x8
 #define FINISHER_BOOT_SIZE 0x10
+#define FINISHER_FB_DAMAGE 0x18
 
 /* VM-only devices, deliberately outside the t8103 SoC MMIO window. */
 #define INPUT_BASE 0x1ff001000ULL
@@ -115,6 +119,8 @@ struct vm {
     uint8_t *fb;
     uint64_t fb_size;
     uint32_t fb_width, fb_height;
+    _Atomic bool fb_damage_used;  /* the guest reports damage (FINISHER_FB_DAMAGE) */
+    _Atomic uint64_t fb_damage;   /* rows changed since the window last drew: (end << 32) | start, 0 none */
     bool headless;
     const char *screenshot;
     int disk_fd[MAX_DISKS];

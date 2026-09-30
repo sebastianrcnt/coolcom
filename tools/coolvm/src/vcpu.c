@@ -308,6 +308,18 @@ static bool region_dispatch(cpu_t *c, uint64_t pa, int size, bool wr, uint64_t *
                 *r = (*r & 0xffffffffULL) | (uint64_t)(uint32_t)*val << 32;
             else
                 *r = (*r & ~0xffffffffULL) | (uint32_t)*val;
+        } else if (wr && *offp == FINISHER_FB_DAMAGE && size == 4) {
+            uint64_t start = *val & 0xffff, end = (*val >> 16) & 0xffff, old, merged;
+            if (end > g.fb_height) end = g.fb_height;
+            if (start < end) {
+                old = atomic_load(&g.fb_damage);
+                do {
+                    merged = old ? ((old >> 32 > end ? old >> 32 : end) << 32) |
+                                   ((old & 0xffffffff) < start ? old & 0xffffffff : start)
+                                 : (end << 32) | start;
+                } while (!atomic_compare_exchange_weak(&g.fb_damage, &old, merged));
+            }
+            atomic_store(&g.fb_damage_used, true);
         } else if (wr || *offp != 0) {
             ok = false;
         } else {

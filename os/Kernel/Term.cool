@@ -1,12 +1,23 @@
 extern U0 ConsPutCp(I64 cp);
-// Task-bound ANSI terminals. Shells run cooperatively on core 0; inherited
-// terminal references and cell/input locks also support worker tasks on other cores.
-// Screen cells are independent of the physical framebuffer and UART.
+// The terminal emulator: ANSI/UTF-8 bytes in, a grid of cells out. Every terminal is
+// one of these: the framebuffer console (vt_screen, drawn by the renderer in Fb.cool),
+// the primary shell's (the same one when there is a framebuffer), Tmux panes and remote
+// shells. Shells run cooperatively on core 0; inherited terminal references and
+// cell/input locks also support worker tasks on other cores.
+// The grid knows nothing about pixels: a writer marks the rows it changes in row_dirty,
+// counts full-screen scrolls in scrolled, and whoever shows the grid (Fb.cool's renderer)
+// takes those under v->lock and clears them.
 // A cell color is an Ansi.cool color: 0..15 the ANSI colors, 16..255 the xterm palette,
-// ANSI_RGB_FLAG | 0xRRGGBB a 24-bit color.
+// ANSI_RGB_FLAG | 0xRRGGBB a 24-bit color. fg and bg are the colors selected by SGR;
+// VT_ATTR_REVERSE in attr means they are shown swapped.
+#define VT_ATTR_BOLD    1
+#define VT_ATTR_REVERSE 2
 class CVtCell
-{
-    I64 cp, fg, bg, width;
+{// 16 bytes, so the renderer compares a cell as two I64s.
+    I32 cp, fg, bg;
+    U8 width;  // 1 narrow or blank, 2 the left half of a wide glyph, 0 its right half
+    U8 attr;   // VT_ATTR_*
+    U16 pad;
 };
 class CVTerm
 {
@@ -18,6 +29,8 @@ class CVTerm
     Bool reverse, saved_reverse;
     Bool cursor_off; // CSI ?25l; Tmux shows the host cursor only for a pane without it
     CVtCell *cells, *saved;
+    U8 *row_dirty;  // per row: cells changed since the renderer last looked
+    I64 scrolled;   // full-screen scrolls since then (the renderer moves its pixels instead of redrawing)
     I64 keys[256], head, tail;
     I64 dirty, refs, lock;
     Bool direct, closed;
@@ -26,16 +39,33 @@ class CVTerm
     U8 *sink_data;
 };
 CVTerm *vt_focus;
+CVTerm *vt_screen;  // the framebuffer console's grid (Fb.cool); NULL without a framebuffer
 
 CVTerm *VtCurrent() {return Fs->terminal;}
 
+I64 VtAttr(CVTerm *v)
+{
+    I64 a = 0;
+    if (v->bold) a |= VT_ATTR_BOLD;
+    if (v->reverse) a |= VT_ATTR_REVERSE;
+    return a;
+}
+U0 VtCellColors(CVtCell *p, I64 *_fg, I64 *_bg)
+{//The colors a cell is shown in (reverse applied).
+    if (p->attr & VT_ATTR_REVERSE) {*_fg = p->bg; *_bg = p->fg;}
+    else {*_fg = p->fg; *_bg = p->bg;}
+}
+U0 VtDirtyAll(CVTerm *v)
+{
+    MemSet(v->row_dirty, 1, v->rows);
+}
 U0 VtBlank(CVTerm *v, I64 col, I64 row)
 {
     CVtCell *p;
     if (col < 0 || col >= v->cols || row < 0 || row >= v->rows) return;
     p = &v->cells[row * v->cols + col];
-    p->cp = ' '; p->width = 1; p->fg = v->fg; p->bg = v->bg;
-    if (v->reverse) {p->fg = v->bg; p->bg = v->fg;}
+    p->cp = ' '; p->width = 1; p->fg = v->fg; p->bg = v->bg; p->attr = VtAttr(v);
+    v->row_dirty[row] = 1;
 }
 U0 VtErase(CVTerm *v, I64 x1, I64 y1, I64 x2, I64 y2)
 {
@@ -52,6 +82,8 @@ U0 VtScroll(CVTerm *v)
 {
     MemCpy(v->cells, v->cells + v->cols, (v->rows - 1) * v->cols * sizeof(CVtCell));
     VtErase(v, 0, v->rows - 1, v->cols - 1, v->rows - 1);
+    VtDirtyAll(v);
+    v->scrolled++;
     v->cy = v->rows - 1;
 }
 U0 VtPutCp(CVTerm *v, I64 cp)
@@ -70,8 +102,8 @@ U0 VtPutCp(CVTerm *v, I64 cp)
         if (v->cells[i + j].width == 2 && j + 1 >= w)
             VtBlank(v, v->cx + j + 1, v->cy);
     p = &v->cells[i];
-    p->cp = cp; p->fg = v->fg; p->bg = v->bg; p->width = w;
-    if (v->reverse) {p->fg = v->bg; p->bg = v->fg;}
+    p->cp = cp; p->fg = v->fg; p->bg = v->bg; p->width = w; p->attr = VtAttr(v);
+    v->row_dirty[v->cy] = 1;
     if (w == 2) {
         VtBlank(v, v->cx + 1, v->cy);
         v->cells[i + 1].width = 0;
@@ -98,6 +130,7 @@ U0 VtAlt(CVTerm *v, Bool on)
         v->fg = v->saved_fg; v->bg = v->saved_bg;
         v->bold = v->saved_bold; v->reverse = v->saved_reverse;
         v->alternate = FALSE;
+        VtDirtyAll(v);
     }
 }
 U0 VtCsi(CVTerm *v, U8 c)
@@ -241,25 +274,32 @@ Bool VtOutput(U8 c)
     U0 (*sink)(CVTerm *v, U8 c);
     if (!v) return FALSE;
     daif = SpinLockIrq(&v->lock);
-    VtPut(v, c); v->dirty = TRUE;
+    // The console's own grid is written by its output, FbPutC, which gets the byte next.
+    if (v != vt_screen) {VtPut(v, c); v->dirty = TRUE;}
     if (sink = v->sink) (*sink)(v, c);
     SpinUnlockIrq(&v->lock, daif);
     return !v->direct;
 }
-CVTerm *VtNew(I64 cols, I64 rows)
-{
+CVTerm *VtAlloc(I64 cols, I64 rows)
+{//A terminal, not yet routed to (the framebuffer console makes its own before there are tasks).
     CVTerm *v = CAlloc(sizeof(CVTerm));
     v->cols = cols; v->rows = rows; v->fg = 15; v->refs = 1;
     v->cells = CAlloc(cols * rows * sizeof(CVtCell));
     v->saved = CAlloc(cols * rows * sizeof(CVtCell));
+    v->row_dirty = MAlloc(rows);
     VtClear(v); v->dirty = TRUE;
+    return v;
+}
+CVTerm *VtNew(I64 cols, I64 rows)
+{
+    CVTerm *v = VtAlloc(cols, rows);
     cons_route = &VtOutput;
     return v;
 }
 U0 VtRelease(CVTerm *v)
 {
     if (v && !ArchAdd(&v->refs, -1)) {
-        Free(v->cells); Free(v->saved); Free(v);
+        Free(v->cells); Free(v->saved); Free(v->row_dirty); Free(v);
     }
 }
 U0 VtBind(CTask *t, CVTerm *v)
@@ -271,12 +311,15 @@ U0 VtBind(CTask *t, CVTerm *v)
 U0 VtResize(CVTerm *v, I64 cols, I64 rows)
 {
     CVtCell *old = v->cells, *saved = v->saved;
+    U8 *old_dirty = v->row_dirty;
     I64 daif = SpinLockIrq(&v->lock);
     I64 x, y, oc = v->cols, orows = v->rows;
     if (cols == oc && rows == orows) {SpinUnlockIrq(&v->lock, daif); return;}
     v->cells = CAlloc(cols * rows * sizeof(CVtCell));
     v->saved = CAlloc(cols * rows * sizeof(CVtCell));
+    v->row_dirty = MAlloc(rows);
     v->cols = cols; v->rows = rows;
+    VtDirtyAll(v);
     VtErase(v, 0, 0, cols - 1, rows - 1);
     MemCpy(v->saved, v->cells, cols * rows * sizeof(CVtCell));
     for (y = 0; y < rows && y < orows; y++)
@@ -295,7 +338,7 @@ U0 VtResize(CVTerm *v, I64 cols, I64 rows)
     if (v->cy >= rows) v->cy = rows - 1;
     if (v->saved_cx >= cols) v->saved_cx = cols - 1;
     if (v->saved_cy >= rows) v->saved_cy = rows - 1;
-    Free(old); Free(saved); v->dirty = TRUE;
+    Free(old); Free(saved); Free(old_dirty); v->dirty = TRUE;
     SpinUnlockIrq(&v->lock, daif);
 }
 Bool VtKeyPush(CVTerm *v, I64 key)
@@ -320,7 +363,7 @@ I64 VtKeyPop()
 // its parent terminal too. SGR is reset at every row boundary.
 U0 VtDraw(CVTerm *v, I64 left, I64 top)
 {
-    I64 x, y, fg = -1, bg = -1;
+    I64 x, y, fg = -1, bg = -1, cfg, cbg;
     U8 sgr[96];
     CVtCell *p;
     CVTerm snapshot;
@@ -338,8 +381,9 @@ U0 VtDraw(CVTerm *v, I64 left, I64 top)
         for (x = 0; x < v->cols; x++) {
             p = &v->cells[y * v->cols + x];
             if (p->width) {
-                if (p->fg != fg || p->bg != bg) {
-                    fg = p->fg; bg = p->bg;
+                VtCellColors(p, &cfg, &cbg);
+                if (cfg != fg || cbg != bg) {
+                    fg = cfg; bg = cbg;
                     AnsiSetS(sgr, fg, bg);
                     ConsPutS(sgr);
                 }
@@ -389,9 +433,9 @@ Bool AnsiTermSize(I64 *rows, I64 *cols)
         *cols = VtCurrent->cols;
         return TRUE;
     }
-    if (fb.base) {
-        *rows = fb.rows;
-        *cols = fb.cols;
+    if (vt_screen) {
+        *rows = vt_screen->rows;
+        *cols = vt_screen->cols;
         return TRUE;
     }
     *rows = 24;
