@@ -1,0 +1,84 @@
+// TrueType console fonts (docs/fonts.md): the kernel's FontSet (Glyph.cool) loads this file
+// into a resident task the first time a font file is set. stb_truetype, translated to Cool
+// (coolc/Lib/StbTrueType.cool), reads the font and rasterizes glyphs with grayscale
+// antialiasing; the kernel keeps the results in its glyph cache.
+#include "C:/Cool/Lib/StbTrueType.cool"
+
+class CTtfFace
+{
+    stbtt_fontinfo info;
+    U8 *data;
+};
+
+U8 *TtfOpen(U8 *path)
+{//A face from a .ttf file, or the first font of a .ttc collection; NULL if it is unusable.
+    CTtfFace *f;
+    I64 size, offset;
+    U8 *data = FileRead(path, &size);
+    if (!data)
+        return NULL;
+    offset = stbtt_GetFontOffsetForIndex(data, 0);
+    f = CAlloc(sizeof(CTtfFace));
+    if (offset < 0 || !stbtt_InitFont(&f->info, data, offset)) {
+        Free(f);
+        Free(data);
+        return NULL;
+    }
+    f->data = data;
+    return f;
+}
+
+U0 TtfClose(CTtfFace *f)
+{
+    Free(f->data);
+    Free(f);
+}
+
+U0 TtfMetrics(CTtfFace *f, I64 px, I64 *_cw, I64 *_ch, I64 *_base)
+{//The cell of a monospace font at px pixels per em: the advance of 'M' wide, the line
+    //(ascent, descent, line gap) high; the baseline below the top by the ascent and half
+    //the gap.
+    I32i ascent, descent, gap, advance, bearing;
+    F64 scale = stbtt_ScaleForMappingEmToPixels(&f->info, px);
+    stbtt_GetFontVMetrics(&f->info, &ascent, &descent, &gap);
+    stbtt_GetCodepointHMetrics(&f->info, 'M', &advance, &bearing);
+    *_cw = MaxI64(1, Round(advance * scale));
+    *_ch = MaxI64(1, Ceil((ascent - descent + gap) * scale));
+    *_base = Round(ascent * scale + gap * scale / 2);
+}
+
+Bool TtfGlyph(CTtfFace *f, I64 cp, I64 px, I64 base, U8 *out, I64 w, I64 h)
+{//cp's glyph as coverage in a w x h cell box, on the baseline; FALSE if the font has none.
+    I32i x0, y0, x1, y1;
+    I64 gw, gh, x, y, ox, oy;
+    U8 *tmp;
+    F64 scale;
+    if (!stbtt_FindGlyphIndex(&f->info, cp))
+        return FALSE;
+    scale = stbtt_ScaleForMappingEmToPixels(&f->info, px);
+    stbtt_GetCodepointBitmapBoxSubpixel(&f->info, cp, scale, scale, 0, 0, &x0, &y0, &x1, &y1);
+    gw = x1 - x0;
+    gh = y1 - y0;
+    if (gw <= 0 || gh <= 0)
+        return TRUE;  // a blank glyph (a space)
+    tmp = CAlloc(gw * gh);
+    stbtt_MakeCodepointBitmapSubpixel(&f->info, tmp, gw, gh, gw, scale, scale, 0, 0, cp);
+    for (y = 0; y < gh; y++) {
+        oy = base + y0 + y;
+        if (oy < 0 || oy >= h)
+            goto ttf_row_next;
+        for (x = 0; x < gw; x++) {
+            ox = x0 + x;
+            if (ox >= 0 && ox < w)
+                out[oy * w + ox] = tmp[y * gw + x];
+        }
+ttf_row_next:
+    }
+    Free(tmp);
+    return TRUE;
+}
+
+font_ttf_close = &TtfClose;
+font_ttf_metrics = &TtfMetrics;
+font_ttf_glyph = &TtfGlyph;
+font_ttf_open = &TtfOpen;  // last: FontSet waits for this one

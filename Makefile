@@ -141,7 +141,7 @@ reloc-check: build/kernel.Image
 # build/disk.img is the persistent C: drive for make run (FAT32; mount it on
 # the Mac with `hdiutil attach build/disk.img` while the VM is not running).
 build/disk.img: | build
-	mkfile -n 64m $@
+	mkfile -n 512m $@
 	mformat -i $@ -F -v COOLDISK ::
 
 # make run only adds files that are missing, so edits made inside the OS
@@ -190,6 +190,7 @@ warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
+	tools/disk-fonts.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	tools/native/prepare.sh
 	mdir -i build/disk.img ::Cool/Compiler >/dev/null 2>&1 || mmd -i build/disk.img ::Cool/Compiler </dev/null
@@ -197,6 +198,7 @@ disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 
 disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img -n
+	tools/disk-fonts.sh build/disk.img -n
 	@mdir -i build/disk.img ::Kernel.coolh >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	@mdir -i build/disk.img ::Cool/Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
 	  mmd -i build/disk.img ::Cool/Compiler && mcopy -i build/disk.img build/native-src/* ::Cool/Compiler/; }
@@ -289,10 +291,16 @@ top-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/cmdline-test.py $<
 
+# Console fonts (os/Kernel/Glyph.cool, docs/fonts.md): 2x Unifont is 1x doubled, on the CPU
+# renderer and (when the Venus stack is built) on the Vulkan terminal.
+.PHONY: font-test
+font-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
+	python3 tools/font-test.py $<
+
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: venus-gen-test venus-transport-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: venus-gen-test venus-transport-test font-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool

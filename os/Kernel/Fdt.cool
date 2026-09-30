@@ -15,6 +15,7 @@ I64 fdt_psci; // 1: HVC, 2: SMC
 I64 fdt_uart_irq;  // its AIC interrupt (0: none known)
 I64 fdt_finisher, fdt_size;
 Bool fdt_vm, fdt_test, fdt_venus_metal;
+I64 fdt_scale;  // bootarg coolcom.scale=1 or 2: the console's scale (Glyph.cool), 0 automatic
 I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate.cool)
 
 // VM devices, found by compatible string under /soc and /chosen:
@@ -162,7 +163,7 @@ U0 FdtNodeDone(CFdtNode *n, CFdtNode *parent)
 Bool FdtInit(U8 *dt)
 {
     U8 *p, *str, *data, *r, *name;
-    I64 tok, len, nameoff, depth = -1, i, start, size;
+    I64 tok, len, nameoff, depth = -1, i, k, start, size;
     CFdtNode nodes[16], *n;
     if (Fdt32(dt) != 0xD00DFEED) return FALSE;
     fdt_size = Fdt32(dt + 4);
@@ -211,7 +212,12 @@ Bool FdtInit(U8 *dt)
             else if (FdtEqual(name, "coolcom,scanout-y") && len == 8) n->scanout = Fdt64(data);
             else if (FdtEqual(name, "format")) n->fb32 = FdtEqual(data, "x8r8g8b8") || FdtEqual(data, "a8r8g8b8");
             if (FdtEqual(n->name, "chosen")) {
-                if (FdtEqual(name, "bootargs")) fdt_test = FdtPrefix(data, "coolcom.test=1");
+                if (FdtEqual(name, "bootargs")) {
+                    fdt_test = FdtPrefix(data, "coolcom.test=1");
+                    for (k = 0; k + 15 < len; k++)
+                        if (FdtPrefix(data + k, "coolcom.scale=") && (data[k + 14] == '1' || data[k + 14] == '2'))
+                            fdt_scale = data[k + 14] - '0';
+                }
                 if (FdtEqual(name, "coolcom,unix-time") && len == 8) fdt_unix_time = Fdt64(data);
                 if (FdtEqual(name, "coolcom,utc-offset") && len == 4) fdt_utc_offset = Fdt32(data)(I32);
             }

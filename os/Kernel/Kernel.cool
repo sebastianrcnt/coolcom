@@ -45,6 +45,7 @@
 #include "Blk.cool"
 #include "Gpu.cool"
 #include "GpuVenus.cool"
+#include "Glyph.cool"
 #include "Fb.cool"
 #include "Key.cool"
 #include "Ime.cool"

@@ -29,7 +29,8 @@ class CFb
     U8 *base;                 // the framebuffer (non-cacheable)
     U8 *back;                 // what it shows without the cursor: same size and stride, cached
     I64 w, h, stride, cols, rows;
-    U8 *scanout;             // optional FDT scanout-y register (pixel rows)
+    U8 *scanout;             // optional FDT scanout-y register (pixel rows), while the cells fill the screen
+    U8 *scanout_cap;         // that register, whether or not the current cell size allows it
     I64 scan_top;            // offset last committed to the display
     Bool gpu;                // virtio-gpu resource backing, with a mirrored second screen
     Bool venus;              // resident Vulkan app has installed its render hooks
@@ -50,7 +51,6 @@ class CFb
     U32 palette[256];
     U64i venus_frames, venus_rows, venus_cell_bytes;
     U64i venus_completed, venus_coalesced, venus_skipped, venus_records, venus_uploads; // actual guest cell writes / draws
-    U8 *ascii[128];           // glyphs of ASCII (all one cell wide)
 };
 
 CFb fb;
@@ -130,23 +130,12 @@ I64 FbRgb(I64 color)
     return fb.palette[color & 255];
 }
 
-U8 *FbGlyph(I64 cp, I64 *_cells)
-{
-    if (cp >= 0 && cp < 128 && fb.ascii[cp]) {
-        *_cells = 1;
-        return fb.ascii[cp];
-    }
-    if (cp < 0 || cp >= 0x110000)
-        return NULL;
-    return FontGlyph(cp, _cells);
-}
-
 //---- drawing into the back buffer
 
 I64 FbBackY(I64 y)
 {//Only complete text rows rotate; the bottom pixel margin stays fixed.
-    if (y < fb.rows * FONT_CELL_H)
-        return (fb.top + y) % (fb.rows * FONT_CELL_H);
+    if (y < fb.rows * font.ch)
+        return (fb.top + y) % (fb.rows * font.ch);
     return y;
 }
 
@@ -163,36 +152,67 @@ U0 FbBackFill(I64 x, I64 y, I64 w, I64 h, I64 rgb)
     }
 }
 
-U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg)
-{//Draw cp over cells cells at col,row. A code point the font lacks, or whose glyph
-    //is not cells wide, is a '?' in each cell.
-    U8 *g, *line = fb.back + FbBackY(row * FONT_CELL_H) * fb.stride + col * FONT_CELL_W * 4;
+I64 FbBlend(I64 fg, I64 bg, I64 a)
+{//bg to fg by coverage a (0..255), per channel.
+    I64 r = ((fg >> 16 & 255) * a + (bg >> 16 & 255) * (255 - a) + 127) / 255,
+            g = ((fg >> 8 & 255) * a + (bg >> 8 & 255) * (255 - a) + 127) / 255,
+            b = ((fg & 255) * a + (bg & 255) * (255 - a) + 127) / 255;
+    return r << 16 | g << 8 | b;
+}
+
+U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = FALSE)
+{//Draw cp over cells cells at col,row (Glyph.cool). A code point the font lacks, or
+    //whose glyph is not cells wide, is a '?' in each cell.
+    CGlyph g;
+    U8 *src, *line;
     U32 *p;
-    I64 y, x, bits, n = cells * FONT_CELL_W, gc;
+    I64 y, x, i, bits, n = cells * font.cw, s, sw, a, y0 = row * font.ch, x0 = col * font.cw;
     if (cp == ' ') {
-        FbBackFill(col * FONT_CELL_W, row * FONT_CELL_H, n, FONT_CELL_H, bg);
+        FbBackFill(x0, y0, n, font.ch, bg);
         return;
     }
-    g = FbGlyph(cp, &gc);
-    if (!g || gc != cells) {
+    if (!GlyphGet(cp, cells, bold, &g)) {
         for (x = 0; x < cells; x++)
-            FbBackGlyph(col + x, row, '?', 1, fg, bg);
+            FbBackGlyph(col + x, row, '?', 1, fg, bg, bold);
         return;
     }
-    for (y = 0; y < FONT_CELL_H; y++) {
-        if (cells == 2) {
-            bits = (g[0] << 8) | g[1];
-            g += 2;
-        } else
-            bits = *g++;
-        p = line;
-        for (x = n - 1; x >= 0; x--) {
-            if ((bits >> x) & 1)
-                *p++ = fg;
-            else
-                *p++ = bg;
+    if (g.bpp == 8) {
+        src = g.data;
+        for (y = 0; y < font.ch; y++) {
+            p = fb.back + FbBackY(y0 + y) * fb.stride + x0 * 4;
+            for (x = 0; x < n; x++) {
+                a = *src++;
+                if (!a) p[x] = bg;
+                else if (a == 255) p[x] = fg;
+                else p[x] = FbBlend(fg, bg, a);
+            }
         }
-        line += fb.stride;
+        return;
+    }
+    // A Unifont stamp: every bit a scale x scale block.
+    s = g.scale;
+    sw = cells * 8;
+    if (g.x || g.y || sw * s != n || 16 * s != font.ch)
+        FbBackFill(x0, y0, n, font.ch, bg);
+    src = g.data;
+    for (y = 0; y < 16; y++) {
+        if (cells == 2) {
+            bits = (src[0] << 8) | src[1];
+            src += 2;
+        } else
+            bits = *src++;
+        for (i = 0; i < s; i++) {
+            line = fb.back + FbBackY(y0 + g.y + y * s + i) * fb.stride + (x0 + g.x) * 4;
+            p = line;
+            for (x = sw - 1; x >= 0; x--) {
+                if ((bits >> x) & 1)
+                    a = fg;
+                else
+                    a = bg;
+                for (a = a, bits = bits, n = 0; n < s; n++)
+                    *p++ = a;
+            }
+        }
     }
 }
 
@@ -205,7 +225,7 @@ U0 FbBackCell(I64 col, I64 row, CVtCell *c, I64 cells)
     if (!c->width)  // the right half of a wide glyph that is gone
         FbBackGlyph(col, row, ' ', 1, fg, bg);
     else
-        FbBackGlyph(col, row, c->cp, cells, fg, bg);
+        FbBackGlyph(col, row, c->cp, cells, fg, bg, c->attr & VT_ATTR_BOLD);
 }
 
 Bool FbCellSame(CVtCell *a, CVtCell *b)
@@ -218,7 +238,7 @@ Bool FbCellSame(CVtCell *a, CVtCell *b)
 
 U0 FbCopyRect(I64 x, I64 y, I64 w, I64 h)
 {//Back buffer to framebuffer, in pixels.
-    I64 src, dst, n, i, ring_h = fb.rows * FONT_CELL_H;
+    I64 src, dst, n, i, ring_h = fb.rows * font.ch;
     if (w <= 0 || h <= 0)
         return;
     while (h > 0) {
@@ -252,18 +272,18 @@ fb_copy_next:
 
 U0 FbCursorDraw(I64 cx, I64 cy, I64 w)
 {//The block cursor: the cell under it with every color inverted.
-    I64 off = cy * FONT_CELL_H * fb.stride + cx * FONT_CELL_W * 4, y, x;
+    I64 off = cy * font.ch * fb.stride + cx * font.cw * 4, y, x;
     U32 *s, *d;
     if (fb.gpu) {
-        GpuCursor(cx * FONT_CELL_W, cy * FONT_CELL_H, w,
-                  fb.back + FbBackY(cy * FONT_CELL_H) * fb.stride + cx * FONT_CELL_W * 4, fb.stride);
+        GpuCursor(cx * font.cw, cy * font.ch, w, font.ch,
+                  fb.back + FbBackY(cy * font.ch) * fb.stride + cx * font.cw * 4, fb.stride);
         return;
     }
-    for (y = 0; y < FONT_CELL_H; y++) {
-        s = fb.back + FbBackY(cy * FONT_CELL_H + y) * fb.stride + cx * FONT_CELL_W * 4;
+    for (y = 0; y < font.ch; y++) {
+        s = fb.back + FbBackY(cy * font.ch + y) * fb.stride + cx * font.cw * 4;
         d = fb.base + off;
         if (fb.scanout)
-            d = fb.base + FbBackY(cy * FONT_CELL_H + y) * fb.stride + cx * FONT_CELL_W * 4;
+            d = fb.base + FbBackY(cy * font.ch + y) * fb.stride + cx * font.cw * 4;
         for (x = 0; x < w; x++)
             d[x] = s[x] ^ 0xFFFFFF;
         off += fb.stride;
@@ -294,7 +314,7 @@ U0 FbRenderLocked()
     CVtCell *p, *d;
     I64 x, y, n, cols = fb.cols, rows = fb.rows, scrolled, cx = 0, cy = 0, cw = 0;
     I64 dy0 = fb.h, dy1 = 0;
-    Bool all, hardware = fb.scanout || (fb.gpu && fb.h == rows * FONT_CELL_H && fb.w == cols * FONT_CELL_W);
+    Bool all, hardware = fb.scanout || (fb.gpu && fb.h == rows * font.ch && fb.w == cols * font.cw);
     SpinLock(&v->lock);
     if (v->cols != cols || v->rows != rows) {  // buffer and grid resizing is serialized by this lock
         fb.pending = FALSE;
@@ -314,7 +334,7 @@ U0 FbRenderLocked()
     if (!v->cursor_off && !fb.cursor_hidden && v->cx >= 0 && v->cx < cols && v->cy >= 0 && v->cy < rows) {
         cx = v->cx;
         cy = v->cy;
-        cw = FONT_CELL_W;
+        cw = font.cw;
         if (v->cells[cy * cols + cx].width == 2 && cx + 1 < cols)
             cw *= 2;
     }
@@ -323,15 +343,15 @@ U0 FbRenderLocked()
     if (fb.venus && venus_frame_hook) {
         U0 (*frame)(Bool fresh, I64 scroll_rows, I64 col, I64 row, I64 span);
         frame = venus_frame_hook;
-        (*frame)(all, scrolled, cx, cy, cw / FONT_CELL_W);
+        (*frame)(all, scrolled, cx, cy, cw / font.cw);
         return;
     }
 
     // Remove the cursor at its old physical location before rotating scanout.
     if (fb.scanout && fb.cur_w) {
-        FbCopyRect(fb.cur_x * FONT_CELL_W, fb.cur_y * FONT_CELL_H, fb.cur_w, FONT_CELL_H);
-        dy0 = fb.cur_y * FONT_CELL_H;
-        dy1 = dy0 + FONT_CELL_H;
+        FbCopyRect(fb.cur_x * font.cw, fb.cur_y * font.ch, fb.cur_w, font.ch);
+        dy0 = fb.cur_y * font.ch;
+        dy1 = dy0 + font.ch;
         fb.cur_w = 0;
     }
     // Rotate the pixel ring; only the small cell cache moves.
@@ -342,7 +362,7 @@ U0 FbRenderLocked()
             MemSet(fb.back, 0, fb.stride * fb.h * (1 + fb.gpu));
         }
     } else if (scrolled) {
-        fb.top = (fb.top + scrolled * FONT_CELL_H) % (rows * FONT_CELL_H);
+        fb.top = (fb.top + scrolled * font.ch) % (rows * font.ch);
         MemCpy(fb.drawn, fb.drawn + scrolled * cols, (rows - scrolled) * cols * sizeof(CVtCell));
         MemSet(fb.drawn + (rows - scrolled) * cols, 0xFF, scrolled * cols * sizeof(CVtCell));
     }
@@ -373,19 +393,19 @@ U0 FbRenderLocked()
 
     // The old cursor goes with its row's copy.
     if (fb.cur_w && !fb.gpu)
-        FbSpan(fb.cur_y, fb.cur_x, fb.cur_x + fb.cur_w / FONT_CELL_W);
-    if (all || (scrolled && !hardware && fb.cols * FONT_CELL_W == fb.w)) {
+        FbSpan(fb.cur_y, fb.cur_x, fb.cur_x + fb.cur_w / font.cw);
+    if (all || (scrolled && !hardware && fb.cols * font.cw == fb.w)) {
         FbCopyRect(0, 0, fb.w, fb.h);
         dy0 = 0;
         dy1 = fb.h;
     }
     for (y = 0; y < rows; y++) {
         if (fb.x0[y] < fb.x1[y]) {
-            if (!all && !(scrolled && !hardware && fb.cols * FONT_CELL_W == fb.w))
-                FbCopyRect(fb.x0[y] * FONT_CELL_W, y * FONT_CELL_H,
-                           (fb.x1[y] - fb.x0[y]) * FONT_CELL_W, FONT_CELL_H);
-            if (y * FONT_CELL_H < dy0) dy0 = y * FONT_CELL_H;
-            if ((y + 1) * FONT_CELL_H > dy1) dy1 = (y + 1) * FONT_CELL_H;
+            if (!all && !(scrolled && !hardware && fb.cols * font.cw == fb.w))
+                FbCopyRect(fb.x0[y] * font.cw, y * font.ch,
+                           (fb.x1[y] - fb.x0[y]) * font.cw, font.ch);
+            if (y * font.ch < dy0) dy0 = y * font.ch;
+            if ((y + 1) * font.ch > dy1) dy1 = (y + 1) * font.ch;
         }
         fb.x0[y] = cols;
         fb.x1[y] = 0;
@@ -396,8 +416,8 @@ U0 FbRenderLocked()
         fb.cur_x = cx;
         fb.cur_y = cy;
         FbCursorDraw(cx, cy, cw);
-        if (cy * FONT_CELL_H < dy0) dy0 = cy * FONT_CELL_H;
-        if ((cy + 1) * FONT_CELL_H > dy1) dy1 = (cy + 1) * FONT_CELL_H;
+        if (cy * font.ch < dy0) dy0 = cy * font.ch;
+        if ((cy + 1) * font.ch > dy1) dy1 = (cy + 1) * font.ch;
     }
     if (fb.scanout && fb.scan_top != fb.top) {
         ArchDsb;  // the newly exposed pixels must be visible before scanout moves
@@ -556,8 +576,8 @@ U0 FbFillRect(I64 x, I64 y, I64 w, I64 h, I64 color)
     }
     FbBackFill(x, y, w, h, color);
     FbCopyRect(x, y, w, h);
-    if (fb.cur_w && y < (fb.cur_y + 1) * FONT_CELL_H && y + h > fb.cur_y * FONT_CELL_H &&
-            x < fb.cur_x * FONT_CELL_W + fb.cur_w && x + w > fb.cur_x * FONT_CELL_W) {
+    if (fb.cur_w && y < (fb.cur_y + 1) * font.ch && y + h > fb.cur_y * font.ch &&
+            x < fb.cur_x * font.cw + fb.cur_w && x + w > fb.cur_x * font.cw) {
         fb.cur_w = 0;  // painted over
         if (fb.gpu) GpuCursorHide;
     }
@@ -657,10 +677,17 @@ U0 FbAlt(Bool on)
     SpinUnlockIrq(&v->lock, daif);
 }
 
+I64 FbScaleReported()
+{//The display's own scale: coolvm's virtio-gpu reports the window's backing scale (1 or
+    //2) in a config register after the standard ones; 0 elsewhere.
+    if (fb.gpu && fdt_vm)
+        return VioRd(&gpu.q[0], VIO_CONFIG + 0x10);
+    return 0;
+}
+
 Bool FbInit()
 {//Map the framebuffer and add it as a console output. FALSE if the FDT has none.
-    I64 i, cells, n;
-    U8 *g;
+    I64 i, n;
     fb.gpu = GpuInit(&fb.w, &fb.h);
     if (fb.gpu)
         fb.stride = fb.w * 4;
@@ -668,8 +695,9 @@ Bool FbInit()
         if (!fdt_fb_32bpp || !fdt_fb.base) return FALSE;
         fb.w = fdt_fb_w; fb.h = fdt_fb_h; fb.stride = fdt_fb_stride;
     }
-    fb.cols = fb.w / FONT_CELL_W;
-    fb.rows = fb.h / FONT_CELL_H;
+    FontInit(fb.w, FbScaleReported);
+    fb.cols = fb.w / font.cw;
+    fb.rows = fb.h / font.ch;
     if (fb.cols < 1 || fb.rows < 2 || fb.stride < fb.w * 4)
         return FALSE;
     n = fb.cols * fb.rows;
@@ -687,15 +715,14 @@ Bool FbInit()
         fb.x0[i] = fb.cols;
     for (i = 0; i < 256; i++)
         fb.palette[i] = FbColor256(i);
-    for (i = 0; i < 128; i++)
-        if ((g = FontGlyph(i, &cells)) && cells == 1)
-            fb.ascii[i] = g;
     if (fdt_vm && fdt_finisher)
         fb.damage = fdt_finisher + FINISHER_FB_DAMAGE;
     // Whole-frame scanout rotates margins too: keep the software path when
     // dimensions leave partial cells, preserving those fixed pixel margins.
-    if (!fb.gpu && fdt_vm && fdt_fb_scanout && fb.h == fb.rows * FONT_CELL_H && fb.w == fb.cols * FONT_CELL_W)
-        fb.scanout = fdt_fb_scanout;
+    if (!fb.gpu && fdt_vm && fdt_fb_scanout)
+        fb.scanout_cap = fdt_fb_scanout;
+    if (fb.h == fb.rows * font.ch && fb.w == fb.cols * font.cw)
+        fb.scanout = fb.scanout_cap;
     fb.vt = vt_screen = VtAlloc(fb.cols, fb.rows);
     if (fb.gpu) fb.base = fb.back;
     else {
@@ -712,7 +739,7 @@ Bool FbResizeCells(I64 w, I64 h)
 {//Vulkan resize: new cell snapshots; the app replaces its size-dependent resources.
     CVtCell *drawn, *snap;
     U8 *snap_row;
-    I64 *x0, *x1, daif, cols = w / FONT_CELL_W, rows = h / FONT_CELL_H, i;
+    I64 *x0, *x1, daif, cols = w / font.cw, rows = h / font.ch, i;
     drawn = MAlloc(cols * rows * sizeof(CVtCell)); snap = MAlloc(cols * rows * sizeof(CVtCell));
     snap_row = CAlloc(rows); x0 = MAlloc(rows * sizeof(I64)); x1 = CAlloc(rows * sizeof(I64));
     if (!drawn || !snap || !snap_row || !x0 || !x1) {
@@ -731,6 +758,65 @@ Bool FbResizeCells(I64 w, I64 h)
     return TRUE;
 }
 
+Bool FbRegrid(I64 scale, CFontCfg *cfg = NULL)
+{//A new cell size (Glyph.cool: another scale, or font cfg) over the same pixels: a new
+    //grid, redrawn; programs see it as a resize (KEY_RESIZE). scale 0: keep it.
+    CVtCell *drawn, *snap;
+    U8 *snap_row;
+    I64 *x0, *x1, daif, cols, rows, i, cw, ch;
+    if (!fb.base)
+        return FALSE;
+    if (!scale)
+        scale = font.scale;
+    if (!cfg)
+        cfg = &font.cfg;
+    FontCellSize(cfg, scale, &cw, &ch);
+    cols = fb.w / cw;
+    rows = fb.h / ch;
+    if (cols < 1 || rows < 2)
+        return FALSE;
+    drawn = MAlloc(cols * rows * sizeof(CVtCell)); snap = MAlloc(cols * rows * sizeof(CVtCell));
+    snap_row = CAlloc(rows); x0 = MAlloc(rows * sizeof(I64)); x1 = CAlloc(rows * sizeof(I64));
+    if (!drawn || !snap || !snap_row || !x0 || !x1) {
+        Free(drawn); Free(snap); Free(snap_row); Free(x0); Free(x1);
+        return FALSE;
+    }
+    daif = FbRenderLock;
+    font.scale = scale;
+    MemCpy(&font.cfg, cfg, sizeof(CFontCfg));
+    FontCells;
+    Free(fb.drawn); Free(fb.snap); Free(fb.snap_row); Free(fb.x0); Free(fb.x1);
+    fb.cols = cols; fb.rows = rows;
+    fb.drawn = drawn; fb.snap = snap; fb.snap_row = snap_row; fb.x0 = x0; fb.x1 = x1;
+    for (i = 0; i < rows; i++) fb.x0[i] = cols;
+    fb.scanout = NULL;
+    if (fb.h == rows * font.ch && fb.w == cols * font.cw)
+        fb.scanout = fb.scanout_cap;
+    if (fb.scanout_cap && fb.scan_top) {  // back to an unrotated screen
+        ArchMmioWrite32(fb.scanout_cap, 0);
+        fb.scan_top = 0;
+    }
+    fb.top = 0; fb.cur_w = 0;
+    if (fb.gpu && !fb.venus) GpuCursorHide;
+    VtResize(fb.vt, cols, rows);
+    fb.redraw_all = TRUE; fb.pending = TRUE;
+    FbRenderLocked;
+    FbRenderUnlock(daif);
+    return TRUE;
+}
+
+I64 FontScale(I64 scale = 0)
+{//Set the console's scale: 1, 2, or 0 for automatic (the display's own, else 2 from 2560
+    //pixels wide). Returns the scale in use.
+    if (scale < 0 || scale > FONT_MAX_SCALE)
+        return font.scale;
+    font.scale_set = scale;
+    scale = FontScaleAuto(fb.w, FbScaleReported);
+    if (scale != font.scale)
+        FbRegrid(scale);
+    return font.scale;
+}
+
 Bool FbResize(I64 w, I64 h)
 {//Prepare a replacement, then switch the grid and renderer under its lock.
     CFb next;
@@ -741,7 +827,7 @@ Bool FbResize(I64 w, I64 h)
         return FbResizeCells(w, h);
     MemSet(&next, 0, sizeof(CFb));
     next.w = w; next.h = h; next.stride = w * 4;
-    next.cols = w / FONT_CELL_W; next.rows = h / FONT_CELL_H;
+    next.cols = w / font.cw; next.rows = h / font.ch;
     n = next.cols * next.rows;
     next.back = CAlloc(next.stride * h * 2);
     next.drawn = MAlloc(n * sizeof(CVtCell)); next.snap = MAlloc(n * sizeof(CVtCell));
@@ -780,7 +866,11 @@ U0 FbDisplayTask(U8 *data)
         if (VioRd(d, VIO_CONFIG) & 1) {
             // Clear first: changes during GET_DISPLAY_INFO remain pending.
             VioWr(d, VIO_CONFIG + 4, 1); VioWr(d, VIO_ISR_ACK, 2);
-            if (GpuDisplayInfo(&w, &h)) FbResize(w, h);
+            if (GpuDisplayInfo(&w, &h)) {
+                FbResize(w, h);
+                if (FontScaleAuto(fb.w, FbScaleReported) != font.scale)  // the window moved to another screen
+                    FbRegrid(FontScaleAuto(fb.w, FbScaleReported));
+            }
         }
     }
 }

@@ -23,11 +23,12 @@ class CVenusTerm
     CVenusFrame slot[2];
     Bool pending, direct;
     U64i published, skipped, coalesced;
-    U32 *glyphs;
+    U32 *glyphs, *bold_glyphs;  // per code point: atlas slot | wide << 16, or all ones: none
     I64 slots, atlas_y0, atlas_y1, overlay_y0, overlay_y1;
-    I64 w, h, cols, rows, first, cx, cy, cw;
+    I64 w, h, cols, rows, first, cx, cy, cur_cells;
     U64i sampler, set_layout, descriptor_pool, set, layout, pipeline, shaders[2];
     Bool overlay_used, images_ready, installing;
+    I64 cw, ch, per_row, max_slots, serial;  // the font's cell size, atlas slots of 2 cells (Glyph.cool)
     I64 install_daif, next_service;
     U64i frames, changed_rows, cell_bytes;
 };
@@ -37,49 +38,69 @@ U0 VenusDirty(I64 *y0, I64 *y1, I64 y, I64 h)
     if (*y0 >= *y1) {*y0 = y; *y1 = y + h;}
     else {if (y < *y0) *y0 = y; if (y + h > *y1) *y1 = y + h;}
 }
-I64 VenusPixelRow(I64 y) {if (y < vterm.rows * 16) return (y + vterm.first * 16) % (vterm.rows * 16); return y;}
+I64 VenusPixelRow(I64 y) {if (y < vterm.rows * vterm.ch) return (y + vterm.first * vterm.ch) % (vterm.rows * vterm.ch); return y;}
 U0 VenusOverlayClear(I64 row)
 {
     I64 i;
-    I64 y = VenusPixelRow(row * 16);
-    MemSet(vterm.overlay_upload.mapping + y * vterm.w * 4, 0, vterm.cols * 8 * 4); // remaining 15 scanlines below
-    for (i = 1; i < 16; i++) MemSet(vterm.overlay_upload.mapping + (y + i) * vterm.w * 4, 0, vterm.cols * 8 * 4);
-    VenusDirty(&vterm.overlay_y0, &vterm.overlay_y1, y, 16);
+    I64 y = VenusPixelRow(row * vterm.ch);
+    for (i = 0; i < vterm.ch; i++) MemSet(vterm.overlay_upload.mapping + (y + i) * vterm.w * 4, 0, vterm.cols * vterm.cw * 4);
+    VenusDirty(&vterm.overlay_y0, &vterm.overlay_y1, y, vterm.ch);
 }
-I64 VenusGlyph(I64 cp, I64 cells)
-{
-    U32 entry; U8 *g, *dst; I64 gc, x, y, bits, w, slot, sx, sy;
+U0 VenusFont()
+{//The font or its scale changed (Glyph.cool): new atlas slots, every glyph again.
+    vterm.cw = font.cw; vterm.ch = font.ch; vterm.serial = font.serial;
+    vterm.per_row = 4096 / (2 * vterm.cw);
+    vterm.max_slots = vterm.per_row * (2048 / vterm.ch);
+    if (vterm.max_slots > 65535) vterm.max_slots = 65535;
+    MemSet(vterm.glyphs, 0, 0x110000 * 4); MemSet(vterm.bold_glyphs, 0, 0x110000 * 4); vterm.slots = 1;
+    MemSet(vterm.atlas_upload.mapping, 0, 4096 * 2048);
+    vterm.atlas_y0 = 0; vterm.atlas_y1 = 2048;
+}
+I64 VenusGlyph(I64 cp, I64 cells, Bool bold = FALSE)
+{//The atlas slot of cp's glyph (Glyph.cool's GlyphGet; bold: the font's bold one),
+    //uploaded the first time; 0 if none.
+    U32 entry, *table = vterm.glyphs; U8 *src, *dst; CGlyph g; I64 x, y, k, bits, w, sw, slot, sx, sy;
     if (cp < 0 || cp >= 0x110000) return 0;
-    entry = vterm.glyphs[cp];
+    if (bold) table = vterm.bold_glyphs;
+    entry = table[cp];
     if (entry) {if (entry == 0xFFFFFFFF || ((entry >> 16) & 1) != (cells == 2)) return 0; return entry & 0xFFFF;}
-    g = FbGlyph(cp, &gc);
-    if (!g) {vterm.glyphs[cp] = 0xFFFFFFFF; return 0;}
-    if (gc != cells || vterm.slots >= 32768) return 0;
-    slot = vterm.slots++; sx = slot % 256 * 16; sy = slot / 256 * 16; w = cells * 8;
-    for (y = 0; y < 16; y++) {
-        if (cells == 2) {bits = (g[0] << 8) | g[1]; g += 2;} else bits = *g++;
-        dst = vterm.atlas_upload.mapping + (sy + y) * 4096 + sx;
-        for (x = 0; x < w; x++) dst[x] = ((bits >> (w - 1 - x)) & 1) * 255;
+    if (!GlyphGet(cp, cells, bold, &g)) {if (!GlyphGet(cp, 3 - cells, bold, &g)) table[cp] = 0xFFFFFFFF; return 0;}
+    if (vterm.slots >= vterm.max_slots) return 0;
+    slot = vterm.slots++; sx = slot % vterm.per_row * 2 * vterm.cw; sy = slot / vterm.per_row * vterm.ch; w = cells * vterm.cw;
+    for (y = 0; y < vterm.ch; y++) MemSet(vterm.atlas_upload.mapping + (sy + y) * 4096 + sx, 0, 2 * vterm.cw);
+    if (g.bpp == 8) {
+        for (y = 0; y < vterm.ch; y++) MemCpy(vterm.atlas_upload.mapping + (sy + y) * 4096 + sx, g.data + y * w, w);
+    } else {  // a Unifont stamp, each bit a scale x scale block
+        src = g.data; sw = cells * 8;
+        for (y = 0; y < 16; y++) {
+            if (cells == 2) {bits = (src[0] << 8) | src[1]; src += 2;} else bits = *src++;
+            for (k = 0; k < g.scale; k++) {
+                dst = vterm.atlas_upload.mapping + (sy + g.y + y * g.scale + k) * 4096 + sx + g.x;
+                for (x = 0; x < sw * g.scale; x++) dst[x] = ((bits >> (sw - 1 - x / g.scale)) & 1) * 255;
+            }
+        }
     }
-    vterm.glyphs[cp] = slot | ((cells == 2) << 16);
-    VenusDirty(&vterm.atlas_y0, &vterm.atlas_y1, sy, 16);
+    table[cp] = slot | ((cells == 2) << 16);
+    VenusDirty(&vterm.atlas_y0, &vterm.atlas_y1, sy, vterm.ch);
     return slot;
 }
 U0 VenusCell(CVenusCell *d, CVtCell *c, I64 glyph, I64 flags)
 {
     d->glyph = glyph; d->fg = FbRgb(c->fg); d->bg = FbRgb(c->bg); d->flags = flags;
     if (c->attr & VT_ATTR_REVERSE) d->flags |= VENUS_REVERSE;
-    if (c->attr & VT_ATTR_BOLD) d->flags |= VENUS_BOLD;
+    if ((c->attr & VT_ATTR_BOLD) && !FontHasBold) d->flags |= VENUS_BOLD;  // else the bold glyph
 }
 U0 VenusRow(CVtCell *p, CVenusCell *d, I64 cols)
 {
     I64 x, g, q = VenusGlyph('?', 1);
+    Bool bold;
     for (x = 0; x < cols; x++) {
+        bold = (p[x].attr & VT_ATTR_BOLD) && FontHasBold;
         if (p[x].width == 2 && x + 1 < cols) {
-            if ((g = VenusGlyph(p[x].cp, 2))) {VenusCell(&d[x], &p[x], g, 0); VenusCell(&d[x + 1], &p[x], g, VENUS_RIGHT);}
+            if ((g = VenusGlyph(p[x].cp, 2, bold))) {VenusCell(&d[x], &p[x], g, 0); VenusCell(&d[x + 1], &p[x], g, VENUS_RIGHT);}
             else {VenusCell(&d[x], &p[x], q, 0); VenusCell(&d[x + 1], &p[x], q, 0);} x++;
         } else if (!p[x].width || p[x].cp == ' ') VenusCell(&d[x], &p[x], 0, 0);
-        else {if (!(g = VenusGlyph(p[x].cp, 1))) g = q; VenusCell(&d[x], &p[x], g, 0);}
+        else {if (!(g = VenusGlyph(p[x].cp, 1, bold))) g = q; VenusCell(&d[x], &p[x], g, 0);}
     }
 }
 Bool VenusRowSame(I64 *a, I64 *b, I64 cols)
@@ -93,7 +114,7 @@ U0 VenusDescriptors(CVenusFrame *f)
     I64 i;
     VkDescriptorBufferInfo buffer[2]; VkDescriptorImageInfo images[2]; VkWriteDescriptorSet writes[4];
     MemSet(buffer, 0, sizeof(buffer)); buffer[0].buffer = f->cells.buffer; buffer[0].range = vterm.cols * vterm.rows * 16;
-    buffer[1].buffer = f->params.buffer; buffer[1].range = 36;
+    buffer[1].buffer = f->params.buffer; buffer[1].range = 52;
     MemSet(images, 0, sizeof(images)); MemSet(writes, 0, sizeof(writes));
     for (i = 0; i < 4; i++) {writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[i].dstSet = f->set; writes[i].dstBinding = i; writes[i].descriptorCount = 1;}
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[0].pBufferInfo = &buffer[0];
@@ -162,10 +183,10 @@ U0 VenusCache(CVenusFrame *f)
     }
     GfxEndRecord; fb.venus_records++;
 }
-U0 VenusGrid(I64 w, I64 h)
-{
+Bool VenusGrid(I64 w, I64 h)
+{//TRUE if the grid was made again (a new size or font): every row is drawn again.
     I64 i; CVenusFrame *f;
-    if (vterm.w == w && vterm.h == h) return;
+    if (vterm.w == w && vterm.h == h && vterm.serial == font.serial) return FALSE;
     if (vterm.w) {
         VenusDrain;
         GfxBegin; vn_encode_vkDestroyPipeline(&gfx.enc, 0, gfx.device, vterm.pipeline, NULL);
@@ -179,7 +200,8 @@ U0 VenusGrid(I64 w, I64 h)
             GfxBufferDestroy(&f->overlay_upload); GfxImageDestroy(&f->target); Free(f->dirty_rows);
         }
     }
-    vterm.w = w; vterm.h = h; vterm.cols = w / 8; vterm.rows = h / 16; vterm.first = 0; vterm.cw = 0;
+    if (vterm.serial != font.serial) VenusFont;
+    vterm.w = w; vterm.h = h; vterm.cols = w / vterm.cw; vterm.rows = h / vterm.ch; vterm.first = 0; vterm.cur_cells = 0;
     GfxBufferCreate(&vterm.cells, ((vterm.cols * vterm.rows * 16 + 16383) & ~16383), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     GfxBufferCreate(&vterm.overlay_upload, ((w * h * 4 + 16383) & ~16383), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     MemSet(vterm.overlay_upload.mapping, 0, w * h * 4);
@@ -208,6 +230,7 @@ U0 VenusGrid(I64 w, I64 h)
         GfxExecute; VenusCache(f);
     }
     vterm.next_service = 0; vterm.images_ready = TRUE; vterm.overlay_used = FALSE; vterm.overlay_y0 = 0; vterm.overlay_y1 = h;
+    return TRUE;
 }
 U0 VenusDraw()
 {
@@ -222,7 +245,8 @@ U0 VenusDraw()
         }
     params = f->params.mapping;
     params[0] = vterm.w; params[1] = vterm.h; params[2] = vterm.cols; params[3] = vterm.rows; params[4] = vterm.first;
-    params[5] = vterm.cx; params[6] = vterm.cy; params[7] = vterm.cw; params[8] = vterm.overlay_used;
+    params[5] = vterm.cx; params[6] = vterm.cy; params[7] = vterm.cur_cells; params[8] = vterm.overlay_used;
+    params[9] = vterm.cw; params[10] = vterm.ch; params[11] = vterm.per_row; params[12] = 2 * vterm.cw;
     if (ah > 0 || oh > 0) {
         VkMemoryBarrier barrier; MemSet(&barrier, 0, sizeof(barrier)); barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
         barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -263,7 +287,7 @@ U0 VenusService()
 U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
 {
     I64 y, physical; Bool changed = all || scrolled; CVtCell *s, *d;
-    VenusGrid(fb.w, fb.h);
+    if (VenusGrid(fb.w, fb.h)) all = TRUE;
     if (all) {
         vterm.first = 0; MemSet(vterm.overlay_upload.mapping, 0, vterm.w * vterm.h * 4);
         vterm.overlay_y0 = 0; vterm.overlay_y1 = vterm.h; vterm.overlay_used = FALSE;
@@ -291,8 +315,8 @@ U0 VenusFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
                 fb.venus_rows++; fb.venus_cell_bytes += fb.cols * 16; changed = TRUE;
             }
         }
-    if (cx != vterm.cx || cy != vterm.cy || cells != vterm.cw) changed = TRUE;
-    vterm.cx = cx; vterm.cy = cy; vterm.cw = cells;
+    if (cx != vterm.cx || cy != vterm.cy || cells != vterm.cur_cells) changed = TRUE;
+    vterm.cx = cx; vterm.cy = cy; vterm.cur_cells = cells;
     if (changed) vterm.pending = TRUE;
     if (!changed && !vterm.pending) {vterm.skipped++; fb.venus_skipped++;}
     VenusService;
@@ -343,7 +367,7 @@ U0 VenusSetInit() {
 U0 VenusSetup() {
     I64 daif;
     gfx.no_sleep = TRUE; gfx.soft_fail = TRUE; vterm.direct = fdt_venus_metal;
-    GfxInit; vterm.glyphs = CAlloc(0x110000 * 4); vterm.slots = 1;
+    GfxInit; vterm.glyphs = CAlloc(0x110000 * 4); vterm.bold_glyphs = CAlloc(0x110000 * 4); vterm.slots = 1;
     GfxBufferCreate(&vterm.atlas_upload, 4096 * 2048, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     MemSet(vterm.atlas_upload.mapping, 0, 4096 * 2048);
     GfxImageCreate(&vterm.atlas, 4096, 2048, VK_FORMAT_R8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);

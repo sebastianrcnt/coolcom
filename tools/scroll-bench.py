@@ -76,7 +76,7 @@ for width, height in sizes:
         phase_cpu = {}
         with (d/'vm.log').open('wb') as out:
             proc = subprocess.Popen([a.vm,'--headless','--cpus','2','--mem','1024','--timeout',str(a.timeout),
-                            '--width',str(width),'--height',str(height),'--input-script',str(d/'input.txt'),
+                            '--width',str(width),'--height',str(height),'--bootargs','coolcom.scale=1','--input-script',str(d/'input.txt'),
                             '--screenshot',str(d/'screen.png'),*(['--disk',a.disk] if a.disk else []),*a.extra,a.image],
                             stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             for raw in proc.stdout:

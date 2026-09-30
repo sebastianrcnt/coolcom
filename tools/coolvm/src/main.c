@@ -44,6 +44,7 @@ static void usage(void)
             "  --el2           EXPERIMENTAL: enter the guest at EL2h with HCR_EL2 like m1n1 (needs macOS 15+ on M3 or later)\n"
             "  --headless      run without a Cocoa window\n"
             "  --width N       framebuffer width (default 1024)\n"
+            "  --scale N       tell the guest its display scale is 1 or 2 (default: the window's backing scale; 1 headless)\n"
             "  --height N      framebuffer height (default 768)\n"
             "  --gpu/--no-gpu enable/disable virtio-gpu 2D\n"
             "  --gpu-3d-stub   test-only Venus transport responses (no Vulkan rendering)\n"
@@ -150,7 +151,7 @@ int main(int argc, char **argv)
         {"gpu", no_argument, 0, 1001}, {"no-gpu", no_argument, 0, 1002},
         {"gpu-3d-stub", no_argument, 0, 1004}, {"no-venus", no_argument, 0, 1005}, {"venus-readback", no_argument, 0, 1006},
         {"no-fb-scroll", no_argument, 0, 1000}, {"no-logos", no_argument, 0, 1003},
-        {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'},
+        {"width", required_argument, 0, 'W'}, {"height", required_argument, 0, 'Y'}, {"scale", required_argument, 0, 1100},
         {"input-script", required_argument, 0, 'I'}, {"disk", required_argument, 0, 'D'},
         {"net", no_argument, 0, 'N'}, {"net-forward", required_argument, 0, 'F'},
         {"temp-kernel", no_argument, 0, 'K'}, /* internal: the kernel file is ours to delete */
@@ -182,6 +183,7 @@ int main(int argc, char **argv)
         case 1005: g.no_venus = true; break;
         case 1006: g.venus_readback = true; break;
         case 'W': g.fb_width = (uint32_t)strtoul(optarg, NULL, 0); break;
+        case 1100: g.fb_scale = (uint32_t)strtoul(optarg, NULL, 0); if (g.fb_scale != 1 && g.fb_scale != 2) { usage(); return 2; } break;
         case 'Y': g.fb_height = (uint32_t)strtoul(optarg, NULL, 0); break;
         case 'I': input_script = optarg; break;
         case 'D': if (ndisks == MAX_DISKS) { usage(); return 2; } disk_paths[ndisks++] = optarg; break;

@@ -181,6 +181,7 @@ static const uint16_t keymap[128] = {
 - (void)windowDidResize:(NSNotification *)notification {
     NSWindow *window = notification.object;
     NSRect pixels = [window.contentView convertRectToBacking:window.contentView.bounds];
+    gpu_scale(window.backingScaleFactor >= 1.5 ? 2 : 1);
     gpu_resize((uint32_t)llround(pixels.size.width), (uint32_t)llround(pixels.size.height));
 }
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification { [self windowDidResize:notification]; }

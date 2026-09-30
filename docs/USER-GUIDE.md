@@ -52,7 +52,8 @@ frame when a program needs completion. Shutdown/reboot call it automatically.
 `make -j test` always keeps the ordinary monitor and needs no Venus dependencies
 or internet; optional GPU validation is `make venus-term-test venus-test`.
 
-`make run` and `make run-qemu` create `build/disk.img` (64 MiB FAT32) the first time. It then adds only the files that are
+`make run` and `make run-qemu` create `build/disk.img` (512 MiB FAT32, a sparse file) the first time; an older, smaller
+disk is kept as it is (to get the larger one, copy your files off, `rm build/disk.img`, and `make run` again). It then adds only the files that are
 missing, so edits made inside the OS are kept. The disk holds the programs of `os/Disk`, the kernel sources
 in `C:/Kernel` and `C:/Cool/Runtime` (tokenizer in `C:/Cool/Fmt`), the shell prelude `C:/Kernel.coolh`, and the compiler sources in `C:/Cool/Compiler`.
 It also installs the shared C library in `C:/Cool/LibC`, the Warm compiler in

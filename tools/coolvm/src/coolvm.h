@@ -127,6 +127,7 @@ struct vm {
     uint8_t *fb;
     uint64_t fb_size;
     uint32_t fb_width, fb_height;
+    uint32_t fb_scale;           /* --scale: the scale the guest is told (0: the window's backing scale, 1 headless) */
     bool gpu;                   /* modern virtio-gpu 2D */
     bool gpu_3d_stub;
     uint8_t *gpu_stub_memory;
@@ -205,6 +206,7 @@ void gpu_init(void);
 bool gpu_mmio(uint64_t off, int size, bool wr, uint64_t *val);
 bool gpu_irq_level(void);
 void gpu_resize(uint32_t width, uint32_t height);
+void gpu_scale(uint32_t scale); /* the window's backing scale, unless --scale fixed it */
 bool gpu_snapshot(uint8_t **pixels, uint32_t *width, uint32_t *height); /* g.lock held */
 void fb_snapshot(uint8_t *dst); /* visible scanout, including ring wrap */
 void display_init(void);
