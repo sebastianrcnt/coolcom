@@ -1,0 +1,2536 @@
+// The C standard library for C programs translated to Cool (tools/c2hc), on top of the OS's own
+// functions. One file for both worlds:
+//   - in the OS (Kernel.coolh included first, so COOLCOM_KERNEL is defined) it calls the kernel
+//     (MAlloc, ConsPut, GetLine, FileRead/FileWrite, Sin, Now, ...);
+//   - on the host (build/coolc --run) it imports the same names from the native host
+//     (coolc/Host/native.c registers them).
+// Everything is written with the I64i/U8i/F64 family, which both worlds have, and plain functions:
+// no macros but a few LC_-prefixed constants, so including it never disturbs the program. The C names are the real ones
+// (malloc, printf, fopen, sin, setjmp's partner longjmp, ...); coolc/LibC/include has the
+// headers for the parser. Not in the compiler seed: a program that wants it includes this file.
+//
+// Deviations from C, all deliberate:
+//   - files are read whole at fopen and written whole at fclose/fflush (the OS has FileRead and
+//     FileWrite, not streams); stdin is the terminal (a line at a time in the OS), stdout and
+//     stderr write straight to it;
+//   - strtod/atof are exact for the ordinary cases (up to 15 digits, |exponent| <= 22) and
+//     within an ulp beyond; printf's floating point conversions are exact and correctly rounded;
+//   - sin, cos, exp, log ... are the host's libm on the host and the OS's own (about 1e-15) in the OS;
+//   - locale is "C", time is UTC, there are no processes, no environment and no signals.
+// A variadic function's parameter is never named fmt: the compiler checks calls of those against
+// HolyC's Print conversions. setjmp cannot be a function: c2hc turns setjmp(buf) into AIWNIOS_SetJmp(buf) (a jmp_buf is 24
+// I64s). exit() leaves LibCRun's context if there is one (the OS's way back to the shell).
+
+#ifndef COOLCOM_KERNEL
+import U8i *MAlloc(I64i size);
+import U8i *CAlloc(I64i size);
+import U0 Free(U8i *ptr);
+import U8i *MemCpy(U8i *dst, U8i *src, I64i cnt);
+import U8i *MemSet(U8i *dst, I64i value, I64i cnt);
+import I64i MemCmp(U8i *a, U8i *b, I64i cnt);
+import U0 NativeExit(I64i status);
+import I64i NativeWrite(I64i fd, U8i *buf, I64i n);
+import I64i NativeGetChar();
+import I64i NativeArgCount();
+import U8i *NativeArg(I64i index);
+import U8i *FileRead(U8i *name, I64i *size, U8i *attrs);
+import I64i FileWrite(U8i *name, U8i *data, I64i size);
+import F64 Sin(F64 x);
+import F64 Cos(F64 x);
+import F64 Tan(F64 x);
+import F64 ATan(F64 x);
+import F64 Arg(F64 x, F64 y);
+import F64 Exp(F64 x);
+import F64 Ln(F64 x);
+import F64 Log2(F64 x);
+import F64 Log10(F64 x);
+import F64 Pow(F64 x, F64 y);
+import F64 Sqrt(F64 x);
+import F64 Floor(F64 x);
+import F64 Ceil(F64 x);
+import I64i UnixNow();
+import I64i __GetTicks();
+import I64i AIWNIOS_SetJmp(I64i *ctx);
+import U0 AIWNIOS_LongJmp(I64i *ctx);
+#endif
+
+// ---------------------------------------------------------------- the platform layer
+// (the only place the two worlds differ)
+
+U0 LC_Write(I64i fd, U8i *buf, I64i n)
+{//Bytes to the terminal.
+#ifdef COOLCOM_KERNEL
+    I64i i;
+    for (i = 0; i < n; i++)
+        ConsPut(buf[i]);
+#else
+    NativeWrite(fd, buf, n);
+#endif
+}
+
+U8i lc_line[520];
+I64i lc_line_pos, lc_line_len;
+
+I64i LC_GetChar()
+{//The next byte of the terminal input, or -1 at its end (never, in the OS: a line at a time).
+#ifdef COOLCOM_KERNEL
+    if (lc_line_pos >= lc_line_len) {
+        GetLine(lc_line, 512);
+        lc_line_len = StrLen(lc_line);
+        lc_line[lc_line_len++] = '\n';
+        lc_line_pos = 0;
+    }
+    return lc_line[lc_line_pos++];
+#else
+    return NativeGetChar();
+#endif
+}
+
+I64i LC_Seconds()
+{//Seconds since 1970 (UTC).
+    return UnixNow();
+}
+
+I64i LC_Ticks()
+{//A steady counter in milliseconds.
+    return __GetTicks();
+}
+
+// ---------------------------------------------------------------- errno, exit, run context
+
+I32i errno;
+#define LC_ENOENT 2
+#define LC_EIO 5
+#define LC_ENOMEM 12
+#define LC_EACCES 13
+#define LC_EINVAL 22
+#define LC_ERANGE 34
+
+I64i lc_run_ctx[24];
+I64i lc_run_active;
+I64i lc_exit_status;
+
+// ---------------------------------------------------------------- memory
+
+U8i *malloc(U64i n)
+{//16 bytes of header keep the size for realloc and the 16-byte alignment.
+    if (n > 0x7FFFFFFFFFFFFFEF)
+        return 0;
+    U64i *p = MAlloc(n + 16);
+    if (!p)
+        return 0;
+    *p = n;
+    return p(U8i *) + 16;
+}
+
+U8i *calloc(U64i count, U64i size)
+{
+    U64i n = count * size;
+    U64i *p;
+    if (n > 0x7FFFFFFFFFFFFFEF || (size && n / size != count))
+        return 0;
+    p = CAlloc(n + 16);
+    if (!p)
+        return 0;
+    *p = n;
+    return p(U8i *) + 16;
+}
+
+U0 free(U8i *p)
+{
+    if (p)
+        Free(p - 16);
+}
+
+U8i *realloc(U8i *p, U64i n)
+{
+    U8i *q;
+    U64i old;
+    if (!p)
+        return malloc(n);
+    if (!n) {
+        free(p);
+        return 0;
+    }
+    old = *(p - 16)(U64i *);
+    if (n <= old)
+        return p;
+    q = malloc(n);
+    if (!q)
+        return 0;
+    MemCpy(q, p, old);
+    free(p);
+    return q;
+}
+
+// ---------------------------------------------------------------- string.h
+
+U8i *memcpy(U8i *d, U8i *s, U64i n)
+{
+    MemCpy(d, s, n);
+    return d;
+}
+
+U8i *memmove(U8i *d, U8i *s, U64i n)
+{
+    U64i i;
+    if (d < s) {
+        for (i = 0; i < n; i++)
+            d[i] = s[i];
+    } else {
+        i = n;
+        while (i) {
+            i--;
+            d[i] = s[i];
+        }
+    }
+    return d;
+}
+
+U8i *memset(U8i *d, I32i c, U64i n)
+{
+    MemSet(d, c & 0xFF, n);
+    return d;
+}
+
+I32i memcmp(U8i *a, U8i *b, U64i n)
+{
+    U64i i;
+    for (i = 0; i < n; i++) {
+        if (a[i] != b[i]) {
+            if (a[i] < b[i])
+                return -1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+U8i *memchr(U8i *s, I32i c, U64i n)
+{
+    U64i i;
+    for (i = 0; i < n; i++) {
+        if (s[i] == (c & 0xFF))
+            return s + i;
+    }
+    return 0;
+}
+
+U64i strlen(U8i *s)
+{
+    U64i n = 0;
+    while (s[n])
+        n++;
+    return n;
+}
+
+U64i strnlen(U8i *s, U64i max)
+{
+    U64i n = 0;
+    while (n < max && s[n])
+        n++;
+    return n;
+}
+
+I32i strcmp(U8i *a, U8i *b)
+{
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    if (*a == *b)
+        return 0;
+    if (*a < *b)
+        return -1;
+    return 1;
+}
+
+I32i strncmp(U8i *a, U8i *b, U64i n)
+{
+    while (n && *a && *a == *b) {
+        a++;
+        b++;
+        n--;
+    }
+    if (!n || *a == *b)
+        return 0;
+    if (*a < *b)
+        return -1;
+    return 1;
+}
+
+I32i strcoll(U8i *a, U8i *b)
+{
+    return strcmp(a, b);
+}
+
+U8i *strcpy(U8i *d, U8i *s)
+{
+    U8i *r = d;
+    while (*s)
+        *d++ = *s++;
+    *d = 0;
+    return r;
+}
+
+U8i *strncpy(U8i *d, U8i *s, U64i n)
+{
+    U64i i = 0;
+    while (i < n && s[i]) {
+        d[i] = s[i];
+        i++;
+    }
+    while (i < n)
+        d[i++] = 0;
+    return d;
+}
+
+U8i *strcat(U8i *d, U8i *s)
+{
+    strcpy(d + strlen(d), s);
+    return d;
+}
+
+U8i *strncat(U8i *d, U8i *s, U64i n)
+{
+    U8i *e = d + strlen(d);
+    while (n && *s) {
+        *e++ = *s++;
+        n--;
+    }
+    *e = 0;
+    return d;
+}
+
+U8i *strchr(U8i *s, I32i c)
+{
+    c = c & 0xFF;
+    while (1) {
+        if (*s == c)
+            return s;
+        if (!*s)
+            return 0;
+        s++;
+    }
+    return 0;
+}
+
+U8i *strrchr(U8i *s, I32i c)
+{
+    U8i *r = 0;
+    c = c & 0xFF;
+    while (1) {
+        if (*s == c)
+            r = s;
+        if (!*s)
+            return r;
+        s++;
+    }
+    return 0;
+}
+
+U8i *strstr(U8i *h, U8i *n)
+{
+    U64i nl = strlen(n);
+    if (!nl)
+        return h;
+    while (*h) {
+        if (*h == *n && !strncmp(h, n, nl))
+            return h;
+        h++;
+    }
+    return 0;
+}
+
+U64i strspn(U8i *s, U8i *set)
+{
+    U64i n = 0;
+    while (s[n] && strchr(set, s[n]))
+        n++;
+    return n;
+}
+
+U64i strcspn(U8i *s, U8i *set)
+{
+    U64i n = 0;
+    while (s[n] && !strchr(set, s[n]))
+        n++;
+    return n;
+}
+
+U8i *strpbrk(U8i *s, U8i *set)
+{
+    while (*s) {
+        if (strchr(set, *s))
+            return s;
+        s++;
+    }
+    return 0;
+}
+
+U8i *lc_strtok_next;
+
+U8i *strtok(U8i *s, U8i *delim)
+{
+    U8i *start;
+    if (!s)
+        s = lc_strtok_next;
+    if (!s)
+        return 0;
+    s += strspn(s, delim);
+    if (!*s) {
+        lc_strtok_next = 0;
+        return 0;
+    }
+    start = s;
+    s += strcspn(s, delim);
+    if (*s) {
+        *s = 0;
+        lc_strtok_next = s + 1;
+    } else
+        lc_strtok_next = 0;
+    return start;
+}
+
+U8i *strdup(U8i *s)
+{
+    U64i n = strlen(s) + 1;
+    U8i *p = malloc(n);
+    if (p)
+        MemCpy(p, s, n);
+    return p;
+}
+
+U8i *strerror(I32i e)
+{
+    switch (e) {
+        case 0: return "No error";
+        case 1: return "Operation not permitted";
+        case 2: return "No such file or directory";
+        case 5: return "Input/output error";
+        case 9: return "Bad file descriptor";
+        case 12: return "Cannot allocate memory";
+        case 13: return "Permission denied";
+        case 17: return "File exists";
+        case 21: return "Is a directory";
+        case 22: return "Invalid argument";
+        case 24: return "Too many open files";
+        case 28: return "No space left on device";
+        case 33: return "Numerical argument out of domain";
+        case 34: return "Numerical result out of range";
+    }
+    return "Unknown error";
+}
+
+// ---------------------------------------------------------------- ctype.h ("C" locale)
+
+I32i isdigit(I32i c) {return c >= '0' && c <= '9';}
+I32i islower(I32i c) {return c >= 'a' && c <= 'z';}
+I32i isupper(I32i c) {return c >= 'A' && c <= 'Z';}
+I32i isalpha(I32i c) {return islower(c) || isupper(c);}
+I32i isalnum(I32i c) {return isalpha(c) || isdigit(c);}
+I32i isxdigit(I32i c) {return isdigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');}
+I32i isspace(I32i c) {return c == ' ' || (c >= 9 && c <= 13);}
+I32i iscntrl(I32i c) {return (c >= 0 && c < 32) || c == 127;}
+I32i isprint(I32i c) {return c >= 32 && c < 127;}
+I32i isgraph(I32i c) {return c > 32 && c < 127;}
+I32i ispunct(I32i c) {return isgraph(c) && !isalnum(c);}
+I32i isblank(I32i c) {return c == ' ' || c == 9;}
+I32i tolower(I32i c)
+{
+    if (isupper(c))
+        return c + 32;
+    return c;
+}
+I32i toupper(I32i c)
+{
+    if (islower(c))
+        return c - 32;
+    return c;
+}
+
+// ---------------------------------------------------------------- math
+
+#define LC_NAN 0x7FF8000000000000
+#define LC_INF 0x7FF0000000000000
+
+F64 LC_Bits2F(U64i bits)
+{
+    F64 x;
+    *(&x)(U64i *) = bits;
+    return x;
+}
+
+U64i LC_F2Bits(F64 x)
+{
+    return *(&x)(U64i *);
+}
+
+F64 lc_nan_value;
+F64 lc_inf_value;
+
+F64 LC_INF_VALUE() {return lc_inf_value;}
+F64 LC_NAN_VALUE() {return lc_nan_value;}
+I32i LC_ctz(U64i x) {I32i n = 0; if (!x) return 64; while (!(x & 1)) {n++; x >>= 1;} return n;}
+I32i LC_clz(U64i x, I32i bits) {I32i n = 0; U64i mask = 1; mask <<= bits - 1; while (mask && !(x & mask)) {n++; mask >>= 1;} return n;}
+I32i LC_popcount(U64i x) {I32i n = 0; while (x) {x &= x - 1; n++;} return n;}
+
+I32i isnan(F64 x)
+{
+    U64i b = LC_F2Bits(x);
+    return (b & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000;
+}
+
+I32i isinf(F64 x)
+{
+    return (LC_F2Bits(x) & 0x7FFFFFFFFFFFFFFF) == 0x7FF0000000000000;
+}
+
+F64 fabs(F64 x)
+{
+    return LC_Bits2F(LC_F2Bits(x) & 0x7FFFFFFFFFFFFFFF);
+}
+
+F64 floor(F64 x) {return Floor(x);}
+F64 ceil(F64 x) {return Ceil(x);}
+F64 sqrt(F64 x) {return Sqrt(x);}
+F64 exp(F64 x) {return Exp(x);}
+F64 log2(F64 x) {return Log2(x);}
+F64 log10(F64 x) {return Log10(x);}
+F64 sin(F64 x) {return Sin(x);}
+F64 cos(F64 x) {return Cos(x);}
+F64 tan(F64 x) {return Tan(x);}
+F64 atan(F64 x) {return ATan(x);}
+
+F64 log(F64 x)
+{
+    if (x < 0.0)
+        return lc_nan_value;
+    return Ln(x);
+}
+
+F64 atan2(F64 y, F64 x) {return Arg(x, y);}
+
+F64 asin(F64 x)
+{
+    if (x > 1.0 || x < -1.0)
+        return lc_nan_value;
+    if (x == 1.0)
+        return 1.5707963267948966;
+    if (x == -1.0)
+        return -1.5707963267948966;
+    return ATan(x / Sqrt(1.0 - x * x));
+}
+
+F64 acos(F64 x)
+{
+    if (x > 1.0 || x < -1.0)
+        return lc_nan_value;
+    return 1.5707963267948966 - asin(x);
+}
+
+F64 sinh(F64 x) {return (Exp(x) - Exp(-x)) / 2.0;}
+F64 cosh(F64 x) {return (Exp(x) + Exp(-x)) / 2.0;}
+F64 tanh(F64 x)
+{
+    F64 a, b;
+    if (x > 20.0)
+        return 1.0;
+    if (x < -20.0)
+        return -1.0;
+    a = Exp(x);
+    b = Exp(-x);
+    return (a - b) / (a + b);
+}
+
+F64 trunc(F64 x)
+{
+    if (x < 0.0)
+        return Ceil(x);
+    return Floor(x);
+}
+
+F64 round(F64 x)
+{
+    if (x < 0.0)
+        return -Floor(-x + 0.5);
+    return Floor(x + 0.5);
+}
+
+F64 frexp(F64 x, I32i *e)
+{//x = m * 2^e, 0.5 <= |m| < 1.
+    U64i b = LC_F2Bits(x);
+    I64i ex = (b >> 52) & 0x7FF;
+    if (ex == 0x7FF || x == 0.0) {
+        *e = 0;
+        return x;
+    }
+    if (!ex) {
+        x = x * 18446744073709551616.0;
+        b = LC_F2Bits(x);
+        ex = ((b >> 52) & 0x7FF) - 64;
+    }
+    *e = ex - 1022;
+    b = b & 0x800FFFFFFFFFFFFF | 0x3FE0000000000000;
+    return LC_Bits2F(b);
+}
+
+F64 ldexp(F64 x, I32i e)
+{
+    U64i b;
+    F64 f;
+    if (x == 0.0 || isinf(x) || isnan(x))
+        return x;
+    while (e > 1000) {
+        x = x * 8.98846567431158e307;
+        e -= 1023;
+        if (isinf(x))
+            return x;
+    }
+    while (e < -1000) {
+        x = x * 1.0020841800044864e-292;
+        e += 969;
+        if (x == 0.0)
+            return x;
+    }
+    b = ((1023 + e) & 0x7FF);
+    f = LC_Bits2F(b << 52);
+    return x * f;
+}
+
+F64 modf(F64 x, F64 *ip)
+{
+    F64 t;
+    if (isinf(x)) {
+        *ip = x;
+        return 0.0;
+    }
+    t = trunc(x);
+    *ip = t;
+    return x - t;
+}
+
+F64 fmod(F64 x, F64 y)
+{//Exact, by shifting and subtracting the mantissas (as musl does).
+    U64i ux = LC_F2Bits(x), uy = LC_F2Bits(y), i, sx = ux & 0x8000000000000000;
+    I64i ex = (ux >> 52) & 0x7FF, ey = (uy >> 52) & 0x7FF;
+    if ((uy << 1) == 0 || isnan(y) || ex == 0x7FF)
+        return lc_nan_value;
+    if ((ux << 1) <= (uy << 1)) {
+        if ((ux << 1) == (uy << 1))
+            return LC_Bits2F(sx);
+        return x;
+    }
+    if (!ex) {
+        i = ux << 12;
+        while (!(i >> 63)) {
+            ex--;
+            i = i << 1;
+        }
+        ux = ux << (1 - ex);
+    } else {
+        ux = ux & 0xFFFFFFFFFFFFF;
+        ux = ux | 0x10000000000000;
+    }
+    if (!ey) {
+        i = uy << 12;
+        while (!(i >> 63)) {
+            ey--;
+            i = i << 1;
+        }
+        uy = uy << (1 - ey);
+    } else {
+        uy = uy & 0xFFFFFFFFFFFFF;
+        uy = uy | 0x10000000000000;
+    }
+    while (ex > ey) {
+        i = ux - uy;
+        if (!(i >> 63)) {
+            if (i == 0)
+                return LC_Bits2F(sx);
+            ux = i;
+        }
+        ux = ux << 1;
+        ex--;
+    }
+    i = ux - uy;
+    if (!(i >> 63)) {
+        if (i == 0)
+            return LC_Bits2F(sx);
+        ux = i;
+    }
+    while (!(ux >> 52)) {
+        ux = ux << 1;
+        ex--;
+    }
+    if (ex > 0) {
+        ux = ux - 0x10000000000000;
+        ux = ux | (ex(U64i) << 52);
+    } else
+        ux = ux >> (1 - ex);
+    return LC_Bits2F(ux | sx);
+}
+
+F64 pow(F64 x, F64 y)
+{//An integer power is exact when the result is (repeated squaring); the rest is the OS's Pow.
+    F64 r, b;
+    I64i n;
+    I32i neg;
+    if (y == 0.0)
+        return 1.0;
+    if (isnan(x) || isnan(y))
+        return lc_nan_value;
+    if (y == Floor(y) && y > -1024.0 && y < 1024.0) {
+        neg = y < 0.0;
+        if (neg)
+            n = -y;
+        else
+            n = y;
+        r = 1.0;
+        b = x;
+        while (n) {
+            if (n & 1)
+                r = r * b;
+            b = b * b;
+            n = n >> 1;
+        }
+        if (neg)
+            return 1.0 / r;
+        return r;
+    }
+    if (x < 0.0)
+        return lc_nan_value;
+    return Pow(x, y);
+}
+
+I32i abs(I32i x)
+{
+    if (x < 0)
+        return -x;
+    return x;
+}
+
+I64i labs(I64i x)
+{
+    if (x < 0)
+        return -x;
+    return x;
+}
+
+I64i llabs(I64i x)
+{
+    if (x < 0)
+        return -x;
+    return x;
+}
+
+// ---------------------------------------------------------------- number conversion
+
+U64i LC_Strtoull(U8i *s, U8i **end, I32i base, I32i *neg_out, I32i *overflow)
+{//The digits of s in base (0: C's prefix rules) as an unsigned value.
+    U8i *p = s;
+    U64i v = 0, d, lim;
+    I32i neg = 0, any = 0, digit;
+    *overflow = 0;
+    while (isspace(*p))
+        p++;
+    if (*p == '-') {
+        neg = 1;
+        p++;
+    } else if (*p == '+')
+        p++;
+    if ((base == 0 || base == 16) && p[0] == '0' && (p[1] == 'x' || p[1] == 'X') && isxdigit(p[2])) {
+        p += 2;
+        base = 16;
+    } else if (base == 0) {
+        if (p[0] == '0')
+            base = 8;
+        else
+            base = 10;
+    }
+    lim = 0xFFFFFFFFFFFFFFFF / base;
+    while (1) {
+        if (isdigit(*p))
+            digit = *p - '0';
+        else if (isalpha(*p))
+            digit = tolower(*p) - 'a' + 10;
+        else
+            break;
+        if (digit >= base)
+            break;
+        d = digit;
+        if (v > lim || (v == lim && d > 0xFFFFFFFFFFFFFFFF - lim * base))
+            *overflow = 1;
+        v = v * base + d;
+        any = 1;
+        p++;
+    }
+    if (!any)
+        p = s;
+    if (end)
+        *end = p;
+    *neg_out = neg;
+    return v;
+}
+
+I64i strtoll(U8i *s, U8i **end, I32i base)
+{
+    I32i neg, ov;
+    U64i v = LC_Strtoull(s, end, base, &neg, &ov);
+    if (neg) {
+        if (ov || v > 0x8000000000000000) {
+            errno = LC_ERANGE;
+            return 0x8000000000000000;
+        }
+        return -v;
+    }
+    if (ov || v > 0x7FFFFFFFFFFFFFFF) {
+        errno = LC_ERANGE;
+        return 0x7FFFFFFFFFFFFFFF;
+    }
+    return v;
+}
+
+I64i strtol(U8i *s, U8i **end, I32i base) {return strtoll(s, end, base);}
+
+U64i strtoull(U8i *s, U8i **end, I32i base)
+{
+    I32i neg, ov;
+    U64i v = LC_Strtoull(s, end, base, &neg, &ov);
+    if (ov) {
+        errno = LC_ERANGE;
+        return 0xFFFFFFFFFFFFFFFF;
+    }
+    if (neg)
+        return -v;
+    return v;
+}
+
+U64i strtoul(U8i *s, U8i **end, I32i base) {return strtoull(s, end, base);}
+I32i atoi(U8i *s) {return strtoll(s, 0, 10);}
+I64i atol(U8i *s) {return strtoll(s, 0, 10);}
+I64i atoll(U8i *s) {return strtoll(s, 0, 10);}
+
+F64 LC_Pow10(I64i n)
+{//10^n for |n| <= 22 is exact; beyond, by repeated multiplication.
+    F64 r = 1.0, b = 10.0;
+    I32i neg = n < 0;
+    if (neg)
+        n = -n;
+    while (n) {
+        if (n & 1)
+            r = r * b;
+        b = b * b;
+        n = n >> 1;
+    }
+    if (neg)
+        return 1.0 / r;
+    return r;
+}
+
+F64 strtod(U8i *s, U8i **end)
+{
+    U8i *p = s, *q, *t;
+    U64i m = 0;
+    I64i digits = 0, exp10 = 0, dropped = 0, e = 0, hexexp = 0, ev;
+    I32i neg = 0, esign = 1, any = 0, d, es;
+    F64 r;
+    while (isspace(*p))
+        p++;
+    if (*p == '-') {
+        neg = 1;
+        p++;
+    } else if (*p == '+')
+        p++;
+    if (!strncmp(p, "inf", 3) || !strncmp(p, "INF", 3) || !strncmp(p, "Inf", 3)) {
+        if (end) {
+            *end = p + 3;
+            if (!strncmp(p + 3, "inity", 5) || !strncmp(p + 3, "INITY", 5))
+                *end = p + 8;
+        }
+        if (neg)
+            return -lc_inf_value;
+        return lc_inf_value;
+    }
+    if (!strncmp(p, "nan", 3) || !strncmp(p, "NAN", 3) || !strncmp(p, "NaN", 3)) {
+        if (end)
+            *end = p + 3;
+        return lc_nan_value;
+    }
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        q = p + 2;
+        while (isxdigit(*q) || (*q == '.' && hexexp == 0)) {
+            if (*q == '.') {
+                hexexp = 1;
+                q++;
+            } else {
+                d = *q;
+                if (isdigit(d))
+                    d = d - '0';
+                else
+                    d = tolower(d) - 'a' + 10;
+                if (digits < 15 || !m) {
+                    if (m || d) {
+                        m = m * 16 + d;
+                        digits++;
+                    }
+                    if (hexexp == 1)
+                        e -= 4;
+                } else if (hexexp == 0)
+                    e += 4;
+                any = 1;
+                q++;
+            }
+        }
+        if (any) {
+            if (*q == 'p' || *q == 'P') {
+                t = q + 1;
+                es = 1;
+                ev = 0;
+                if (*t == '-') {
+                    es = -1;
+                    t++;
+                } else if (*t == '+')
+                    t++;
+                if (isdigit(*t)) {
+                    while (isdigit(*t)) {
+                        if (ev < 100000)
+                            ev = ev * 10 + (*t - '0');
+                        t++;
+                    }
+                    e += es * ev;
+                    q = t;
+                }
+            }
+            if (end)
+                *end = q;
+            r = m;
+            r = ldexp(r, e);
+            if (neg)
+                return -r;
+            return r;
+        }
+    }
+    q = p;
+    while (1) {
+        if (isdigit(*q)) {
+            any = 1;
+            if (m < 1844674407370955161) {
+                m = m * 10 + (*q - '0');
+                if (m)
+                    digits++;
+                if (exp10 < 0 || dropped == -1)
+                    ;
+            } else
+                dropped++;
+            if (dropped == 0 && hexexp)
+                exp10--;
+            else if (dropped && !hexexp)
+                exp10++;
+            q++;
+        } else if (*q == '.' && !hexexp) {
+            hexexp = 1;
+            q++;
+        } else
+            break;
+    }
+    if (!any) {
+        if (end)
+            *end = s;
+        return 0.0;
+    }
+    if (*q == 'e' || *q == 'E') {
+        t = q + 1;
+        if (*t == '-') {
+            esign = -1;
+            t++;
+        } else if (*t == '+')
+            t++;
+        if (isdigit(*t)) {
+            e = 0;
+            while (isdigit(*t)) {
+                if (e < 100000)
+                    e = e * 10 + (*t - '0');
+                t++;
+            }
+            exp10 += esign * e;
+            q = t;
+        }
+    }
+    if (end)
+        *end = q;
+    r = m;
+    if (m == 0)
+        r = 0.0;
+    else if (exp10 == 0)
+        ;
+    else if (exp10 > 0) {
+        if (exp10 > 400)
+            r = lc_inf_value;
+        else if (exp10 <= 22)
+            r = r * LC_Pow10(exp10);
+        else {
+            r = r * LC_Pow10(22);
+            exp10 -= 22;
+            while (exp10 > 0 && !isinf(r)) {
+                if (exp10 > 22) {
+                    r = r * LC_Pow10(22);
+                    exp10 -= 22;
+                } else {
+                    r = r * LC_Pow10(exp10);
+                    exp10 = 0;
+                }
+            }
+        }
+    } else {
+        if (exp10 < -700)
+            r = 0.0;
+        else if (exp10 >= -22)
+            r = r / LC_Pow10(-exp10);
+        else {
+            r = r / LC_Pow10(22);
+            exp10 += 22;
+            while (exp10 < 0 && r != 0.0) {
+                if (exp10 < -22) {
+                    r = r / LC_Pow10(22);
+                    exp10 += 22;
+                } else {
+                    r = r / LC_Pow10(-exp10);
+                    exp10 = 0;
+                }
+            }
+        }
+    }
+    if (neg)
+        return -r;
+    return r;
+}
+
+F64 atof(U8i *s) {return strtod(s, 0);}
+
+// ---------------------------------------------------------------- printf's engine
+
+class LC_Buf {U8i *p; I64i len; I64i cap;};
+
+U0 LC_BufWrite(LC_Buf *b, U8i *s, I64i n)
+{
+    U8i *q;
+    I64i cap;
+    if (n <= 0)
+        return;
+    if (b->len + n + 1 > b->cap) {
+        cap = b->cap * 2;
+        if (cap < b->len + n + 64)
+            cap = b->len + n + 64;
+        q = MAlloc(cap);
+        if (b->len)
+            MemCpy(q, b->p, b->len);
+        if (b->p)
+            Free(b->p);
+        b->p = q;
+        b->cap = cap;
+    }
+    MemCpy(b->p + b->len, s, n);
+    b->len += n;
+    b->p[b->len] = 0;
+}
+
+U0 LC_BufPut(LC_Buf *b, I32i c, I64i count)
+{
+    U8i ch = c;
+    while (count-- > 0)
+        LC_BufWrite(b, &ch, 1);
+}
+
+class LC_VA {I64i *argv; I64i i; I64i n;};
+
+I64i LC_VaArg(LC_VA *ap)
+{
+    I64i v = 0;
+    if (ap->i < ap->n)
+        v = ap->argv[ap->i];
+    ap->i++;
+    return v;
+}
+
+// Exact decimal digits of a positive finite double, by big integers in base 10^9.
+I64i lc_big[160];
+I64i lc_big_n;
+
+U0 LC_BigMul(I64i m)
+{//lc_big *= m (m < 2^31).
+    I64i i, carry = 0, t;
+    for (i = 0; i < lc_big_n; i++) {
+        t = lc_big[i] * m + carry;
+        lc_big[i] = t % 1000000000;
+        carry = t / 1000000000;
+    }
+    while (carry) {
+        lc_big[lc_big_n++] = carry % 1000000000;
+        carry = carry / 1000000000;
+    }
+}
+
+I64i LC_Digits(F64 v, U8i *out, I64i *point)
+{//The exact decimal expansion of v > 0 as digits without a trailing zero in out (at most 780),
+    //value = 0.DIGITS * 10^point. Returns the digit count.
+    U64i bits = LC_F2Bits(v), m;
+    I64i ex = (bits >> 52) & 0x7FF, e2, k, i, n, j, limb, digit;
+    U8i tmp[16];
+    m = bits & 0xFFFFFFFFFFFFF;
+    if (ex)
+        m = m | 0x10000000000000;
+    e2 = ex - 1075;
+    if (!ex)
+        e2 = -1074;
+    lc_big_n = 0;
+    lc_big[lc_big_n++] = m % 1000000000;
+    if (m / 1000000000)
+        lc_big[lc_big_n++] = (m / 1000000000) % 1000000000;
+    if (m / 1000000000000000000)
+        lc_big[lc_big_n++] = m / 1000000000000000000;
+    if (e2 >= 0) {
+        while (e2 >= 30) {
+            LC_BigMul(1 << 30);
+            e2 -= 30;
+        }
+        if (e2)
+            LC_BigMul(1 << e2);
+        k = 0;
+    } else {
+        k = -e2;
+        e2 = k;
+        while (e2 >= 13) {
+            LC_BigMul(1220703125);
+            e2 -= 13;
+        }
+        while (e2 > 0) {
+            LC_BigMul(5);
+            e2--;
+        }
+    }
+    // to text
+    n = 0;
+    for (i = lc_big_n - 1; i >= 0; i--) {
+        limb = lc_big[i];
+        for (j = 8; j >= 0; j--) {
+            tmp[j] = '0' + limb % 10;
+            limb = limb / 10;
+        }
+        for (j = 0; j < 9; j++) {
+            if (n == 0 && tmp[j] == '0')
+                ;
+            else
+                out[n++] = tmp[j];
+        }
+    }
+    *point = n - k;
+    while (n > 1 && out[n - 1] == '0')
+        n--;
+    digit = 0;
+    return n;
+}
+
+I64i LC_Round(U8i *d, I64i n, I64i *point, I64i keep)
+{//Round the digits to keep of them (round half even, exact); returns the new count. keep may
+    //be <= 0 (everything rounds away or up to a single 1).
+    I64i i;
+    I32i up;
+    if (keep >= n)
+        return n;
+    if (keep < 0) {
+        *point = *point;
+        return 0;
+    }
+    if (d[keep] > '5')
+        up = 1;
+    else if (d[keep] < '5')
+        up = 0;
+    else {
+        up = 0;
+        for (i = keep + 1; i < n; i++) {
+            if (d[i] != '0')
+                up = 1;
+        }
+        if (!up && keep > 0)
+            up = (d[keep - 1] - '0') & 1;
+    }
+    n = keep;
+    if (up) {
+        i = keep - 1;
+        while (i >= 0) {
+            if (d[i] == '9') {
+                d[i] = '0';
+                i--;
+            } else {
+                d[i]++;
+                break;
+            }
+        }
+        if (i < 0) {
+            // 99..9 -> 100..0
+            for (i = n; i > 0; i--)
+                d[i] = d[i - 1];
+            d[0] = '1';
+            n++;
+            (*point)++;
+        }
+    }
+    while (n > 0 && d[n - 1] == '0')
+        n--;
+    return n;
+}
+
+U0 LC_PadAndPut(LC_Buf *b, U8i *body, I64i blen, I64i width, I32i left, I32i zero, I64i prefix)
+{//body is [sign/prefix (prefix bytes)] digits; zero padding goes after the prefix.
+    I64i pad = width - blen;
+    if (pad < 0)
+        pad = 0;
+    if (left) {
+        LC_BufWrite(b, body, blen);
+        LC_BufPut(b, ' ', pad);
+    } else if (zero) {
+        LC_BufWrite(b, body, prefix);
+        LC_BufPut(b, '0', pad);
+        LC_BufWrite(b, body + prefix, blen - prefix);
+    } else {
+        LC_BufPut(b, ' ', pad);
+        LC_BufWrite(b, body, blen);
+    }
+}
+
+U0 LC_FmtFloat(LC_Buf *b, F64 v, I32i conv, I32i left, I32i plus, I32i space, I32i alt, I32i zero, I64i width, I64i prec)
+{
+    U8i digits[800], body[1200], sign = 0, ec;
+    I64i n, point, blen = 0, i, x, keep, prefix = 0, lower = 0, expo;
+    I32i neg, isnum = 1, useexp = 0, dropzeros = 0;
+    U64i bits = LC_F2Bits(v);
+    neg = (bits >> 63) != 0;
+    if (neg)
+        sign = '-';
+    else if (plus)
+        sign = '+';
+    else if (space)
+        sign = ' ';
+    if (conv >= 'a')
+        lower = 1;
+    if (isnan(v) || isinf(v)) {
+        isnum = 0;
+        zero = 0;
+        if (sign)
+            body[blen++] = sign;
+        prefix = blen;
+        if (isnan(v)) {
+            body[blen++] = 'n' - 32 * !lower;
+            body[blen++] = 'a' - 32 * !lower;
+            body[blen++] = 'n' - 32 * !lower;
+        } else {
+            body[blen++] = 'i' - 32 * !lower;
+            body[blen++] = 'n' - 32 * !lower;
+            body[blen++] = 'f' - 32 * !lower;
+        }
+        LC_PadAndPut(b, body, blen, width, left, 0, prefix);
+        return;
+    }
+    if (sign)
+        body[blen++] = sign;
+    prefix = blen;
+    ec = 'e';
+    if (!lower)
+        ec = 'E';
+    if (conv == 'a' || conv == 'A') {
+        // hexadecimal floating point
+        I64i he = (bits >> 52) & 0x7FF;
+        U64i hm = bits & 0xFFFFFFFFFFFFF;
+        I64i lead = 1, hdig, shiftb;
+        body[blen++] = '0';
+        body[blen++] = 'x' - 32 * !lower;
+        prefix = blen;
+        if (!he) {
+            lead = 0;
+            if (hm)
+                he = -1022;
+            else
+                he = 0;
+        } else
+            he -= 1023;
+        if (prec >= 0 && prec < 13) {
+            // round the 52 fraction bits to prec hex digits (half even)
+            shiftb = (13 - prec) * 4;
+            U64i full = ((lead(U64i)) << 52) | hm;
+            U64i half = 1 << (shiftb - 1);
+            U64i rem = full & ((1 << shiftb) - 1);
+            full = full >> shiftb;
+            if (rem > half || (rem == half && (full & 1)))
+                full++;
+            full = full << shiftb;
+            lead = full >> 52;
+            hm = full & 0xFFFFFFFFFFFFF;
+            if (lead > 1) {
+                lead = 1;
+                he++;
+            }
+        }
+        body[blen++] = '0' + lead;
+        keep = 13;
+        if (prec < 0) {
+            // trailing zero digits are dropped
+            keep = 13;
+            while (keep > 0 && ((hm >> (52 - 4 * keep)) & 0xF) == 0)
+                keep--;
+        } else
+            keep = prec;
+        if (keep > 0 || alt)
+            body[blen++] = '.';
+        for (i = 1; i <= keep; i++) {
+            if (i <= 13)
+                hdig = (hm >> (52 - 4 * i)) & 0xF;
+            else
+                hdig = 0;
+            if (hdig < 10)
+                body[blen++] = '0' + hdig;
+            else
+                body[blen++] = 'a' + hdig - 10 - 32 * !lower;
+        }
+        body[blen++] = 'p' - 32 * !lower;
+        if (he < 0) {
+            body[blen++] = '-';
+            he = -he;
+        } else
+            body[blen++] = '+';
+        if (he >= 1000)
+            body[blen++] = '0' + he / 1000;
+        if (he >= 100)
+            body[blen++] = '0' + (he / 100) % 10;
+        if (he >= 10)
+            body[blen++] = '0' + (he / 10) % 10;
+        body[blen++] = '0' + he % 10;
+        LC_PadAndPut(b, body, blen, width, left, zero, prefix);
+        return;
+    }
+    if (prec < 0)
+        prec = 6;
+    if (v == 0.0 || v == -0.0) {
+        n = 1;
+        digits[0] = '0';
+        point = 1;
+    } else {
+        if (neg)
+            v = -v;
+        n = LC_Digits(v, digits, &point);
+    }
+    if (conv == 'g' || conv == 'G') {
+        if (prec == 0)
+            prec = 1;
+        if (digits[0] == '0' && n == 1) {
+            expo = 0;
+            n = 1;
+        } else {
+            n = LC_Round(digits, n, &point, prec);
+            expo = point - 1;
+            if (n == 0) {
+                digits[0] = '0';
+                n = 1;
+            }
+        }
+        if (expo < -4 || expo >= prec) {
+            useexp = 1;
+            prec = prec - 1;
+        } else
+            prec = prec - 1 - expo;
+        dropzeros = !alt;
+        if (useexp)
+            conv = 'e';
+        else
+            conv = 'f';
+    } else if (conv == 'e' || conv == 'E') {
+        useexp = 1;
+        if (!(digits[0] == '0' && n == 1)) {
+            n = LC_Round(digits, n, &point, prec + 1);
+            if (n == 0) {
+                digits[0] = '1';
+                n = 1;
+                point++;
+            }
+        }
+        expo = point - 1;
+        if (digits[0] == '0' && n == 1)
+            expo = 0;
+    } else {
+        // f: prec digits after the point
+        if (!(digits[0] == '0' && n == 1)) {
+            keep = point + prec;
+            if (keep < 0) {
+                n = 0;
+            } else if (keep == 0) {
+                // rounds to 0 or 10^-prec
+                if (digits[0] > '5' || (digits[0] == '5' && n > 1)) {
+                    digits[0] = '1';
+                    n = 1;
+                    point++;
+                } else
+                    n = 0;
+            } else
+                n = LC_Round(digits, n, &point, keep);
+            if (n == 0) {
+                digits[0] = '0';
+                n = 1;
+                point = 1;
+            }
+        }
+    }
+    if (useexp) {
+        body[blen++] = digits[0];
+        if (prec > 0 || alt)
+            body[blen++] = '.';
+        for (i = 1; i <= prec; i++) {
+            if (i < n)
+                body[blen++] = digits[i];
+            else
+                body[blen++] = '0';
+        }
+        if (dropzeros && prec > 0) {
+            while (body[blen - 1] == '0')
+                blen--;
+            if (body[blen - 1] == '.')
+                blen--;
+        }
+        body[blen++] = ec;
+        if (expo < 0) {
+            body[blen++] = '-';
+            expo = -expo;
+        } else
+            body[blen++] = '+';
+        if (expo >= 100)
+            body[blen++] = '0' + expo / 100;
+        body[blen++] = '0' + (expo / 10) % 10;
+        body[blen++] = '0' + expo % 10;
+    } else {
+        if (point <= 0 || (digits[0] == '0' && n == 1))
+            body[blen++] = '0';
+        else {
+            for (i = 0; i < point; i++) {
+                if (i < n)
+                    body[blen++] = digits[i];
+                else
+                    body[blen++] = '0';
+            }
+        }
+        if (prec > 0 || alt)
+            body[blen++] = '.';
+        for (i = 0; i < prec; i++) {
+            x = point + i;
+            if (digits[0] == '0' && n == 1)
+                body[blen++] = '0';
+            else if (x < 0 || x >= n)
+                body[blen++] = '0';
+            else
+                body[blen++] = digits[x];
+        }
+        if (dropzeros && prec > 0) {
+            while (body[blen - 1] == '0')
+                blen--;
+            if (body[blen - 1] == '.')
+                blen--;
+        }
+    }
+    LC_PadAndPut(b, body, blen, width, left, zero && isnum, prefix);
+}
+
+U0 LC_FmtInt(LC_Buf *b, U64i v, I32i conv, I32i isneg, I32i left, I32i plus, I32i space, I32i alt, I32i zero, I64i width, I64i prec)
+{
+    U8i body[80], rev[72];
+    I64i blen = 0, n = 0, base = 10, i, prefix = 0;
+    U8i sign = 0, dig;
+    if (conv == 'x' || conv == 'X')
+        base = 16;
+    else if (conv == 'o')
+        base = 8;
+    if (isneg)
+        sign = '-';
+    else if (conv == 'd' || conv == 'i') {
+        if (plus)
+            sign = '+';
+        else if (space)
+            sign = ' ';
+    }
+    if (prec >= 0)
+        zero = 0;
+    while (v) {
+        i = v % base;
+        v = v / base;
+        if (i < 10)
+            dig = '0' + i;
+        else if (conv == 'X')
+            dig = 'A' + i - 10;
+        else
+            dig = 'a' + i - 10;
+        rev[n++] = dig;
+    }
+    if (prec == 0 && n == 0 && !alt)
+        ;
+    else if (n == 0)
+        rev[n++] = '0';
+    if (base == 8 && alt && (n == 0 || rev[n - 1] != '0'))
+        rev[n++] = '0';
+    if (sign)
+        body[blen++] = sign;
+    if (base == 16 && alt && n > 0 && !(n == 1 && rev[0] == '0')) {
+        body[blen++] = '0';
+        body[blen++] = conv;
+    }
+    prefix = blen;
+    for (i = n; i < prec; i++)
+        body[blen++] = '0';
+    while (n > 0)
+        body[blen++] = rev[--n];
+    LC_PadAndPut(b, body, blen, width, left, zero, prefix);
+}
+
+U0 LC_Format(LC_Buf *b, U8i *format, LC_VA *ap)
+{
+    U8i *p = format, *s, cbuf[2];
+    I32i conv, len;
+    I32i left, plus, space, alt, zero;
+    I64i width, prec, v, n;
+    F64 f;
+    U64i u;
+    while (*p) {
+        if (*p != '%') {
+            s = p;
+            while (*p && *p != '%')
+                p++;
+            LC_BufWrite(b, s, p - s);
+        } else {
+            p++;
+            left = plus = space = alt = zero = 0;
+            while (1) {
+                if (*p == '-')
+                    left = 1;
+                else if (*p == '+')
+                    plus = 1;
+                else if (*p == ' ')
+                    space = 1;
+                else if (*p == '#')
+                    alt = 1;
+                else if (*p == '0')
+                    zero = 1;
+                else
+                    break;
+                p++;
+            }
+            width = 0;
+            if (*p == '*') {
+                width = LC_VaArg(ap)(I32i);
+                if (width < 0) {
+                    left = 1;
+                    width = -width;
+                }
+                p++;
+            } else {
+                while (isdigit(*p)) {
+                    width = width * 10 + (*p - '0');
+                    p++;
+                }
+            }
+            prec = -1;
+            if (*p == '.') {
+                p++;
+                prec = 0;
+                if (*p == '*') {
+                    prec = LC_VaArg(ap)(I32i);
+                    p++;
+                } else {
+                    while (isdigit(*p)) {
+                        prec = prec * 10 + (*p - '0');
+                        p++;
+                    }
+                }
+            }
+            len = 0;  // 0 int, 1 long (any 64 bit), -1 short, -2 char
+            while (*p == 'l' || *p == 'h' || *p == 'z' || *p == 'j' || *p == 't' || *p == 'L' || *p == 'q') {
+                if (*p == 'h') {
+                    if (len == -1)
+                        len = -2;
+                    else
+                        len = -1;
+                } else
+                    len = 1;
+                p++;
+            }
+            conv = *p;
+            if (conv)
+                p++;
+            if (conv == 'd' || conv == 'i') {
+                v = LC_VaArg(ap);
+                if (len == 0)
+                    v = v(I32i);
+                else if (len == -1)
+                    v = v(I16i);
+                else if (len == -2)
+                    v = v(I8i);
+                if (v < 0)
+                    LC_FmtInt(b, -v, conv, 1, left, plus, space, alt, zero, width, prec);
+                else
+                    LC_FmtInt(b, v, conv, 0, left, plus, space, alt, zero, width, prec);
+            } else if (conv == 'u' || conv == 'x' || conv == 'X' || conv == 'o') {
+                u = LC_VaArg(ap);
+                if (len == 0)
+                    u = u & 0xFFFFFFFF;
+                else if (len == -1)
+                    u = u & 0xFFFF;
+                else if (len == -2)
+                    u = u & 0xFF;
+                LC_FmtInt(b, u, conv, 0, left, plus, space, alt, zero, width, prec);
+            } else if (conv == 'c') {
+                cbuf[0] = LC_VaArg(ap);
+                LC_PadAndPut(b, cbuf, 1, width, left, 0, 0);
+            } else if (conv == 's') {
+                s = LC_VaArg(ap);
+                if (!s)
+                    s = "(null)";
+                n = strlen(s);
+                if (prec >= 0 && prec < n)
+                    n = prec;
+                LC_PadAndPut(b, s, n, width, left, 0, 0);
+            } else if (conv == 'p') {
+                u = LC_VaArg(ap);
+                if (!u)
+                    LC_PadAndPut(b, "(nil)", 5, width, left, 0, 0);
+                else
+                    LC_FmtInt(b, u, 'x', 0, left, plus, space, 1, 0, width, prec);
+            } else if (conv == 'e' || conv == 'E' || conv == 'f' || conv == 'F' || conv == 'g' || conv == 'G' || conv == 'a' || conv == 'A') {
+                v = LC_VaArg(ap);
+                f = LC_Bits2F(v);
+                if (conv == 'F')
+                    conv = 'f';
+                LC_FmtFloat(b, f, conv, left, plus, space, alt, zero, width, prec);
+            } else if (conv == '%')
+                LC_BufWrite(b, "%", 1);
+            else if (conv == 'n') {
+                s = LC_VaArg(ap);
+                *s(I32i *) = b->len;
+            } else if (conv) {
+                LC_BufWrite(b, "%", 1);
+                cbuf[0] = conv;
+                LC_BufWrite(b, cbuf, 1);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- stdio.h
+
+class LC_FILE {
+    I64i kind;      // 0 stdin, 1 stdout, 2 stderr, 3 a file
+    U8i *name;
+    U8i *data;      // the whole file
+    I64i size;
+    I64i cap;
+    I64i pos;
+    I64i canread;
+    I64i canwrite;
+    I64i append;
+    I64i dirty;
+    I64i err;
+    I64i eof;
+    I64i ungot;     // pushed-back byte, or -1
+    I64i open;
+};
+
+LC_FILE lc_std[3];
+LC_FILE *stdin, *stdout, *stderr;
+I64i lc_files_open;
+LC_FILE *lc_file_list[64];
+
+LC_FILE *LC_NewFile()
+{
+    LC_FILE *f = CAlloc(sizeof(LC_FILE));
+    f->ungot = -1;
+    f->open = 1;
+    return f;
+}
+
+I32i fflush(LC_FILE *f)
+{
+    I64i i;
+    if (!f) {
+        for (i = 0; i < 64; i++) {
+            if (lc_file_list[i] && lc_file_list[i]->dirty)
+                fflush(lc_file_list[i]);
+        }
+        return 0;
+    }
+    if (f->kind == 3 && f->dirty) {
+        if (!FileWrite(f->name, f->data, f->size)) {
+            f->err = 1;
+            errno = LC_EIO;
+            return -1;
+        }
+        f->dirty = 0;
+    }
+    return 0;
+}
+
+I32i fclose(LC_FILE *f)
+{
+    I64i i;
+    I32i r = 0;
+    if (!f)
+        return -1;
+    if (f->kind != 3)
+        return 0;
+    r = fflush(f);
+    for (i = 0; i < 64; i++) {
+        if (lc_file_list[i] == f)
+            lc_file_list[i] = 0;
+    }
+    if (f->data)
+        Free(f->data);
+    if (f->name)
+        Free(f->name);
+    Free(f);
+    return r;
+}
+
+LC_FILE *fopen(U8i *name, U8i *mode)
+{
+    LC_FILE *f;
+    I64i size = 0, i;
+    U8i *data;
+    I32i r, w, a, plus;
+    r = mode[0] == 'r';
+    w = mode[0] == 'w';
+    a = mode[0] == 'a';
+    plus = 0;
+    for (i = 1; mode[i]; i++) {
+        if (mode[i] == '+')
+            plus = 1;
+    }
+    if (!r && !w && !a) {
+        errno = LC_EINVAL;
+        return 0;
+    }
+    f = LC_NewFile();
+    f->kind = 3;
+    f->name = strdup(name);
+    f->canread = r || plus;
+    f->canwrite = w || a || plus;
+    f->append = a;
+    if (w) {
+        f->data = MAlloc(64);
+        f->cap = 64;
+        f->size = 0;
+        f->dirty = 1;
+        if (!FileWrite(name, f->data, 0)) {
+            errno = LC_EACCES;
+            fclose(f);
+            return 0;
+        }
+    } else {
+        data = FileRead(name, &size, 0);
+        if (!data) {
+            if (a) {
+                f->data = MAlloc(64);
+                f->cap = 64;
+                f->size = 0;
+            } else {
+                errno = LC_ENOENT;
+                fclose(f);
+                return 0;
+            }
+        } else {
+            f->data = data;
+            f->size = size;
+            f->cap = size + 1;
+        }
+        if (a)
+            f->pos = f->size;
+    }
+    for (i = 0; i < 64; i++) {
+        if (!lc_file_list[i]) {
+            lc_file_list[i] = f;
+            break;
+        }
+    }
+    return f;
+}
+
+LC_FILE *freopen(U8i *name, U8i *mode, LC_FILE *f)
+{
+    LC_FILE *g;
+    if (f && f->kind == 3)
+        fclose(f);
+    if (!name)
+        return 0;
+    g = fopen(name, mode);
+    return g;
+}
+
+LC_FILE *tmpfile()
+{
+    LC_FILE *f = LC_NewFile();
+    f->kind = 3;
+    f->name = strdup("lctmpfile");
+    f->data = MAlloc(64);
+    f->cap = 64;
+    f->canread = 1;
+    f->canwrite = 1;
+    return f;
+}
+
+I32i LC_GetC(LC_FILE *f)
+{
+    I32i c;
+    if (f->ungot >= 0) {
+        c = f->ungot;
+        f->ungot = -1;
+        return c;
+    }
+    if (f->kind == 0) {
+        c = LC_GetChar();
+        if (c < 0)
+            f->eof = 1;
+        return c;
+    }
+    if (f->kind != 3 || !f->canread) {
+        f->err = 1;
+        return -1;
+    }
+    if (f->pos >= f->size) {
+        f->eof = 1;
+        return -1;
+    }
+    return f->data[f->pos++];
+}
+
+I32i fgetc(LC_FILE *f) {return LC_GetC(f);}
+I32i getc(LC_FILE *f) {return LC_GetC(f);}
+I32i getchar() {return LC_GetC(stdin);}
+
+I32i ungetc(I32i c, LC_FILE *f)
+{
+    if (c < 0)
+        return -1;
+    if (f->kind == 3 && f->pos > 0 && f->ungot < 0 && f->data[f->pos - 1] == c) {
+        f->pos--;
+        f->eof = 0;
+        return c;
+    }
+    f->ungot = c;
+    f->eof = 0;
+    return c;
+}
+
+U64i fwrite(U8i *p, U64i size, U64i count, LC_FILE *f)
+{
+    U64i n = size * count;
+    U8i *q;
+    I64i cap;
+    if (!n)
+        return 0;
+    if (f->kind == 1 || f->kind == 2) {
+        LC_Write(f->kind, p, n);
+        return count;
+    }
+    if (f->kind != 3 || !f->canwrite) {
+        f->err = 1;
+        return 0;
+    }
+    if (f->append)
+        f->pos = f->size;
+    if (f->pos + n + 1 > f->cap) {
+        cap = f->cap * 2;
+        if (cap < f->pos + n + 64)
+            cap = f->pos + n + 64;
+        q = MAlloc(cap);
+        if (f->size)
+            MemCpy(q, f->data, f->size);
+        Free(f->data);
+        f->data = q;
+        f->cap = cap;
+    }
+    if (f->pos > f->size)
+        MemSet(f->data + f->size, 0, f->pos - f->size);
+    MemCpy(f->data + f->pos, p, n);
+    f->pos += n;
+    if (f->pos > f->size)
+        f->size = f->pos;
+    f->dirty = 1;
+    return count;
+}
+
+U64i fread(U8i *p, U64i size, U64i count, LC_FILE *f)
+{
+    U64i n = size * count, i = 0;
+    I32i c;
+    if (!n)
+        return 0;
+    if (f->kind == 3 && f->canread && f->ungot < 0) {
+        if (f->pos + n > f->size) {
+            n = f->size - f->pos;
+            f->eof = 1;
+        }
+        if (n)
+            MemCpy(p, f->data + f->pos, n);
+        f->pos += n;
+        return n / size;
+    }
+    while (i < n) {
+        c = LC_GetC(f);
+        if (c < 0)
+            break;
+        p[i++] = c;
+    }
+    return i / size;
+}
+
+I32i fputc(I32i c, LC_FILE *f)
+{
+    U8i ch = c;
+    if (!fwrite(&ch, 1, 1, f))
+        return -1;
+    return ch;
+}
+
+I32i putc(I32i c, LC_FILE *f) {return fputc(c, f);}
+I32i putchar(I32i c) {return fputc(c, stdout);}
+
+I32i fputs(U8i *s, LC_FILE *f)
+{
+    U64i n = strlen(s);
+    if (n && !fwrite(s, 1, n, f))
+        return -1;
+    return 0;
+}
+
+I32i puts(U8i *s)
+{
+    fputs(s, stdout);
+    fputc('\n', stdout);
+    return 0;
+}
+
+U8i *fgets(U8i *s, I32i n, LC_FILE *f)
+{
+    I32i i = 0, c;
+    if (n <= 0)
+        return 0;
+    while (i < n - 1) {
+        c = LC_GetC(f);
+        if (c < 0)
+            break;
+        s[i++] = c;
+        if (c == '\n')
+            break;
+    }
+    if (i == 0)
+        return 0;
+    s[i] = 0;
+    return s;
+}
+
+I32i feof(LC_FILE *f) {return f->eof != 0;}
+I32i ferror(LC_FILE *f) {return f->err != 0;}
+
+U0 clearerr(LC_FILE *f)
+{
+    f->err = 0;
+    f->eof = 0;
+}
+
+I32i fseek(LC_FILE *f, I64i off, I32i whence)
+{
+    I64i base = 0;
+    if (f->kind != 3)
+        return -1;
+    if (whence == 1)
+        base = f->pos;
+    else if (whence == 2)
+        base = f->size;
+    if (base + off < 0)
+        return -1;
+    f->pos = base + off;
+    f->ungot = -1;
+    f->eof = 0;
+    return 0;
+}
+
+I64i ftell(LC_FILE *f)
+{
+    if (f->kind != 3)
+        return -1;
+    return f->pos;
+}
+
+U0 rewind(LC_FILE *f)
+{
+    fseek(f, 0, 0);
+    f->err = 0;
+}
+
+I32i setvbuf(LC_FILE *f, U8i *buf, I32i mode, U64i size) {return 0;}
+U0 setbuf(LC_FILE *f, U8i *buf) {}
+I32i fileno(LC_FILE *f) {return f->kind;}
+
+I32i LC_Out(LC_FILE *f, U8i *format, LC_VA *ap)
+{
+    LC_Buf b;
+    I32i n;
+    b.p = 0;
+    b.len = 0;
+    b.cap = 0;
+    LC_Format(&b, format, ap);
+    n = b.len;
+    if (n)
+        fwrite(b.p, 1, n, f);
+    if (b.p)
+        Free(b.p);
+    return n;
+}
+
+I32i LC_Str(U8i *dst, U64i size, U8i *format, LC_VA *ap)
+{
+    LC_Buf b;
+    I32i n;
+    U64i k;
+    b.p = 0;
+    b.len = 0;
+    b.cap = 0;
+    LC_Format(&b, format, ap);
+    n = b.len;
+    if (size) {
+        k = n;
+        if (k > size - 1)
+            k = size - 1;
+        if (k)
+            MemCpy(dst, b.p, k);
+        dst[k] = 0;
+    }
+    if (b.p)
+        Free(b.p);
+    return n;
+}
+
+I32i printf(U8i *format, ...)
+{
+    LC_VA ap;
+    ap.argv = argv;
+    ap.i = 0;
+    ap.n = argc;
+    return LC_Out(stdout, format, &ap);
+}
+
+I32i fprintf(LC_FILE *f, U8i *format, ...)
+{
+    LC_VA ap;
+    ap.argv = argv;
+    ap.i = 0;
+    ap.n = argc;
+    return LC_Out(f, format, &ap);
+}
+
+I32i sprintf(U8i *dst, U8i *format, ...)
+{
+    LC_VA ap;
+    ap.argv = argv;
+    ap.i = 0;
+    ap.n = argc;
+    return LC_Str(dst, 0x7FFFFFFF, format, &ap);
+}
+
+I32i snprintf(U8i *dst, U64i size, U8i *format, ...)
+{
+    LC_VA ap;
+    ap.argv = argv;
+    ap.i = 0;
+    ap.n = argc;
+    return LC_Str(dst, size, format, &ap);
+}
+
+I32i vprintf(U8i *format, LC_VA *ap) {return LC_Out(stdout, format, ap);}
+I32i vfprintf(LC_FILE *f, U8i *format, LC_VA *ap) {return LC_Out(f, format, ap);}
+I32i vsprintf(U8i *dst, U8i *format, LC_VA *ap) {return LC_Str(dst, 0x7FFFFFFF, format, ap);}
+I32i vsnprintf(U8i *dst, U64i size, U8i *format, LC_VA *ap) {return LC_Str(dst, size, format, ap);}
+
+I32i remove(U8i *name)
+{
+    errno = LC_EACCES;
+    return -1;
+}
+
+I32i rename(U8i *from, U8i *to)
+{
+    errno = LC_EACCES;
+    return -1;
+}
+
+I64i lc_tmp_serial;
+
+U8i *tmpnam(U8i *buf)
+{
+    U8i *b = buf;
+    if (!b)
+        b = "/tmp/lc_tmp_XXXXXX";
+    else
+        strcpy(b, "/tmp/lc_tmp_XXXXXX");
+    return b;
+}
+
+// ---------------------------------------------------------------- stdlib.h
+
+U0 abort()
+{
+    fflush(0);
+    LC_Write(2, "abort\n", 6);
+    lc_exit_status = 134;
+    if (lc_run_active) {
+        lc_run_active = 0;
+        AIWNIOS_LongJmp(lc_run_ctx);
+    }
+    NativeExit(134);
+}
+
+U0 exit(I32i status)
+{
+    fflush(0);
+    lc_exit_status = status;
+    if (lc_run_active) {
+        lc_run_active = 0;
+        AIWNIOS_LongJmp(lc_run_ctx);
+    }
+    NativeExit(status);
+}
+
+I32i atexit(U8i *fn) {return 0;}
+U8i *getenv(U8i *name) {return 0;}
+I32i system(U8i *cmd) {return -1;}
+
+I32i LC_JmpResult(I64i *buf, I64i resumed)
+{
+    if (resumed) return buf[0];
+    return 0;
+}
+
+U0 longjmp(I64i *buf, I32i val)
+{
+    if (!val) val = 1;
+    buf[0] = val;
+    AIWNIOS_LongJmp(buf);
+}
+
+I64i lc_rand_state;
+
+I32i rand()
+{
+    lc_rand_state = lc_rand_state * 6364136223846793005 + 1442695040888963407;
+    return (lc_rand_state >> 33) & 0x7FFFFFFF;
+}
+
+U0 srand(U32i seed) {lc_rand_state = seed;}
+
+U0 LC_QSort(U8i *base, I64i lo, I64i hi, U64i size, U8i *cmpfp, U8i *tmp)
+{//Sorts elements lo..hi (inclusive) with a Hoare-partition quicksort.
+    I64i (*cmp)(U8i *a, U8i *b);
+    I64i i, j;
+    U8i *pivot;
+    cmp = cmpfp;
+    while (lo < hi) {
+        pivot = base + ((lo + hi) / 2) * size;
+        MemCpy(tmp, pivot, size);
+        i = lo;
+        j = hi;
+        while (i <= j) {
+            while ((*cmp)(base + i * size, tmp) < 0)
+                i++;
+            while ((*cmp)(base + j * size, tmp) > 0)
+                j--;
+            if (i <= j) {
+                if (i != j) {
+                    MemCpy(tmp + size, base + i * size, size);
+                    MemCpy(base + i * size, base + j * size, size);
+                    MemCpy(base + j * size, tmp + size, size);
+                }
+                i++;
+                j--;
+            }
+        }
+        if (j - lo < hi - i) {
+            LC_QSort(base, lo, j, size, cmpfp, tmp);
+            lo = i;
+        } else {
+            LC_QSort(base, i, hi, size, cmpfp, tmp);
+            hi = j;
+        }
+    }
+}
+
+U0 qsort(U8i *base, U64i count, U64i size, U8i *cmpfp)
+{
+    U8i *tmp;
+    if (count < 2)
+        return;
+    tmp = MAlloc(size * 2);
+    LC_QSort(base, 0, count - 1, size, cmpfp, tmp);
+    Free(tmp);
+}
+
+U8i *bsearch(U8i *key, U8i *base, U64i count, U64i size, U8i *cmpfp)
+{
+    I64i (*cmp)(U8i *a, U8i *b);
+    I64i lo = 0, hi = count - 1, mid, r;
+    cmp = cmpfp;
+    while (lo <= hi) {
+        mid = (lo + hi) / 2;
+        r = (*cmp)(key, base + mid * size);
+        if (r == 0)
+            return base + mid * size;
+        if (r < 0)
+            hi = mid - 1;
+        else
+            lo = mid + 1;
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------- time.h (UTC)
+
+class tm {
+    I32i tm_sec;
+    I32i tm_min;
+    I32i tm_hour;
+    I32i tm_mday;
+    I32i tm_mon;
+    I32i tm_year;
+    I32i tm_wday;
+    I32i tm_yday;
+    I32i tm_isdst;
+};
+
+tm lc_tm_buf;
+
+I64i time(I64i *t)
+{
+    I64i s = LC_Seconds();
+    if (t)
+        *t = s;
+    return s;
+}
+
+I64i clock()
+{//Processor time in CLOCKS_PER_SEC = 1000000 units (the wall clock, in milliseconds).
+    return LC_Ticks() * 1000;
+}
+
+F64 difftime(I64i a, I64i b) {return a - b;}
+
+I32i LC_Leap(I64i y) {return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;}
+
+I64i LC_MDays(I64i mon, I64i y)
+{
+    switch (mon) {
+        case 1:
+            if (LC_Leap(y))
+                return 29;
+            return 28;
+        case 3: case 5: case 8: case 10:
+            return 30;
+    }
+    return 31;
+}
+
+U8i *LC_DayName(I64i d)
+{
+    switch (d) {
+        case 0: return "Sunday";
+        case 1: return "Monday";
+        case 2: return "Tuesday";
+        case 3: return "Wednesday";
+        case 4: return "Thursday";
+        case 5: return "Friday";
+    }
+    return "Saturday";
+}
+
+U8i *LC_MonthName(I64i m)
+{
+    switch (m) {
+        case 0: return "January";
+        case 1: return "February";
+        case 2: return "March";
+        case 3: return "April";
+        case 4: return "May";
+        case 5: return "June";
+        case 6: return "July";
+        case 7: return "August";
+        case 8: return "September";
+        case 9: return "October";
+        case 10: return "November";
+    }
+    return "December";
+}
+
+tm * gmtime(I64i *tp)
+{
+    I64i t = *tp, days, secs, y = 1970, md;
+    I32i mon;
+    days = t / 86400;
+    secs = t % 86400;
+    if (secs < 0) {
+        secs += 86400;
+        days--;
+    }
+    lc_tm_buf.tm_hour = secs / 3600;
+    lc_tm_buf.tm_min = (secs / 60) % 60;
+    lc_tm_buf.tm_sec = secs % 60;
+    lc_tm_buf.tm_wday = (days + 4) % 7;
+    if (lc_tm_buf.tm_wday < 0)
+        lc_tm_buf.tm_wday += 7;
+    while (days < 0) {
+        y--;
+        if (LC_Leap(y))
+            days += 366;
+        else
+            days += 365;
+    }
+    while (1) {
+        md = 365;
+        if (LC_Leap(y))
+            md = 366;
+        if (days < md)
+            break;
+        days -= md;
+        y++;
+    }
+    lc_tm_buf.tm_year = y - 1900;
+    lc_tm_buf.tm_yday = days;
+    for (mon = 0; mon < 12; mon++) {
+        if (days < LC_MDays(mon, y))
+            break;
+        days -= LC_MDays(mon, y);
+    }
+    lc_tm_buf.tm_mon = mon;
+    lc_tm_buf.tm_mday = days + 1;
+    lc_tm_buf.tm_isdst = 0;
+    return &lc_tm_buf;
+}
+
+tm * localtime(I64i *tp) {return gmtime(tp);}
+
+I64i mktime(tm * tp)
+{
+    I64i y = tp->tm_year + 1900, mon = tp->tm_mon, days = 0, i;
+    y += mon / 12;
+    mon = mon % 12;
+    if (mon < 0) {
+        mon += 12;
+        y--;
+    }
+    if (y >= 1970) {
+        for (i = 1970; i < y; i++) {
+            if (LC_Leap(i))
+                days += 366;
+            else
+                days += 365;
+        }
+    } else {
+        for (i = y; i < 1970; i++) {
+            if (LC_Leap(i))
+                days -= 366;
+            else
+                days -= 365;
+        }
+    }
+    for (i = 0; i < mon; i++)
+        days += LC_MDays(i, y);
+    days += tp->tm_mday - 1;
+    return days * 86400 + tp->tm_hour * 3600 + tp->tm_min * 60 + tp->tm_sec;
+}
+
+U64i strftime(U8i *dst, U64i max, U8i *format, tm * tp)
+{
+    LC_Buf b;
+    U8i tmp[32];
+    U64i n;
+    I32i h;
+    b.p = 0;
+    b.len = 0;
+    b.cap = 0;
+    while (*format) {
+        if (*format != '%') {
+            LC_BufWrite(&b, format, 1);
+            format++;
+        } else {
+            format++;
+            if (*format == 'E' || *format == 'O')
+                format++;
+            switch (*format) {
+                case 'a': LC_BufWrite(&b, LC_DayName(tp->tm_wday % 7), 3); break;
+                case 'A': LC_BufWrite(&b, LC_DayName(tp->tm_wday % 7), strlen(LC_DayName(tp->tm_wday % 7))); break;
+                case 'b': case 'h': LC_BufWrite(&b, LC_MonthName(tp->tm_mon % 12), 3); break;
+                case 'B': LC_BufWrite(&b, LC_MonthName(tp->tm_mon % 12), strlen(LC_MonthName(tp->tm_mon % 12))); break;
+                case 'd': sprintf(tmp, "%02d", tp->tm_mday); LC_BufWrite(&b, tmp, 2); break;
+                case 'e': sprintf(tmp, "%2d", tp->tm_mday); LC_BufWrite(&b, tmp, 2); break;
+                case 'H': sprintf(tmp, "%02d", tp->tm_hour); LC_BufWrite(&b, tmp, 2); break;
+                case 'I':
+                    h = tp->tm_hour % 12;
+                    if (!h)
+                        h = 12;
+                    sprintf(tmp, "%02d", h);
+                    LC_BufWrite(&b, tmp, 2);
+                    break;
+                case 'j': sprintf(tmp, "%03d", tp->tm_yday + 1); LC_BufWrite(&b, tmp, 3); break;
+                case 'm': sprintf(tmp, "%02d", tp->tm_mon + 1); LC_BufWrite(&b, tmp, 2); break;
+                case 'M': sprintf(tmp, "%02d", tp->tm_min); LC_BufWrite(&b, tmp, 2); break;
+                case 'p':
+                    if (tp->tm_hour >= 12)
+                        LC_BufWrite(&b, "PM", 2);
+                    else
+                        LC_BufWrite(&b, "AM", 2);
+                    break;
+                case 'S': sprintf(tmp, "%02d", tp->tm_sec); LC_BufWrite(&b, tmp, 2); break;
+                case 'w': sprintf(tmp, "%d", tp->tm_wday); LC_BufWrite(&b, tmp, 1); break;
+                case 'y': sprintf(tmp, "%02d", tp->tm_year % 100); LC_BufWrite(&b, tmp, 2); break;
+                case 'Y': n = sprintf(tmp, "%d", tp->tm_year + 1900); LC_BufWrite(&b, tmp, n); break;
+                case 'Z': LC_BufWrite(&b, "UTC", 3); break;
+                case 'z': LC_BufWrite(&b, "+0000", 5); break;
+                case 'n': LC_BufWrite(&b, "\n", 1); break;
+                case 't': LC_BufWrite(&b, "\t", 1); break;
+                case '%': LC_BufWrite(&b, "%", 1); break;
+                case 'D': n = strftime(tmp, 32, "%m/%d/%y", tp); LC_BufWrite(&b, tmp, n); break;
+                case 'F': n = strftime(tmp, 32, "%Y-%m-%d", tp); LC_BufWrite(&b, tmp, n); break;
+                case 'T': case 'X': n = strftime(tmp, 32, "%H:%M:%S", tp); LC_BufWrite(&b, tmp, n); break;
+                case 'R': n = strftime(tmp, 32, "%H:%M", tp); LC_BufWrite(&b, tmp, n); break;
+                case 'x': n = strftime(tmp, 32, "%m/%d/%y", tp); LC_BufWrite(&b, tmp, n); break;
+                case 'c':
+                    n = strftime(tmp, 32, "%a %b %e %H:%M:%S %Y", tp);
+                    LC_BufWrite(&b, tmp, n);
+                    break;
+                default:
+                    if (!*format) {
+                        format--;
+                    } else {
+                        LC_BufWrite(&b, "%", 1);
+                        LC_BufWrite(&b, format, 1);
+                    }
+            }
+            format++;
+        }
+    }
+    if (b.len + 1 > max) {
+        if (b.p)
+            Free(b.p);
+        return 0;
+    }
+    if (b.len)
+        MemCpy(dst, b.p, b.len);
+    dst[b.len] = 0;
+    n = b.len;
+    if (b.p)
+        Free(b.p);
+    return n;
+}
+
+// ---------------------------------------------------------------- locale.h, signal.h
+
+class lconv {
+    U8i *decimal_point;
+    U8i *thousands_sep;
+    U8i *grouping;
+};
+
+lconv lc_lconv;
+
+U8i *setlocale(I32i category, U8i *locale)
+{
+    if (!locale || !*locale || !strcmp(locale, "C") || !strcmp(locale, "POSIX"))
+        return "C";
+    return 0;
+}
+
+lconv * localeconv()
+{
+    lc_lconv.decimal_point = ".";
+    lc_lconv.thousands_sep = "";
+    lc_lconv.grouping = "";
+    return &lc_lconv;
+}
+
+U8i *signal(I32i sig, U8i *handler) {return 0;}
+I32i raise(I32i sig) {return 0;}
+I32i isatty(I32i fd) {return 1;}
+
+// ---------------------------------------------------------------- program start
+
+I64i lc_argc;
+U8i **lc_argv;
+
+I64i LibCArgc()
+{
+    return lc_argc;
+}
+
+U8i **LibCArgv()
+{
+    return lc_argv;
+}
+
+U0 LibCSetArgs(I64i n, U8i **args)
+{//For the OS, where there is no command line: main's argc and argv.
+    lc_argc = n;
+    lc_argv = args;
+}
+
+#ifndef COOLCOM_KERNEL
+U0 LibCHostArgs()
+{//On the host: the arguments after the BIN (build/coolc --run x.BIN a b).
+    I64i i, n = NativeArgCount();
+    U8i **args;
+    args = MAlloc((n + 1) * 8);
+    for (i = 0; i < n; i++)
+        args[i] = NativeArg(i);
+    args[n] = 0;
+    lc_argc = n;
+    lc_argv = args;
+}
+
+#endif
+
+I32i LibCRun(U8i *mainfp)
+{//Call main(argc, argv) so that exit() and abort() return here; the exit status.
+    I32i (*fn)(I64i argc, U8i **argv);
+    I32i status = 0;
+    fn = mainfp;
+    if (AIWNIOS_SetJmp(lc_run_ctx)) {
+        return lc_exit_status;
+    }
+    lc_run_active = 1;
+    status = (*fn)(lc_argc, lc_argv);
+    lc_run_active = 0;
+    fflush(0);
+    return status;
+}
+
+U0 LC_Init()
+{
+    lc_nan_value = LC_Bits2F(0x7FF8000000000000);
+    lc_inf_value = LC_Bits2F(0x7FF0000000000000);
+    lc_std[0].kind = 0;
+    lc_std[0].ungot = -1;
+    lc_std[0].open = 1;
+    lc_std[1].kind = 1;
+    lc_std[1].ungot = -1;
+    lc_std[1].open = 1;
+    lc_std[2].kind = 2;
+    lc_std[2].ungot = -1;
+    lc_std[2].open = 1;
+    stdin = &lc_std[0];
+    stdout = &lc_std[1];
+    stderr = &lc_std[2];
+    lc_rand_state = 1;
+#ifndef COOLCOM_KERNEL
+    LibCHostArgs();
+#endif
+}
+
+LC_Init();

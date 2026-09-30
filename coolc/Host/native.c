@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 enum {
@@ -64,8 +65,6 @@ static void host_unimplemented(uint64_t id) {
     exit(1);
 }
 static void host_exit(int64_t status) { exit((int)status); }
-static int64_t host_float_to_int(double value) { return (int64_t)value; }
-static double host_int_to_float(int64_t value) { return (double)value; }
 
 // Standalone program services. Compiler invocations do not expose their argv.
 static int native_argc;
@@ -80,6 +79,22 @@ static int64_t host_get_char(void) {
     fflush(stdout);  // a prompt printed before the read must show first
     return getchar();  // the next byte of standard input, or -1 at the end
 }
+// LibC (coolc/LibC/LibC.cool) on the host: the console as bytes, the clock, the libm functions
+// under the OS's names (the OS's Arg(x, y) is atan2(y, x)).
+static int64_t host_write(int64_t fd, const char *buf, int64_t n) {
+    FILE *out = fd == 2 ? stderr : stdout;
+    size_t done = n > 0 ? fwrite(buf, 1, (size_t)n, out) : 0;
+    if (fd == 2)
+        fflush(stderr);
+    return (int64_t)done;
+}
+static int64_t host_unix_now(void) { return (int64_t)time(NULL); }
+static int64_t host_ticks(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+static double host_atan2_xy(double x, double y) { return atan2(y, x); }
 static void host_err_puts(const char *text) {
     fputs(text, stderr);
     fflush(stderr);
@@ -355,16 +370,22 @@ static void register_host_symbols(Module *m) {
     HOST("FileNameAbs", host_file_name_abs);
     HOST("FileRead", host_file_read);
     HOST("FileWrite", host_file_write);
-    HOST("C2HFloor", floor);
-    HOST("C2HCeil", ceil);
-    HOST("C2HSqrt", sqrt);
-    HOST("C2HFabs", fabs);
-    HOST("C2HFmod", fmod);
-    HOST("C2HCos", cos);
-    HOST("C2HAcos", acos);
-    HOST("C2HPow", pow);
-    HOST("C2HFloatToInt", host_float_to_int);
-    HOST("C2HIntToFloat", host_int_to_float);
+    HOST("NativeWrite", host_write);
+    HOST("UnixNow", host_unix_now);
+    HOST("__GetTicks", host_ticks);
+    HOST("Sin", sin);
+    HOST("Cos", cos);
+    HOST("Tan", tan);
+    HOST("ATan", atan);
+    HOST("Arg", host_atan2_xy);
+    HOST("Exp", exp);
+    HOST("Ln", log);
+    HOST("Log2", log2);
+    HOST("Log10", log10);
+    HOST("Pow", pow);
+    HOST("Sqrt", sqrt);
+    HOST("Floor", floor);
+    HOST("Ceil", ceil);
     HOST("FlushMsgs", host_zero);  // compiler errors are printed as they happen
 #undef HOST
 }

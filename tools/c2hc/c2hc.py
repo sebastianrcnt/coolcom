@@ -1,478 +1,499 @@
 #!/usr/bin/env python3
-"""A deliberately small AST based C to Cool translator.
+"""A C to Cool translator on top of clang's JSON AST (see README.md).
 
-Unsupported constructs fail with a source location instead of being copied as C.
-The clang AST supplies types and statement structure; no token level C rewriting
-is used for expressions.
+The C source is parsed by clang with the hermetic headers of coolc/LibC/include, so macros, typedefs,
+implicit conversions and types are all resolved before this program sees them. Nothing is copied as C:
+a construct this program cannot translate stops it with the source position.
+
+The Cool it writes keeps C's meaning:
+  - every C type has the size and layout it has in C (records get explicit padding), so sizeof and
+    offsetof are constants and pointer arithmetic scales the same;
+  - small integers are kept normalized (an unsigned char is 0..255, an int is sign-extended);
+  - conditional operators, and && / || / commas around them, are lowered to statements and temporaries;
+  - function pointers are plain U8i * and are called through one small thunk per signature;
+  - static data is initialized by generated functions, run when the file loads;
+  - the C library is coolc/LibC/LibC.cool.
 """
 import argparse
 import json
 import re
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 
-BASE = {'void': 'U0', 'char': 'U8i', 'signed char': 'I8i',
-        'unsigned char': 'U8i', 'short': 'I16i', 'unsigned short': 'U16i',
-        'int': 'I32i', 'unsigned int': 'U32i', 'long': 'I64i',
-        'unsigned long': 'U64i', 'long long': 'I64i',
-        'unsigned long long': 'U64i', '_Bool': 'I8i',
-        'float': 'F64', 'double': 'F64'}
-KEYWORDS = {'reg', 'class', 'union', 'public', 'private', 'lock', 'try', 'catch',
-            'throw', 'import', 'export', 'asm', 'Bool', 'Print', 'I32', 'U32'}
-WRAPPERS = {'ImplicitCastExpr', 'ParenExpr', 'ConstantExpr', 'ExprWithCleanups'}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ctype_model import (CError, CT, Rec, TypeParser, VOID, DOUBLE, INT, UINT, LONG, ULONG, BOOL,  # noqa: E402
+                         layout, sizeof, alignof, ptr_to)
+from c2hc_body import FnTranslator  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+LIBC_INCLUDE = ROOT / 'coolc' / 'LibC' / 'include'
+
+# Names Cool cannot have as C identifiers (its keywords and types, and the names the output uses).
+KEYWORDS = {'reg', 'class', 'union', 'public', 'private', 'lock', 'try', 'catch', 'throw', 'import',
+            'export', 'asm', 'Bool', 'Print', 'I8', 'U8', 'I16', 'U16', 'I32', 'U32', 'I64', 'U64', 'F64',
+            'U0', 'I0', 'lastclass', 'no_warn', 'start', 'end', 'interrupt', 'haserrcode', 'argpop',
+            'noargpop', 'argc', 'argv', 'fmt', 'ON', 'OFF', 'TRUE', 'FALSE', 'pi', 'inf', 'Fs', 'Gs',
+            'I8i', 'U8i', 'I16i', 'U16i', 'I32i', 'U32i', 'I64i', 'U64i'}
+
+SENT_STATIC = ('\x01', '\x02', '\x03')   # \x01 stem \x02 name \x03
+SENT_LOCAL = ('\x04', '\x05')            # \x04 name \x05
 
 
-class Translator:
-    def __init__(self, path, roots=None):
+class FileTracker:
+    """The file each top-level declaration is in. clang prints a file name only when it changes, so
+    the state must follow every location in document order."""
+
+    def __init__(self):
+        self.cur = None
+
+    def visit(self, x):
+        if isinstance(x, dict):
+            if 'offset' in x and 'tokLen' in x and 'file' in x:
+                self.cur = x['file']
+            for k, v in x.items():
+                if k == 'includedFrom':
+                    continue
+                if isinstance(v, (dict, list)):
+                    self.visit(v)
+        else:
+            for v in x:
+                if isinstance(v, (dict, list)):
+                    self.visit(v)
+
+    def scan(self, ast):
+        files = {}
+        for n in ast['inner']:
+            loc = n.get('loc')
+            if loc:
+                self.visit(loc)
+            files[id(n)] = self.cur
+            self.visit({k: v for k, v in n.items() if k != 'loc'})
+        return files
+
+
+class Global:
+    def __init__(self, name, ct, static, stem, external):
+        self.name = name
+        self.ct = ct
+        self.static = static
+        self.stem = stem
+        self.external = external
+        self.defined = False
+
+
+class Program:
+    def __init__(self, args):
+        self.args = args
+        self.typedefs = {}
+        self.tags = {}
+        self.anon_by_text = {}
+        self.anon_pending = deque()
+        self.enum_consts = {}
+        self.enum_types = {}
+        self.recs = []
+        self.anon_count = 0
+        self.globals = {}       # (stem or '', name) -> Global
+        self.global_order = []
+        self.funcs = {}         # (stem or '', name) -> dict(ct, external, defined)
+        self.func_defs = []     # (key, text, refs)
+        self.inits = []         # (lines, refs)
+        self.thunks = {}
+        self.strings = 0
+        self.reserved = set(KEYWORDS)
+        self.parser = TypeParser(self)
+        self.cache = {}
+        self.names_used = set()
+
+    def thunk(self, ft):
+        key = ft.key()
+        if key not in self.thunks:
+            self.thunks[key] = (ft, f"_c2hc_call_{len(self.thunks)}")
+        return self.thunks[key][1]
+
+    # -- the resolver interface of TypeParser
+    def typedef(self, name):
+        if name in self.typedefs:
+            return self.typedefs[name]
+        raise CError(f'unknown type name {name}')
+
+    def aggregate(self, agg, name):
+        if name.startswith('('):
+            if name in self.anon_by_text:
+                return self.anon_by_text[name]
+            for i, (kind, ct) in enumerate(self.anon_pending):
+                if kind == agg:
+                    del self.anon_pending[i]
+                    self.anon_by_text[name] = ct
+                    return ct
+            raise CError(f'unknown anonymous {agg} {name}')
+        if agg == 'enum':
+            return self.enum_types.get(name, INT)
+        key = (agg, name)
+        if key not in self.tags:
+            rec = Rec(name, agg == 'union')
+            rec.cool = self.cool_ident(name)
+            self.tags[key] = CT('rec', rec=rec)
+        return self.tags[key]
+
+    def ctype(self, s):
+        t = self.cache.get(s)
+        if t is None:
+            t = TypeParser(self).parse(s)
+            if not (t.kind == 'rec' and t.rec.fields is None) and '(unnamed' not in s and '(anonymous' not in s:
+                self.cache[s] = t
+        return t
+
+    def cool_ident(self, name):
+        if name in self.reserved:
+            return 'c_' + name
+        return name
+
+    # -- Cool type text
+    def cool(self, t):
+        k = t.kind
+        if k == 'void':
+            return 'U0'
+        if k == 'int':
+            return ('I' if t.signed else 'U') + str(t.bits) + 'i'
+        if k == 'float':
+            return 'F64'
+        if k == 'ptr':
+            to = t.to
+            if to.kind in ('void', 'func'):
+                return 'U8i *'
+            if to.kind == 'arr':
+                raise CError('pointer to array')
+            return self.cool(to) + (' *' if to.kind != 'ptr' else '*')
+        if k == 'rec':
+            return t.rec.cool
+        if k == 'arr':
+            raise CError('array type in a scalar position')
+        raise CError(f'cool type of {k}')
+
+    def decl(self, t, name):
+        """A Cool declaration of name with type t (arrays get their dimensions)."""
+        dims = ''
+        while t.kind == 'arr':
+            dims += f'[{t.n if t.n is not None else 1}]'
+            t = t.to
+        c = self.cool(t)
+        if c.endswith('*'):
+            return f'{c}{name}{dims}'
+        return f'{c} {name}{dims}'
+
+    # -- records
+    def define_record(self, rec, fields):
+        layout(rec, fields)
+
+    def record_text(self, rec):
+        lines = [('union ' if rec.is_union else 'class ') + rec.cool + ' {']
+        off = 0
+        pad = 0
+        for name, t, o in rec.fields:
+            if not rec.is_union and o > off:
+                lines.append(f'    U8i _pad{pad}[{o - off}];')
+                pad += 1
+            lines.append('    ' + self.decl(t, self.cool_ident(name)) + ';')
+            off = o + sizeof(t)
+        if rec.is_union:
+            if rec.size:
+                lines.append(f'    U8i _size[{rec.size}];')
+        elif rec.size > off:
+            lines.append(f'    U8i _pad{pad}[{rec.size - off}];')
+        lines.append('};')
+        return '\n'.join(lines)
+
+
+class TU:
+    """Translation of one C file into the program."""
+
+    def __init__(self, prog, path, flags):
+        self.prog = prog
         self.path = Path(path).resolve()
-        self.source = self.path.read_text()
-        command = ['clang', '-std=c11', '-fsyntax-only', '-Xclang', '-ast-dump=json', str(self.path)]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode:
-            raise ValueError(result.stderr)
-        self.ast = json.loads(result.stdout)
-        self.lines = []
-        self.static = []
-        self.function = ''
-        self.loop = []
-        self.serial = 0
-        self.static_names = {}
-        self.roots = roots
-        self.aliases = {}
-        self.record_names = {}
-        self.record_fields = {}
-        self.enums = {}
-        self.select_types = {}
-        self.local_names = {}
-        self.labels = {}
+        self.flags = flags
+        self.stem = re.sub(r'\W', '_', self.path.stem)
+        self.file_of = {}
 
-    def fail(self, node, detail):
-        loc = node.get('range', {}).get('begin', node.get('loc', {}))
-        raise ValueError(f'{self.path}:{loc.get("line", "?")}:{loc.get("col", "?")}: unsupported {detail} ({node.get("kind")})')
+    def clang(self):
+        cmd = ['clang', '-std=gnu11', '-funsigned-char', '-fsyntax-only', '-Xclang', '-ast-dump=json',
+               '-nostdinc', '-isystem', str(LIBC_INCLUDE), '-Wno-everything'] + self.flags + [str(self.path)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode:
+            raise CError('clang failed:\n' + r.stderr[-4000:])
+        return json.loads(r.stdout)
 
-    def name(self, value):
-        return 'c_' + value if value in KEYWORDS else value
+    def external(self, n):
+        f = self.file_of.get(id(n))
+        return bool(f) and str(LIBC_INCLUDE) in str(Path(f).resolve()) if f else False
 
-    def typ(self, spelling, node=None):
-        spelling = re.sub(r'\b(const|volatile|restrict|static)\b', '', spelling).strip()
-        array = re.search(r'\[(\d+)\]$', spelling)
-        if array:
-            return self.typ(spelling[:array.start()].strip(), node), int(array.group(1))
-        pointers = spelling.count('*')
-        spelling = spelling.replace('*', '').strip()
-        if spelling.startswith('struct '):
-            result = self.name(spelling[7:])
-        elif spelling.startswith('enum '):
-            result = 'I32i'
-        elif spelling in BASE:
-            result = BASE[spelling]
-        elif spelling in self.aliases:
-            result = self.typ(self.aliases[spelling], node)
-        else:
-            self.fail(node or {}, f'type {spelling}')
-        if isinstance(result, tuple):
-            self.fail(node or {}, f'pointer to array type {spelling}')
-        return result + ' *' * pointers
+    def fail(self, n, why):
+        loc = n.get('range', {}).get('begin', n.get('loc', {}))
+        raise CError(f'{self.path}:{loc.get("line", "?")}:{loc.get("col", "?")}: {why} ({n.get("kind")})')
 
-    def decl(self, node):
-        t = self.typ(node['type']['qualType'], node)
-        n = self.local_names.get(node['id'], self.name(node['name']))
-        if isinstance(t, tuple):
-            return f'{t[0]} {n}[{t[1]}]'
-        return f'{t} {n}'
-
-    def children(self, node):
-        return [x for x in node.get('inner', []) if x.get('kind') and
-                not x['kind'].endswith('Comment')]
-
-    def unwrap(self, node):
-        while node['kind'] in WRAPPERS:
-            node = self.children(node)[0]
-        return node
-
-    def narrowed(self, expression, node):
-        """HolyC promotes small integer operations to 64 bits; C does not."""
-        spelling = node.get('type', {}).get('qualType', '')
-        widths = {'int': (32, True), 'unsigned int': (32, False),
-                  'short': (16, True), 'unsigned short': (16, False),
-                  'char': (8, False), 'signed char': (8, True),
-                  'unsigned char': (8, False)}
-        if spelling not in widths:
-            return expression
-        bits, signed = widths[spelling]
-        mask = (1 << bits) - 1
-        clipped = f'({expression} & 0x{mask:X})'
-        if not signed:
-            return clipped
-        sign = 1 << (bits - 1)
-        return f'(({clipped} ^ 0x{sign:X}) - 0x{sign:X})'
-
-    def pure(self, node):
-        n = self.unwrap(node)
-        if n['kind'] in ('CallExpr', 'CompoundAssignOperator'):
-            return False
-        if n['kind'] == 'UnaryOperator' and n['opcode'] in ('++', '--'):
-            return False
-        if n['kind'] == 'BinaryOperator' and n['opcode'] in ('=', ','):
-            return False
-        return all(self.pure(child) for child in self.children(n))
-
-    def expr(self, node):
-        n = self.unwrap(node)
-        k = n['kind']
-        ch = self.children(n)
-        if k == 'IntegerLiteral':
-            return n['value']
-        if k == 'FloatingLiteral':
-            return n['value'].rstrip('fF')
-        if k == 'StringLiteral':
-            return n['value']
-        if k == 'CharacterLiteral':
-            return str(n['value'])
-        if k == 'DeclRefExpr':
-            ref = n['referencedDecl']
-            if ref['name'] in self.enums:
-                return str(self.enums[ref['name']])
-            return self.static_names.get(ref['id'],
-                                         self.local_names.get(ref['id'], self.name(ref['name'])))
-        if k == 'UnaryOperator':
-            x = self.expr(ch[0])
-            op = n['opcode']
-            result = f'({x}{op})' if n.get('isPostfix') else f'({op}{x})'
-            return self.narrowed(result, n) if op in ('-', '~') else result
-        if k in ('BinaryOperator', 'CompoundAssignOperator'):
-            a, b = map(self.expr, ch)
-            op = n['opcode']
-            if op == '=' and n['type']['qualType'].startswith('struct ') and '*' not in n['type']['qualType']:
-                self.fail(n, 'struct assignment in expression position')
-            result = f'({a} {op} {b})'
-            if k == 'BinaryOperator' and op in ('+', '-', '*', '/', '%', '<<', '>>', '&', '|', '^'):
-                return self.narrowed(result, n)
-            return result
-        if k == 'ArraySubscriptExpr':
-            return f'({self.expr(ch[0])}[{self.expr(ch[1])}])'
-        if k == 'MemberExpr':
-            return f'({self.expr(ch[0])}{"->" if n.get("isArrow") else "."}{self.name(n["name"])})'
-        if k == 'CallExpr':
-            callee = self.expr(ch[0])
-            callee = {'printf': 'Print', 'malloc': 'MAlloc', 'free': 'Free',
-                      'memcpy': 'MemCpy', 'memset': 'MemSet', 'strlen': 'StrLen',
-                      'floor': 'C2HFloor', 'ceil': 'C2HCeil', 'sqrt': 'C2HSqrt',
-                      'fabs': 'C2HFabs', 'fmod': 'C2HFmod', 'cos': 'C2HCos',
-                      'acos': 'C2HAcos', 'pow': 'C2HPow'}.get(callee, callee)
-            return f'{callee}({", ".join(self.expr(x) for x in ch[1:])})'
-        if k == 'CStyleCastExpr':
-            target = self.typ(n['type']['qualType'], n)
-            source = self.typ(ch[0]['type']['qualType'], ch[0])
-            if target == 'U0':
-                return self.expr(ch[0])
-            if target == 'F64' and source != 'F64':
-                return f'C2HIntToFloat({self.expr(ch[0])})'
-            if target != 'F64' and source == 'F64':
-                return f'(C2HFloatToInt({self.expr(ch[0])}))({target})'
-            return f'({self.expr(ch[0])})({target})'
-        if k == 'ConditionalOperator':
-            target = self.typ(n['type']['qualType'], n)
-            if not all(self.pure(branch) for branch in ch[1:]):
-                self.fail(n, 'side effects in nested conditional expression')
-            if target not in BASE.values() and not target.endswith(' *'):
-                self.fail(n, 'record-valued conditional expression')
-            helper = f'_c2hc_select_{len(self.select_types)}'
-            if target not in self.select_types:
-                self.select_types[target] = helper
-            return f'{self.select_types[target]}({self.expr(ch[0])}, {self.expr(ch[1])}, {self.expr(ch[2])})'
-        if k == 'UnaryExprOrTypeTraitExpr' and n.get('name') == 'sizeof':
-            arg_type = n.get('argType') or ch[0]['type']
-            return f'sizeof({self.typ(arg_type["qualType"], n)})'
-        self.fail(n, 'expression')
-
-    def out(self, indent, content):
-        self.lines.append('    ' * indent + content)
-
-    def value(self, node, target, indent):
-        n = self.unwrap(node)
-        if n['kind'] == 'ConditionalOperator':
-            condition, yes, no = self.children(n)
-            self.out(indent, f'if ({self.expr(condition)}) {{')
-            self.value(yes, target, indent + 1)
-            self.out(indent, '} else {')
-            self.value(no, target, indent + 1)
-            self.out(indent, '}')
-        else:
-            self.out(indent, f'{target} = {self.expr(n)};')
-
-    def vars(self, node, indent):
-        for v in self.children(node):
-            if v['kind'] != 'VarDecl':
-                self.fail(v, 'declaration')
-            initial = self.children(v)
-            if v.get('storageClass') == 'static':
-                if len(initial) > 1 or (initial and initial[0]['kind'] == 'InitListExpr'):
-                    self.fail(v, 'static initializer')
-                new_name = self.function + '_' + self.name(v['name'])
-                self.static_names[v['id']] = new_name
-                self.static.append(self.decl(v).replace(' ' + self.name(v['name']), ' ' + new_name, 1) +
-                                   (f' = {self.expr(initial[0])}' if initial else '') + ';')
-                continue
-            self.out(indent, self.decl(v) + ';')
-            if initial:
-                init = self.unwrap(initial[0])
-                name = self.local_names.get(v['id'], self.name(v['name']))
-                if init['kind'] == 'InitListExpr':
-                    elems = self.children(init)
-                    if not elems and init.get('array_filler'):
-                        elems = init['array_filler'][1:]
-                    t = self.typ(v['type']['qualType'], v)
-                    if not isinstance(t, tuple):
-                        if t not in self.record_fields:
-                            self.fail(v, 'record initializer')
-                        self.out(indent, f'MemSet(&{name}, 0, sizeof({t}));')
-                        for field, elem in zip(self.record_fields[t], elems):
-                            if elem['kind'] != 'ImplicitValueInitExpr':
-                                self.out(indent, f'{name}.{field} = {self.expr(elem)};')
-                        continue
-                    for i, elem in enumerate(elems):
-                        self.out(indent, f'{name}[{i}] = {self.expr(elem)};')
-                    for i in range(len(elems), t[1]):
-                        self.out(indent, f'{name}[{i}] = 0;')
-                else:
-                    self.value(init, name, indent)
-
-    def statement(self, node, indent):
-        n = self.unwrap(node)
-        k = n['kind']
-        ch = self.children(n)
-        if k == 'CompoundStmt':
-            for x in ch:
-                self.statement(x, indent)
-        elif k == 'DeclStmt':
-            self.vars(n, indent)
-        elif k == 'ReturnStmt':
-            if ch and self.unwrap(ch[0])['kind'] == 'ConditionalOperator':
-                temp = f'_c2hc_return_{self.serial}'; self.serial += 1
-                self.out(indent, f'{self.typ(ch[0]["type"]["qualType"], ch[0])} {temp};')
-                self.value(ch[0], temp, indent)
-                self.out(indent, f'return {temp};')
-            else:
-                self.out(indent, 'return' + (f' {self.expr(ch[0])}' if ch else '') + ';')
-        elif k == 'IfStmt':
-            self.out(indent, f'if ({self.expr(ch[0])}) {{')
-            self.statement(ch[1], indent + 1)
-            self.out(indent, '}')
-            if len(ch) > 2:
-                self.out(indent, 'else {')
-                self.statement(ch[2], indent + 1)
-                self.out(indent, '}')
-        elif k == 'SwitchStmt':
-            self.out(indent, f'switch ({self.expr(ch[0])}) {{')
-            self.statement(ch[1], indent + 1)
-            self.out(indent, '}')
-        elif k == 'CaseStmt':
-            self.out(indent, f'case {self.expr(ch[0])}:')
-            for item in ch[1:]:
-                self.statement(item, indent + 1)
-        elif k == 'DefaultStmt':
-            self.out(indent, 'default:')
-            for item in ch:
-                self.statement(item, indent + 1)
-        elif k in ('ForStmt', 'WhileStmt', 'DoStmt'):
-            label = f'_c2hc_continue_{self.serial}'; self.serial += 1
-            if k == 'ForStmt':
-                # clang keeps empty for-clause slots as untyped dictionaries.
-                slots = n.get('inner', [])
-                init, _, cond, step, body = (slots + [None] * 5)[:5]
-                if init and init.get('kind'):
-                    self.statement(init, indent)
-                self.out(indent, f'while ({self.expr(cond) if cond and cond.get("kind") else "1"}) {{')
-                self.loop.append(label)
-                self.statement(body, indent + 1)
-                self.loop.pop()
-                self.out(indent + 1, label + ':;')
-                if step and step.get('kind'):
-                    self.statement(step, indent + 1)
-                self.out(indent, '}')
-            elif k == 'WhileStmt':
-                self.out(indent, f'while ({self.expr(ch[0])}) {{')
-                self.loop.append(label)
-                self.statement(ch[1], indent + 1)
-                self.loop.pop()
-                self.out(indent + 1, label + ':;')
-                self.out(indent, '}')
-            else:
-                self.out(indent, 'do {')
-                self.loop.append(label)
-                self.statement(ch[0], indent + 1)
-                self.loop.pop()
-                self.out(indent + 1, label + ':;')
-                self.out(indent, f'}} while ({self.expr(ch[1])});')
-        elif k == 'ContinueStmt':
-            if not self.loop: self.fail(n, 'continue outside loop')
-            self.out(indent, f'goto {self.loop[-1]};')
-        elif k == 'BreakStmt':
-            self.out(indent, 'break;')
-        elif k == 'GotoStmt':
-            self.out(indent, f'goto {self.labels[n["targetLabelDeclId"]]};')
-        elif k == 'LabelStmt':
-            self.out(indent, f'{self.labels[n["declId"]]}:;')
-            for item in ch:
-                self.statement(item, indent)
-        elif k == 'NullStmt':
-            self.out(indent, ';')
-        elif k == 'BinaryOperator' and n['opcode'] == '=' and n['type']['qualType'].startswith('struct ') and '*' not in n['type']['qualType']:
-            dst, src = ch
-            self.out(indent, f'MemCpy(&{self.expr(dst)}, &{self.expr(src)}, sizeof({self.typ(n["type"]["qualType"], n)}));')
-        elif k == 'BinaryOperator' and n['opcode'] == '=' and self.unwrap(ch[1])['kind'] == 'ConditionalOperator':
-            self.value(ch[1], self.expr(ch[0]), indent)
-        elif k in ('CallExpr', 'BinaryOperator', 'CompoundAssignOperator', 'UnaryOperator',
-                   'CStyleCastExpr'):
-            self.out(indent, self.expr(n) + ';')
-        else:
-            self.fail(n, 'statement')
-
-    def translate(self):
-        records, globals_, functions = [], [], []
-        nodes = self.children(self.ast)
-        for n in nodes:
-            if n['kind'] == 'TypedefDecl' and 'offset' in n.get('loc', {}):
-                spelling = n['type']['qualType']
-                if spelling != n['name']:
-                    self.aliases[n['name']] = spelling
-                for child in self.children(n):
-                    tag = child.get('ownedTagDecl', {})
-                    if tag.get('kind') == 'RecordDecl':
-                        self.record_names[tag['id']] = n['name']
-            if n['kind'] == 'EnumDecl' and 'offset' in n.get('loc', {}):
-                value = -1
-                for child in self.children(n):
-                    if child['kind'] != 'EnumConstantDecl':
-                        continue
-                    if self.children(child):
-                        expr = self.unwrap(self.children(child)[0])
-                        value = int(expr.get('value', value + 1), 0)
-                    else:
-                        value += 1
-                    self.enums[child['name']] = value
-        if self.roots:
-            by_name = {n['name']: n for n in nodes if n['kind'] == 'FunctionDecl'
-                       and any(x['kind'] == 'CompoundStmt' for x in self.children(n))}
-            selected = set()
-            pending = list(self.roots)
+    def run(self):
+        ast = self.clang()
+        self.file_of = FileTracker().scan(ast)
+        self.statics = {n['name'] for n in ast['inner'] if n.get('storageClass') == 'static' and 'name' in n}
+        prog = self.prog
+        if prog.args.roots:
+            defs = {n.get('name'): n for n in ast['inner'] if n['kind'] == 'FunctionDecl' and any(c['kind'] == 'CompoundStmt' for c in self.kids(n))}
+            wanted, pending = set(), list(prog.args.roots)
+            def calls(n):
+                if n.get('kind') == 'DeclRefExpr' and n.get('referencedDecl', {}).get('kind') == 'FunctionDecl':
+                    yield n['referencedDecl']['name']
+                for c in self.kids(n): yield from calls(c)
             while pending:
                 name = pending.pop()
-                if name in selected:
-                    continue
-                if name not in by_name:
-                    raise ValueError(f'root function not found: {name}')
-                selected.add(name)
-                stack = [by_name[name]]
-                while stack:
-                    item = stack.pop()
-                    if item.get('kind') == 'DeclRefExpr':
-                        ref = item.get('referencedDecl', {})
-                        if ref.get('kind') == 'FunctionDecl' and ref.get('name') in by_name:
-                            pending.append(ref['name'])
-                    stack.extend(self.children(item))
+                if name in wanted: continue
+                wanted.add(name)
+                if name in defs: pending.extend(calls(defs[name]))
+            self.wanted = wanted
+        for n in ast['inner']:
+            try:
+                self.top(n)
+            except CError as e:
+                if str(e).startswith(str(self.path)) or ':' in str(e).split(' ')[0]:
+                    raise
+                self.fail(n, str(e))
+        del ast
+
+    # -- top level declarations
+    def top(self, n):
+        k = n['kind']
+        if n.get('isImplicit'): return
+        prog = self.prog
+        ext = self.external(n)
+        if k == 'RecordDecl':
+            self.record(n, ext)
+        elif k == 'TypedefDecl':
+            self.typedef(n, ext)
+        elif k == 'EnumDecl':
+            self.enum(n)
+        elif k == 'VarDecl':
+            self.var(n, ext)
+        elif k == 'FunctionDecl':
+            self.function(n, ext)
+        elif k in ('EmptyDecl', 'FileScopeAsmDecl', 'StaticAssertDecl'):
+            pass
         else:
-            selected = None
-        for n in nodes:
-            loc = n.get('loc', {})
-            if not self.roots:
-                if loc.get('includedFrom'):
-                    continue
-                if loc.get('file') and Path(loc['file']).resolve() != self.path:
-                    continue
-            if 'offset' not in loc:
+            self.fail(n, 'top level declaration')
+
+    def kids(self, n):
+        return [x for x in n.get('inner', []) if isinstance(x, dict) and x.get('kind') and not x['kind'].endswith('Comment')]
+
+    def record(self, n, ext, owner_name=None):
+        prog = self.prog
+        if not n.get('completeDefinition'):
+            if n.get('name'):
+                prog.aggregate(n['tagUsed'], n['name'])
+            return
+        name = n.get('name') or owner_name
+        agg = n['tagUsed']
+        if name:
+            ct = prog.aggregate(agg, name)
+        else:
+            prog.anon_count += 1
+            name = f'anon{prog.anon_count}'
+            rec = Rec(name, agg == 'union')
+            rec.cool = prog.cool_ident(name)
+            ct = CT('rec', rec=rec)
+            prog.anon_pending.append((agg, ct))
+        self.record_ids = getattr(self, 'record_ids', {})
+        self.record_ids[n['id']] = ct
+        rec = ct.rec
+        if rec.fields is not None:
+            return          # already defined (the same header in another translation unit)
+        fields = []
+        nested = None
+        for c in self.kids(n):
+            if c['kind'] == 'RecordDecl':
+                self.record(c, ext)
+                nested = self.record_ids.get(c['id'])
+            elif c['kind'] == 'FieldDecl':
+                if c.get('isBitfield'):
+                    self.fail(c, 'bit-field')
+                if not c.get('name'):
+                    self.fail(c, 'anonymous member')
+                spelling = c['type']['qualType']
+                if nested is not None and ('(unnamed' in spelling or '(anonymous' in spelling):
+                    anon = re.search(r'\((?:unnamed|anonymous)[^()]*\)', spelling)
+                    if anon: prog.anon_by_text[anon[0]] = nested
+                    prog.anon_pending = deque((a, t) for a, t in prog.anon_pending if t is not nested)
+                fields.append((c['name'], prog.ctype(spelling)))
+                nested = None
+            elif c['kind'] in ('IndirectFieldDecl', 'StaticAssertDecl'):
+                pass
+        prog.define_record(rec, fields)
+        rec.external = ext
+        prog.recs.append(rec)
+
+    def typedef(self, n, ext):
+        prog = self.prog
+        name = n['name']
+        # typedef struct { ... } Name;  the record takes the name
+        owned = None
+        for c in self.kids(n):
+            tag = c.get('ownedTagDecl')
+            if tag and tag.get('kind') in ('RecordDecl',) and not tag.get('name'):
+                owned = tag
+        if owned is not None:
+            for r in [x for x in self._pending_records if x.get('id') == owned['id']] if hasattr(self, '_pending_records') else []:
+                pass
+        spelling = n['type']['qualType']
+        t = self.record_ids[owned['id']] if owned is not None else prog.ctype(spelling)
+        if owned is not None:
+            prog.anon_pending = deque((a, ct) for a, ct in prog.anon_pending if ct is not t)
+            prog.tags[('struct' if not t.rec.is_union else 'union', name)] = t
+        if t.kind == 'rec' and t.rec.name.startswith('anon') and owned is not None:
+            t.rec.name = name
+            t.rec.cool = prog.cool_ident(name)
+        prog.typedefs[name] = t
+
+    def enum(self, n):
+        prog = self.prog
+        value = -1
+        neg = False
+        consts = []
+        for c in self.kids(n):
+            if c['kind'] != 'EnumConstantDecl':
                 continue
-            k = n['kind']
-            if k == 'RecordDecl' and n.get('completeDefinition') and (n.get('name') or n['id'] in self.record_names):
-                fields = [f for f in self.children(n) if f['kind'] == 'FieldDecl']
-                record_name = self.name(n.get('name') or self.record_names[n['id']])
-                self.record_fields[record_name] = [self.name(f['name']) for f in fields]
-                records.append('class ' + record_name + ' {\n' +
-                               ''.join('    ' + self.decl(f) + ';\n' for f in fields) + '};')
-            elif k == 'FunctionDecl' and any(x['kind'] == 'CompoundStmt' for x in self.children(n)):
-                if selected is None or n['name'] in selected:
-                    functions.append(n)
-            elif k == 'VarDecl':
-                globals_.append(self.decl(n) + ';')
-            elif k in ('FunctionDecl', 'TypedefDecl', 'EnumDecl', 'RecordDecl'):
-                pass  # C prototypes, including printf
+            inner = self.kids(c)
+            if inner:
+                value = self.const_int(inner[0])
             else:
-                self.fail(n, 'top level declaration')
-        self.lines = ['// Generated by tools/c2hc/c2hc.py from ' + self.path.name,
-                      'extern U0 Print(U8i *fmt, ...);',
-                      'extern U8i *MemCpy(U8i *dst, U8i *src, I64i cnt);',
-                      'extern U8i *MemSet(U8i *dst, I64i value, I64i cnt);',
-                      'extern U8i *MAlloc(I64i size);',
-                      'extern U0 Free(U8i *ptr);',
-                      'extern I64i StrLen(U8i *ptr);',
-                      'extern F64 C2HFloor(F64 x);',
-                      'extern F64 C2HCeil(F64 x);',
-                      'extern F64 C2HSqrt(F64 x);',
-                      'extern F64 C2HFabs(F64 x);',
-                      'extern F64 C2HFmod(F64 x, F64 y);',
-                      'extern F64 C2HCos(F64 x);',
-                      'extern F64 C2HAcos(F64 x);',
-                      'extern F64 C2HPow(F64 x, F64 y);',
-                      'extern I64i C2HFloatToInt(F64 x);',
-                      'extern F64 C2HIntToFloat(I64i x);',
-                      *records, *globals_]
-        if self.roots:
-            for n in functions:
-                args = [x for x in self.children(n) if x['kind'] == 'ParmVarDecl']
-                return_type = n['type']['qualType'].split('(', 1)[0].strip()
-                self.lines.append(f'extern {self.typ(return_type, n)} {self.name(n["name"])}(' +
-                                  ', '.join(self.decl(x) for x in args) + ');')
-        prefix = len(self.lines)
-        for n in functions:
-            self.function = self.name(n['name'])
-            ch = self.children(n)
-            counts = {}
-            stack = [ch[-1]]
-            while stack:
-                item = stack.pop()
-                if item['kind'] == 'LabelStmt':
-                    self.labels[item['declId']] = f'_c2hc_label_{len(self.labels)}'
-                if item['kind'] == 'VarDecl':
-                    base = self.name(item['name'])
-                    count = counts.get(base, 0)
-                    counts[base] = count + 1
-                    self.local_names[item['id']] = base if count == 0 else f'{base}_{count}'
-                stack.extend(reversed(self.children(item)))
-            args = [x for x in ch if x['kind'] == 'ParmVarDecl']
-            return_type = n['type']['qualType'].split('(', 1)[0].strip()
-            self.out(0, f'{self.typ(return_type, n)} {self.function}(' +
-                     ', '.join(self.decl(x) for x in args) + ') {')
-            self.statement(ch[-1], 1)
-            self.out(0, '}')
-        if not self.roots and not any(n['name'] == 'main' for n in functions):
-            raise ValueError('input needs a main function')
-        # Globals must precede functions because static locals become globals.
-        self.lines[prefix:prefix] = self.static
-        helpers = [f'{type_name} {helper}(I64i cond, {type_name} yes, {type_name} no) {{\n'
-                   f'    if (cond) return yes;\n    return no;\n}}'
-                   for type_name, helper in self.select_types.items()]
-        prefix += len(self.static)
-        self.lines[prefix:prefix] = helpers
-        if not self.roots:
-            self.lines.append('main();')
-        return '\n'.join(self.lines) + '\n'
+                value += 1
+            consts.append((c['name'], value))
+            if value < 0:
+                neg = True
+        for name, v in consts:
+            prog.enum_consts[name] = v
+        if n.get('name'):
+            prog.enum_types[n['name']] = INT if neg else UINT
+
+    def const_int(self, n):
+        k = n['kind']
+        if k in ('ConstantExpr',) and 'value' in n:
+            return int(n['value'])
+        if k in ('ImplicitCastExpr', 'ParenExpr', 'ConstantExpr', 'CStyleCastExpr'):
+            return self.const_int(self.kids(n)[0])
+        if k == 'IntegerLiteral':
+            return int(n['value'])
+        if k == 'CharacterLiteral':
+            return int(n['value'])
+        if k == 'UnaryOperator':
+            v = self.const_int(self.kids(n)[0])
+            op = n['opcode']
+            return {'-': -v, '+': v, '~': ~v, '!': int(not v)}[op]
+        if k == 'BinaryOperator':
+            a, b = (self.const_int(x) for x in self.kids(n))
+            op = n['opcode']
+            ops = {'+': lambda: a + b, '-': lambda: a - b, '*': lambda: a * b, '/': lambda: int(a / b),
+                   '%': lambda: a % b, '<<': lambda: a << b, '>>': lambda: a >> b, '&': lambda: a & b,
+                   '|': lambda: a | b, '^': lambda: a ^ b}
+            if op in ops:
+                return ops[op]()
+        if k == 'DeclRefExpr':
+            ref = n['referencedDecl']
+            if ref['name'] in self.prog.enum_consts:
+                return self.prog.enum_consts[ref['name']]
+        if k == 'UnaryExprOrTypeTraitExpr' and n.get('name') == 'sizeof':
+            arg = n.get('argType') or self.kids(n)[0]['type']
+            return sizeof(self.prog.ctype(arg['qualType']))
+        raise CError(f'not a constant: {k}')
+
+    def var(self, n, ext):
+        prog = self.prog
+        name = n['name']
+        static = n.get('storageClass') == 'static'
+        ct = prog.ctype(n['type']['qualType'])
+        key = (self.stem if static else '', name)
+        g = prog.globals.get(key)
+        if g is None:
+            g = Global(name, ct, static, self.stem, ext or n.get('storageClass') == 'extern' and not self.kids(n))
+            prog.globals[key] = g
+            prog.global_order.append(key)
+        else:
+            if ct.kind == 'arr' and ct.n is not None:
+                g.ct = ct
+        inits = [c for c in self.kids(n) if c['kind'] not in ('ConstantExpr',) or True]
+        has_init = bool(inits)
+        if n.get('storageClass') != 'extern' and not ext:
+            g.external = False
+        if ext:
+            g.external = True
+            return
+        if has_init:
+            g.defined = True
+            fn = FnTranslator(self, None)
+            fn.global_init(key, n, inits[0])
+        elif n.get('storageClass') != 'extern':
+            g.defined = True
+
+    def function(self, n, ext):
+        prog = self.prog
+        name = n['name']
+        if hasattr(self, 'wanted') and name not in self.wanted: return
+        static = n.get('storageClass') == 'static'
+        ct = prog.ctype(n['type']['qualType'])
+        key = (self.stem if static else '', name)
+        body = [c for c in self.kids(n) if c['kind'] == 'CompoundStmt']
+        f = prog.funcs.get(key)
+        if f is None:
+            f = {'ct': ct, 'external': ext, 'defined': False, 'static': static, 'stem': self.stem}
+            prog.funcs[key] = f
+        if ext:
+            f['external'] = True
+            return
+        if not body:
+            return
+        f['defined'] = True
+        f['external'] = False
+        fn = FnTranslator(self, key)
+        text, refs = fn.function(n, body[0])
+        prog.func_defs.append((key, text, refs))
+
+
+def resolve_sentinels(prog, text, statics_final):
+    def stat(m):
+        return statics_final[(m.group(1), m.group(2))]
+    text = re.sub('\x01([^\x02]*)\x02([^\x03]*)\x03', stat, text)
+    return text
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('input', type=Path)
-    parser.add_argument('output', type=Path)
-    parser.add_argument('--root', action='append', dest='roots',
-                        help='translate only this function and its dependencies; emit a library')
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('inputs', nargs='+', help='C files, then the Cool output file last')
+    ap.add_argument('--root', action='append', dest='roots', help='keep only this function and what it uses (a library)')
+    ap.add_argument('--libc', help='#include this LibC.cool at the top of the output')
+    ap.add_argument('--library', action='store_true', help='no main call')
+    ap.add_argument('--reserved-from', action='append', default=[],
+                    help='a Cool header (Kernel.coolh): its macro and function names are renamed in the C code')
+    ap.add_argument('-I', action='append', default=[], dest='includes')
+    ap.add_argument('-D', action='append', default=[], dest='defines')
+    args = ap.parse_args()
+    *sources, output = args.inputs
+    prog = Program(args)
+    for header in args.reserved_from:
+        text = Path(header).read_text(errors='replace')
+        for m in re.finditer(r'^\s*#define\s+([A-Za-z_]\w*)', text, re.M):
+            prog.reserved.add(m.group(1))
+        for m in re.finditer(r'^\s*(?:public\s+)?(?:extern|import)?\s*[\w\s\*]*?\b([A-Za-z_]\w*)\s*\(', text, re.M):
+            prog.reserved.add(m.group(1))
+        for m in re.finditer(r'^\s*(?:public\s+)?(?:class|union)\s+([A-Za-z_]\w*)', text, re.M):
+            prog.reserved.add(m.group(1))
+    flags = [f'-I{i}' for i in args.includes] + [f'-D{d}' for d in args.defines]
     try:
-        output = Translator(args.input, args.roots).translate()
-    except ValueError as error:
-        parser.exit(1, str(error) + '\n')
-    args.output.write_text(output)
+        for s in sources:
+            TU(prog, s, flags).run()
+        text = emit(prog, args)
+    except CError as e:
+        sys.exit(f'c2hc: {e}')
+    Path(output).write_text(text)
 
+
+from c2hc_emit import emit  # noqa: E402
 
 if __name__ == '__main__':
     main()

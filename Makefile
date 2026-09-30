@@ -149,7 +149,7 @@ build/disk.img: | build
 # build/kernel.Image (docs/kernel-rebuild.md).
 # Package the Cool implementation of Warm for the kernel shell. disk-files.sh
 # also requests this target when populating a test or external disk image.
-WARMSRC := $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
+WARMSRC := coolc/LibC/LibC.cool $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
 build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
 	./warmc/build.sh
 build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py

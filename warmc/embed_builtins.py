@@ -22,6 +22,8 @@ with out.open('w') as f:
 with (root / 'build/warmcool/RuntimeText.cool').open('w') as f:
     for fn, src in (('WRuntime', 'Runtime.cool'), ('WModuleRuntime', 'ModuleRuntime.cool')):
         text = (root / 'warmc' / src).read_text()
+        text = text.replace('// @shared-libc: expanded from coolc/LibC/LibC.cool by the packagers.',
+                            (root / 'coolc/LibC/LibC.cool').read_text())
         f.write(f'U8 *{fn}(CWUnit *u) {{\n')
         f.write(f'  U8 *text=WAlloc(u,{len(text.encode())+1});\n')
         offset = 0

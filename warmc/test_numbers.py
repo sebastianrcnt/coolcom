@@ -20,7 +20,7 @@ bits32 = [0, 0x80000000, 1, 0x80000001, 0x007fffff, 0x00800000, 0x7f7fffff,
           0x7f800000, 0xff800000] + [rng.randrange(2**32) for _ in range(512)]
 # Exclude NaNs: payload canonicalization is intentionally not specified here.
 bits32 = [x for x in bits32 if (x & 0x7f800000) != 0x7f800000 or not (x & 0x7fffff)]
-source = [f'#include "{ROOT}/warmc/Runtime.cool"', '#define Bool I8i',
+source = [f'#include "{ROOT}/coolc/LibC/LibC.cool"', f'#include "{ROOT}/warmc/Runtime.cool"', '#define Bool I8i',
           '#define TRUE 1', '#define FALSE 0', '#define NULL 0',
           'import I64 StrCmp(U8 *a,U8 *b);', f'#include "{ROOT}/warmc/Core.cool"', f'#include "{ROOT}/warmc/Fold.cool"',
           'U0 NumberTest() {', 'F64 widened;', 'CWUnit *u=WNew();']

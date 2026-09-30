@@ -49,7 +49,7 @@ def main():
     run(sys.executable, 'tools/c2hc/stbtt_prepare.py', str(OUT))
     generated = OUT / 'StbTrueType.cool'
     run(sys.executable, 'tools/c2hc/c2hc.py', '--root', 'stbtt_InitFont',
-        '--root', 'stbtt_MakeCodepointBitmap',
+        '--root', 'stbtt_MakeCodepointBitmap', '--libc', '../../coolc/LibC/LibC.cool',
         str(OUT / 'stbtt_ttf.c'), str(generated))
     formatted = OUT / 'StbTrueType.formatted.cool'
     run('build/coolc', '--format', 'build/hcfmt.BIN',

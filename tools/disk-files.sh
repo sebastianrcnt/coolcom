@@ -14,7 +14,7 @@ FLAG=-o
 cd "$ROOT"
 # Build once, and refresh only when the compiler or its embedded sources change.
 make build/warmcool/Kernel.cool os/Kernel/NetParse.cool  # (and the kernel's Warm parts)
-for d in Kernel coolc coolc/Runtime coolc/Fmt; do
+for d in Kernel coolc coolc/Runtime coolc/Fmt coolc/LibC; do
     # mmd asks on the terminal when the directory exists, so only make missing ones.
     mdir -i "$IMG" ::$d >/dev/null 2>&1 || mmd -i "$IMG" ::$d </dev/null
 done
@@ -38,3 +38,5 @@ put Kernel/ os/Kernel/*
 [ ! -f build/BootStub.BIN ] || put Kernel/ build/BootStub.BIN
 put coolc/Runtime/ coolc/Runtime/*.cool
 put coolc/Fmt/ coolc/Fmt/HCTok.cool
+
+put coolc/LibC/ coolc/LibC/LibC.cool
