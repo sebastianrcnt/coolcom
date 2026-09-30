@@ -4,11 +4,14 @@
 #define FDT_RES 64
 #define FDT_CPUS 8
 class CFdtRange {I64 start, end;};
-class CFdtCpu {I64 mpidr, release;};
+class CFdtCpu {I64 mpidr, release; Bool psci;};
 CFdtRange fdt_mem[FDT_MEMS], fdt_res[FDT_RES];
 CFdtCpu fdt_cpu[FDT_CPUS];
 I64 fdt_nmem, fdt_nres, fdt_ncpu;
 I64 fdt_uart = 0x235200000, fdt_aic = 0x23B100000;
+Bool fdt_pl011;
+I64 fdt_gic, fdt_gic_cpu, fdt_gic_cpu_size, fdt_gic_version, fdt_timer_irq = 27;
+I64 fdt_psci; // 1: HVC, 2: SMC
 I64 fdt_uart_irq;  // its AIC interrupt (0: none known)
 I64 fdt_finisher, fdt_size;
 Bool fdt_vm, fdt_test;
@@ -16,15 +19,19 @@ I64 fdt_unix_time, fdt_utc_offset;  // coolvm /chosen: host clock at boot (KDate
 
 // VM devices, found by compatible string under /soc and /chosen:
 //   simple-framebuffer, coolcom,coolvm-input, virtio,mmio (any number).
-#define FDT_BLKS 8  // virtio-mmio nodes: block devices (Blk.cool) and the NIC (NetDrv.cool)
-class CFdtDev {I64 base, size, irq;};
+#define FDT_BLKS 32  // virtio-mmio nodes: block devices (Blk.cool) and the NIC (NetDrv.cool)
+class CFdtDev {I64 base, size, irq, flags;};
 CFdtDev fdt_input, fdt_blk[FDT_BLKS], fdt_fb;
 I64 fdt_nblk, fdt_fb_w, fdt_fb_h, fdt_fb_stride, fdt_fb_scanout;
 Bool fdt_fb_32bpp;  // format x8r8g8b8 or a8r8g8b8
-// The node being parsed (leaf nodes below /soc and /chosen).
-CFdtDev fdt_nd;
-I64 fdt_nd_kind, fdt_nd_w, fdt_nd_h, fdt_nd_stride, fdt_nd_scanout;
-Bool fdt_nd_32bpp;
+// Keep properties until END_NODE: DT property order and node depth are arbitrary.
+class CFdtNode
+{
+    U8 *name, *compat, *reg, *ints, *method, *enable;
+    I64 compat_len, reg_len, ints_len, addr_cells, size_cells;
+    I64 parent_addr, parent_size, release, w, h, stride, scanout;
+    Bool fb32;
+};
 
 I64 Fdt32(U8 *p)
 {
@@ -67,40 +74,6 @@ Bool FdtCompat(U8 *data, I64 len, U8 *want)
     return FALSE;
 }
 
-U0 FdtNodeStart()
-{
-    fdt_nd.base = fdt_nd.size = fdt_nd.irq = 0;
-    fdt_nd_kind = fdt_nd_w = fdt_nd_h = fdt_nd_stride = 0;
-    fdt_nd_scanout = 0;
-    fdt_nd_32bpp = FALSE;
-}
-
-U0 FdtNodeDone()
-{
-    if (fdt_nd_kind == 1) {
-        fdt_input.base = fdt_nd.base;
-        fdt_input.size = fdt_nd.size;
-        fdt_input.irq = fdt_nd.irq;
-    } else if (fdt_nd_kind == 2) {
-        if (fdt_nblk < FDT_BLKS) {
-            fdt_blk[fdt_nblk].base = fdt_nd.base;
-            fdt_blk[fdt_nblk].size = fdt_nd.size;
-            fdt_blk[fdt_nblk].irq = fdt_nd.irq;
-            fdt_nblk++;
-        }
-    } else if (fdt_nd_kind == 3 && fdt_nd_32bpp && fdt_nd_w && fdt_nd_h) {
-        fdt_fb.base = fdt_nd.base;
-        fdt_fb.size = fdt_nd.size;
-        fdt_fb_w = fdt_nd_w;
-        fdt_fb_h = fdt_nd_h;
-        fdt_fb_stride = fdt_nd_stride;
-        if (!fdt_fb_stride)
-            fdt_fb_stride = fdt_fb_w * 4;
-        fdt_fb_scanout = fdt_nd_scanout;
-        fdt_fb_32bpp = TRUE;
-    }
-}
-
 U0 FdtReserve(I64 start, I64 size)
 {
     if (size > 0 && fdt_nres < FDT_RES) {
@@ -110,122 +83,146 @@ U0 FdtReserve(I64 start, I64 size)
     }
 }
 
+I64 FdtCell(U8 *p, I64 cells)
+{
+    if (cells == 2) return Fdt64(p);
+    if (cells == 1) return Fdt32(p);
+    return 0;
+}
+
+Bool FdtIs(CFdtNode *n, U8 *compat)
+{
+    return n->compat && FdtCompat(n->compat, n->compat_len, compat);
+}
+
+U0 FdtNodeDone(CFdtNode *n, CFdtNode *parent)
+{
+    I64 base = 0, size = 0, irq = 0, i, step = 4 * (n->parent_addr + n->parent_size);
+    if (n->reg && step && n->reg_len >= step) {
+        base = FdtCell(n->reg, n->parent_addr);
+        size = FdtCell(n->reg + 4 * n->parent_addr, n->parent_size);
+    }
+    if (n->ints_len >= 8) irq = Fdt32(n->ints + 4);
+    if (FdtPrefix(n->name, "memory@")) {
+        for (i = 0; step && i + step <= n->reg_len && fdt_nmem < FDT_MEMS; i += step) {
+            base = FdtCell(n->reg + i, n->parent_addr);
+            size = FdtCell(n->reg + i + 4 * n->parent_addr, n->parent_size);
+            fdt_mem[fdt_nmem].start = base;
+            fdt_mem[fdt_nmem++].end = base + size;
+        }
+    }
+    if (parent && FdtEqual(parent->name, "reserved-memory")) FdtReserve(base, size);
+    if (parent && FdtEqual(parent->name, "cpus") && FdtPrefix(n->name, "cpu@") && fdt_ncpu < FDT_CPUS) {
+        fdt_cpu[fdt_ncpu].mpidr = base;
+        fdt_cpu[fdt_ncpu].release = n->release;
+        fdt_cpu[fdt_ncpu++].psci = n->enable && FdtEqual(n->enable, "psci");
+    }
+    if (FdtIs(n, "arm,psci-0.2") || FdtIs(n, "arm,psci-1.0")) {
+        if (n->method && FdtEqual(n->method, "hvc")) fdt_psci = 1;
+        if (n->method && FdtEqual(n->method, "smc")) fdt_psci = 2;
+    }
+    if (FdtIs(n, "arm,gic-v3") || FdtIs(n, "arm,cortex-a15-gic") || FdtIs(n, "arm,gic-400")) {
+        fdt_gic_version = 2;
+        if (FdtIs(n, "arm,gic-v3")) fdt_gic_version = 3;
+        fdt_gic = base;
+        if (n->reg_len >= 2 * step) {
+            fdt_gic_cpu = FdtCell(n->reg + step, n->parent_addr);
+            fdt_gic_cpu_size = FdtCell(n->reg + step + 4 * n->parent_addr, n->parent_size);
+        }
+    }
+    if (FdtIs(n, "apple,aic")) fdt_aic = base;
+    if (FdtIs(n, "arm,pl011") || FdtIs(n, "apple,s5l-uart")) {
+        fdt_uart = base;
+        fdt_uart_irq = irq;
+        fdt_pl011 = FdtIs(n, "arm,pl011");
+    }
+    if (FdtIs(n, "arm,armv8-timer") && n->ints_len >= 36)
+        fdt_timer_irq = 16 + Fdt32(n->ints + 28); // third specifier: virtual timer PPI
+    if (FdtIs(n, "coolcom,coolvm-finisher")) fdt_finisher = base;
+    if (FdtIs(n, "coolcom,coolvm-input")) {
+        fdt_input.base = base; fdt_input.size = size; fdt_input.irq = irq;
+    }
+    if (FdtIs(n, "virtio,mmio") && fdt_nblk < FDT_BLKS) {
+        fdt_blk[fdt_nblk].base = base;
+        fdt_blk[fdt_nblk].size = size;
+        fdt_blk[fdt_nblk].flags = 0;
+        if (n->ints_len >= 12) fdt_blk[fdt_nblk].flags = Fdt32(n->ints + 8);
+        fdt_blk[fdt_nblk++].irq = irq;
+    }
+    if (FdtIs(n, "simple-framebuffer") && n->fb32 && n->w && n->h) {
+        fdt_fb.base = base; fdt_fb.size = size;
+        fdt_fb_w = n->w; fdt_fb_h = n->h;
+        fdt_fb_stride = n->stride;
+        if (!fdt_fb_stride) fdt_fb_stride = n->w * 4;
+        fdt_fb_scanout = n->scanout;
+        fdt_fb_32bpp = TRUE;
+    }
+}
+
 Bool FdtInit(U8 *dt)
 {
-    U8 *p, *str, *data, *r;
-    I64 tok, len, nameoff, depth = -1, kind[16], k, i, start, size;
-    if (Fdt32(dt) != 0xD00DFEED)
-        return FALSE;
+    U8 *p, *str, *data, *r, *name;
+    I64 tok, len, nameoff, depth = -1, i, start, size;
+    CFdtNode nodes[16], *n;
+    if (Fdt32(dt) != 0xD00DFEED) return FALSE;
     fdt_size = Fdt32(dt + 4);
-    if (fdt_size < 40 || fdt_size > (2 << 20))
-        return FALSE;
-    p = dt + Fdt32(dt + 8);
-    str = dt + Fdt32(dt + 12);
-    r = dt + Fdt32(dt + 16);
+    if (fdt_size < 40 || fdt_size > (2 << 20)) return FALSE;
+    p = dt + Fdt32(dt + 8); str = dt + Fdt32(dt + 12); r = dt + Fdt32(dt + 16);
     while ((start = Fdt64(r)) | (size = Fdt64(r + 8))) {
-        FdtReserve(start, size);
-        r += 16;
+        FdtReserve(start, size); r += 16;
     }
     while (p < dt + fdt_size) {
-        tok = Fdt32(p);
-        p += 4;
+        tok = Fdt32(p); p += 4;
         if (tok == 1) {
-            depth++;
-            if (depth >= 16)
-                return FALSE;
-            k = 0;
-            if (depth == 1) {
-                if (FdtPrefix(p, "memory@")) k = 1;
-                if (FdtPrefix(p, "cpus")) k = 2;
-                if (FdtPrefix(p, "soc")) k = 3;
-                if (FdtPrefix(p, "reserved-memory")) k = 4;
-                if (FdtPrefix(p, "chosen")) k = 10;
-            } else if (depth == 2) {
-                if (kind[1] == 2 && FdtPrefix(p, "cpu@")) {
-                    k = 5;
-                    if (fdt_ncpu < FDT_CPUS) fdt_ncpu++;
-                }
-                if (kind[1] == 3 && FdtPrefix(p, "serial@")) k = 6;
-                if (kind[1] == 3 && FdtPrefix(p, "interrupt-controller@")) k = 7;
-                if (kind[1] == 3 && FdtPrefix(p, "finisher@")) k = 8;
-                if (kind[1] == 4) k = 9;
+            if (++depth >= 16) return FALSE;
+            n = &nodes[depth];
+            for (i = 0; i < sizeof(CFdtNode); i++) n(U8 *)[i] = 0;
+            n->name = p; n->addr_cells = 2; n->size_cells = 1;
+            if (depth) {
+                n->parent_addr = nodes[depth - 1].addr_cells;
+                n->parent_size = nodes[depth - 1].size_cells;
             }
-            kind[depth] = k;
-            if (depth == 2 && (kind[1] == 3 || kind[1] == 10))
-                FdtNodeStart;
             while (*p) p++;
             p = ((p + 4)(I64) & ~3)(U8 *);
         } else if (tok == 2) {
-            if (depth == 2 && (kind[1] == 3 || kind[1] == 10))
-                FdtNodeDone;
-            if (depth == 2 && kind[2] == 6 && fdt_nd.irq)
-                fdt_uart_irq = fdt_nd.irq;
+            if (depth < 0) return FALSE;
+            if (depth) FdtNodeDone(&nodes[depth], &nodes[depth - 1]);
             depth--;
         } else if (tok == 3) {
-            len = Fdt32(p);
-            nameoff = Fdt32(p + 4);
-            data = p + 8;
+            if (depth < 0) return FALSE;
+            n = &nodes[depth];
+            len = Fdt32(p); nameoff = Fdt32(p + 4); data = p + 8;
             p = ((data + len + 3)(I64) & ~3)(U8 *);
-            if (kind[depth] == 10 && FdtEqual(str + nameoff, "bootargs"))
-                fdt_test = FdtPrefix(data, "coolcom.test=1");
-            if (kind[depth] == 10 && FdtEqual(str + nameoff, "coolcom,unix-time") && len == 8)
-                fdt_unix_time = Fdt64(data);
-            if (kind[depth] == 10 && FdtEqual(str + nameoff, "coolcom,utc-offset") && len == 4)
-                fdt_utc_offset = Fdt32(data)(I32);
-            if (depth == 0 && FdtEqual(str + nameoff, "compatible"))
-                fdt_vm = FdtPrefix(data, "coolcom,coolvm");
-            if (FdtEqual(str + nameoff, "reg") && len >= 16) {
-                start = Fdt64(data);
-                size = Fdt64(data + 8);
-                if (kind[depth] == 1) {
-                    for (i = 0; i + 16 <= len && fdt_nmem < FDT_MEMS; i += 16) {
-                        start = Fdt64(data + i);
-                        size = Fdt64(data + i + 8);
-                        fdt_mem[fdt_nmem].start = start;
-                        fdt_mem[fdt_nmem].end = start + size;
-                        fdt_nmem++;
-                    }
-                }
-                if (kind[depth] == 6) fdt_uart = start;
-                if (kind[depth] == 7) fdt_aic = start;
-                if (kind[depth] == 8) fdt_finisher = start;
-                if (kind[depth] == 9) FdtReserve(start, size);
-            }
-            if (depth == 2 && (kind[1] == 3 || kind[1] == 10)) {
-                if (FdtEqual(str + nameoff, "reg") && len >= 16) {
-                    fdt_nd.base = Fdt64(data);
-                    fdt_nd.size = Fdt64(data + 8);
-                } else if (FdtEqual(str + nameoff, "interrupts") && len >= 8)
-                    fdt_nd.irq = Fdt32(data + 4);
-                else if (FdtEqual(str + nameoff, "compatible")) {
-                    if (FdtCompat(data, len, "coolcom,coolvm-input"))
-                        fdt_nd_kind = 1;
-                    else if (FdtCompat(data, len, "virtio,mmio"))
-                        fdt_nd_kind = 2;
-                    else if (FdtCompat(data, len, "simple-framebuffer"))
-                        fdt_nd_kind = 3;
-                } else if (FdtEqual(str + nameoff, "width") && len >= 4)
-                    fdt_nd_w = Fdt32(data);
-                else if (FdtEqual(str + nameoff, "height") && len >= 4)
-                    fdt_nd_h = Fdt32(data);
-                else if (FdtEqual(str + nameoff, "stride") && len >= 4)
-                    fdt_nd_stride = Fdt32(data);
-                else if (FdtEqual(str + nameoff, "coolcom,scanout-y") && len == 8)
-                    fdt_nd_scanout = Fdt64(data);
-                else if (FdtEqual(str + nameoff, "format"))
-                    fdt_nd_32bpp = FdtEqual(data, "x8r8g8b8") || FdtEqual(data, "a8r8g8b8");
-            }
-            if (kind[depth] == 5) {
-                if (FdtEqual(str + nameoff, "reg") && len >= 8 && fdt_ncpu)
-                    fdt_cpu[fdt_ncpu - 1].mpidr = Fdt64(data);
-                if (FdtEqual(str + nameoff, "cpu-release-addr") && len >= 8 && fdt_ncpu)
-                    fdt_cpu[fdt_ncpu - 1].release = Fdt64(data);
+            name = str + nameoff;
+            if (FdtEqual(name, "compatible")) {
+                n->compat = data; n->compat_len = len;
+                if (!depth) fdt_vm = FdtCompat(data, len, "coolcom,coolvm");
+            } else if (FdtEqual(name, "reg")) {n->reg = data; n->reg_len = len;}
+            else if (FdtEqual(name, "interrupts")) {n->ints = data; n->ints_len = len;}
+            else if (FdtEqual(name, "#address-cells") && len == 4) n->addr_cells = Fdt32(data);
+            else if (FdtEqual(name, "#size-cells") && len == 4) n->size_cells = Fdt32(data);
+            else if (FdtEqual(name, "method")) n->method = data;
+            else if (FdtEqual(name, "enable-method")) n->enable = data;
+            else if (FdtEqual(name, "cpu-release-addr") && len == 8) n->release = Fdt64(data);
+            else if (FdtEqual(name, "width") && len == 4) n->w = Fdt32(data);
+            else if (FdtEqual(name, "height") && len == 4) n->h = Fdt32(data);
+            else if (FdtEqual(name, "stride") && len == 4) n->stride = Fdt32(data);
+            else if (FdtEqual(name, "coolcom,scanout-y") && len == 8) n->scanout = Fdt64(data);
+            else if (FdtEqual(name, "format")) n->fb32 = FdtEqual(data, "x8r8g8b8") || FdtEqual(data, "a8r8g8b8");
+            if (FdtEqual(n->name, "chosen")) {
+                if (FdtEqual(name, "bootargs")) fdt_test = FdtPrefix(data, "coolcom.test=1");
+                if (FdtEqual(name, "coolcom,unix-time") && len == 8) fdt_unix_time = Fdt64(data);
+                if (FdtEqual(name, "coolcom,utc-offset") && len == 4) fdt_utc_offset = Fdt32(data)(I32);
             }
         } else if (tok == 9) {
+            if (!fdt_vm) fdt_finisher = 0;
+            if (fdt_gic_version) {
+                fdt_uart_irq += 32;
+                fdt_input.irq += 32;
+                for (i = 0; i < fdt_nblk; i++) fdt_blk[i].irq += 32;
+            }
             return fdt_nmem > 0 && fdt_ncpu > 0;
-        } else if (tok != 4) {
-            return FALSE;
-        }
+        } else if (tok != 4) return FALSE;
     }
     return FALSE;
 }

@@ -159,6 +159,17 @@ mmu_tables:
   add x2, x2, #1
   cmp x2, x3
   b.lo 8b
+  // QEMU virt peripherals occupy the low 1 GiB. Keep the Apple MMIO map too.
+  mov x2, #0
+  mov x3, #32
+16:
+  lsl x4, x2, #25
+  ldr x5, =BLK_DEVICE
+  orr x4, x4, x5
+  str x4, [x0, x2, lsl #3]
+  add x2, x2, #1
+  cmp x2, x3
+  b.lo 16b
   // Page-map the DRAM aperture before enabling translation. No live block
   // splitting (and no break-before-make window on the executing stack).
   LA x6, l3_tables
@@ -171,6 +182,12 @@ mmu_tables:
   LA x14, ap_stacks_end
   mov x2, #1024
   mov x3, #1536
+  // The loaded Image selects the RAM aperture before we can parse the FDT.
+  // Apple: 32..48 GiB; QEMU virt: 1..17 GiB. Both retain page guards and RO text.
+  lsr x4, x7, #35
+  cbnz x4, 9f
+  mov x2, #32
+  mov x3, #544
 9:
   orr x4, x6, #3
   str x4, [x0, x2, lsl #3]
