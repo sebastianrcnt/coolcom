@@ -362,3 +362,12 @@ draws the guest console's cell grid with Metal. It uses feature bit 23, FDT `coo
 and commands `0x4000`-`0x4006` on the control queue. `--no-logos` stops offering it, and the
 guest then draws pixels as before. `LOGOS_DEBUG=1` in the environment logs failed commands,
 and `LOGOS_DEBUG=2` logs every command.
+
+### Optional Venus host transport
+
+`tools/vendor-venus.sh --host` builds the pinned source dependencies into `vendor/venus`.
+`COOLVM_VENUS=1 tools/coolvm/build.sh build/coolvm-venus` enables the experimental
+capset/context/SUBMIT_3D/blob path. `make venus-host-test` runs real renderer and
+Hypervisor mapping tests without a guest. The default build and `make -j test`
+need no vendored libraries. See [Venus validation](../../docs/venus.md#host-validation-log-2026-09-30)
+for measured results, resource limits and remaining presentation/guest work.

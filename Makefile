@@ -378,6 +378,13 @@ logos-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/gpu-resize-test.py $<
 
+# Host-only Venus spike; opt-in and independent of the default test suite.
+.PHONY: vendor-venus venus-host-test
+vendor-venus:
+	tools/vendor-venus.sh --host
+venus-host-test:
+	tools/coolvm/test/venus-spike.sh
+
 # Kernel Venus wire flow with a deliberately fake, opt-in host backend.
 .PHONY: venus-transport-test
 venus-transport-test: build/kernel.Image coolvm
@@ -391,3 +398,22 @@ venus-gen: venus-vendor
 venus-gen-test: build/coolc
 	python3 tools/venus/test_offline.py
 	python3 tools/venus/test.py
+
+# Real guest tests are opt-in; these targets never fetch dependencies.
+.PHONY: venus-memory-test
+build/venus/Vulkan.cool: tools/venus/gen.py tools/venus/subset.txt tools/venus/wire.cool
+	python3 tools/venus/gen.py
+build/coolvm-venus: $(wildcard tools/coolvm/src/*.[ch]) tools/coolvm/build.sh
+	COOLVM_VENUS=1 tools/coolvm/build.sh $@
+venus-memory-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool
+	python3 tools/venus/run_guest.py
+
+.PHONY: venus-test
+build/venus/triangle.vert.spv: tools/venus/shaders/triangle.vert
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+build/venus/triangle.frag.spv: tools/venus/shaders/triangle.frag
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+venus-test: build/kernel.Image build/coolvm-venus build/venus/Vulkan.cool build/venus/triangle.vert.spv build/venus/triangle.frag.spv
+	python3 tools/venus/run_guest.py --triangle

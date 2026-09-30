@@ -1,7 +1,8 @@
-/* Virtio 1.2 section 5.7: synchronous unaccelerated 2D, one scanout, two
+/* Virtio 1.2 section 5.7: synchronous 2D and opt-in Venus, one scanout, two
  * split queues. All device state (including presentation) is under g.lock. */
 #include "virtio.h"
 #include "logos.h"
+#include "gpu3d.h"
 #define GPU_RESOURCES 64
 #define GPU_BYTES (256ULL << 20)
 #define GPU_TOTAL (512ULL << 20)
@@ -19,7 +20,7 @@ static struct {
     struct gpu_resource res[GPU_RESOURCES];
     uint32_t events, width, height, scan_id, sx, sy, sw, sh;
     uint32_t cursor[64*64], cx, cy, hx, hy;
-    bool cursor_on, active;
+    bool cursor_on, active, venus;
     uint64_t bytes;
     uint32_t stub_ctx, shm_sel;
 } gpu;
@@ -72,6 +73,11 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
                 damage();
             }
         }
+    } else if(gpu.venus && ((type==0x10c && len>=32 && resource(vio32(p+24))) ||
+               (type==0x101 && len>=32 && gpu3d_resource(vio32(p+24))))) {
+        result=0x1205;
+    } else if(gpu.venus && (gpu.v.drvfeat[0]&GPU3D_FEATURES)==GPU3D_FEATURES && gpu3d_command(p,len,out,cap,&n)) {
+        return n;
     } else if(g.gpu_3d_stub && stub_command(type,p,len,out,cap,&result,&n)) {
         /* Test-only transport. No renderer or Vulkan protocol decoding. */
     } else if(type==0x100) {
@@ -123,10 +129,10 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
             uint32_t id=vio32(p+(type==0x103?44:type==0x105?48:40));
             struct gpu_resource *r=resource(id);
             if(type==0x103 && vio32(p+40))result=0x1202;
-            else if(type==0x103 && !id){gpu.scan_id=0;gpu.active=true;damage();}
+            else if(type==0x103 && !id){gpu3d_scanout_disable();gpu.scan_id=0;gpu.active=true;damage();}
             else if(!r)result=0x1203;
             else if(!rect(r,x,y,w,h))result=0x1205;
-            else if(type==0x103){gpu.active=true;gpu.scan_id=id;gpu.sx=x;gpu.sy=y;gpu.sw=w;gpu.sh=h;damage();}
+            else if(type==0x103){gpu3d_scanout_disable();gpu.active=true;gpu.scan_id=id;gpu.sx=x;gpu.sy=y;gpu.sw=w;gpu.sh=h;damage();}
             else if(type==0x104){if(r->blob_mem && !stub_flush(r))result=0x1205;else if(gpu.scan_id==id){damage();fb_frame_dump();}}
             else {
                 uint64_t offset=vio64(p+40),stride=(uint64_t)r->w*4;
@@ -153,7 +159,7 @@ static void process(unsigned queue)
     if((uint16_t)(end-q->last_avail)>q->num)return;
     while(q->last_avail!=end) {
         uint16_t head=vio16(avail+4+2*(q->last_avail%q->num)),id=head;
-        uint8_t req[32+1024*16],reply[24+16*24];
+        uint8_t req[65536],reply[GPU3D_REPLY_MAX];
         struct {uint8_t *p;uint32_t len;} writable[256];
         size_t nr=0,capacity=0;unsigned nw=0,steps=0;bool valid=true,done=false;
         do {
@@ -167,7 +173,7 @@ static void process(unsigned queue)
         } while(valid);
         uint32_t written=0;
         if(valid && done && nr>=24 && capacity>=24) {
-            size_t n=command(queue,req,nr,reply,capacity),off=0;
+            size_t n=command(queue,req,nr,reply,capacity<sizeof reply?capacity:sizeof reply),off=0;
             for(unsigned i=0;i<nw && off<n;i++){size_t bytes=writable[i].len;if(bytes>n-off)bytes=n-off;memcpy(writable[i].p,reply+off,bytes);off+=bytes;}
             written=(uint32_t)off;
         } else LOGE("gpu: malformed chain %u\n",head);
@@ -176,8 +182,8 @@ static void process(unsigned queue)
     }
     aic_update_locked();
 }
-static void features(void){gpu.v.devfeat0=(g.logos?1u<<LOGOS_FEATURE:0) | (g.gpu_3d_stub?0x19:0);}
-void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;features();}
+static void features(void){gpu.v.devfeat0=(g.logos?1u<<LOGOS_FEATURE:0)|((gpu.venus || g.gpu_3d_stub)?GPU3D_FEATURES:0);}
+void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;gpu.venus=g.gpu && !g.gpu_3d_stub && gpu3d_init();features();}
 bool gpu_irq_level(void){return g.gpu && gpu.v.isr!=0;}
 bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
 {
@@ -185,7 +191,7 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
     uint32_t x=(uint32_t)*val;
     if(off>=0x100) {
         if(wr){if(off!=0x104)return false;gpu.events&=~x;}
-        else {switch(off){case 0x100:x=gpu.events;break;case 0x104:x=0;break;case 0x108:x=1;break;case 0x10c:x=g.gpu_3d_stub?1:0;break;default:return false;}*val=x;}
+        else {switch(off){case 0x100:x=gpu.events;break;case 0x104:x=0;break;case 0x108:x=1;break;case 0x10c:x=(g.gpu_3d_stub || gpu.venus)?1:0;break;default:return false;}*val=x;}
         return true;
     }
     if(off>=0xac && off<=0xbc && g.gpu_3d_stub) {
@@ -198,10 +204,12 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
         }
         return true;
     }
+    if(!g.gpu_3d_stub && gpu3d_mmio(off,wr,&x)){if(!wr)*val=x;return true;}
     if(wr && off==0x50){if(x>=2)return false;process(x);return true;}
     if(wr && off==0x70 && x==0) {
         for(unsigned i=0;i<GPU_RESOURCES;i++)discard(&gpu.res[i]);
         memset(&gpu.v,0,sizeof gpu.v);gpu.scan_id=0;gpu.cursor_on=false;gpu.active=false;
+        if(gpu.venus){gpu3d_reset();gpu.venus=gpu3d_init();}
         gpu.stub_ctx=0;gpu.shm_sel=0;features();logos_reset();
     } else if(!virtio_regs(&gpu.v,16,off,wr,&x))return false;
     if(!wr)*val=x;aic_update_locked();return true;
@@ -217,6 +225,7 @@ void gpu_resize(uint32_t width,uint32_t height)
  * to queue processing. Caller holds g.lock. */
 bool gpu_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
 {
+    if(gpu.venus && gpu3d_snapshot(pixels,width,height))return true;
     if(!gpu.active)return false;
     struct gpu_resource *r=resource(gpu.scan_id);
     uint32_t w=r?gpu.sw:gpu.width,h=r?gpu.sh:gpu.height;

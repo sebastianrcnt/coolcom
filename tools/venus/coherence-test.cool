@@ -1,0 +1,6 @@
+#include "C:/Vulkan/Gfx.cool"
+GfxInit;
+GfxCoherenceTest;
+GfxDestroy;
+Print("VENUS MEMORY PASS\n");
+Shutdown;

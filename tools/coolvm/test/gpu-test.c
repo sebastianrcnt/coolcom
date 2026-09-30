@@ -25,7 +25,8 @@ static uint8_t *send(unsigned q,uint32_t type,unsigned len)
     uint8_t *avail=mem(0x1200+q*0x1000);
     vio_put16(avail+4+2*(idx[q]%8),0);vio_put16(avail+2,++idx[q]);wr(0x50,q);
     assert(vio16(mem(0x1302+q*0x1000))==idx[q]);
-    assert(vio32(mem(0x5004))==1 && vio64(mem(0x5008))==fence);
+    assert(vio64(mem(0x5008))==fence);
+    assert(vio32(mem(0x5004))==1 || (type==0x207 && vio32(mem(0x5000))>=0x1200 && vio32(mem(0x5004))==0));
     return mem(0x5000);
 }
 static void initq(unsigned q)

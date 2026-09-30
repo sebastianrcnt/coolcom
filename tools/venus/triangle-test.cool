@@ -1,0 +1,135 @@
+#include "C:/Vulkan/Gfx.cool"
+
+U64i TriangleShader(U8 *path)
+{
+    I64 size; U8 *code = FileRead(path, &size);
+    U64i shader = GfxId; VkShaderModuleCreateInfo ci;
+    GfxCheck(code && size > 0 && !(size & 3), "SPIR-V file");
+    MemSet(&ci, 0, sizeof(ci)); ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ci.codeSize = size; ci.pCode = code;
+    GfxBegin; vn_encode_vkCreateShaderModule(&gfx.enc, 0, gfx.device, &ci, NULL, &shader); GfxSubmit;
+    GfxResult(vn_decode_vkCreateShaderModule_reply(&gfx.reply, gfx.device, &ci, NULL, &shader), "shader");
+    Free(code); return shader;
+}
+U0 Triangle()
+{
+    U64i image = GfxId, memory, view = GfxId, layout = GfxId, pipeline = GfxId;
+    U64i shaders[2]; I32i format = VK_FORMAT_B8G8R8A8_UNORM;
+    VkImageCreateInfo image_info; VkMemoryRequirements req; VkImageViewCreateInfo view_info;
+    VkPipelineLayoutCreateInfo layout_info; VkGraphicsPipelineCreateInfo pipeline_info;
+    VkPipelineRenderingCreateInfo rendering_pipeline;
+    VkPipelineShaderStageCreateInfo stages[2]; VkPipelineVertexInputStateCreateInfo vertex;
+    VkPipelineInputAssemblyStateCreateInfo assembly; VkPipelineViewportStateCreateInfo viewport_state;
+    VkViewport viewport; VkRect2D scissor; VkPipelineRasterizationStateCreateInfo raster;
+    VkPipelineMultisampleStateCreateInfo multisample; VkPipelineColorBlendAttachmentState blend;
+    VkPipelineColorBlendStateCreateInfo blend_state;
+    VkImageMemoryBarrier image_barrier; VkMemoryBarrier buffer_barrier;
+    VkRenderingAttachmentInfo attachment; VkRenderingInfo rendering; VkBufferImageCopy copy;
+    CGfxBuffer readback;
+    I64 x, y, painted = 0, daif; U8 *pixel;
+    MemSet(&image_info, 0, sizeof(image_info)); image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D; image_info.format = format;
+    image_info.extent.width = 256; image_info.extent.height = 256; image_info.extent.depth = 1;
+    image_info.mipLevels = 1; image_info.arrayLayers = 1; image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    GfxBegin; vn_encode_vkCreateImage(&gfx.enc, 0, gfx.device, &image_info, NULL, &image); GfxSubmit;
+    GfxResult(vn_decode_vkCreateImage_reply(&gfx.reply, gfx.device, &image_info, NULL, &image), "image");
+    GfxBegin; vn_encode_vkGetImageMemoryRequirements(&gfx.enc, 0, gfx.device, image, &req); GfxSubmit;
+    vn_decode_vkGetImageMemoryRequirements_reply(&gfx.reply, gfx.device, image, &req);
+    GfxCheck(!gfx.reply.error, "image requirements"); memory = GfxMemory(&req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    GfxBegin; vn_encode_vkBindImageMemory(&gfx.enc, 0, gfx.device, image, memory, 0); GfxSubmit;
+    GfxResult(vn_decode_vkBindImageMemory_reply(&gfx.reply, gfx.device, image, memory, 0), "bind image");
+    MemSet(&view_info, 0, sizeof(view_info)); view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = image; view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; view_info.format = format;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.levelCount = 1; view_info.subresourceRange.layerCount = 1;
+    GfxBegin; vn_encode_vkCreateImageView(&gfx.enc, 0, gfx.device, &view_info, NULL, &view); GfxSubmit;
+    GfxResult(vn_decode_vkCreateImageView_reply(&gfx.reply, gfx.device, &view_info, NULL, &view), "image view");
+    shaders[0] = TriangleShader("C:/Vulkan/triangle.vert.spv"); shaders[1] = TriangleShader("C:/Vulkan/triangle.frag.spv");
+    MemSet(&layout_info, 0, sizeof(layout_info)); layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    GfxBegin; vn_encode_vkCreatePipelineLayout(&gfx.enc, 0, gfx.device, &layout_info, NULL, &layout); GfxSubmit;
+    GfxResult(vn_decode_vkCreatePipelineLayout_reply(&gfx.reply, gfx.device, &layout_info, NULL, &layout), "pipeline layout");
+    MemSet(stages, 0, sizeof(stages));
+    for (x = 0; x < 2; x++) {stages[x].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[x].module = shaders[x]; stages[x].pName = "main";}
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT; stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    MemSet(&vertex, 0, sizeof(vertex)); vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    MemSet(&assembly, 0, sizeof(assembly)); assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    MemSet(&viewport, 0, sizeof(viewport)); viewport.width = 0x43800000; viewport.height = 0x43800000; viewport.maxDepth = 0x3F800000;
+    MemSet(&scissor, 0, sizeof(scissor)); scissor.extent.width = 256; scissor.extent.height = 256;
+    MemSet(&viewport_state, 0, sizeof(viewport_state)); viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1; viewport_state.pViewports = &viewport; viewport_state.scissorCount = 1; viewport_state.pScissors = &scissor;
+    MemSet(&raster, 0, sizeof(raster)); raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    raster.lineWidth = 0x3F800000;
+    MemSet(&multisample, 0, sizeof(multisample)); multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MemSet(&blend, 0, sizeof(blend)); blend.colorWriteMask = 15;
+    MemSet(&blend_state, 0, sizeof(blend_state)); blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend_state.attachmentCount = 1; blend_state.pAttachments = &blend;
+    MemSet(&rendering_pipeline, 0, sizeof(rendering_pipeline)); rendering_pipeline.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    rendering_pipeline.colorAttachmentCount = 1; rendering_pipeline.pColorAttachmentFormats = &format;
+    MemSet(&pipeline_info, 0, sizeof(pipeline_info)); pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_info.pNext = &rendering_pipeline; pipeline_info.stageCount = 2; pipeline_info.pStages = stages;
+    pipeline_info.pVertexInputState = &vertex; pipeline_info.pInputAssemblyState = &assembly;
+    pipeline_info.pViewportState = &viewport_state; pipeline_info.pRasterizationState = &raster;
+    pipeline_info.pMultisampleState = &multisample; pipeline_info.pColorBlendState = &blend_state;
+    pipeline_info.layout = layout; pipeline_info.basePipelineIndex = -1;
+    GfxBegin; vn_encode_vkCreateGraphicsPipelines(&gfx.enc, 0, gfx.device, 0, 1, &pipeline_info, NULL, &pipeline); GfxSubmit;
+    GfxResult(vn_decode_vkCreateGraphicsPipelines_reply(&gfx.reply, gfx.device, 0, 1, &pipeline_info, NULL, &pipeline), "graphics pipeline");
+    GfxBufferCreate(&readback, 256 * 256 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    MemSet(&image_barrier, 0, sizeof(image_barrier)); image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    image_barrier.image = image; image_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; image_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    image_barrier.subresourceRange = view_info.subresourceRange;
+    image_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; image_barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    MemSet(&attachment, 0, sizeof(attachment)); attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment.imageView = view; attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.clearValue.color.uint32[0] = 0x3D4CCCCD; attachment.clearValue.color.uint32[1] = 0x3DCCCCCD;
+    attachment.clearValue.color.uint32[2] = 0x3E4CCCCD; attachment.clearValue.color.uint32[3] = 0x3F800000;
+    MemSet(&rendering, 0, sizeof(rendering)); rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea = scissor; rendering.layerCount = 1; rendering.colorAttachmentCount = 1; rendering.pColorAttachments = &attachment;
+    MemSet(&copy, 0, sizeof(copy)); copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; copy.imageSubresource.layerCount = 1;
+    copy.imageExtent.width = 256; copy.imageExtent.height = 256; copy.imageExtent.depth = 1;
+    MemSet(&buffer_barrier, 0, sizeof(buffer_barrier)); buffer_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    buffer_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; buffer_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    GfxRecord;
+    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &image_barrier);
+    vn_encode_vkCmdBeginRendering(&gfx.enc, 0, gfx.cmd, &rendering);
+    vn_encode_vkCmdBindPipeline(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vn_encode_vkCmdDraw(&gfx.enc, 0, gfx.cmd, 3, 1, 0, 0);
+    vn_encode_vkCmdEndRendering(&gfx.enc, 0, gfx.cmd);
+    image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; image_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    image_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; image_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &image_barrier);
+    vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1, &copy);
+    vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &buffer_barrier, 0, NULL, 0, NULL);
+    GfxExecute;
+    for (y = 0; y < 256; y++) for (x = 0; x < 256; x++) {
+            pixel = readback.mapping + (y * 256 + x) * 4;
+            if (pixel[2] > 200 && pixel[0] < 40) painted++;
+        }
+    GfxCheck(painted > 18000 && painted < 19000, "triangle readback area");
+    pixel = readback.mapping + (128 * 256 + 128) * 4;
+    GfxCheck(pixel[2] > 220 && pixel[1] > 45 && pixel[1] < 57 && pixel[0] < 32, "triangle center");
+    GfxCheck(readback.mapping[0] == 51 && readback.mapping[2] < 16, "clear background");
+    // Release render objects, retaining the scanout buffer/device until VM exit.
+    GfxBegin; vn_encode_vkDestroyPipeline(&gfx.enc, 0, gfx.device, pipeline, NULL);
+    vn_encode_vkDestroyPipelineLayout(&gfx.enc, 0, gfx.device, layout, NULL);
+    for (x = 0; x < 2; x++) vn_encode_vkDestroyShaderModule(&gfx.enc, 0, gfx.device, shaders[x], NULL);
+    vn_encode_vkDestroyImageView(&gfx.enc, 0, gfx.device, view, NULL);
+    vn_encode_vkDestroyImage(&gfx.enc, 0, gfx.device, image, NULL); vn_encode_vkFreeMemory(&gfx.enc, 0, gfx.device, memory, NULL); GfxSubmit;
+    Print("VENUS TRIANGLE PASS pixels=%d\n", painted);
+    // Prevent the periodic console from replacing the blob scanout before exit.
+    // FbRenderLocked owns this lock across all console GPU commands.
+    // Keep it until power-off so another vCPU cannot restore 2D scanout.
+    daif = SpinLockIrq(&fb.render_lock);
+    if (!GpuScanoutBlob(readback.blob, 256, 256, 1024)) {
+        SpinUnlockIrq(&fb.render_lock, daif);
+        GfxCheck(FALSE, "scanout blob");
+    }
+    gpu.active = FALSE;
+    ArchMmioWrite32(fdt_finisher, FINISHER_POWER_OFF);
+}
+GfxInit;
+GfxCoherenceTest;
+Triangle;
