@@ -123,14 +123,14 @@ U0 GpuPresent(I64 top, I64 w, I64 h)
     GpuCommand(0, 0x104, p, 6);
 }
 
-U0 GpuCursor(I64 x, I64 y, I64 w, U8 *back, I64 stride)
+U0 GpuCursor(I64 x, I64 y, I64 w, I64 h, U8 *back, I64 stride)
 {//Preserve the console's inverted block cursor using a transparent 64x64 resource.
     U32 p[8], *src, *dst = gpu.cursor;
     I64 i, j;
     MemSet(dst, 0, 64 * 64 * 4);
-    for (j = 0; j < FONT_CELL_H; j++) {
+    for (j = 0; j < h && j < 64; j++) {
         src = back + j * stride;
-        for (i = 0; i < w; i++) dst[j * 64 + i] = (src[i] ^ 0xFFFFFF) | 0xFF000000;
+        for (i = 0; i < w && i < 64; i++) dst[j * 64 + i] = (src[i] ^ 0xFFFFFF) | 0xFF000000;
     }
     if (!GpuTransfer(gpu.cursor_id, 64 * 4, 0, 0, 64, 64)) return;
     MemSet(p, 0, sizeof(p)); p[1] = x; p[2] = y; p[4] = gpu.cursor_id;

@@ -18,6 +18,7 @@ static struct {
     struct virtio_mmio v;
     struct gpu_resource res[GPU_RESOURCES];
     uint32_t events, width, height, scan_id, sx, sy, sw, sh;
+    uint32_t scale; /* coolcom extension, config offset 0x10: the display's backing scale (1 or 2) */
     uint32_t cursor[64*64], cx, cy, hx, hy;
     bool cursor_on, active, venus;
     uint64_t bytes;
@@ -178,7 +179,7 @@ static void process(unsigned queue)
     aic_update_locked();
 }
 static void features(void){gpu.v.devfeat0=((gpu.venus || g.gpu_3d_stub)?GPU3D_FEATURES:0);}
-void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;gpu.venus=g.gpu && !g.no_venus && !g.gpu_3d_stub && gpu3d_init();features();}
+void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;gpu.scale=g.fb_scale?g.fb_scale:1;gpu.venus=g.gpu && !g.no_venus && !g.gpu_3d_stub && gpu3d_init();features();}
 bool gpu_irq_level(void){return g.gpu && gpu.v.isr!=0;}
 bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
 {
@@ -186,7 +187,7 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
     uint32_t x=(uint32_t)*val;
     if(off>=0x100) {
         if(wr){if(off!=0x104)return false;gpu.events&=~x;}
-        else {switch(off){case 0x100:x=gpu.events;break;case 0x104:x=0;break;case 0x108:x=1;break;case 0x10c:x=(g.gpu_3d_stub || gpu.venus)?1:0;break;default:return false;}*val=x;}
+        else {switch(off){case 0x100:x=gpu.events;break;case 0x104:x=0;break;case 0x108:x=1;break;case 0x10c:x=(g.gpu_3d_stub || gpu.venus)?1:0;break;case 0x110:x=gpu.scale;break;default:return false;}*val=x;}
         return true;
     }
     if(off>=0xac && off<=0xbc && g.gpu_3d_stub) {
@@ -208,6 +209,13 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
         gpu.stub_ctx=0;gpu.shm_sel=0;features();
     } else if(!virtio_regs(&gpu.v,16,off,wr,&x))return false;
     if(!wr)*val=x;aic_update_locked();return true;
+}
+void gpu_scale(uint32_t scale)
+{/* The window's backing scale changed (Retina or not): the same display event as a resize. */
+    if(!g.gpu || (scale!=1 && scale!=2) || g.fb_scale)return;
+    pthread_mutex_lock(&g.lock);
+    if(scale!=gpu.scale){gpu.scale=scale;gpu.events|=1;gpu.v.generation++;gpu.v.isr|=2;aic_update_locked();}
+    pthread_mutex_unlock(&g.lock);
 }
 void gpu_resize(uint32_t width,uint32_t height)
 {

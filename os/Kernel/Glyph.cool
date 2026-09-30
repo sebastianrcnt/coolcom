@@ -1,0 +1,88 @@
+// The console font: glyphs for the CPU renderer (Fb.cool) and the Vulkan terminal
+// (os/Vulkan/Terminal.cool), through one call, GlyphGet. The source is GNU Unifont
+// (Font.cool), whose 8x16 stamps are drawn scaled by an integer (1x, or 2x on HiDPI
+// screens). The cell size is the font's: 8x16 times the scale for Unifont.
+// font.serial changes whenever glyphs or the cell size change; renderers that cache
+// glyphs (the Vulkan atlas) start over then.
+#define FONT_MAX_SCALE 2
+
+class CGlyph
+{// What GlyphGet returns. bpp 1: a Unifont stamp (16 rows of 1 byte, or 2 for a wide
+    // glyph, MSB leftmost), drawn with each bit as a scale x scale block at x, y in the
+    // cell box. bpp 8: coverage bytes (0..255), cells * font.cw wide and font.ch high.
+    U8 *data;
+    I64 bpp, scale, x, y;
+};
+
+class CFont
+{
+    I64 scale;           // 1 or 2
+    I64 scale_set;       // 0: automatic; else the override (FontScale, bootarg coolcom.scale=N)
+    I64 cw, ch;          // cell size in pixels, scale included
+    I64 serial;
+    U8 *ascii[128];      // Unifont glyphs of ASCII (all one cell wide)
+};
+
+CFont font;
+
+U0 FontCellSize(I64 scale, I64 *_cw, I64 *_ch)
+{//The cell size the current font has at scale.
+    *_cw = 8 * scale;
+    *_ch = 16 * scale;
+}
+
+U0 FontCells()
+{//Take the cell size for the current font and scale (the renderer's lock held, once it runs).
+    FontCellSize(font.scale, &font.cw, &font.ch);
+    font.serial++;
+}
+
+I64 FontScaleAuto(I64 w, I64 reported)
+{//The scale a w-pixel-wide screen gets: an override, what the display reports (coolvm:
+    //the window's backing scale), else 2 from 2560 pixels on.
+    if (font.scale_set)
+        return font.scale_set;
+    if (reported == 1 || reported == 2)
+        return reported;
+    if (w >= 2560)
+        return 2;
+    return 1;
+}
+
+U0 FontInit(I64 w, I64 reported)
+{//At boot, before the console's grid is made.
+    I64 i, cells;
+    U8 *g;
+    for (i = 0; i < 128; i++)
+        if ((g = FontGlyph(i, &cells)) && cells == 1)
+            font.ascii[i] = g;
+    font.scale_set = fdt_scale;
+    font.scale = FontScaleAuto(w, reported);
+    FontCells;
+}
+
+U8 *UnifontGlyph(I64 cp, I64 *_cells)
+{
+    if (cp >= 0 && cp < 128 && font.ascii[cp]) {
+        *_cells = 1;
+        return font.ascii[cp];
+    }
+    if (cp < 0 || cp >= 0x110000)
+        return NULL;
+    return FontGlyph(cp, _cells);
+}
+
+Bool GlyphGet(I64 cp, I64 cells, Bool bold, CGlyph *g)
+{//The glyph of cp over cells cells (1, or 2 for a wide one); FALSE if there is none
+    //(the renderers then show '?').
+    I64 gc;
+    no_warn bold;
+    g->data = UnifontGlyph(cp, &gc);
+    if (!g->data || gc != cells)
+        return FALSE;
+    g->bpp = 1;
+    g->scale = font.scale;
+    g->x = 0;
+    g->y = 0;
+    return TRUE;
+}
