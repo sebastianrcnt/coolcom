@@ -163,3 +163,8 @@ reference-counted); cancellation (a token the parent can set and the task polls)
 5. An abort inside a task: **the task fails and `join` returns `Err(Aborted)`**, or the abort
    also stops the parent.
 6. Later closure syntax: **explicit capture list**, or implicit captures.
+
+**Decided (user, 2026-09-30):** all six follow the recommendations: A (function pointer +
+one typed argument), a built-in `Sendable` marker, no `RootCapability` in tasks, `detach`
+only for `Free` results, an abort fails only its task (`join` returns `Err(Aborted)`), and
+an explicit capture list for later closures.
