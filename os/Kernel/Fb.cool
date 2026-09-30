@@ -758,8 +758,8 @@ Bool FbResizeCells(I64 w, I64 h)
     return TRUE;
 }
 
-Bool FbRegrid(I64 scale)
-{//A new cell size (Glyph.cool: the scale or, later, the font) over the same pixels: a new
+Bool FbRegrid(I64 scale, CFontCfg *cfg = NULL)
+{//A new cell size (Glyph.cool: another scale, or font cfg) over the same pixels: a new
     //grid, redrawn; programs see it as a resize (KEY_RESIZE). scale 0: keep it.
     CVtCell *drawn, *snap;
     U8 *snap_row;
@@ -768,7 +768,9 @@ Bool FbRegrid(I64 scale)
         return FALSE;
     if (!scale)
         scale = font.scale;
-    FontCellSize(scale, &cw, &ch);
+    if (!cfg)
+        cfg = &font.cfg;
+    FontCellSize(cfg, scale, &cw, &ch);
     cols = fb.w / cw;
     rows = fb.h / ch;
     if (cols < 1 || rows < 2)
@@ -781,6 +783,7 @@ Bool FbRegrid(I64 scale)
     }
     daif = FbRenderLock;
     font.scale = scale;
+    MemCpy(&font.cfg, cfg, sizeof(CFontCfg));
     FontCells;
     Free(fb.drawn); Free(fb.snap); Free(fb.snap_row); Free(fb.x0); Free(fb.x1);
     fb.cols = cols; fb.rows = rows;

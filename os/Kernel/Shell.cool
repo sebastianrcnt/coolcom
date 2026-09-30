@@ -269,7 +269,10 @@ I64 RtFileWrite(U8 *name, U8 *data, I64 size)
 
 U0 RtExit(I64 status)
 {
-    if (ShellCur && ShellCur->resident) venus_console_boot = 2;
+    if (ShellCur && ShellCur->resident) {  // a resident loader failed
+        if (venus_console_boot == 1) venus_console_boot = 2;
+        if (font_ttf_boot == 1) font_ttf_boot = 2;
+    }
     Print("shell: compiler exited (%d); shell halted\n", status);
     if (!VtCurrent || VtCurrent->direct) shell_state = -1;
     while (TRUE) {  // halted: sleep (breaks and kills still wake it)
@@ -591,6 +594,28 @@ U0 VenusConsoleLoad(U8 *data)
     if (ShellInit) ShellExe("#include \"C:/Vulkan/Terminal.cool\"");
     venus_console_boot = 2;
     while (TRUE) {Fs->wake_jiffy = JIFFY_NEVER; Yield;}
+}
+
+U0 FontTtfLoad(U8 *data)
+{//The TrueType module (C:/FontTtf.cool) belongs to a resident task, like the Vulkan
+    //terminal, so it stays when the shell that asked for it ends.
+    no_warn data;
+    Fs->parent_task = adam_task;
+    Fs->shell_ctx = CAlloc(sizeof(CShell));
+    ShellCur->resident = TRUE;
+    if (ShellInit && FileFind("C:/FontTtf.cool")) ShellExe("#include \"C:/FontTtf.cool\"");
+    font_ttf_boot = 2;
+    while (TRUE) {Fs->wake_jiffy = JIFFY_NEVER; Yield;}
+}
+
+Bool FontTtfReady()
+{//Load the TrueType module the first time (Glyph.cool's FontSet); TRUE if it is there.
+    if (!font_ttf_open && !font_ttf_boot) {
+        font_ttf_boot = 1;
+        if (!Spawn(&FontTtfLoad, NULL, "Fonts", -1, NULL, SHELL_STACK)) font_ttf_boot = 2;
+    }
+    while (font_ttf_boot == 1) Sleep(1);
+    return font_ttf_open != NULL;
 }
 
 U0 ShellTask(U8 *data)

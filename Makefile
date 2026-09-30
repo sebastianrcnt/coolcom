@@ -190,6 +190,7 @@ warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
+	tools/disk-fonts.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	tools/native/prepare.sh
 	mdir -i build/disk.img ::Cool/Compiler >/dev/null 2>&1 || mmd -i build/disk.img ::Cool/Compiler </dev/null
@@ -197,6 +198,7 @@ disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 
 disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img -n
+	tools/disk-fonts.sh build/disk.img -n
 	@mdir -i build/disk.img ::Kernel.coolh >/dev/null 2>&1 || mcopy -i build/disk.img build/ShellPrelude.coolh ::Kernel.coolh
 	@mdir -i build/disk.img ::Cool/Compiler >/dev/null 2>&1 || { tools/native/prepare.sh && \
 	  mmd -i build/disk.img ::Cool/Compiler && mcopy -i build/disk.img build/native-src/* ::Cool/Compiler/; }

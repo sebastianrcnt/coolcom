@@ -1,10 +1,17 @@
 // The console font: glyphs for the CPU renderer (Fb.cool) and the Vulkan terminal
-// (os/Vulkan/Terminal.cool), through one call, GlyphGet. The source is GNU Unifont
-// (Font.cool), whose 8x16 stamps are drawn scaled by an integer (1x, or 2x on HiDPI
-// screens). The cell size is the font's: 8x16 times the scale for Unifont.
-// font.serial changes whenever glyphs or the cell size change; renderers that cache
+// (os/Vulkan/Terminal.cool), through one call, GlyphGet (docs/fonts.md). Two sources:
+// - GNU Unifont (Font.cool, built in): 8x16 stamps, drawn scaled by an integer (1x, or 2x
+//   on HiDPI screens); cells are 8x16 times the scale.
+// - A TrueType font (FontSet): rasterized by stb_truetype (C:/FontTtf.cool, loaded from
+//   the disk the first time) at size x scale pixels, grayscale antialiased, lazily, and
+//   kept in a cache until the font or the scale changes. Bold text uses the "Bold" file
+//   next to the "Regular" one. The cell size comes from the font's metrics. A code point
+//   the font lacks is Unifont's glyph, centered in the cell.
+// font.serial changes whenever the glyphs or the cell size change; renderers that keep
 // glyphs (the Vulkan atlas) start over then.
 #define FONT_MAX_SCALE 2
+#define FONT_ARENA     (32 << 20)  // the TTF glyph cache; when it is full it starts over
+#define FONT_MISSING   1(U8 *)     // cache entry: no glyph anywhere
 
 class CGlyph
 {// What GlyphGet returns. bpp 1: a Unifont stamp (16 rows of 1 byte, or 2 for a wide
@@ -14,26 +21,65 @@ class CGlyph
     I64 bpp, scale, x, y;
 };
 
+class CFontCfg
+{// A font: Unifont (face NULL) or a TTF face, its bold face (or NULL), and its size.
+    U8 *face, *bold;
+    I64 size;
+};
+
 class CFont
 {
     I64 scale;           // 1 or 2
     I64 scale_set;       // 0: automatic; else the override (FontScale, bootarg coolcom.scale=N)
     I64 cw, ch;          // cell size in pixels, scale included
+    I64 base;            // TTF: the baseline, in pixels from the cell's top
     I64 serial;
+    Bool chosen;         // FontSet was called (Init.cool then leaves the font alone)
+    CFontCfg cfg;
+    U8 **pages;          // TTF cache: (cp >> 8) * 2 + bold -> 256 entries: NULL (not yet),
+    // FONT_MISSING, or 1 byte of cells followed by the coverage
+    U8 *arena;
+    I64 used;
     U8 *ascii[128];      // Unifont glyphs of ASCII (all one cell wide)
 };
 
 CFont font;
 
-U0 FontCellSize(I64 scale, I64 *_cw, I64 *_ch)
-{//The cell size the current font has at scale.
-    *_cw = 8 * scale;
-    *_ch = 16 * scale;
+// The TTF module (os/Disk/FontTtf.cool) installs these when it loads.
+U8 *font_ttf_open;     // U8 *(*)(U8 *path): a face, or NULL
+U8 *font_ttf_close;    // U0 (*)(U8 *face)
+U8 *font_ttf_metrics;  // U0 (*)(U8 *face, I64 px, I64 *cw, I64 *ch, I64 *base)
+U8 *font_ttf_glyph;    // Bool (*)(U8 *face, I64 cp, I64 px, I64 base, U8 *out, I64 w, I64 h)
+extern Bool FontTtfReady();  // Shell.cool: loads the module once, in a resident task
+I64 font_ttf_boot;           // 0 untried, 1 loading, 2 loaded or failed
+
+U0 FontCellSize(CFontCfg *cfg, I64 scale, I64 *_cw, I64 *_ch, I64 *_base = NULL)
+{//The cell size of font cfg at scale.
+    U0 (*metrics)(U8 *f, I64 px, I64 *cw, I64 *ch, I64 *base);
+    I64 base = 0;
+    metrics = font_ttf_metrics;
+    if (cfg->face && metrics)
+        (*metrics)(cfg->face, cfg->size * scale, _cw, _ch, &base);
+    else {
+        *_cw = 8 * scale;
+        *_ch = 16 * scale;
+    }
+    if (_base)
+        *_base = base;
+}
+
+U0 FontCacheClear()
+{
+    if (font.pages)
+        MemSet(font.pages, 0, 0x1100 * 2 * sizeof(U8 *));
+    font.used = 0;
 }
 
 U0 FontCells()
-{//Take the cell size for the current font and scale (the renderer's lock held, once it runs).
-    FontCellSize(font.scale, &font.cw, &font.ch);
+{//Take the cell size for the current font and scale (the renderer's lock held, once it
+    //runs), and forget the cached glyphs.
+    FontCellSize(&font.cfg, font.scale, &font.cw, &font.ch, &font.base);
+    FontCacheClear;
     font.serial++;
 }
 
@@ -72,17 +118,168 @@ U8 *UnifontGlyph(I64 cp, I64 *_cells)
     return FontGlyph(cp, _cells);
 }
 
+U8 *FontAlloc(I64 n)
+{//From the glyph cache's arena, zeroed; NULL when it is full.
+    U8 *p;
+    if (font.used + n > FONT_ARENA)
+        return NULL;
+    p = font.arena + font.used;
+    font.used += n;
+    MemSet(p, 0, n);
+    return p;
+}
+
+Bool FontStamp(I64 cp, I64 cells, U8 *out, I64 w, I64 h)
+{//Unifont's glyph as coverage in a w x h cell box: scaled by an integer that fits,
+    //centered, clipped. FALSE if Unifont has none that wide either.
+    U8 *g, *src;
+    I64 gc, s, x0, y0, x, y, k, j, bits, sw = cells * 8, px, py;
+    g = UnifontGlyph(cp, &gc);
+    if (!g || gc != cells)
+        return FALSE;
+    s = w / sw;
+    if (h / 16 < s) s = h / 16;
+    if (s < 1) s = 1;
+    x0 = (w - sw * s) / 2;
+    y0 = (h - 16 * s) / 2;
+    src = g;
+    for (y = 0; y < 16; y++) {
+        if (cells == 2) {
+            bits = (src[0] << 8) | src[1];
+            src += 2;
+        } else
+            bits = *src++;
+        for (x = 0; x < sw; x++)
+            if ((bits >> (sw - 1 - x)) & 1)
+                for (j = 0; j < s; j++)
+                    for (k = 0; k < s; k++) {
+                        px = x0 + x * s + k;
+                        py = y0 + y * s + j;
+                        if (px >= 0 && px < w && py >= 0 && py < h)
+                            out[py * w + px] = 255;
+                    }
+    }
+    return TRUE;
+}
+
+Bool FontHasBold()
+{//The current font draws bold text with glyphs of its own (else renderers may embolden).
+    return font.cfg.face && font.cfg.bold;
+}
+
 Bool GlyphGet(I64 cp, I64 cells, Bool bold, CGlyph *g)
 {//The glyph of cp over cells cells (1, or 2 for a wide one); FALSE if there is none
-    //(the renderers then show '?').
-    I64 gc;
-    no_warn bold;
-    g->data = UnifontGlyph(cp, &gc);
-    if (!g->data || gc != cells)
+    //(the renderers then show '?'). Called with the renderer's lock held.
+    U8 **entries, *e, *face;
+    I64 gc, w, mark, at;
+    Bool (*raster)(U8 *f, I64 c, I64 px, I64 base, U8 *out, I64 ow, I64 oh);
+    raster = font_ttf_glyph;
+    if (!font.cfg.face || !raster || !font.pages) {
+        g->data = UnifontGlyph(cp, &gc);
+        if (!g->data || gc != cells)
+            return FALSE;
+        g->bpp = 1;
+        g->scale = font.scale;
+        g->x = 0;
+        g->y = 0;
+        return TRUE;
+    }
+    if (cp < 0 || cp >= 0x110000)
         return FALSE;
-    g->bpp = 1;
-    g->scale = font.scale;
+    bold = bold && font.cfg.bold;
+    at = (cp >> 8) * 2 + bold;
+    if (!font.pages[at] && !(font.pages[at] = FontAlloc(256 * sizeof(U8 *)))) {
+        FontCacheClear;  // full: start over
+        font.pages[at] = FontAlloc(256 * sizeof(U8 *));
+    }
+    entries = font.pages[at];
+    e = entries[cp & 255];
+    if (!e) {
+        w = cells * font.cw;
+        mark = font.used;
+        if (!(e = FontAlloc(1 + w * font.ch)))
+            return FALSE;
+        e[0] = cells;
+        face = font.cfg.face;
+        if (bold)
+            face = font.cfg.bold;
+        if (!(*raster)(face, cp, font.cfg.size * font.scale, font.base, e + 1, w, font.ch) &&
+                !FontStamp(cp, cells, e + 1, w, font.ch)) {
+            font.used = mark;
+            e = FONT_MISSING;
+        }
+        entries[cp & 255] = e;
+    }
+    if (e == FONT_MISSING || e[0] != cells)
+        return FALSE;
+    g->data = e + 1;
+    g->bpp = 8;
+    g->scale = 1;
     g->x = 0;
     g->y = 0;
+    return TRUE;
+}
+
+U8 *FontBoldPath(U8 *path)
+{//The bold file next to a "...Regular..." one (Sarasa-Regular.ttf: Sarasa-Bold.ttf); NULL
+    //if there is none.
+    U8 *at = StrFind("Regular", path), *res;
+    if (!at)
+        return NULL;
+    res = MAlloc(StrLen(path) + 1);
+    MemCpy(res, path, at - path);
+    StrCpy(res + (at - path), "Bold");
+    StrCpy(res + (at - path) + 4, at + 7);
+    if (!FileFind(res)) {
+        Free(res);
+        return NULL;
+    }
+    return res;
+}
+
+extern Bool FbRegrid(I64 scale, CFontCfg *cfg = NULL);
+
+U0 FontClose(CFontCfg *cfg)
+{
+    U0 (*close)(U8 *f);
+    close = font_ttf_close;
+    if (close && cfg->face) (*close)(cfg->face);
+    if (close && cfg->bold) (*close)(cfg->bold);
+}
+
+Bool FontSet(U8 *path = NULL, I64 size = 14)
+{//The console's font: a TrueType file (.ttf, or the first font of a .ttc) at size pixels
+    //(at 1x; the scale multiplies it), or Unifont for NULL. The grid is made again and
+    //programs see a resize. FALSE if the font cannot be used (the old one stays).
+    CFontCfg cfg, old;
+    U8 *(*open)(U8 *p), *bold;
+    font.chosen = TRUE;
+    MemSet(&cfg, 0, sizeof(CFontCfg));
+    cfg.size = ClampI64(size, 6, 96);
+    if (path) {
+        if (!FontTtfReady) {
+            Print("FontSet: the TrueType module (C:/FontTtf.cool) did not load\n");
+            return FALSE;
+        }
+        open = font_ttf_open;
+        if (!(cfg.face = (*open)(path))) {
+            Print("FontSet: cannot use %s\n", path);
+            return FALSE;
+        }
+        if ((bold = FontBoldPath(path))) {
+            cfg.bold = (*open)(bold);
+            Free(bold);
+        }
+        if (!font.arena) {
+            font.arena = MAlloc(FONT_ARENA);
+            font.pages = CAlloc(0x1100 * 2 * sizeof(U8 *));
+        }
+    }
+    MemCpy(&old, &font.cfg, sizeof(CFontCfg));
+    if (!FbRegrid(font.scale, &cfg)) {
+        FontClose(&cfg);
+        return FALSE;
+    }
+    FontClose(&old);
     return TRUE;
 }

@@ -22,6 +22,11 @@ ASSETS = (
      None),
 )
 CODEPOINTS = (65, 103, 90, 44032, 45208, 54620)
+# What coolc/Lib/StbTrueType.cool translates: the bitmap path, and what the console's TTF
+# fonts (os/Disk/FontTtf.cool) use for collections and metrics.
+ROOTS = ('stbtt_InitFont', 'stbtt_MakeCodepointBitmap', 'stbtt_GetFontOffsetForIndex',
+         'stbtt_GetFontVMetrics', 'stbtt_GetCodepointHMetrics', 'stbtt_ScaleForMappingEmToPixels',
+         'stbtt_GetCodepointBitmapBoxSubpixel', 'stbtt_MakeCodepointBitmapSubpixel')
 
 
 def run(*args, env=None):
@@ -48,8 +53,10 @@ def main():
     fetch_assets()
     run(sys.executable, 'tools/c2hc/stbtt_prepare.py', str(OUT))
     generated = OUT / 'StbTrueType.cool'
-    run(sys.executable, 'tools/c2hc/c2hc.py', '--root', 'stbtt_InitFont',
-        '--root', 'stbtt_MakeCodepointBitmap', '--libc', '../../coolc/LibC/LibC.cool',
+    roots = []
+    for root in ROOTS:
+        roots += ['--root', root]
+    run(sys.executable, 'tools/c2hc/c2hc.py', *roots, '--libc', '../../coolc/LibC/LibC.cool',
         str(OUT / 'stbtt_ttf.c'), str(generated))
     formatted = OUT / 'StbTrueType.formatted.cool'
     run('build/coolc', '--format', 'build/hcfmt.BIN',

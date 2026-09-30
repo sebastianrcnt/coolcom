@@ -44,6 +44,10 @@ put Cool/Runtime/ coolc/Runtime/*.cool
 put Cool/Fmt/ coolc/Fmt/HCTok.cool
 
 put Cool/LibC/ coolc/LibC/LibC.cool
+# stb_truetype for C:/FontTtf.cool, with its LibC include mapped like the kernel's.
+mdir -i "$IMG" ::Cool/Lib >/dev/null 2>&1 || mmd -i "$IMG" ::Cool/Lib </dev/null
+sed 's|#include "\.\./\.\./coolc/LibC/|#include "C:/Cool/LibC/|' coolc/Lib/StbTrueType.cool >"$stage/StbTrueType.cool"
+put Cool/Lib/ "$stage/StbTrueType.cool"
 
 put "" build/lua/LuaRuntime.cool
 
