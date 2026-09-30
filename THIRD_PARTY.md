@@ -6,7 +6,7 @@ projects and keep their licenses; the files carry their origin in a header comme
 | What | Where | License |
 |---|---|---|
 | TempleOS (Terry A. Davis): runtime library, FAT32, compiler frontend lineage | `coolc/Runtime`, `coolc/Frontend`, parts of `os/Kernel` | Public domain |
-| Aiwnios (nrootconauto): compiler frontend and ARM64/x86-64 backends, `KernelA` headers | `coolc/Frontend`, `coolc/Compiler` | BSD-3-Clause (see file headers) |
+| Aiwnios (nrootconauto): compiler frontend and ARM64/x86-64 backends, `KernelA` headers | `coolc/Frontend`, `coolc/Compiler` | BSD-style (`coolc/LICENSE-aiwnios`) |
 | Austral (Fernando Borretti): language, standard library, test suite, from which Warm is forked | `warmc/` | Apache-2.0 WITH LLVM-exception (`warmc/LICENSE`, `warmc/standard/LICENSE`) |
 | Lua 5.4.9 (PUC-Rio) | `vendor/lua-5.4.9` | MIT |
 | stb_truetype (Sean Barrett) | `coolc/Lib/StbTrueType.cool`, `tools/c2hc` | Public domain / MIT |
