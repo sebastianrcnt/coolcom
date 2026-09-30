@@ -326,7 +326,7 @@ coolvm-test: coolvm
 	tools/coolvm/test/run.sh
 
 # Small AST-based C to Cool differential tests.
-c2hc-test: build/coolc
+c2hc-test: build/coolc build/coolc-x86_64
 	python3 tools/c2hc/test.py
 
 stbtt-test: build/coolc build/hcfmt.BIN

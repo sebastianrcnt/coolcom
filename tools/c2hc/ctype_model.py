@@ -27,7 +27,7 @@ class CT:
         if k == 'int':
             return f'i{self.bits}{"s" if self.signed else "u"}{"b" if self.is_bool else ""}'
         if k == 'float':
-            return 'f'
+            return f'f{self.bits}'
         if k == 'void':
             return 'v'
         if k == 'ptr':
@@ -49,7 +49,8 @@ class CT:
 
 
 VOID = CT('void')
-DOUBLE = CT('float')
+FLOAT = CT('float', bits=32)
+DOUBLE = CT('float', bits=64)
 INT = CT('int', bits=32, signed=True)
 UINT = CT('int', bits=32, signed=False)
 LONG = CT('int', bits=64, signed=True)
@@ -81,7 +82,9 @@ def sizeof(t):
     k = t.kind
     if k == 'int':
         return t.bits // 8
-    if k in ('float', 'ptr'):
+    if k == 'float':
+        return t.bits // 8
+    if k == 'ptr':
         return 8
     if k == 'arr':
         return (t.n or 0) * sizeof(t.to)
@@ -184,7 +187,11 @@ class TypeParser:
             raise CError(f'no type in {self.src!r}')
         if 'void' in words:
             return VOID
-        if 'float' in words or 'double' in words:
+        if 'long' in words and 'double' in words:
+            raise CError('long double')
+        if 'float' in words:
+            return FLOAT
+        if 'double' in words:
             return DOUBLE
         if '_Bool' in words:
             return BOOL
