@@ -3,6 +3,8 @@
 // Every command is fenced. A request is at most GPU_REQ_MAX bytes, the reply follows it. Rendering and display-info polling share the
 // control queue's lock; the cursor queue has its own lock.
 #define GPU_REQ_MAX  1536
+#define GPU_REPLY_MAX 65560
+#define GPU_F_VENUS  ((1 << 0) | (1 << 3) | (1 << 4))
 #define GPU_F_LOGOS  (1 << 23)  // Logos.cool, docs/logos.md: coolvm's cell renderer
 
 class CGpu
@@ -11,27 +13,30 @@ class CGpu
     I64 resource, cursor_id, next_id, fence, scan_id, scan_top;
     U8 *cursor;
     Bool active, cursor_on;
+    Bool venus_features;
     Bool logos;  // the device offers Logos (Logos.cool) and the driver accepted it
 };
 CGpu gpu;
 
-Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL)
+Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL, I64 reply_size = 0, I64 response = 0, I64 ctx = 0, I64 ring = -1)
 {
     CVirtBlk *d = &gpu.q[queue];
     I64 daif, idx, deadline, fence, n;
     U8 *res = d->qreq + GPU_REQ_MAX;
     Bool ok;
-    if (24 + words * 4 > GPU_REQ_MAX) return FALSE;
+    if (queue < 0 || queue > 1 || words < 0 || words > (GPU_REQ_MAX - 24) / 4 || reply_size < 0 || reply_size > GPU_REPLY_MAX - 24 || ring < -1 || ring > 63) return FALSE;
     daif = SpinLockIrq(&d->lock);
     MemSet(d->qreq, 0, 24);
     MemSet(res, 0, 24);
     *(d->qreq)(U32i *) = type;
-    *(d->qreq + 4)(U32i *) = 1; // VIRTIO_GPU_FLAG_FENCE
+    *(d->qreq + 4)(U32i *) = 1 | (ring >= 0) * 2; // FENCE, INFO_RING_IDX
     fence = ArchAdd(&gpu.fence, 1);
     *(d->qreq + 8)(I64 *) = fence;
+    *(d->qreq + 16)(U32i *) = ctx;
+    if (ring >= 0) d->qreq[20] = ring;
     if (words) MemCpy(d->qreq + 24, data, words * 4);
     VioDesc(d, 0, d->qreq, 24 + words * 4, VRING_F_NEXT, 1);
-    VioDesc(d, 1, res, 512, VRING_F_WRITE, 0);
+    VioDesc(d, 1, res, GPU_REPLY_MAX, VRING_F_WRITE, 0);
     idx = *(d->qavail + 2)(U16i *);
     *(d->qavail + 4 + 2 * (idx % VQ_SIZE))(U16i *) = 0;
     ArchDsb;
@@ -52,8 +57,10 @@ Bool GpuCommand(I64 queue, I64 type, U32 *data, I64 words, U8 *reply = NULL)
     ArchDsb;
     n = *(d->qused + 8 + 8 * (d->last_used % VQ_SIZE))(U32i *);
     d->last_used++;
-    ok = n >= 24 && *(res + 4)(U32i *) == 1 && *(res + 8)(I64 *) == fence;
-    if (type == 0x100) ok = ok && n == 408 && *res(U32i *) == 0x1101;
+    ok = n >= 24 && n <= GPU_REPLY_MAX && (*(res + 4)(U32i *) & 1) == 1 && *(res + 8)(I64 *) == fence;
+    if (ring >= 0) ok = ok && (*(res + 4)(U32i *) & 2) && res[20] == ring && *(res + 16)(U32i *) == ctx;
+    if (response) ok = ok && n == 24 + reply_size && *res(U32i *) == response;
+    else if (type == 0x100) ok = ok && n == 408 && *res(U32i *) == 0x1101;
     else ok = ok && n == 24 && *res(U32i *) == 0x1100;
     if (reply && ok) MemCpy(reply, res, n);
     VioWr(d, VIO_ISR_ACK, VioRd(d, VIO_ISR) & 1); // do not swallow display-change IRQs
@@ -72,7 +79,7 @@ Bool GpuDisplayInfo(I64 *w, I64 *h)
 I64 GpuResource(U8 *back, I64 w, I64 h, I64 format)
 {
     U32 p[6];
-    I64 id = ++gpu.next_id;
+    I64 id = ArchAdd(&gpu.next_id, 1);
     p[0] = id; p[1] = format; p[2] = w; p[3] = h;
     if (!GpuCommand(0, 0x101, p, 4)) return 0;
     p[0] = id; p[1] = 1;
@@ -140,7 +147,7 @@ U0 GpuCursorHide()
 Bool GpuInit(I64 *w, I64 *h)
 {
     CVirtBlk *d;
-    I64 i, base = 0;
+    I64 i, features, base = 0;
     for (i = 0; i < fdt_nblk; i++)
         if (ArchMmioRead32(fdt_blk[i].base) == VIO_MAGIC && ArchMmioRead32(fdt_blk[i].base + VIO_DEVID_OFF) == 16) {
             base = fdt_blk[i].base;
@@ -150,10 +157,12 @@ Bool GpuInit(I64 *w, I64 *h)
     d = &gpu.q[0]; d->base = base;
     VioWr(d, VIO_STATUS, 0); VioWr(d, VIO_STATUS, 3);
     VioWr(d, VIO_DEVFEAT_SEL, 0);
-    gpu.logos = (VioRd(d, VIO_DEVFEAT) & GPU_F_LOGOS) != 0;
+    features = VioRd(d, VIO_DEVFEAT);
+    gpu.logos = (features & GPU_F_LOGOS) != 0;
+    gpu.venus_features = (features & GPU_F_VENUS) == GPU_F_VENUS;
     VioWr(d, VIO_DEVFEAT_SEL, 1);
     if (!(VioRd(d, VIO_DEVFEAT) & 1)) return FALSE;
-    VioWr(d, VIO_DRVFEAT_SEL, 0); VioWr(d, VIO_DRVFEAT, gpu.logos * GPU_F_LOGOS);
+    VioWr(d, VIO_DRVFEAT_SEL, 0); VioWr(d, VIO_DRVFEAT, gpu.logos * GPU_F_LOGOS | gpu.venus_features * GPU_F_VENUS);
     VioWr(d, VIO_DRVFEAT_SEL, 1); VioWr(d, VIO_DRVFEAT, 1);
     VioWr(d, VIO_STATUS, 11);
     if (!(VioRd(d, VIO_STATUS) & 8)) return FALSE;
@@ -162,7 +171,7 @@ Bool GpuInit(I64 *w, I64 *h)
         VioWr(d, VIO_QSEL, i);
         if (VioRd(d, VIO_QNUM_MAX) < VQ_SIZE) return FALSE;
         d->qdesc = CAlloc(16 * VQ_SIZE); d->qavail = CAlloc(6 + 2 * VQ_SIZE);
-        d->qused = CAlloc(6 + 8 * VQ_SIZE); d->qreq = CAlloc(GPU_REQ_MAX + 512);
+        d->qused = CAlloc(6 + 8 * VQ_SIZE); d->qreq = CAlloc(GPU_REQ_MAX + GPU_REPLY_MAX);
         *d->qavail(U16i *) = 1;
         VioWr(d, VIO_QNUM, VQ_SIZE); VioWr64(d, VIO_QDESC, d->qdesc(I64));
         VioWr64(d, VIO_QAVAIL, d->qavail(I64)); VioWr64(d, VIO_QUSED, d->qused(I64));
