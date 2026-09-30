@@ -1,6 +1,7 @@
 # Venus: Vulkan for coolcom (design, for review)
 
-Status: a proposal; nothing here is implemented. The goal is one general GPU API, Vulkan,
+Status: milestone 1 host work started (2026-09-30); guest transport and rendering
+remain planned. See the host validation log below. The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
 virtio-gpu **Venus**: under coolvm on the Mac through virglrenderer and MoltenVK to Metal,
 and under QEMU on Linux hosts through virglrenderer to the host's Vulkan driver. Logos
@@ -237,3 +238,40 @@ and maps one blob.
 **Decided (user, 2026-09-30):** all seven follow the recommendations; downloading the
 pinned dependencies (virglrenderer, MoltenVK, Vulkan headers/registry, venus-protocol, a
 Linux VM image for testing) is approved.
+
+## Host validation log (2026-09-30)
+
+### Step 1: pinned source builds
+
+`tools/vendor-venus.sh` builds into the gitignored `vendor/venus/install` prefix.
+`tools/venus-deps.json` records every source URL and SHA-256. Run the script with
+Xcode installed; build tools are `meson`, `ninja`, `pkgconf`, `cmake`, and Python 3
+(`brew install meson ninja pkgconf cmake` if missing). No runtime Homebrew packages
+or binary bottles are used. Build logs and upstream license notices are retained in
+`vendor/venus/logs` and `vendor/venus/licenses`.
+
+- virglrenderer: **0.10.4e-krunkit**, the macOS fork still used by the
+  [current krun formula](https://github.com/libkrun/homebrew-krun/blob/main/Formula/virglrenderer-krun.rb).
+  This is not upstream virglrenderer 1.0: it carries its own Venus/macOS patches.
+  Built with Venus enabled, render server/DRM/EGL/GLX disabled. The only local
+  source adjustment removes a hardcoded Homebrew header path; headers come from
+  the vendored prefix. Its bundled renderer protocol was generated at d6bf073e;
+  that matching venus-protocol source is downloaded too.
+- MoltenVK: **1.4.2**, built from source with the seven exact dependency revisions
+  in its `ExternalRevisions` (also checksummed in our manifest). This is a locally
+  verified pairing, not a claim that krunkit pins this MoltenVK version.
+- libepoxy: **1.5.10**, required even though the GL renderer is not used.
+- Licenses inspected: virglrenderer, venus-protocol and libepoxy MIT (epoxy also
+  retains Khronos notices); MoltenVK, SPIRV-Cross and SPIRV-Tools Apache-2.0;
+  SPIRV-Headers MIT/Khronos notices; Vulkan-Headers Apache-2.0 OR MIT,
+  Vulkan-Tools Apache-2.0; Volk MIT; cereal BSD-3-Clause. Preserve the upstream
+  notices when redistributing. Apple frameworks/SDK remain system dependencies.
+- Unlike the proposed generic Linux path, this krunkit fork links **directly to
+  MoltenVK**, so no Vulkan loader/ICD is needed for this host build. The pinned
+  Vulkan-Headers includes registry XML.
+
+Verified on Apple M6, macOS 27 / Xcode 27: all libraries built successfully;
+`otool -L` shows runtime dependencies only in our prefix and system libraries.
+MoltenVK's packaging script removes its intermediate directory unless
+`KEEP_CACHE=Y`; the vendoring script sets this to avoid deleting Xcode's active
+build database. The script supports rerunning from its cached sources.

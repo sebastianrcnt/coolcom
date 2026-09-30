@@ -1,0 +1,68 @@
+[
+  {
+    "name": "virglrenderer",
+    "url": "https://gitlab.freedesktop.org/slp/virglrenderer/-/archive/0.10.4e-krunkit/virglrenderer-0.10.4e-krunkit.tar.gz",
+    "sha256": "09d000623fbdb966cb604eb48c962a0815e8142383e6066d6494809335b76dbb",
+    "dest": "virglrenderer"
+  },
+  {
+    "name": "moltenvk",
+    "url": "https://github.com/KhronosGroup/MoltenVK/archive/refs/tags/v1.4.2.tar.gz",
+    "sha256": "6864db532f1dbbdb621a8d0ec13f24edae318fd9269dd3dd0cdff791334bb1cb",
+    "dest": "MoltenVK"
+  },
+  {
+    "name": "libepoxy",
+    "url": "https://github.com/anholt/libepoxy/archive/refs/tags/1.5.10.tar.gz",
+    "sha256": "a7ced37f4102b745ac86d6a70a9da399cc139ff168ba6b8002b4d8d43c900c15",
+    "dest": "libepoxy"
+  },
+  {
+    "name": "venus-protocol",
+    "url": "https://gitlab.freedesktop.org/virgl/venus-protocol/-/archive/d6bf073e/venus-protocol-d6bf073e.tar.gz",
+    "sha256": "65adfcf41c512740801e6ccb2cffed8bf0ef2bcca0a47881a3cb05c4ef7b546c",
+    "dest": "venus-protocol"
+  },
+  {
+    "name": "SPIRV-Cross",
+    "url": "https://github.com/KhronosGroup/SPIRV-Cross/archive/6c09849fe88c48eaed08413aa022aaa136a3a057.tar.gz",
+    "sha256": "b81b9956289950570953738e666a031ca32ff64e4fc925eba89f227c42109518",
+    "dest": "MoltenVK/External/SPIRV-Cross"
+  },
+  {
+    "name": "SPIRV-Headers",
+    "url": "https://github.com/KhronosGroup/SPIRV-Headers/archive/29981f65241605e08b0ede4cfeb999fe3b723c6a.tar.gz",
+    "sha256": "232899f1ad4104fb5bc377b94596c7621575eee62ad9a9e8f929b63a7dd8a7ad",
+    "dest": "MoltenVK/External/SPIRV-Tools/external/spirv-headers"
+  },
+  {
+    "name": "SPIRV-Tools",
+    "url": "https://github.com/KhronosGroup/SPIRV-Tools/archive/0d6fd73ca73830ccab5fa1f00ed5ed40124e2c55.tar.gz",
+    "sha256": "20219c0962dffb0d7644bb3116a5923cfcf0526a569baa0b2a17343dd2fa6e5d",
+    "dest": "MoltenVK/External/SPIRV-Tools"
+  },
+  {
+    "name": "Volk",
+    "url": "https://github.com/zeux/Volk/archive/776893306c5d3b22b6185b5d4a258b81d94572bf.tar.gz",
+    "sha256": "ff5b63e1b7104b34955eb4a993b94882a55f8561e971b92119069e496e3496b5",
+    "dest": "MoltenVK/External/Volk"
+  },
+  {
+    "name": "Vulkan-Headers",
+    "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/e3b1eec08173d6b825cd3ac88c885a63b621504a.tar.gz",
+    "sha256": "f492279345cbc10708b64fcd432b3ff6c8246a5837c4db2b649abba00cf82208",
+    "dest": "MoltenVK/External/Vulkan-Headers"
+  },
+  {
+    "name": "Vulkan-Tools",
+    "url": "https://github.com/KhronosGroup/Vulkan-Tools/archive/8c66b352925cb771f793a4d3220b1321ae0febf1.tar.gz",
+    "sha256": "170eaa9086812c0a8d5275e0fa320b96af4a00fa4e84eee0437650bdd54ed2a8",
+    "dest": "MoltenVK/External/Vulkan-Tools"
+  },
+  {
+    "name": "cereal",
+    "url": "https://github.com/USCiLab/cereal/archive/a56bad8bbb770ee266e930c95d37fff2a5be7fea.tar.gz",
+    "sha256": "12e10fb541270632f6683286ce8c7e8c321fe4addb53fa91ed498b95c1758f93",
+    "dest": "MoltenVK/External/cereal"
+  }
+]
