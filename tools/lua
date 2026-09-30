@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run translated Lua with the Cool BIN loader.
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+make -s -C "$ROOT" build/lua/Lua.BIN >&2
+exec "$ROOT/build/coolc" --run "$ROOT/build/lua/Lua.BIN" "$@"

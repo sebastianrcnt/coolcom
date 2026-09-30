@@ -16,6 +16,8 @@ for line in runtime.splitlines():
     elif not line.startswith(('#define ', 'import ')):
         lines.append(line)
 runtime = '\n'.join(lines) + '\n'
+runtime = runtime.replace('// @shared-libc: expanded from coolc/LibC/LibC.cool by the packagers.',
+                          (root / 'coolc/LibC/LibC.cool').read_text())
 for name, adapter in [('NativeExit', 'WKernelExit'), ('NativeErrPutS', 'WKernelErrPutS'),
                       ('NativeArgCount', 'WKernelArgCount'), ('NativeGetChar', 'WKernelGetChar'), ('NativeArg', 'WKernelArg')]:
     runtime = runtime.replace(name, adapter)

@@ -1,0 +1,12 @@
+// Load the translated Lua runtime once in this shell, then run a file or the REPL.
+Bool lua_loaded;
+U8 *lua_script_path;
+I64 lua_result;
+I64 Lua(U8 *path = NULL)
+{
+    lua_script_path = path;
+    if (!lua_loaded) ShellExe("#include \"C:/LuaRuntime.cool\"");
+    if (!lua_loaded) {Print("Lua runtime failed to load\n"); return -1;}
+    ShellExe("LuaRun();");
+    return lua_result;
+}
