@@ -1,0 +1,50 @@
+U0 VenusCheck(Bool ok, U8 *label)
+{
+    if (!ok) {Print("VENUS FAIL %s\n", label); Shutdown;}
+}
+U0 VenusTransportTest()
+{
+    CGpuBlob *guest, *host, *second;
+    U8 *mapped, *again;
+    U32 stream[2], bad[2], reply[10];
+    I64 i, old_gpu = gpu.active, old_logos = gpu.logos;
+    if (!gpu.venus_features) {
+        VenusCheck(!GpuVenusInit && gpu.active == old_gpu && gpu.logos == old_logos, "fallback");
+        Print("VENUS SKIP %d\n", 1); return;
+    }
+    VenusCheck(GpuVenusInit && venus.cap_size == 16 && venus.cap_version == 0 &&
+               !MemCmp(venus.cap + 24, "COOLVM-3D-STUB!!", 16), "capset");
+    bad[0] = 99; bad[1] = 0;
+    VenusCheck(!GpuCommand(0, 0x108, bad, 2, reply, 16, 0x1102), "device error");
+    bad[0] = 0;
+    VenusCheck(!GpuCommand(0, 0x108, bad, 2, reply, 8, 0x1102), "response length");
+    bad[0] = 0; bad[1] = 0;
+    VenusCheck(!GpuCommand(0, 0x207, bad, 2, NULL, 0, 0, 99, 0) && gpu.active, "invalid context");
+    guest = GpuBlobCreate(16384, GPU_BLOB_GUEST);
+    host = GpuBlobCreate(16384, GPU_BLOB_HOST3D, 7);
+    VenusCheck(guest && host && GpuContextResource(guest->id, TRUE) &&
+               GpuContextResource(host->id, TRUE), "create/attach");
+    for (i = 0; i < 16384; i++) guest->guest[i] = i;
+    mapped = GpuBlobMap(host);
+    VenusCheck(mapped && !(mapped(I64) & 16383), "host map");
+    mapped[0] = 91; mapped[16383] = 73;
+    again = GpuBlobMap(host);
+    VenusCheck(again == mapped && again[0] == 91 && again[16383] == 73, "mapping reuse");
+    second = GpuBlobCreate(16384, GPU_BLOB_HOST3D, 8);
+    VenusCheck(second && GpuBlobMap(second) && second->mapping != mapped, "window allocation");
+    VenusCheck(GpuBlobUnmap(host), "unmap");
+    VenusCheck(GpuBlobMap(host) == mapped && mapped[0] == 91 && mapped[16383] == 73, "remap/hole reuse");
+    stream[0] = 0x12345678; stream[1] = 0x87654321;
+    for (i = 0; i < 40; i++) VenusCheck(GpuSubmit3D(stream, sizeof(stream), i % 2), "submit/fence");
+    VenusCheck(!GpuSubmit3D(stream, 3) && !GpuSubmit3D(stream, GPU_REQ_MAX) &&
+               !GpuSubmit3D(stream, 8, 64) && !GpuBlobCreate(-1, GPU_BLOB_GUEST), "bounds");
+    VenusCheck(!GpuScanoutBlob(host, 64, 64, 256, 1), "scanout bounds");
+    VenusCheck(GpuScanoutBlob(host, 64, 64, 256), "scanout/flush");
+    VenusCheck(GpuContextResource(guest->id, FALSE) && GpuContextResource(host->id, FALSE), "detach");
+    VenusCheck(!GpuVenusDestroy, "live context");
+    VenusCheck(GpuBlobDestroy(second) && GpuBlobDestroy(host) && GpuBlobDestroy(guest), "unref");
+    VenusCheck(GpuVenusDestroy && GpuVenusInit && GpuVenusDestroy, "context lifecycle");
+    VenusCheck(gpu.active == old_gpu && gpu.logos == old_logos, "2D state");
+    Print("VENUS PASS %d\n", 1);
+}
+VenusTransportTest;

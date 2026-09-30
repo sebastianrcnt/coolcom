@@ -1,0 +1,228 @@
+// Venus transport only. No Vulkan encoding or renderer dependency.
+// Wire layouts: Linux uapi/linux/virtio_gpu.h (Virtio 1.2 section 5.7).
+#define GPU_BLOB_GUEST 1
+#define GPU_BLOB_HOST3D 2
+#define GPU_BLOB_MAPPABLE 1
+#define GPU_VENUS_BLOBS 64
+class CGpuBlob
+{
+    I64 id, size, offset, map_info;
+    U8 *guest, *mapping;
+};
+class CGpuVenus
+{
+    Bool ready;
+    I64 lock, ctx, cap_version, cap_size, shm_base, shm_size;
+    U8 *cap;
+    CGpuBlob blobs[GPU_VENUS_BLOBS];
+};
+CGpuVenus venus;
+
+I64 GpuRead64(I64 off)
+{
+    return VioRd(&gpu.q[0], off) | (VioRd(&gpu.q[0], off + 4) << 32);
+}
+
+Bool GpuVenusInit()
+{// Lazy discovery: ordinary 2D/Logos boot never depends on Venus.
+    I64 i, count, daif = SpinLockIrq(&venus.lock);
+    U32 p[18], info[10];
+    Bool ok = FALSE;
+    if (venus.ready) ok = gpu.active;
+    else if (gpu.active && gpu.venus_features) {
+        count = VioRd(&gpu.q[0], VIO_CONFIG + 12);
+        if (count > 256) count = 256;
+        for (i = 0; i < count; i++) {
+            p[0] = i; p[1] = 0;
+            if (!GpuCommand(0, 0x108, p, 2, info, 16, 0x1102)) break;
+            if (info[6] == 4 && info[8] && info[8] <= GPU_REPLY_MAX - 24) {
+                venus.cap_version = info[7]; venus.cap_size = info[8];
+                venus.cap = CAlloc(24 + venus.cap_size);
+                p[0] = 4; p[1] = venus.cap_version;
+                if (!GpuCommand(0, 0x109, p, 2, venus.cap, venus.cap_size, 0x1103)) {
+                    Free(venus.cap); venus.cap = NULL; break;
+                }
+                MemSet(p, 0, sizeof(p)); p[1] = 4;
+                if (!GpuCommand(0, 0x200, p, 18, NULL, 0, 0, 1)) {
+                    Free(venus.cap); venus.cap = NULL; break;
+                }
+                venus.ctx = 1;
+                VioWr(&gpu.q[0], 0xAC, 1); // HOST_VISIBLE shared-memory region
+                venus.shm_size = GpuRead64(0xB0); venus.shm_base = GpuRead64(0xB8);
+                if (venus.shm_size <= 0 || venus.shm_base <= 0 ||
+                        venus.shm_base & 16383 || venus.shm_size & 16383 ||
+                        venus.shm_base >= (1 << 36) || venus.shm_size > (1 << 36) - venus.shm_base)
+                    venus.shm_size = 0;
+                venus.ready = TRUE; ok = TRUE; break;
+            }
+        }
+    }
+    SpinUnlockIrq(&venus.lock, daif);
+    return ok;
+}
+
+Bool GpuContextResource(I64 id, Bool attach)
+{
+    U32 p[2]; p[0] = id; p[1] = 0;
+    return gpu.active && venus.ready && GpuCommand(0, 0x203 - attach, p, 2, NULL, 0, 0, venus.ctx);
+}
+
+CGpuBlob *GpuBlobCreate(I64 size, I64 mem, I64 blob_id = 0, I64 flags = GPU_BLOB_MAPPABLE)
+{// Guest blobs own their contiguous backing until the fenced unref completes.
+    I64 i, daif;
+    U32 p[12];
+    CGpuBlob *b = NULL;
+    if (!GpuVenusInit || size <= 0 || size > (256 << 20) ||
+            (mem != GPU_BLOB_GUEST && mem != GPU_BLOB_HOST3D) || flags & ~7) return NULL;
+    daif = SpinLockIrq(&venus.lock);
+    for (i = 0; i < GPU_VENUS_BLOBS; i++) if (!venus.blobs[i].id) {b = &venus.blobs[i]; break;}
+    if (b) {
+        MemSet(p, 0, sizeof(p));
+        b->id = ArchAdd(&gpu.next_id, 1); b->size = size;
+        p[0] = b->id; p[1] = mem; p[2] = flags;
+        p[4] = blob_id; p[5] = blob_id >> 32; p[6] = size; p[7] = size >> 32;
+        if (mem == GPU_BLOB_GUEST) {
+            b->guest = CAlloc(size); p[3] = 1;
+            p[8] = b->guest(I64); p[9] = b->guest(I64) >> 32; p[10] = size;
+        }
+        if (!GpuCommand(0, 0x10C, p, 8 + (mem == GPU_BLOB_GUEST) * 4, NULL, 0, 0, venus.ctx)) {
+            Free(b->guest); MemSet(b, 0, sizeof(CGpuBlob)); b = NULL;
+        }
+    }
+    SpinUnlockIrq(&venus.lock, daif);
+    return b;
+}
+
+Bool GpuBlobPages(I64 start, I64 size, I64 cache, Bool install)
+{// Identity-map unused aperture pages only. Retain page tables for reuse.
+    I64 addr, entry, *l3, *l2 = ArchL2Table;
+    U8 *raw;
+    for (addr = start; addr < start + size; addr += 16384) {
+        entry = l2[addr >> 25];
+        if (entry && (entry & 3) != 3) return FALSE;
+        if (!entry && install) {
+            raw = CAlloc(32768);
+            l3 = (raw(I64) + 16383) & ~16383;
+            l2[addr >> 25] = l3(I64) | 3;
+            entry = l2[addr >> 25];
+        }
+        if (entry) {
+            l3 = entry & ~16383;
+            if (install && l3[(addr >> 14) & 2047]) return FALSE;
+        }
+    }
+    for (addr = start; addr < start + size; addr += 16384) {
+        entry = l2[addr >> 25];
+        if (entry) {
+            l3 = entry & ~16383;
+            l3[(addr >> 14) & 2047] = 0;
+            if (install) l3[(addr >> 14) & 2047] = addr | 3 | ((2 - (cache == 1)) << 2) |
+                        (3 << 8) | (1 << 10) | (1 << 53) | (1 << 54);
+        }
+    }
+    ArchTlbFlush;
+    return TRUE;
+}
+
+U8 *GpuBlobMap(CGpuBlob *b)
+{
+    I64 daif, offset = 0, size, i, other;
+    U32 p[4], info[8];
+    U8 *result = NULL;
+    if (!gpu.active || !venus.ready || !b || !b->id || !venus.shm_size) return NULL;
+    daif = SpinLockIrq(&venus.lock);
+    if (b->mapping) result = b->mapping;
+    else {
+        size = (b->size + 16383) & ~16383;
+        // First fit, including holes left by unmap. All offsets are 16 KiB aligned.
+        for (i = 0; i < GPU_VENUS_BLOBS; i++) {
+            other = venus.blobs[i].offset;
+            if (venus.blobs[i].mapping && offset < other + ((venus.blobs[i].size + 16383) & ~16383) && other < offset + size) {
+                offset = other + ((venus.blobs[i].size + 16383) & ~16383); i = -1;
+            }
+        }
+        if (offset <= venus.shm_size && size <= venus.shm_size - offset) {
+            p[0] = b->id; p[1] = 0; p[2] = offset; p[3] = offset >> 32;
+            if (GpuCommand(0, 0x208, p, 4, info, 8, 0x1106, venus.ctx)) {
+                b->map_info = info[6];
+                if ((info[6] & 15) <= 3 && GpuBlobPages(venus.shm_base + offset, size, info[6] & 15, TRUE)) {
+                    b->offset = offset; b->mapping = venus.shm_base + offset; result = b->mapping;
+                } else GpuCommand(0, 0x209, p, 2, NULL, 0, 0, venus.ctx);
+            }
+        }
+    }
+    SpinUnlockIrq(&venus.lock, daif);
+    return result;
+}
+
+Bool GpuBlobUnmapLocked(CGpuBlob *b)
+{
+    U32 p[2];
+    if (!b || !b->id) return FALSE;
+    if (!b->mapping) return TRUE;
+    p[0] = b->id; p[1] = 0;
+    if (!gpu.active || !GpuCommand(0, 0x209, p, 2, NULL, 0, 0, venus.ctx)) return FALSE;
+    GpuBlobPages(b->mapping(I64), (b->size + 16383) & ~16383, 0, FALSE);
+    b->mapping = NULL;
+    return TRUE;
+}
+
+Bool GpuBlobUnmap(CGpuBlob *b)
+{
+    I64 daif = SpinLockIrq(&venus.lock);
+    Bool ok = GpuBlobUnmapLocked(b);
+    SpinUnlockIrq(&venus.lock, daif);
+    return ok;
+}
+
+Bool GpuBlobDestroy(CGpuBlob *b)
+{
+    I64 daif;
+    U32 p[2];
+    Bool ok = FALSE;
+    if (!b || !b->id) return FALSE;
+    daif = SpinLockIrq(&venus.lock);
+    if (GpuBlobUnmapLocked(b)) {
+        p[0] = b->id; p[1] = 0;
+        ok = gpu.active && GpuCommand(0, 0x102, p, 2);
+        if (ok) {Free(b->guest); MemSet(b, 0, sizeof(CGpuBlob));}
+    }
+    SpinUnlockIrq(&venus.lock, daif);
+    return ok;
+}
+
+Bool GpuSubmit3D(U8 *stream, I64 bytes, I64 ring = 0)
+{// Synchronous consumption fence, not a Vulkan fence. Large streams use a Venus ring.
+    U32 p[(GPU_REQ_MAX - 24) / 4];
+    if (!GpuVenusInit || !stream || bytes <= 0 || bytes & 3 || bytes > GPU_REQ_MAX - 32 || ring < 0 || ring > 63) return FALSE;
+    p[0] = bytes; p[1] = 0; MemCpy(p + 2, stream, bytes);
+    return GpuCommand(0, 0x207, p, 2 + bytes / 4, NULL, 0, 0, venus.ctx, ring);
+}
+
+Bool GpuScanoutBlob(CGpuBlob *b, I64 w, I64 h, I64 stride, I64 offset = 0, I64 format = 1)
+{
+    U32 p[24];
+    if (!gpu.active || !venus.ready || !b || !b->id || w <= 0 || h <= 0 || w > 8192 || h > 8192 ||
+            stride < w * 4 || stride > 0xFFFFFFFF || offset < 0 || offset > 0xFFFFFFFF ||
+            offset > b->size || (h - 1) * stride + w * 4 > b->size - offset) return FALSE;
+    MemSet(p, 0, sizeof(p));
+    p[2] = w; p[3] = h; p[5] = b->id; p[6] = w; p[7] = h; p[8] = format;
+    p[10] = stride; p[14] = offset;
+    if (!GpuCommand(0, 0x10D, p, 18)) return FALSE;
+    gpu.scan_id = 0; gpu.scan_top = -1; // force the next 2D frame to restore its scanout
+    p[4] = b->id; p[5] = 0;
+    return GpuCommand(0, 0x104, p, 6);
+}
+
+Bool GpuVenusDestroy()
+{
+    I64 i, daif = SpinLockIrq(&venus.lock);
+    Bool ok = TRUE;
+    for (i = 0; i < GPU_VENUS_BLOBS; i++) if (venus.blobs[i].id) ok = FALSE;
+    if (ok && venus.ready) {
+        ok = gpu.active && GpuCommand(0, 0x201, NULL, 0, NULL, 0, 0, venus.ctx);
+        if (ok) {Free(venus.cap); venus.cap = NULL; venus.ready = FALSE; venus.ctx = 0;}
+    }
+    SpinUnlockIrq(&venus.lock, daif);
+    return ok;
+}

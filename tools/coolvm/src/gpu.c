@@ -10,6 +10,9 @@ struct gpu_resource {
     uint8_t *pixels;
     struct { uint64_t addr; uint32_t len; } *back;
     uint64_t bytes, backing;
+    uint32_t blob_mem, blob_flags;
+    uint64_t map_offset;
+    bool mapped, attached;
 };
 static struct {
     struct virtio_mmio v;
@@ -18,6 +21,7 @@ static struct {
     uint32_t cursor[64*64], cx, cy, hx, hy;
     bool cursor_on, active;
     uint64_t bytes;
+    uint32_t stub_ctx, shm_sel;
 } gpu;
 static struct gpu_resource *resource(uint32_t id)
 {
@@ -43,6 +47,8 @@ static bool backing_read(struct gpu_resource *r,uint64_t off,uint8_t *dst,size_t
     }
     return len==0;
 }
+#include "gpu3d-stub.h"
+
 /* Response headers always carry the request fence, after processing finishes. */
 static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,size_t cap)
 {
@@ -66,6 +72,8 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
                 damage();
             }
         }
+    } else if(g.gpu_3d_stub && stub_command(type,p,len,out,cap,&result,&n)) {
+        /* Test-only transport. No renderer or Vulkan protocol decoding. */
     } else if(type==0x100) {
         n=24+16*24;
         if(cap<n){result=0x1205;n=24;}
@@ -119,7 +127,7 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
             else if(!r)result=0x1203;
             else if(!rect(r,x,y,w,h))result=0x1205;
             else if(type==0x103){gpu.active=true;gpu.scan_id=id;gpu.sx=x;gpu.sy=y;gpu.sw=w;gpu.sh=h;damage();}
-            else if(type==0x104){if(gpu.scan_id==id){damage();fb_frame_dump();}}
+            else if(type==0x104){if(r->blob_mem && !stub_flush(r))result=0x1205;else if(gpu.scan_id==id){damage();fb_frame_dump();}}
             else {
                 uint64_t offset=vio64(p+40),stride=(uint64_t)r->w*4;
                 if(!r->back || offset>r->backing || (uint64_t)(h-1)*stride+(uint64_t)w*4>r->backing-offset)result=0x1205;
@@ -168,7 +176,7 @@ static void process(unsigned queue)
     }
     aic_update_locked();
 }
-static void features(void){gpu.v.devfeat0=g.logos?1u<<LOGOS_FEATURE:0;}
+static void features(void){gpu.v.devfeat0=(g.logos?1u<<LOGOS_FEATURE:0) | (g.gpu_3d_stub?0x19:0);}
 void gpu_init(void) {gpu.width=g.fb_width;gpu.height=g.fb_height;features();}
 bool gpu_irq_level(void){return g.gpu && gpu.v.isr!=0;}
 bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
@@ -177,14 +185,24 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
     uint32_t x=(uint32_t)*val;
     if(off>=0x100) {
         if(wr){if(off!=0x104)return false;gpu.events&=~x;}
-        else {switch(off){case 0x100:x=gpu.events;break;case 0x104:x=0;break;case 0x108:x=1;break;case 0x10c:x=0;break;default:return false;}*val=x;}
+        else {switch(off){case 0x100:x=gpu.events;break;case 0x104:x=0;break;case 0x108:x=1;break;case 0x10c:x=g.gpu_3d_stub?1:0;break;default:return false;}*val=x;}
+        return true;
+    }
+    if(off>=0xac && off<=0xbc && g.gpu_3d_stub) {
+        if(wr){if(off!=0xac)return false;gpu.shm_sel=x;}
+        else {
+            uint64_t value=gpu.shm_sel==1?(off<0xb8?GPU_STUB_SIZE:GPU_STUB_BASE):UINT64_MAX;
+            if(off==0xac)x=gpu.shm_sel;
+            else x=(off&4)?value>>32:(uint32_t)value;
+            *val=x;
+        }
         return true;
     }
     if(wr && off==0x50){if(x>=2)return false;process(x);return true;}
     if(wr && off==0x70 && x==0) {
         for(unsigned i=0;i<GPU_RESOURCES;i++)discard(&gpu.res[i]);
         memset(&gpu.v,0,sizeof gpu.v);gpu.scan_id=0;gpu.cursor_on=false;gpu.active=false;
-        features();logos_reset();
+        gpu.stub_ctx=0;gpu.shm_sel=0;features();logos_reset();
     } else if(!virtio_regs(&gpu.v,16,off,wr,&x))return false;
     if(!wr)*val=x;aic_update_locked();return true;
 }

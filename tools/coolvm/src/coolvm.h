@@ -75,6 +75,8 @@
 #define GPU_BASE 0x1ff030000ULL
 #define GPU_SIZE 0x1000ULL
 #define GPU_IRQ 713
+#define GPU_STUB_BASE 0x400000000ULL
+#define GPU_STUB_SIZE (16ULL << 20)
 #define FB_BASE 0x900000000ULL
 
 #define MAX_CPUS 8
@@ -126,6 +128,8 @@ struct vm {
     uint64_t fb_size;
     uint32_t fb_width, fb_height;
     bool gpu;                   /* modern virtio-gpu 2D */
+    bool gpu_3d_stub;
+    uint8_t *gpu_stub_memory;
     bool logos;                 /* offer Logos on it (logos.m, docs/logos.md) */
     bool fb_scroll;              /* advertise optional scanout-y register */
     _Atomic uint32_t fb_scanout_y;
