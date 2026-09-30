@@ -81,8 +81,7 @@ def main():
     with disk.open('wb') as f:
         f.truncate(64 * 1024 * 1024)
     subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'SYNTEST', '::'], check=True)
-    for p in (ROOT / 'os/Disk').glob('*.HC'):
-        subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + p.name], check=True)
+    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     for name, text in (('Syn.HC', COOL), ('Syn.aum', WARM), ('Syn.txt', TEXT), ('Big.HC', BIG)):
         p = d / name
         p.write_text(text)

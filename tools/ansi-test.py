@@ -68,8 +68,7 @@ def scenario(name, tmux, size):
     with disk.open('wb') as f:
         f.truncate(64 * 1024 * 1024)
     subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'ANSITEST', '::'], check=True)
-    for p in (ROOT / 'os/Disk').glob('*.HC'):
-        subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + p.name], check=True)
+    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     script = 'delay 5000\n'
     if tmux:
         script += line('Tmux;') + 'delay 1500\n'

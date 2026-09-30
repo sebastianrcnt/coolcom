@@ -45,7 +45,7 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     echo "net shell commands: OK"
     # Compile the real startup files under the heap canaries as a regression
     # for GraphColor indexing its candidate array with an uncolored (-1) neighbor.
-    mcopy -o -i "$dir/fat.img" os/Disk/*.HC ::
+    tools/disk-files.sh "$dir/fat.img"
     # The shell never exits: coolvm stops it at --timeout (nonzero status), then the screenshot is saved.
     gtimeout -k 2 30 build/coolvm --headless --cpus 2 --mem 1024 --timeout 8 --width 640 --height 480 \
         --disk "$dir/fat.img" --screenshot "$dir/shell.png" "$@" "$image" <"$dir/shell.in" >"$dir/shell.log" 2>&1 || true

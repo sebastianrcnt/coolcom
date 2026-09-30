@@ -24,6 +24,7 @@ On an Apple silicon Mac, install the Homebrew packages `aarch64-elf-gcc`, `aarch
 `make run` creates `build/disk.img` (64 MiB FAT32) the first time. It then adds only the files that are
 missing, so edits made inside the OS are kept. The disk holds the programs of `os/Disk`, the kernel sources
 in `C:/Kernel` and `C:/coolc`, the shell prelude `C:/Kernel.HH`, and the compiler sources in `C:/Compiler`.
+It also installs the Warm compiler `C:/Warm.HC` and the example `C:/HelloWarm.aum`.
 To read the disk from the Mac, shut the VM down and run `hdiutil attach build/disk.img`.
 
 The VM shows the framebuffer console in a window, and the terminal you started it from is the serial port
@@ -35,7 +36,7 @@ example `--width/--height`, `--cpus`, `--mem`, `--headless`, `--net` and `--time
 ## The shell
 
 After boot the shell prints `Cool shell: ... compiler loaded`, runs `C:/Init.HC` (which loads Vim, Tmux,
-Less, and the other programs) and shows the `>` prompt.
+Less, Warm, and the other programs) and shows the `>` prompt.
 
 ### HolyC lines
 
@@ -209,9 +210,14 @@ compilers:
   `.HC` file. Copy it to `C:` together with `warmc/standard/src/Kernel/Adapter.HC`, and include both in the
   shell: `#include "C:/Adapter.HC"`, then the generated file. `make warm-kernel-test` does exactly this with
   `warmc/examples/kernel`.
-- **Inside the OS (Warm written in Cool, `warmc/Cool`):** `./warmc/Cool/build.sh` and
-  `python3 warmc/Cool/package_kernel.py` produce `build/warmcool/Kernel.HC`. Copy it to `C:/Warm.HC`, then
-  run `#include "C:/Warm.HC"` and `WarmRun("C:/Test.aum");` in the shell ([warmc/Cool/README.md](../warmc/Cool/README.md)).
+- **Inside the OS (Warm written in Cool, `warmc/Cool`):** `make disk-install` and `make disk-seed`
+  automatically build and package the compiler as `C:/Warm.HC`. `C:/Init.HC` loads it for each shell,
+  so after boot you can run `WarmRun("C:/HelloWarm.aum");` to print `Hello from Warm!`, or
+  `WarmRun("C:/X.aum");` for your own module `Test` with a `main` function. For another module name,
+  pass the entry point, e.g. `WarmRun("C:/X.aum", "X:main");`
+  ([warmc/Cool/README.md](../warmc/Cool/README.md)). No manual build, copy, or `#include` is needed.
+  On an existing disk, run `make disk-install` once to update `Init.HC`; `disk-seed` (also used by
+  `make run`) preserves existing files, including `Init.HC`, Warm, and the example.
 
 <a id="vm-only"></a>
 ## What is VM-only

@@ -117,7 +117,7 @@ build/disk.img: | build
 
 # make run only adds files that are missing, so edits made inside the OS
 # survive; `make disk-install` overwrites them with the repo versions.
-# tools/disk-files.sh copies os/Disk/*.HC and the kernel sources (C:/Kernel, for Man).
+# tools/disk-files.sh copies os/Disk programs/examples, Warm.HC, and kernel sources (C:/Kernel, for Man).
 # C:/Kernel.HH (the shell prelude) declares the kernel for programs compiled
 # with Cmp; C:/Compiler holds the compiler sources (tools/native/prepare.sh), so
 # Cmp("C:/Compiler/Native.HC") in the OS rebuilds coolc/seed/Compiler.BIN.
@@ -125,6 +125,12 @@ build/disk.img: | build
 # includes as ../../coolc/... in C:/coolc (".." stops at the root), and the
 # prebuilt assembly C:/Kernel/BootStub.BIN, so `MakeKernel` in the OS rebuilds
 # build/kernel.Image (docs/kernel-rebuild.md).
+# Package the Cool implementation of Warm for the kernel shell. disk-files.sh
+# also requests this target when populating a test or external disk image.
+build/warmcool/Kernel.HC: $(wildcard warmc/Cool/*.HC warmc/lib/builtin/*.aui warmc/lib/builtin/*.aum) warmc/Cool/build.sh warmc/Cool/embed_builtins.py warmc/Cool/package_kernel.py coolc/seed/Compiler.BIN build/coolc
+	./warmc/Cool/build.sh
+	python3 warmc/Cool/package_kernel.py
+
 disk-install: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
