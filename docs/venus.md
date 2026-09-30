@@ -138,9 +138,9 @@ MoltenVK through the Vulkan loader.
   Vulkan driver.
 
 **QEMU on Linux hosts.** QEMU (9.2 or later, with virglrenderer 1.0 or later) offers Venus
-with `-device virtio-gpu-gl-pci,hostmem=...,blob=true,venus=true`. Only the PCI variant has
-the host-memory region. So the kernel needs a virtio-pci transport on arm64 `-M virt` (PCIe
-ECAM from the FDT), which is the same transport the x86-64 plan needs ([x86-64.md](x86-64.md)).
+with `-device virtio-gpu-gl-pci,hostmem=...,blob=true,venus=true`. The documented PCI route uses a host-memory region. A virtio-pci transport on
+arm64 `-M virt` (PCIe
+ECAM from the FDT) would also serve the x86-64 plan ([x86-64.md](x86-64.md)).
 
 Can this be tested from this Mac?
 - QEMU on macOS with Venus: not with stock builds, and it would test MoltenVK again rather
@@ -275,3 +275,53 @@ Verified on Apple M6, macOS 27 / Xcode 27: all libraries built successfully;
 MoltenVK's packaging script removes its intermediate directory unless
 `KEEP_CACHE=Y`; the vendoring script sets this to avoid deleting Xcode's active
 build database. The script supports rerunning from its cached sources.
+
+### Step 2: guestless C mapping spike
+
+Run `make venus-host-test` after vendoring (Mako 1.3.10 and MarkupSafe 3.0.3
+are installed only in `vendor/venus/python` for the upstream C wire generator).
+The test builds/codesigns `build/venus-spike/spike`, creates an HV VM with **no
+vCPU or guest**, and performs real Venus calls using generated upstream codecs:
+
+1. Initialize the renderer with VENUS, NO_VIRGL, THREAD_SYNC and ASYNC_FENCE_CB;
+   create context 1 with capset 4 (156 bytes, capset version 0).
+2. Create a mappable HOST3D blob with blob_id 0 (renderer-owned shared memory);
+   get its pointer and map/unmap 16 KiB at IPA `0xa00000000`.
+3. Use that blob as the Venus reply stream; create a Vulkan 1.1 instance,
+   enumerate a physical device, read memory properties, create a device, and
+   allocate 16 KiB from an actual HOST_VISIBLE memory type **through Venus**.
+4. Create a second HOST3D blob with blob_id 4 (the VkDeviceMemory object id),
+   map/unmap its pointer at IPA `0xa00004000`, then release resources in order.
+
+**Result: PASS** on the host above. Both pointers were 16 KiB aligned and both
+`hv_vm_map` and `hv_vm_unmap` returned HV_SUCCESS. Host writes to the mappings
+also completed. This proves acceptance by Hypervisor.framework; guest reads,
+cache coherence, GPU read/write visibility and pixel rendering still need tests.
+This is not milestone 1's triangle test.
+
+**Correction to the design:** standard `virgl_renderer_resource_map` returned
+`-EINVAL` (-22) on both macOS opaque-handle resources. The krunkit fork provides
+`virgl_renderer_resource_get_map_ptr`; its Vulkan blob path calls `vkMapMemory`
+and retains that pointer. Blob id 0 uses anonymous mmap instead of Vulkan memory.
+The pointer's lifetime belongs to the renderer: unmap the IPA before resource
+unref/context destruction/freeing the corresponding VkDeviceMemory.
+
+**krunkit source check:** libkrun
+[`e66cad1cefb775a56fcf5fe9f524d8422e31cf0c`](https://github.com/containers/libkrun/tree/e66cad1cefb775a56fcf5fe9f524d8422e31cf0c)
+uses rutabaga to get a blob pointer in
+[`resource_map_blob`](https://github.com/containers/libkrun/blob/e66cad1cefb775a56fcf5fe9f524d8422e31cf0c/src/devices/src/virtio/gpu/virtio_gpu.rs),
+passes it via `GpuAddMapping`, and its
+[`HVF map_memory`](https://github.com/containers/libkrun/blob/e66cad1cefb775a56fcf5fe9f524d8422e31cf0c/src/hvf/src/lib.rs)
+calls `hv_vm_map`. That supports the design's general mapping claim, with the
+API correction above. It does **not** establish the proposed scanout path: its
+GPU worker currently leaves `SetScanoutBlob` unimplemented.
+
+**QEMU version check (source/docs, not runtime-tested here):**
+[QEMU 9.2 release notes](https://www.qemu.org/2024/12/11/qemu-9-2-0/) confirm
+Venus introduction; [official virtio-gpu docs](https://www.qemu.org/docs/master/system/devices/virtio/virtio-gpu.html)
+require a Venus-enabled virglrenderer >=1.0.0 and show
+`virtio-gpu-gl-pci,hostmem=8G,blob=true,venus=true`. The docs also list
+`virtio-gpu-gl-device`, so the earlier claim that only PCI can expose host memory
+is not established and must not be treated as a requirement. The generic Linux
+external-memory requirements do not describe the krunkit macOS pointer patch.
+No QEMU/Linux/lavapipe runtime result is claimed by this host spike.

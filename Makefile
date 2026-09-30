@@ -377,3 +377,10 @@ logos-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 .PHONY: gpu-resize-test
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/gpu-resize-test.py $<
+
+# Host-only Venus spike; opt-in and independent of the default test suite.
+.PHONY: vendor-venus venus-host-test
+vendor-venus:
+	tools/vendor-venus.sh
+venus-host-test:
+	tools/coolvm/test/venus-spike.sh
