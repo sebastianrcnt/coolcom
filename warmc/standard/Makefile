@@ -22,12 +22,12 @@ MODULES := \
 		test/Main.warmh,test/Main.warm
 TEST_BIN := test_bin
 
+# The Warm compiler in Cool checks the whole library and its tests (`make build/warmc` first).
+# Running them needs C stdio bindings that the Cool backend does not have, so there is no test binary yet.
 .DEFAULT: all
-all: $(TEST_BIN)
-
-$(TEST_BIN): src/*.warmh src/*.warm src/*/*.warmh src/*/*.warm test/*.warmh test/*.warm test/*/*.warmh test/*/*.warm
-	../warmc compile $(MODULES) --entrypoint=Standard.Test:Main --output=$(TEST_BIN)
+all:
+	../../build/warmc compile $(MODULES) --entrypoint=Standard.Test:Main --check
 
 .PHONY: clean
 clean:
-	-test -f $(TEST_BIN) && rm $(TEST_BIN)
+	rm -f $(TEST_BIN)

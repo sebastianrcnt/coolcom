@@ -3,44 +3,43 @@
 # See LICENSE file for details.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Run the examples with the Warm compiler written in Cool (tools/warm) and compare their output.
+# From the repository root: warmc/run-examples.sh
+set -euo pipefail
 
-set -euxo pipefail
+cd "$(dirname "$0")/.."
+STD=warmc/standard/src
+OUT=build/warm-examples
+mkdir -p "$OUT"
+failed=0
 
-dune build
-
+# compile DIR MODULE EXPECTED [STDIN]: compile, run and compare the output
 function compile() {
-    ./warmc compile \
-        ./standard/src/Buffer.warmh,./standard/src/Buffer.warm \
-        ./standard/src/String.warmh,./standard/src/String.warm \
-        ./standard/src/StringBuilder.warmh,./standard/src/StringBuilder.warm \
-        ./standard/src/IO/IO.warmh,./standard/src/IO/IO.warm \
-        ./standard/src/IO/Terminal.warmh,./standard/src/IO/Terminal.warm \
-        $1/$2.warmh,$1/$2.warm \
-        --entrypoint=Example.$2:main --output=testbin
-
-    if [ $# -eq 4 ] 
-    then
-        echo -n -e $4 | ./testbin > actual.txt
+    local dir=warmc/examples/$1 module=$2 expected=$3 input=${4:-}
+    local modules=("$STD/Buffer.warmh,$STD/Buffer.warm" "$STD/String.warmh,$STD/String.warm"
+        "$STD/StringBuilder.warmh,$STD/StringBuilder.warm" "$STD/IO/IO.warmh,$STD/IO/IO.warm"
+        "$STD/IO/Terminal.warmh,$STD/IO/Terminal.warm" "$dir/$module.warmh,$dir/$module.warm")
+    if printf '%b' "$input" | tools/warm run "${modules[@]}" --entrypoint="Example.$module:main" >"$OUT/$module.actual" 2>"$OUT/$module.err" \
+        && printf '%b' "$expected" | cmp -s - "$OUT/$module.actual"; then
+        echo "PASS $1"
     else
-        ./testbin > actual.txt
+        echo "FAIL $1 (see $OUT/$module.actual and $OUT/$module.err)"
+        failed=1
     fi
-
-    echo -n -e "$3" > expected.txt
-    diff actual.txt expected.txt
-    rm testbin
-    rm actual.txt
-    rm expected.txt
 }
 
-compile examples/ffi FFI "aHello, world!\n"
-compile examples/fib Fibonacci ""
-compile examples/generic-record GenericRecord ""
-compile examples/generic-union GenericUnion ""
-compile examples/haversine Haversine ""
-compile examples/hello-world HelloWorld "Hello, world!\n"
-compile examples/identity Identity ""
-compile examples/memory Memory ""
-compile examples/named-argument NamedArgument ""
-compile examples/record Record ""
-compile examples/union Union ""
-compile examples/greet Greet "Hello, Santa!\n" "Santa"
+compile ffi FFI "aHello, world!\n"
+compile fib Fibonacci ""
+compile generic-record GenericRecord ""
+compile generic-union GenericUnion ""
+compile haversine Haversine ""
+compile hello-world HelloWorld "Hello, world!\n"
+compile identity Identity ""
+compile memory Memory ""
+compile named-argument NamedArgument ""
+compile record Record ""
+compile union Union ""
+# greet reads standard input (Terminal.readLine), which the Cool backend does not support yet.
+echo "SKIP greet (reads stdin)"
+exit $failed

@@ -18,9 +18,13 @@ SRC := \
 	$(PROG).warmh,$(PROG).warm
 
 .DEFAULT: all
-all: 
-	../../warmc compile $(STDLIB) $(SRC) --entrypoint=$(ENTRY) --output=main
+# Needs build/warmc and build/coolc: `make build/warmc` in the repository root.
+ROOT := ../../..
+all:
+	$(ROOT)/build/warmc compile $(STDLIB) $(SRC) --entrypoint=$(ENTRY) --target-type=hc --output=main.cool
+	COOLC_COMPILER_BIN=$(ROOT)/coolc/seed/Compiler.BIN $(ROOT)/build/coolc main.cool main.BIN
+	@echo "run it: $(ROOT)/build/coolc --run main.BIN"
 
 .PHONY: clean
 clean:
-	rm main
+	rm -f main.cool main.BIN

@@ -127,9 +127,26 @@ build/disk.img: | build
 # build/kernel.Image (docs/kernel-rebuild.md).
 # Package the Cool implementation of Warm for the kernel shell. disk-files.sh
 # also requests this target when populating a test or external disk image.
-build/warmcool/Kernel.cool: $(wildcard warmc/Cool/*.cool warmc/lib/builtin/*.warmh warmc/lib/builtin/*.warm) warmc/Cool/build.sh warmc/Cool/embed_builtins.py warmc/Cool/package_kernel.py coolc/seed/Compiler.BIN build/coolc
-	./warmc/Cool/build.sh
-	python3 warmc/Cool/package_kernel.py
+WARMSRC := $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
+build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
+	./warmc/build.sh
+build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py
+	python3 warmc/package_kernel.py
+
+# The Warm compiler on the host: build/warmc compile ... (warmc/README.md), or tools/warm run Foo.warm.
+build/warmc: build/warmcool/Warm.BIN
+	printf '#!/bin/sh\nexec "%s/build/coolc" --run "%s/build/warmcool/Warm.BIN" "$$@"\n' "$(CURDIR)" "$(CURDIR)" > $@
+	chmod +x $@
+
+# The Warm compiler's own tests: every test-programs case against its stored expectation, and the probes.
+.PHONY: warm-test
+warm-test: build/warmc build/warmcool/Kernel.cool
+	python3 warmc/compare.py
+	python3 warmc/test_frontend.py
+	python3 warmc/test_semantics.py
+	python3 warmc/test_numbers.py
+	python3 warmc/test_cli.py
+	python3 warmc/test_standard.py
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
@@ -250,7 +267,6 @@ stbtt-test: build/coolc build/hcfmt.BIN
 	python3 tools/c2hc/stbtt_test.py
 
 .PHONY: warm-kernel-test
-warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
+warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool build/warmc
 	mkdir -p build/tmp
-	TMPDIR="$(CURDIR)/build/tmp" ./warmc/build.sh
 	python3 tools/warm-kernel-test.py
