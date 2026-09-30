@@ -5,7 +5,7 @@
 // that changed and the number of full-screen scrolls. Nothing is drawn then. The renderer
 // (FbRender) runs from the timer on core 0 once a frame (FB_FRAME_JIFFIES) while output
 // streams and as soon as it pauses (FB_IDLE_JIFFIES), or when asked (FbFlush). It takes
-// the changed rows under the terminal's lock, moves its pixels for the scrolls, draws the
+// the changed rows under the terminal's lock, advances its pixel ring for the scrolls, draws the
 // cells that differ from what it drew last into a cached back buffer with GNU Unifont
 // (Font.cool: 8x16 cells, wide glyphs take two), copies only the changed part of each
 // row to the framebuffer and draws the block cursor there, once. The framebuffer is
@@ -29,6 +29,7 @@ class CFb
     U8 *base;                 // the framebuffer (non-cacheable)
     U8 *back;                 // what it shows without the cursor: same size and stride, cached
     I64 w, h, stride, cols, rows;
+    I64 top;                 // first visible pixel row in the text-area ring
     CVTerm *vt;               // the grid shown (vt_screen)
     CVtCell *drawn;           // per cell, what the back buffer shows (all bytes 0xFF: unknown)
     CVtCell *snap;            // the rows taken from the grid for this frame
@@ -130,23 +131,30 @@ U8 *FbGlyph(I64 cp, I64 *_cells)
 
 //---- drawing into the back buffer
 
+I64 FbBackY(I64 y)
+{//Only complete text rows rotate; the bottom pixel margin stays fixed.
+    if (y < fb.rows * FONT_CELL_H)
+        return (fb.top + y) % (fb.rows * FONT_CELL_H);
+    return y;
+}
+
 U0 FbBackFill(I64 x, I64 y, I64 w, I64 h, I64 rgb)
 {
-    U8 *row = fb.back + y * fb.stride + x * 4;
+    U8 *row;
     U32 *p;
     I64 i;
     while (h-- > 0) {
+        row = fb.back + FbBackY(y++) * fb.stride + x * 4;
         p = row;
         for (i = 0; i < w; i++)
             p[i] = rgb;
-        row += fb.stride;
     }
 }
 
 U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg)
 {//Draw cp over cells cells at col,row. A code point the font lacks, or whose glyph
     //is not cells wide, is a '?' in each cell.
-    U8 *g, *line = fb.back + row * FONT_CELL_H * fb.stride + col * FONT_CELL_W * 4;
+    U8 *g, *line = fb.back + FbBackY(row * FONT_CELL_H) * fb.stride + col * FONT_CELL_W * 4;
     U32 *p;
     I64 y, x, bits, n = cells * FONT_CELL_W, gc;
     if (cp == ' ') {
@@ -198,16 +206,24 @@ Bool FbCellSame(CVtCell *a, CVtCell *b)
 
 U0 FbCopyRect(I64 x, I64 y, I64 w, I64 h)
 {//Back buffer to framebuffer, in pixels.
-    I64 off = y * fb.stride + x * 4;
+    I64 src, n, ring_h = fb.rows * FONT_CELL_H;
     if (w <= 0 || h <= 0)
         return;
-    if (!x && w == fb.w && fb.stride == fb.w * 4) {
-        MemCpy(fb.base + off, fb.back + off, h * fb.stride);
-        return;
-    }
-    while (h-- > 0) {
-        MemCpy(fb.base + off, fb.back + off, w * 4);
-        off += fb.stride;
+    while (h > 0) {
+        src = FbBackY(y);
+        n = 1;
+        if (!x && w == fb.w && fb.stride == fb.w * 4) {
+            n = fb.h - src;
+            if (y < ring_h) {
+                n = ring_h - src;
+                if (n > ring_h - y) n = ring_h - y;
+            }
+            if (n > h) n = h;
+        }
+        MemCpy(fb.base + y * fb.stride + x * 4,
+                fb.back + src * fb.stride + x * 4, (n - 1) * fb.stride + w * 4);
+        y += n;
+        h -= n;
     }
 }
 
@@ -216,7 +232,7 @@ U0 FbCursorDraw(I64 cx, I64 cy, I64 w)
     I64 off = cy * FONT_CELL_H * fb.stride + cx * FONT_CELL_W * 4, y, x;
     U32 *s, *d;
     for (y = 0; y < FONT_CELL_H; y++) {
-        s = fb.back + off;
+        s = fb.back + FbBackY(cy * FONT_CELL_H + y) * fb.stride + cx * FONT_CELL_W * 4;
         d = fb.base + off;
         for (x = 0; x < w; x++)
             d[x] = s[x] ^ 0xFFFFFF;
@@ -240,7 +256,7 @@ U0 FbRenderLocked()
 {//One frame; the caller holds fb.render_lock with IRQs masked.
     CVTerm *v = fb.vt;
     CVtCell *p, *d;
-    I64 x, y, n, cols = fb.cols, rows = fb.rows, scrolled, cx = 0, cy = 0, cw = 0, band;
+    I64 x, y, n, cols = fb.cols, rows = fb.rows, scrolled, cx = 0, cy = 0, cw = 0;
     I64 dy0 = fb.h, dy1 = 0;
     Bool all;
     SpinLock(&v->lock);
@@ -269,14 +285,15 @@ U0 FbRenderLocked()
     fb.pending = FALSE;
     SpinUnlock(&v->lock);
 
-    // The scrolls: move the pixels (and what they show) up, in cached memory.
+    // Rotate the pixel ring; only the small cell cache moves.
     if (all || scrolled >= rows) {
         MemSet(fb.drawn, 0xFF, rows * cols * sizeof(CVtCell));
-        if (all)
+        if (all) {
+            fb.top = 0;
             MemSet(fb.back, 0, fb.stride * fb.h);
+        }
     } else if (scrolled) {
-        band = FONT_CELL_H * fb.stride;
-        MemCpy(fb.back, fb.back + scrolled * band, (rows - scrolled) * band);
+        fb.top = (fb.top + scrolled * FONT_CELL_H) % (rows * FONT_CELL_H);
         MemCpy(fb.drawn, fb.drawn + scrolled * cols, (rows - scrolled) * cols * sizeof(CVtCell));
         MemSet(fb.drawn + (rows - scrolled) * cols, 0xFF, scrolled * cols * sizeof(CVtCell));
     }
@@ -308,14 +325,14 @@ U0 FbRenderLocked()
     // The old cursor goes with its row's copy.
     if (fb.cur_w)
         FbSpan(fb.cur_y, fb.cur_x, fb.cur_x + fb.cur_w / FONT_CELL_W);
-    if (all) {
-        MemCpy(fb.base, fb.back, fb.stride * fb.h);
+    if (all || (scrolled && fb.cols * FONT_CELL_W == fb.w)) {
+        FbCopyRect(0, 0, fb.w, fb.h);
         dy0 = 0;
         dy1 = fb.h;
     }
     for (y = 0; y < rows; y++) {
         if (fb.x0[y] < fb.x1[y]) {
-            if (!all)
+            if (!all && !(scrolled && fb.cols * FONT_CELL_W == fb.w))
                 FbCopyRect(fb.x0[y] * FONT_CELL_W, y * FONT_CELL_H,
                            (fb.x1[y] - fb.x0[y]) * FONT_CELL_W, FONT_CELL_H);
             if (y * FONT_CELL_H < dy0) dy0 = y * FONT_CELL_H;
