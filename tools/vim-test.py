@@ -28,8 +28,8 @@ def keys_of(code):
 def typed(text):
     result = ''
     for ch in text:
-        if ch == '\x12':
-            result += '1 29 1\n' + keys_of(19) + '1 29 0\n'
+        if ch in ('\x12', '\x0f'):
+            result += '1 29 1\n' + keys_of(19 if ch == '\x12' else 24) + '1 29 0\n'
         else:
             code, shift = KEYS[ch]
             if shift:
@@ -71,9 +71,36 @@ def check_init_log(log):
         raise AssertionError('C:/Init.cool diagnostics:\n' + '\n'.join(diagnostics))
 
 
+KERNEL_A = pathlib.Path('coolc/Frontend/KernelA.coolh').read_bytes()
+BIG = ''.join(f'line {i:05d}\n' for i in range(30000))  # 330 KB, over the old 128 KiB limit
+
 # name, starting text, actual input keys, expected text, expected byte cursor.
 # Every session ends in :wq unless its test explicitly exercises quit behavior.
+ASM = '.text\n.global entry\nentry: mov x0, #42 // comment\n  add w30, sp, xzr ; tail\n/* multi\n still */ sub x30, w0, wzr\n# a comment\n#define VALUE 7\n1: b.eq entry\n  .byte 0xff\n  mov X30, W0\n  mov x31, x00\n'
+
 CASES = [
+    ('kernel-a-save', KERNEL_A, 'iCHECK\x1bu\x12:w\n', b'CHECK' + KERNEL_A, 4),
+    ('gd-function', 'Target();\nU0 Target() {}\n', ':set ft=cool\ngd', 'Target();\nU0 Target() {}\n', 13),
+    ('gd-inherited-class', 'Child value;\nclass Child: Parent {};\n', ':set ft=cool\ngd', 'Child value;\nclass Child: Parent {};\n', 19),
+    ('gd-class', 'Thing value;\nclass Thing {};\n', ':set ft=cool\ngd', 'Thing value;\nclass Thing {};\n', 19),
+    ('gd-variable', 'value++;\n  I64 value = 1;\n', ':set ft=cool\ngd', 'value++;\n  I64 value = 1;\n', 15),
+    ('gd-define', 'LIMIT\n#define LIMIT 42\n', ':set ft=cool\ngd', 'LIMIT\n#define LIMIT 42\n', 14),
+    ('gd-return', 'Target();\nU0 Target() {}\n', ':set ft=cool\nlgd\x0f', 'Target();\nU0 Target() {}\n', 1),
+    ('gd-warm-function', 'DoIt();\nfunction DoIt(): Unit is\n', ':set ft=warm\ngd', 'DoIt();\nfunction DoIt(): Unit is\n', 17),
+    ('gd-warm-record', 'Pair\nrecord Pair is\n', ':set ft=warm\ngd', 'Pair\nrecord Pair is\n', 12),
+    ('gd-warm-type', 'Size\ntype Size: Universe;\n', ':set ft=warm\ngd', 'Size\ntype Size: Universe;\n', 10),
+    ('gd-ignore-comment', 'Target();\n/* U0 Target() {}\n*/\nU0 Target() {}\n', ':set ft=cool\ngd', 'Target();\n/* U0 Target() {}\n*/\nU0 Target() {}\n', 34),
+    ('gd-kernel-return', 'StrCmp\n', 'gd\x0f', 'StrCmp\n', 0),
+    ('gd-missing', 'UnknownName\n', 'gd\x0f', 'UnknownName\n', 0),
+    ('gd-dirty-local', 'Target();\nU0 Target() {}\n', ':set ft=cool\nA \x1b0gd', 'Target(); \nU0 Target() {}\n', 14),
+    ('gd-dirty-kernel', 'StrLen\n', 'A \x1b0gd', 'StrLen \n', 0),
+    ('rnu-both', 'a\nb\nc\nd\n', ':set number relativenumber\njj', 'a\nb\nc\nd\n', 4),
+    ('rnu-only', 'a\nb\nc\nd\n', ':set nonu rnu\njj', 'a\nb\nc\nd\n', 4),
+    ('rnu-off', 'a\nb\nc\nd\n', ':set rnu\n:set nornu\njj', 'a\nb\nc\nd\n', 4),
+    ('rnu-no-number', 'a\nb\nc\nd\n', ':set nonumber norelativenumber\njj', 'a\nb\nc\nd\n', 4),
+    ('asm-extension', ASM, '', ASM, 0),
+    ('asm-filetype', ASM, ':set ft=asm\n', ASM, 0),
+    ('asm-block-scroll', '/* block\n' + 'continued\n' * 40 + 'end */\n', 'G', '/* block\n' + 'continued\n' * 40 + 'end */\n', 409),
     ('insert', 'abc\n', 'iX\x1b', 'Xabc\n', 0),
     ('append', 'abc\n', 'aX\x1b', 'aXbc\n', 1),
     ('first-nonblank-insert', '  abc\n', 'IX\x1b', '  Xabc\n', 2),
@@ -167,8 +194,12 @@ CASES = [
     ('hangul-yank', '가나다\n', 'vly$p', '가나다가나\n', 12),
     ('visual-line-change', 'a\nb\nc\n', 'VjcX\x1b', 'X\nc\n', 0),
     ('blank-insert-escape', 'a\nb\n', 'ji\x1b', 'a\nb\n', 2),
-    ('capacity', 'x' * 131071, 'iY\x1b', 'x' * 131071, 0),
-    ('edit-too-large', 'abc\n', ':e C:/Huge.txt\n', 'abc\n', 0),
+    ('capacity-grows', 'x' * 131071, 'iY\x1b', 'Y' + 'x' * 131071, 0),
+    ('edit-large-file', 'abc\n', ':e C:/Huge.txt\nx', 'x' * 131071, 0),
+    ('noop-keeps-redo', 'abcd\n', 'xxuura\x12\x12', 'cd\n', 0),
+    ('replace-same-no-history', 'abc\n', 'xrbu', 'abc\n', 0),
+    ('big-file-edit-undo-redo', BIG, 'GoEND\x1bggxuu\x12', BIG + 'END\n', 0),
+    ('big-file-search-delete', BIG, '/line 29999\ndd', BIG.replace('line 29999\n', ''), 29998 * 11),
 ]
 
 
@@ -227,17 +258,24 @@ def main():
     unicode_file = d / 'Unicode.txt'
     unicode_file.write_bytes(b'abc\n')
     copy(unicode_file, unicode_file.name)
+    run(['mmd', '-i', str(disk), '::coolc/Frontend'])
+    copy(pathlib.Path('coolc/Frontend/KernelA.coolh'), 'coolc/Frontend/KernelA.coolh')
     runner = ['U0 VimTests() {']
     script = BOOT + typed('#include "C:/Run.cool"\n') + wait('> ')
     script += typed('VimTests;\n')
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
         if i:  # the previous editor has quit; the next one gets these keys
             script += wait(f'VIMRESULT {i - 1} ')
-        path = d / f'T{i:03}.txt'
-        path.write_bytes(source.encode())
+        suffix = 'S' if name in ('asm-extension', 'asm-block-scroll') else 'txt'
+        path = d / f'T{i:03}.{suffix}'
+        path.write_bytes((source if isinstance(source, bytes) else source.encode()))
         copy(path, path.name)
-        runner.append(f'Vim("C:/{path.name}"); Print("\\nVIMRESULT {i} %d %d %d\\n", vim_pos, vim_top, vim_left);')
-        script += typed(keys + ':wq\n') + 'delay 60\n'
+        target = 'coolc/Frontend/KernelA.coolh' if name == 'kernel-a-save' else path.name
+        runner.append(f'Vim("C:/{target}"); Print("\\nVIMRESULT {i} %d %d %d\\n", vim_pos, vim_top, vim_left);')
+        if name == 'gd-kernel-return':
+            script += typed('gd') + wait('NORMAL C:/Kernel/KUtils.cool') + typed('\x0f:wq\n') + 'delay 60\n'
+        else:
+            script += typed(keys + ':wq\n') + 'delay 60\n'
     # Verify ordinary and forced exits as well as a real CPU fault and a fresh invocation.
     runner += ['Vim("C:/Quit.txt"); Print("\\nQUITRESULT %d\\n", vim_pos);',
                'Vim("C:/Quit.txt"); Print("\\nCLEANQUIT\\n");', '}']
@@ -294,13 +332,47 @@ def main():
                re.findall(r'VIMRESULT (\d+) (\d+) (\d+) (\d+)', log)}
     failures = []
     for i, (name, source, keys, expected, pos) in enumerate(CASES):
-        filename = f'T{i:03}.txt'
+        suffix = 'S' if name in ('asm-extension', 'asm-block-scroll') else 'txt'
+        filename = f'T{i:03}.{suffix}'
+        if name == 'kernel-a-save':
+            filename = 'coolc/Frontend/KernelA.coolh'
         if name == 'edit-file':
             filename = 'Other.txt'
+        if name == 'edit-large-file':
+            filename = 'Huge.txt'
         got = run(['mcopy', '-i', str(disk), '::' + filename, '-']).stdout
         state = results.get(i)
-        if got != expected.encode() or state is None or state[0] != pos:
-            failures.append(f'{i} {name}: text={got[:150]!r} cursor={state}; expected {expected.encode()[:150]!r}, {pos}')
+        if got != (expected if isinstance(expected, bytes) else expected.encode()) or state is None or state[0] != pos:
+            failures.append(f'{i} {name}: text={got[:150]!r} cursor={state}; expected {(expected if isinstance(expected, bytes) else expected.encode())[:150]!r}, {pos}')
+        if name.startswith('rnu-'):
+            end = log.index(f'VIMRESULT {i} ')
+            frame = log[log.rfind('\x1b[1;1H', 0, end):end]
+            numbers = {'rnu-both': [2, 1, 3, 1], 'rnu-only': [2, 1, 0, 1],
+                       'rnu-off': [1, 2, 3, 4], 'rnu-no-number': None}[name]
+            for row, char in enumerate('abcd', 1):
+                prefix = f'\x1b[{row};1H\x1b[0m\x1b[K'
+                if numbers:
+                    prefix += f'\x1b[90m{numbers[row-1]:5d} '
+                if prefix + '\x1b[0;37m' + char not in frame:
+                    failures.append(f'{name}: wrong rendered number on row {row}')
+            cursor = '\x1b[3;1H' if numbers is None else '\x1b[3;7H'
+            if cursor not in frame:
+                failures.append(f'{name}: wrong rendered cursor')
+        if name in ('asm-extension', 'asm-filetype', 'asm-block-scroll'):
+            end = log.index(f'VIMRESULT {i} ')
+            frame = log[log.rfind('\x1b[1;1H', 0, end):end]
+            markers = ['\x1b[0;90mcontinued', '\x1b[0;90mend */'] if name == 'asm-block-scroll' else [
+                '\x1b[0;35m.text', '\x1b[0;35m.global', '\x1b[0;33mentry:',
+                '\x1b[0;35mmov', '\x1b[0;35madd', '\x1b[0;35msub', '\x1b[0;35mb.eq',
+                '\x1b[0;36mx0', '\x1b[0;36mw30', '\x1b[0;36msp', '\x1b[0;36mxzr',
+                '\x1b[0;36mx30', '\x1b[0;36mw0', '\x1b[0;36mwzr', '\x1b[0;36mX30', '\x1b[0;36mW0',
+                '\x1b[0;33m#42', '\x1b[0;33m0xff', '\x1b[0;33m1:',
+                '\x1b[0;90m// comment', '\x1b[0;90m; tail', '\x1b[0;90m/* multi',
+                '\x1b[0;90m still */', '\x1b[0;90m# a comment', '\x1b[0;35m#define VALUE 7',
+                '\x1b[0;37m x31, x00']
+            for marker in markers:
+                if marker not in frame:
+                    failures.append(f'{name}: missing rendered syntax {marker!r}')
         if state and name == 'vertical-scroll' and state[1] == 0:
             failures.append('vertical viewport did not scroll')
         if state and name == 'horizontal-scroll' and state[2] == 0:

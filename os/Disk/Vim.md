@@ -11,11 +11,19 @@ loads the editor. The UART and VM keyboard use the same `GetKey` events.
   `p P`, `r<char>`, `J`, and `.` to repeat the last change including inserted text.
 - Visual: `v` selects characters, `V` selects whole lines; motions extend
   the selection, `d x c y` operate on it, Escape cancels.
+- Definitions: `gd` finds a declaration in the current live buffer (Cool functions,
+  classes, variables and defines; Warm functions, types and records), then uses
+  Man's compiler symbols and kernel sources. Ctrl+O restores the previous file,
+  cursor and viewport (32 jumps). Save before crossing files with changes.
 - History: `u`, Ctrl+R, with counts. A fresh change after undo discards the
   redo branch. Saving does not clear history; undo recomputes the modified flag.
 - Search: `/text` or `?text`, Enter; `n N` repeat in either direction.
   Searches are literal, case-sensitive UTF-8 and wrap around the buffer.
   An empty search repeats the previous pattern.
+- Numbers: `:set number/nu`, `nonumber/nonu`, `relativenumber/rnu`,
+  `norelativenumber/nornu` (space-separated options also work). With both
+  enabled, the current line is absolute and other lines are relative; with
+  only relative numbers the current line is zero. Default: number, nornu.
 - Ex: `:w :q :q! :wq`, `:e C:/Other.cool`, `:42`. Unsaved changes block
   `:q` and `:e`; failed reads/writes stay in the editor with a status message.
 
@@ -25,8 +33,11 @@ numbers, strings and comments. Hangul/CJK occupy two cells, tabs use four-cell
 stops. Stored cursor offsets are UTF-8 byte boundaries. File control characters
 are displayed as placeholders rather than being sent as ANSI commands.
 
-Storage is deliberately bounded: files must be smaller than 128 KiB, there are
-32 undoable changes, counts are capped at 10000, and the dot recorder holds
+The text is a gap buffer that grows with the file, so there is no size limit
+but memory (KernelA.coolh, 231 KB, opens and saves). Undo records each edit
+(position, removed text, inserted text) instead of copying the text, grouped
+into the same transactions as before. Storage is still bounded in these ways:
+there are 32 undoable changes, counts are capped at 10000, and the dot recorder holds
 4096 key events. Longer edits still work and remain undoable but do not replace
 the previous dot command. This is a single-buffer editor, not full Vim: there
 are no regex searches, named registers, plugins or split windows. Insert counts
@@ -40,13 +51,18 @@ corruption cannot be made safe by an editor cleanup callback.
 
 `make vim-test` boots the real VM, injects keyboard input scripts and UART UTF-8,
 and compares each FAT32 result and byte cursor with independent host expectations.
-It also checks scroll state, capacity/large-file handling, forced quit, and a
+It also checks scroll state, files over 128 KiB, forced quit, and a
 real null-pointer fault while the editor is open followed by successful reentry.
 Generated disks, scripts and diagnostic logs stay in `build/vim-test`.
 
 Syntax highlighting follows the file extension: Cool (`.cool`, `.coolh`, with identifiers colored from the
-shell compiler's symbol table: functions, types, globals, `#define`s), Warm (`.warm`, `.warmh`) and plain
-text. `:set ft=cool|warm|text` overrides it and `:hi GROUP COLOR` changes a group's Ansi color
+shell compiler's symbol table: functions, types, globals, `#define`s), Warm (`.warm`, `.warmh`), ARM64 assembly (`.S`, `.s`, `.asm`) and plain
+text. `:set ft=cool|warm|asm|text` overrides it and `:hi GROUP COLOR` changes a group's Ansi color
 (groups: normal comment string number keyword type storage preproc label constant function global
 linenr nontext). `Vim("name", line)` opens at a line. Rules: `os/Kernel/Syntax.cool`; tokenizer shared with
 the formatter: `coolc/Fmt/HCTok.cool`; `make syntax-test`.
+
+ARM64 assembly colors instruction/macro mnemonics, x0–x30/w0–w30, sp/wsp,
+xzr/wzr/fp/lr, dot directives, labels, numbers and quoted strings. `//`,
+`/* ... */`, `;` and `#` comments are supported; numeric `#` immediates
+and C preprocessor lines are distinguished from comments.
