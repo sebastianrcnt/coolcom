@@ -1,0 +1,42 @@
+#include "../../../os/Kernel/KernelA.coolh"
+// Every construct here is a compile error (tools/native/checks.sh compares the messages with Errors.expected).
+U0 StringCompare(U8 *s)
+{
+    if (s == "abc") Print("a\n");
+    if (s != "abc") Print("b\n");
+    if ("abc" == s) Print("c\n");
+}
+U0 ZeroDivide(I64 n)
+{
+    Print("%d\n", n / 0);
+    Print("%d\n", n % 0);
+    n /= 0;
+    n %= 0;
+}
+U0 BigShift(I64 n)
+{
+    Print("%d\n", n << 64);
+    Print("%d\n", n >> 100);
+    n <<= 64;
+    n >>= 65;
+}
+U0 PointerConstant(U8 *p)
+{
+    p = 5;
+    p = -1;
+    if (p == 5) Print("d\n");
+    if (p != 7) Print("e\n");
+    if (3 == p) Print("f\n");
+}
+U0 UnusedLocal()
+{
+    I64 forgotten, used = 1;
+    Print("%d\n", used);
+}
+U0 DuplicateCase(I64 n)
+{
+    switch (n) {
+        case 1: Print("g\n"); break;
+        case 1: Print("h\n"); break;
+    }
+}

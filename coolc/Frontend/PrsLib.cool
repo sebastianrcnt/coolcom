@@ -136,7 +136,7 @@ U0 COCAppend(CCmpCtrl *cc, CCodeCtrl *tmpcbh)
 CCodeMisc *COCMiscNew(CCmpCtrl *cc, I64 ty)
 {
     CCodeMisc *res = CAlloc(sizeof(CCodeMisc));
-    res->addr = INVALID_PTR;
+    res->addr = INVALID_PTR(U8 *);
     res->type = ty;
     QueIns(res, cc->coc.coc_last_misc);
     return res;

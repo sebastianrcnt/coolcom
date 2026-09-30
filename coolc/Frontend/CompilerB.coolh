@@ -30,7 +30,9 @@ extern U0 LexAttachDoc(CCmpCtrl *cc, CLexFile *tmpf = NULL,
                        CDoc *doc = NULL, U8 *abs_filename = NULL, CDocEntry *doc_e = NULL, I64 col = 0);
 extern CD2I32 *LexD2I32(CCmpCtrl *cc, CD2I32 *p);
 extern CD3I32 *LexD3I32(CCmpCtrl *cc, CD3I32 *p);
+extern U0 LexError(CCmpCtrl *cc, U8 *str);
 extern U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL);
+extern U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str);
 extern I64 LexExpression(CCmpCtrl *cc);
 extern U8 *LexExpression2Bin(CCmpCtrl *cc, I64 *_type = NULL);
 extern F64 LexExpressionF64(CCmpCtrl *cc);

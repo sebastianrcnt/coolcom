@@ -53,3 +53,8 @@ I64 CoolCMain(U8 *entry, U8 *output)
 {
     return Cmp(entry, NULL, output);
 }
+
+I64 CoolCVet(U8 *entry)
+{
+    return Vet(entry);
+}

@@ -169,6 +169,7 @@ memory, and `HeapStats;` shows heap use and checks the heap for consistency.
 | `#include "Hello"` | the same, as a HolyC line (`.cool` is added; the legacy `Hello.HC` if only that exists) |
 | `Cmp("Lib");` | compile `Lib.cool` ahead of time to `Lib.BIN`; returns the error count |
 | `Load("Lib");` | load `Lib.BIN` and run its top-level code; declare its functions with `extern` to call them |
+| `Vet("Lib");` | check `Lib.cool` for style problems, without writing a BIN (see below); returns the number of findings |
 
 ```
 C:/> Cmp("Lib");                      // Lib.cool starts with #include "Kernel.coolh"
@@ -184,6 +185,29 @@ A program compiled with `Cmp` declares the kernel by including `C:/Kernel.coolh`
 OS can also rebuild itself: `Cmp("C:/Compiler/Native.cool")` reproduces the compiler seed byte for byte, and
 `MakeKernel;` followed by `Reboot("C:/Kernel.Image");` builds and boots a new kernel
 ([kernel-rebuild.md](kernel-rebuild.md)).
+
+### What the compiler rejects, and what Vet reports
+
+The compiler stops a program (an error, no BIN, and `Cmp` returns the error count) for constructs that are
+almost certainly bugs; it reports all of them in a file, not only the first:
+
+- a string compared with `==` or `!=` against a string literal (`s == "abc"` compares addresses; use `StrCmp`);
+- an integer constant divided by or taken modulo zero (`n / 0`, `n %= 0`; a float divided by 0 is fine) and a
+  constant shift by 64 or more;
+- a duplicate `case` value in a `switch`;
+- a nonzero integer constant assigned to, compared with, or passed as the argument for a pointer (`p = 5`,
+  `p == -1`, `Man('Tmux')`; `0`, `NULL` and casts such as `p = 5(U8 *)` are fine);
+- an unused local variable (an unused function argument is only a warning, and `no_warn x;` silences a local).
+
+`Vet("file");` in the OS (`build/coolc --vet file.cool` on the host, `make vet` for the repository's own
+programs) compiles the file without output and prints style findings, each named by its check, with the
+position; nothing is reported during a normal compile:
+
+| Check | Finds |
+|---|---|
+| `[assign-cond]` | an assignment used as a condition, `if (a = b)`; `if ((a = b))` says it is meant |
+| `[empty-stmt]` | an empty statement right after `if (...)`, `for (...)` or `while (...)`, as in `if (x);` |
+| `[unreachable]` | a statement right after `return`, `break` or `goto` in the same block (a label or a `case` is fine, and so is the `break;` habit after a `return`) |
 
 ## Networking
 

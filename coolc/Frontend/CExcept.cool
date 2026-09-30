@@ -149,6 +149,39 @@ U0 LexExcept(CCmpCtrl *cc, U8 *str = NULL)
     throw('Compiler');
 }
 
+U0 LexError(CCmpCtrl *cc, U8 *str)
+{//Report a definite bug at the current token. Ahead-of-time compiles go on, so the file gets
+    //all its errors reported (Cmp then writes no BIN); JIT code must not run: as LexExcept.
+    if (!(cc->flags & CCF_AOT_COMPILE))
+        LexExcept(cc, str);
+    if (IsRaw)
+        LexPutMsg(str, TRUE);
+    else
+        PrintErr(str);
+    LexPutPos(cc);
+    cc->error_cnt++;
+}
+
+I64 vet_cnt[3];
+
+U8 *VetName(I64 check)
+{
+    switch (check) {
+        case VET_ASSIGN_COND: return "assign-cond";
+        case VET_EMPTY_STMT: return "empty-stmt";
+    }
+    return "unreachable";
+}
+
+U0 LexVet(CCmpCtrl *cc, I64 check, U8 *str)
+{//A style finding of Vet (off unless OPTf_VET is set): print it, count it, go on.
+    if (!Bt(&cc->opts, OPTf_VET))
+        return;
+    vet_cnt[check]++;
+    Print("vet: [%s] %s\n", VetName(check), str);
+    LexPutPos(cc);
+}
+
 U0 UndefinedExtern()
 {
     PrintErr("Undefined Extern at %P\n", Caller);

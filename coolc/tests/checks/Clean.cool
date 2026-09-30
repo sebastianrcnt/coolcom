@@ -1,0 +1,32 @@
+#include "../../../os/Kernel/KernelA.coolh"
+// Look like the errors of Errors.cool but are fine: tools/native/checks.sh expects Errs:0.
+U0 Fine(U8 *s, I64 n, F64 f)
+{
+    U8 *p = 0, *q = s;
+    no_warn q;
+    if (StrCmp(s, "abc") == 0) Print("a\n");
+    if (s == NULL || s != 0) Print("b\n");
+    if (*s == 'a') Print("c\n");
+    Print("%d\n", f / 0);      // a float divided by zero is +inf, not a trap
+    Print("%d\n", n << 63);
+    Print("%d\n", n >> 1);
+    p = 5(U8 *);
+    p = INVALID_PTR(U8 *);
+    if (p == 5(U8 *)) Print("d\n");
+    if (p == -1(U8 *)) Print("e\n");
+    if (p == s) Print("f\n");
+    n = 5;
+    if (n == 5) Print("g\n");
+    switch (n) {
+        case 1: Print("h\n"); break;
+        case 2: Print("i\n"); break;
+    }
+}
+U0 Callback(I64 unused_argument)
+{//an unused argument is not an error
+    Print("j\n");
+}
+U0 Variadic(U8 *fmt, ...)
+{//argc and argv are declared by the "..."
+    Print("%s\n", fmt);
+}

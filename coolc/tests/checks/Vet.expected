@@ -1,0 +1,19 @@
+vet: [assign-cond] assignment used as a condition (== intended? else add parentheses)
+  Vet.cool,6
+vet: [assign-cond] assignment used as a condition (== intended? else add parentheses)
+  Vet.cool,8
+vet: [empty-stmt] empty statement after if/for/while (use {} if it is meant)
+  Vet.cool,14
+vet: [empty-stmt] empty statement after if/for/while (use {} if it is meant)
+  Vet.cool,15
+vet: [empty-stmt] empty statement after if/for/while (use {} if it is meant)
+  Vet.cool,16
+vet: [unreachable] unreachable code after return, break or goto
+  Vet.cool,28
+vet: [unreachable] unreachable code after return, break or goto
+  Vet.cool,39
+vet: [unreachable] unreachable code after return, break or goto
+  Vet.cool,42
+vet: [unreachable] unreachable code after return, break or goto
+  Vet.cool,46
+Vet: assign-cond=2 empty-stmt=3 unreachable=4 Errs:0

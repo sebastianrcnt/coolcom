@@ -35,7 +35,12 @@ Print("ex %d\n", ex_v * 3);
 ex_v * 7;
 EOF
 printf 'I64 bad = ;\n' >"$dir/Bad.cool"
+# Cmp refuses (no BIN, an error count) a definite bug the compiler found without stopping; Vet reports style findings.
+printf '#include "Kernel.coolh"\nU0 Unused()\n{\n    I64 forgotten;\n}\n' >"$dir/Forgot.cool"
+printf '#include "Kernel.coolh"\nU0 Vetted(I64 n)\n{\n    if (n = 5)\n        Print("five\\n");\n}\n' >"$dir/VetMe.cool"
 printf "StrLen('Tmux');\n" >"$dir/BadPtr.cool"
+# A JIT statement with such an error does not run (the AOT compile goes on, to report every error).
+printf 'U8 *jit_p;\njit_p = 5;\nPrint("jit-ran\\n");\n' >"$dir/BadJit.cool"
 # Legacy .HC files: an extensionless name finds Old.HC when there is no Old.cool, and
 # Both.cool before Both.HC. The disk has no Init.cool, so the shell falls back to C:/Init.HC.
 printf 'Print("old-hc\\n");\n' >"$dir/Old.HC"
@@ -56,10 +61,13 @@ ExeFile("Both");
 ExeFile("Inc");
 Print("bad %d\n", ExeFile("Bad"));
 ExeFile("BadPtr");
+ExeFile("BadJit");
+Print("forgot %d\n", Cmp("Forgot"));
+Print("vet %d\n", Vet("VetMe"));
 Print("self %d\n", Cmp("C:/Compiler/Native.cool", "C:/Self.BIN"));
 Shutdown;
 EOF
-mcopy -i "$disk" "$dir/Hello.cool" "$dir/Ex.cool" "$dir/Init.HC" "$dir/Old.HC" "$dir/Both.cool" "$dir/Both.HC" "$dir/Inc.cool" "$dir/Bad.cool" "$dir/BadPtr.cool" ::
+mcopy -i "$disk" "$dir/Hello.cool" "$dir/Ex.cool" "$dir/Init.HC" "$dir/Old.HC" "$dir/Both.cool" "$dir/Both.HC" "$dir/Inc.cool" "$dir/Bad.cool" "$dir/BadPtr.cool" "$dir/BadJit.cool" "$dir/Forgot.cool" "$dir/VetMe.cool" ::
 log=$dir/log
 status=0
 gtimeout -k 2 130 build/coolvm --headless --cpus 2 --mem 1024 --timeout 120 \
@@ -71,9 +79,10 @@ fail() {
     exit 1
 }
 [ "$status" = 0 ] || fail "coolvm exited with status $status"
-for line in 'Running C:/Init.HC' 'cmp 0' 'Hello loaded 8' 'twice 40 calls 2' 'ex 15' 'exe 35' 'old-hc' 'both-cool' 'ERROR: Expected an expression' '  C:/Bad.cool,1' 'bad 0' 'ERROR: Integer constant for a pointer parameter' 'self 0'; do
-    grep -qx "$line" "$dir/out" || fail "missing line: $line"
+for line in 'Running C:/Init.HC' 'cmp 0' 'Hello loaded 8' 'twice 40 calls 2' 'ex 15' 'exe 35' 'old-hc' 'both-cool' 'ERROR: Expected an expression' '  C:/Bad.cool,1' 'bad 0' 'ERROR: Integer constant for a pointer parameter' 'ERROR: Integer constant assigned to a pointer (cast it)' "ERROR: Unused local variable 'forgotten' in fun 'Unused'" 'forgot 1' 'vet: [assign-cond] assignment used as a condition (== intended? else add parentheses)' 'Vet: assign-cond=1 empty-stmt=0 unreachable=0 Errs:0' 'vet 1' 'self 0'; do
+    grep -qxF "$line" "$dir/out" || fail "missing line: $line"
 done
+! grep -qx 'jit-ran' "$dir/out" || fail "a JIT statement with a compile error ran"
 ! grep -qx 'both-hc' "$dir/out" || fail "an extensionless name picked Both.HC over Both.cool"
 mcopy -i "$disk" ::Self.BIN "$dir/Self.BIN"
 cmp "$dir/Self.BIN" coolc/seed/Compiler.BIN || fail "C:/Self.BIN differs from coolc/seed/Compiler.BIN"

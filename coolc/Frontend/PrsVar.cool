@@ -4,12 +4,9 @@ U0 PrsVarInit(CCmpCtrl *cc, U8 **_dst, CHashClass *tmpc, CArrayDim *tmpad,
 {
     U8 *dst = *_dst;
     I64 (*machine_code)();
-    I64 i, j, r, old_flags, type, size;
+    I64 i, r, old_flags, type, size;
     CMemberLst *tmpm;
-    CRPN *rpn;
-    CIntermediateCode *tmpi;
     CAOTCtrl *aotc = cc->aotc;
-    CAOTAbsAddr *tmpa;
     CCodeMisc *cm;
     CAOTImportExport *tmpie;
     Bool is_str;

@@ -1,0 +1,64 @@
+#include "../../../os/Kernel/KernelA.coolh"
+// coolc --vet reports these (tools/native/checks.sh compares them with Vet.expected); compiling reports nothing.
+U0 AssignCond(I64 n)
+{
+    I64 a;
+    if (a = n) Print("a\n");
+    if ((a = n)) Print("b\n");
+    while (a = n--) Print("c\n");
+    while ((a = n--)) Print("d\n");
+    if (a == n) Print("e\n");
+}
+U0 EmptyStmt(I64 n)
+{
+    if (n);
+    while (n--);
+    for (n = 0; n < 3; n++);
+    if (n) {}
+}
+U0 Unreachable(I64 n)
+{
+    if (n)
+        return;
+    else
+        Print("a\n");
+    switch (n) {
+        case 1:
+            return;
+            Print("b\n");
+        case 2:
+            Print("c\n");
+            break;
+        default:
+            Print("d\n");
+            break;
+    }
+    while (n) {
+        n--;
+        break;
+        n++;
+    }
+    goto done;
+    n++;
+done:
+    n--;
+    return;
+    n++;
+}
+U0 NotUnreachable(I64 n)
+{
+    switch (n) {
+        case 1:
+            return;
+            break;
+        case 2:
+            goto out;
+out:
+            n++;
+    }
+    if (n) {
+        return;
+    }
+    Print("x\n");
+    return;
+}

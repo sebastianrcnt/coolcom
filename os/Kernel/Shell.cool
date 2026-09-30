@@ -419,7 +419,7 @@ I64 ShellExeCmdLine(U8 *cc)
     stmt2bin = ShellCur->lex_stmt2bin;
     while (*tok && (*tok != '}' || !(*flags & CCF_EXE_BLK))) {
         code = (*stmt2bin)(cc, &type, CMPF_PRS_SEMICOLON);
-        if (code && code != INVALID_PTR) {
+        if (code && code != INVALID_PTR(U8 *)) {
             fp = code;
             ShellCur->fault_daif = ArchDaif & 0x3C0;
             if (!ArchSetJmp(ShellCur->fault_ctx)) {

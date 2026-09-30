@@ -1040,7 +1040,7 @@ I64 GenNImmSImmR(I64 imm) {
     // TODO write this stuff in assemblt
     if (imm == 0 || ~imm == 0)
         return ARM_ERR_INV_OFF;
-    I64 consec = 0, idx, zero_gap = 0, first_zeros, width, x, n;
+    I64 consec = 0, idx, zero_gap = 0, width, x, n;
     U64 pattern;
     // Find first 1
     zero_gap = __builtin_ctzl(imm);
@@ -1089,7 +1089,6 @@ I64 GenNImmSImmR(I64 imm) {
 }
 
 I64 LogicalImm(I64 opc, I64 d, I64 s, I64 i) {
-    I64 poodle = GenNImmSImmR(i);
     if (i == ARM_ERR_INV_OFF)
         return i;
     return BMASKn(opc, 8, 29) | BMASKn(0x24, 8, 23) | BMASKn(s, 14, 10) |

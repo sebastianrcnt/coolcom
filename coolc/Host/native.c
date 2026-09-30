@@ -663,21 +663,20 @@ int main(int argc, char **argv) {
         printf("%" PRId64 "\n", probe());
         return 0;
     }
+    int vet = argc == 3 && !strcmp(argv[1], "--vet");
     if (argc != 3)
-        fail("usage: coolc <entry.cool> <out.BIN>");
+        fail("usage: coolc <entry.cool> <out.BIN> | coolc --vet <entry.cool>");
     const char *compiler_image = getenv("COOLC_COMPILER_BIN");
     Module module = load_bin(compiler_image ? compiler_image : "build/coolc-compiler.BIN");
     if (getenv("COOLC_DEBUG"))
         fprintf(stderr, "coolc-host: code base %p\n", (void *)module.code);
     active_module = &module;
     run_initializers(&module);
-    uintptr_t address = find_symbol(&module, "CoolCMain");
+    uintptr_t address = find_symbol(&module, vet ? "CoolCVet" : "CoolCMain");
     if (!address)
-        fail("compiler BIN does not export CoolCMain");
-    int64_t (*compile)(const char *, const char *) =
-        (int64_t (*)(const char *, const char *))address;
-    char *entry = absolute_argument(argv[1]);
-    char *output = absolute_argument(argv[2]);
+        fail(vet ? "compiler BIN does not export CoolCVet" : "compiler BIN does not export CoolCMain");
+    char *entry = absolute_argument(argv[vet ? 2 : 1]);
+    char *output = vet ? NULL : absolute_argument(argv[2]);
     char *directory = strdup(entry);
     if (!directory)
         fail("out of memory preparing source directory");
@@ -689,5 +688,12 @@ int main(int argc, char **argv) {
         perror(directory);
         exit(1);
     }
+    if (vet) {
+        int64_t (*check)(const char *) = (int64_t (*)(const char *))address;
+        check(entry);
+        return 0; // findings are reported, not failed on
+    }
+    int64_t (*compile)(const char *, const char *) =
+        (int64_t (*)(const char *, const char *))address;
     return (int)compile(entry, output);
 }
