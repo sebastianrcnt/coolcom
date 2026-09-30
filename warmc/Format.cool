@@ -183,8 +183,9 @@ Bool WFmSpace(CWFmt *f, I64 i)
     if (WFmGlue(p, t)) return TRUE;
     if (WFmIs(p, "{")) return !WFmIs(t, "}");
     if (WFmIs(t, "}")) return TRUE;
-    if (WFmIs(p, "(") || WFmIs(p, "[") || WFmIs(p, ".") || WFmIs(p, "->") || WFmIs(p, "!")) return FALSE;
-    if (WFmIs(p, "&") || WFmIs(p, "&!") || WFmIs(p, "&~") || WFmIs(p, "&(")) return FALSE;
+    if (WFmIs(p, "(") || WFmIs(p, "[") || WFmIs(p, ".") || WFmIs(p, "->") || WFmIs(p, "!") || WFmIs(p, "~")) return FALSE;
+    if (WFmIs(p, "&!") || WFmIs(p, "&~") || WFmIs(p, "&(")) return FALSE;
+    if (WFmIs(p, "&") && !WFmOperandEnd(pp)) return FALSE;  // a borrow, not a bitwise and
     if (WFmIs(p, "-") && !WFmOperandEnd(pp)) return FALSE;
     if (WFmIs(t, ";") || WFmIs(t, ",") || WFmIs(t, ")") || WFmIs(t, "]") || WFmIs(t, ".") || WFmIs(t, "->") || WFmIs(t, ":")) return FALSE;
     if (WFmIs(t, "(")) {
@@ -216,6 +217,10 @@ U0 WFmApply(CWFmt *f, I64 i)
     f->at_start = FALSE;
     if (t->kind != 1) return;
     s = t->text;
+    if (WEq(s, "private")) {  // a modifier of the declaration that follows
+        f->at_start = was_start;
+        return;
+    }
     if (WEq(s, "(") || WEq(s, "[") || WEq(s, "{") || WEq(s, "&(")) {
         if (f->nb < WF_MAX - 1) f->bk[f->nb++] = f->line_ind;
         if (WEq(s, "(")) f->in_import = FALSE;
@@ -375,6 +380,26 @@ U0 WFmGap(CWFmt *f, I64 i, I64 ind_pre, I64 ind_post)
         if (nl >= 2) WFmBlank(f);
     }
 }
+// Like the parser, read `&(`, `&~` and a signed number right after an operand as two tokens (`a &(b)`, `a &~b`,
+// `a -1` are `a & (b)`, `a & ~b`, `a - 1`), so the formatter can space them as the operators they are.
+U0 WFmSplit(CWUnit *u, CWToken *head)
+{
+    CWToken *t, *prev = NULL, *rest;
+    for (t = head; t; t = t->next) {
+        if (WFmOperandEnd(prev) && ((t->kind == 1 && (WEq(t->text, "&(") || WEq(t->text, "&~"))) || ((t->kind == 3 || t->kind == 4) && (t->text[0] == '-' || t->text[0] == '+')))) {
+            rest = WAlloc(u, sizeof(CWToken));
+            MemCpy(rest, t, sizeof(CWToken));
+            rest->start = t->start + 1;
+            rest->text = WText(u, t->text + 1, StrLen(t->text) - 1);
+            if (t->kind == 1) rest->kind = 1;
+            t->end = t->start + 1;
+            t->text = WText(u, t->text, 1);
+            t->kind = 1;
+            t->next = rest;
+        }
+        prev = t;
+    }
+}
 // The comments of the source, one per line, to prove that formatting kept them.
 U8 *WFmComments(CWUnit *u, CWToken *head, U8 *s)
 {
@@ -432,6 +457,7 @@ Bool WFmVerify(CWFmt *f, CWToken *head, U8 *result)
     src->size = StrLen(result);
     src->text = result;
     bh = WLex(v, src);
+    if (!v->error_kind) WFmSplit(v, bh);
     b = bh;
     if (v->error_kind) ok = FALSE;
     while (ok && a && b) {
@@ -471,6 +497,7 @@ U8 *WFmt(U8 *src, I64 *err)
         WDestroy(u);
         return WFmCopy(src);
     }
+    WFmSplit(u, head);
     for (t = head; t; t = t->next) count++;
     f->u = u;
     f->text = s->text;
