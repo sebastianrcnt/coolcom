@@ -1,6 +1,7 @@
 # Networking
 
-coolcom has a small TCP/IP stack written in Cool (HolyC) for this kernel, a virtio-net driver, and,
+coolcom has a small TCP/IP stack written in Cool (HolyC) for this kernel, with the parser for received
+packets written in Warm (below), a virtio-net driver, and,
 under coolvm, a user-mode NAT on the host (`coolvm --net`, see
 [tools/coolvm/README.md](../tools/coolvm/README.md)). The guest network is QEMU's user network:
 the guest is `10.0.2.15/24`, the gateway `10.0.2.2` and the DNS server `10.0.2.3`, all handed out
@@ -28,6 +29,8 @@ lwIP was the other option: `tools/c2hc` could transpile it. It was not used beca
 | File | Contents |
 |---|---|
 | `os/Kernel/NetDrv.cool` | virtio-net over virtio-mmio v2: 64 receive and 64 transmit buffers of 2 KiB, polled |
+| `os/Kernel/NetParse.warm` | the parser of received packets, in Warm: Ethernet, ARP, IPv4, ICMP, UDP and TCP headers, lengths, checksums and the TCP MSS option |
+| `os/Kernel/NetParseExport.warm` | its boundary: the two functions Net.cool calls (`NetParseFrame`, `NetParsePacket`) |
 | `os/Kernel/Net.cool` | Ethernet, ARP (16-entry cache, packets wait for the reply), IPv4, ICMP echo, UDP sockets, the loopback queue, `NetPoll`/`NetWait` |
 | `os/Kernel/NetTcp.cool` | TCP and the TCP socket calls |
 | `os/Kernel/NetApp.cool` | DHCP client, DNS resolver with a cache, the network task, `NetInit` |
@@ -56,10 +59,41 @@ forever. On a real M1 there is no virtio device, so `NetInit` finds nothing and 
   read and written byte by byte (`NetGet16/32`, `NetPut16/32`), never through packed classes.
 - **Loopback.** Packets to our own address or to 127/8 are queued and handed to `IpRx` on the next
   poll. They never go back into the protocol code recursively.
-- **Checksums** are checked for IP, ICMP, UDP (when present) and TCP. Bad packets are counted and
-  dropped.
+- **Parsing is in Warm** (next section). The IP, ICMP, UDP (when present) and TCP checksums are
+  checked there. Bad packets are counted and dropped.
 - Not implemented: IP options, fragmentation and reassembly, multicast, IPv6, ICMP errors, TCP
   window scaling, SACK and timestamps, and urgent data.
+
+### The packet parser in Warm
+
+Everything a received frame says about itself is untrusted, so the code that reads it is Warm, where
+every index into the frame is bounds-checked and every length computation is overflow-checked. The
+rest of the stack (ARP cache, sockets, TCP state machine) stays in Cool and only sees the result.
+
+- **The boundary** is two functions and one record. `NetParseFrame(U8 *frame, I64 len, CNetPkt *out)`
+  parses an Ethernet frame, `NetParsePacket(U8 *pkt, I64 len, CNetPkt *out)` an IPv4 packet (from the
+  loopback queue). Both return the kind and fill `CNetPkt` (`Net.cool`): 22 `I64`s, the kind (ARP,
+  ICMP, UDP, TCP, another IP protocol, another ethertype, or why it was dropped: runt, bad ARP, bad
+  IPv4 lengths or version, fragment, IP checksum, bad ICMP/UDP/TCP lengths, their checksum) and the
+  header fields: addresses, ports, sequence numbers, flags, window, the MSS option of a SYN, and the
+  offsets and lengths of the transport header and the payload. Every offset and length lies inside the
+  buffer that was parsed. `NetParseExport.warm` is the only unsafe Warm (it turns the pointer and
+  length into a span and writes the 22 fields); `NetParse.warm` is safe Warm and cannot touch
+  anything but that span.
+- **The Cool side** is `NetParsePkt`, which calls one of them inside `try`. A failed check in Warm
+  (which would be a bug in `NetParse.warm`, not a property of the packet) throws; the packet is then
+  dropped and counted as a parser abort, and `NetRep` shows the count and the check's message. `EthRx`,
+  `IpRx`, `ArpRx`, `IcmpRx`, `UdpRx` and `TcpRx` take the `CNetPkt` and the buffer; they keep the
+  policy (is it for us, counters, sockets) and read payloads only at the offsets it gives.
+- **The build.** `make` compiles the two Warm files with `build/warmc --kernel-module=NetParse` into
+  `os/Kernel/NetParse.cool`, which `Kernel.cool` includes before `Net.cool`. The file is generated (in
+  `.gitignore`), but `tools/disk-files.sh` copies it to `C:/Kernel` with the other sources, so
+  `MakeKernel` in the OS compiles the same text and still reproduces the Image byte for byte. Every
+  generated name, and the small module runtime (`warmc/ModuleRuntime.cool`), starts with `NetParse_`.
+- **Speed**, per packet in the kernel under coolvm on an M1 (the old Cool checks and field reads vs
+  `NetParsePkt`): a 1514-byte TCP segment 0.3 us vs 2.2 us, a TCP ACK or SYN 30 ns vs 280 ns, a
+  134-byte UDP datagram 40 ns vs 350 ns. About 70 ns of the Warm time is the `try`. Most of the rest
+  is the generated code's calls and copies; the checksum loop is the only part that scales with size.
 
 ### TCP
 
@@ -194,6 +228,14 @@ kills only that shell, and that `Exit;` closes the connection.
 `tools/kernel-test.sh` boots the kernel test with `--net`, and `DevTestNet` then checks the
 following:
 
+- The packet parser (`DevTestNetParse`): about 20 malformed frames (empty, runts, short or wrong
+  ARP, IPv4 with the wrong version, header lengths of 16 and 60 bytes, total lengths past the frame,
+  bad checksums, fragments, ICMP of 4 bytes, UDP lengths of 4 and 9000, a TCP segment of 12 bytes,
+  TCP data offsets of 12 and 60 bytes, TCP options of length 0, 255 and cut off) and a few valid ones
+  must get the expected kind and fields; the dropped ones
+  also go through `EthRx` and must be counted. Then 20,000 random corruptions of a TCP SYN with
+  options and data (the checksums fixed up half of the time, so the later checks run too) must parse
+  without an abort and with every offset inside the frame. The script requires `net: parser ok`.
 - DHCP configured 10.0.2.15, the netmask, the gateway and the DNS server.
 - An ICMP echo to the gateway is answered.
 - UDP works over loopback.

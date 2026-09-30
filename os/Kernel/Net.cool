@@ -5,7 +5,8 @@
 //   network task and every blocking call run NetPoll, which drains the
 //   virtio-net receive ring, the loopback queue and the TCP timers;
 // - packets are built in stack buffers and copied into the driver's ring;
-//   received frames are parsed in place, sockets copy what they keep;
+//   received frames are checked in place by the Warm parser (NetParse.warm,
+//   through NetParsePkt), which says what they are; sockets copy what they keep;
 // - addresses are I64 host-order IPv4 numbers (10.0.2.15 = 0x0A00020F);
 // - no IP fragmentation or reassembly, no IP options, no multicast.
 #define ETH_HLEN     14
@@ -38,7 +39,37 @@ class CNetPend
 class CNetStats
 {
     I64 rx_frames, tx_frames, rx_bytes, tx_bytes, tx_drop, arp_rx, ip_rx, ip_drop, csum_bad,
-            icmp_rx, udp_rx, udp_drop, tcp_rx, tcp_tx, tcp_retx, tcp_rst, loop_pkts;
+            icmp_rx, udp_rx, udp_drop, tcp_rx, tcp_tx, tcp_retx, tcp_rst, loop_pkts, parse_abort;
+};
+
+// What the Warm parser (NetParse.warm) found in a received frame or IPv4 packet: the kind
+// (NetParse.warm's constants), and the header fields. Every offset and length is inside the
+// buffer that was parsed. NetParseExport.warm writes the fields in this order.
+#define NP_ARP      1
+#define NP_ICMP     2
+#define NP_UDP      3
+#define NP_TCP      4
+#define NP_IP       5   // another IP protocol
+#define NP_OTHER    6   // another ethertype
+#define NP_RUNT     16  // dropped: shorter than an Ethernet header
+#define NP_BAD_ARP  17  // not an Ethernet/IPv4 ARP packet
+#define NP_BAD_IP   18  // IPv4 version or lengths
+#define NP_FRAG     19  // an IPv4 fragment
+#define NP_IP_SUM   20  // the IPv4 header checksum
+#define NP_BAD_L4   21  // ICMP, UDP or TCP lengths (the IPv4 fields are set)
+#define NP_L4_SUM   22  // the ICMP, UDP or TCP checksum (the IPv4 fields are set)
+#define NP_ABORT    23  // the parser aborted (a failed check in Warm: a bug in NetParse.warm)
+
+class CNetPkt
+{
+    I64 kind,
+            op, sha,             // ARP: operation, offset of the sender's MAC
+            src, dst, ttl, proto,// IPv4 (ARP: sender and target address)
+            l4, l4len,           // the ICMP message, UDP datagram or TCP segment
+            sport, dport,        // UDP, TCP
+            data, dlen,          // the UDP or TCP payload
+            seq, ack, flags, win, mss,  // TCP; mss: a SYN's MSS option, 0 if none
+            itype, icode, iid, iseq;    // ICMP: type, code, echo id and sequence number
 };
 
 class CUdpSock
@@ -62,7 +93,7 @@ I64 net_ping_id, net_ping_got_seq = -1, net_ping_got_jiffy, net_ping_got_ttl, ne
 CTask *net_task;
 I64 net_ip_id;
 
-extern U0 TcpRx(I64 src, I64 dst, U8 *seg, I64 len);
+extern U0 TcpRx(CNetPkt *k, U8 *b);
 extern U0 TcpTimers();
 
 I64 net_rand_state;
@@ -248,20 +279,14 @@ U0 ArpLearn(I64 ip, U8 *mac)
         }
 }
 
-U0 ArpRx(U8 *a, I64 len)
-{
-    I64 op, spa, tpa;
-    if (len < 28 || NetGet16(a) != 1 || NetGet16(a + 2) != ETH_T_IP || a[4] != 6 || a[5] != 4)
-        return;
+U0 ArpRx(CNetPkt *k, U8 *b)
+{//A parsed ARP packet in the frame b.
     net_stats.arp_rx++;
-    op = NetGet16(a + 6);
-    spa = NetGet32(a + 14);
-    tpa = NetGet32(a + 24);
-    if (!net_ip || tpa != net_ip)
+    if (!net_ip || k->dst != net_ip)
         return;
-    ArpLearn(spa, a + 8);
-    if (op == 1)
-        ArpSend(2, a + 8, spa);
+    ArpLearn(k->src, b + k->sha);
+    if (k->op == 1)
+        ArpSend(2, b + k->sha, k->src);
 }
 
 // ---- IPv4 ----------------------------------------------------------------
@@ -334,82 +359,88 @@ I64 IpSend(I64 proto, I64 dst, U8 *payload, I64 len, I64 src = -1)
     return 0;
 }
 
-extern U0 UdpRx(I64 src, I64 dst, U8 *u, I64 len);
-extern U0 IcmpRx(I64 src, I64 dst, U8 *p, I64 len, I64 ttl);
+extern U0 UdpRx(CNetPkt *k, U8 *b);
+extern U0 IcmpRx(CNetPkt *k, U8 *b);
 
-U0 IpRx(U8 *p, I64 len)
-{
-    I64 hl, tl, src, dst;
-    if (len < 20 || (p[0] >> 4) != 4) {
-        net_stats.ip_drop++;
-        return;
+I64 NetParsePkt(CNetPkt *k, U8 *b, I64 len, Bool eth)
+{//Check a received Ethernet frame (eth) or IPv4 packet with the Warm parser; k->kind.
+    try {
+        if (eth)
+            NetParseFrame(b, len, k);
+        else
+            NetParsePacket(b, len, k);
+    } catch {  // a failed bounds or overflow check in NetParse.warm: drop the packet
+        Fs->catch_except = TRUE;
+        MemSet(k, 0, sizeof(CNetPkt));
+        k->kind = NP_ABORT;
+        net_stats.parse_abort++;
     }
-    hl = (p[0] & 15) * 4;
-    tl = NetGet16(p + 2);
-    if (hl < 20 || tl < hl || tl > len) {
-        net_stats.ip_drop++;
-        return;
-    }
-    if (NetFold(NetSum(p, hl))) {
+    return k->kind;
+}
+
+U0 IpRx(CNetPkt *k, U8 *b)
+{//A parsed IPv4 packet in the buffer b.
+    if (k->kind == NP_IP_SUM) {
         net_stats.csum_bad++;
         return;
     }
-    if (NetGet16(p + 6) & 0x3FFF) {  // a fragment
+    if (k->kind == NP_BAD_IP || k->kind == NP_FRAG) {
         net_stats.ip_drop++;
         return;
     }
-    src = NetGet32(p + 12);
-    dst = NetGet32(p + 16);
-    if (net_ip && dst != net_ip && dst != NET_BCAST && !NetIsLocal(dst) &&
-            dst != (net_ip | (~net_mask & 0xFFFFFFFF))) {
+    if (k->kind == NP_ABORT)
+        return;
+    if (net_ip && k->dst != net_ip && k->dst != NET_BCAST && !NetIsLocal(k->dst) &&
+            k->dst != (net_ip | (~net_mask & 0xFFFFFFFF))) {
         net_stats.ip_drop++;
         return;
     }
     net_stats.ip_rx++;
-    if (p[9] == IP_P_ICMP)
-        IcmpRx(src, dst, p + hl, tl - hl, p[8]);
-    else if (p[9] == IP_P_UDP)
-        UdpRx(src, dst, p + hl, tl - hl);
-    else if (p[9] == IP_P_TCP)
-        TcpRx(src, dst, p + hl, tl - hl);
+    if (k->kind == NP_ICMP)
+        IcmpRx(k, b);
+    else if (k->kind == NP_UDP)
+        UdpRx(k, b);
+    else if (k->kind == NP_TCP)
+        TcpRx(k, b);
+    else if (k->kind == NP_L4_SUM)
+        net_stats.csum_bad++;
+    else if (k->kind == NP_BAD_L4)
+        net_stats.ip_drop++;
 }
 
 U0 EthRx(U8 *f, I64 len)
 {
-    I64 type;
-    if (len < ETH_HLEN)
+    CNetPkt k;
+    NetParsePkt(&k, f, len, TRUE);
+    if (k.kind == NP_RUNT)
         return;
     net_stats.rx_frames++;
     net_stats.rx_bytes += len;
-    type = NetGet16(f + 12);
-    if (type == ETH_T_ARP)
-        ArpRx(f + ETH_HLEN, len - ETH_HLEN);
-    else if (type == ETH_T_IP)
-        IpRx(f + ETH_HLEN, len - ETH_HLEN);
+    if (k.kind == NP_ARP)
+        ArpRx(&k, f);
+    else if (k.kind != NP_OTHER && k.kind != NP_BAD_ARP)
+        IpRx(&k, f);
 }
 
 // ---- ICMP ----------------------------------------------------------------
 
-U0 IcmpRx(I64 src, I64 dst, U8 *p, I64 len, I64 ttl)
+U0 IcmpRx(CNetPkt *k, U8 *b)
 {
     U8 r[NET_IP_MAX];
-    if (len < 8 || NetFold(NetSum(p, len))) {
-        net_stats.csum_bad++;
-        return;
-    }
+    I64 len = k->l4len, dst = k->dst;
     net_stats.icmp_rx++;
-    if (p[0] == 8 && p[1] == 0) {  // echo request: answer from the address it was sent to
-        MemCpy(r, p, len);
+    if (k->itype == 8 && k->icode == 0) {  // echo request: answer from the address it was sent to
+        MemCpy(r, b + k->l4, len);
         r[0] = 0;
         NetPut16(r + 2, 0);
         NetPut16(r + 2, NetFold(NetSum(r, len)));
         if (dst == NET_BCAST)
             dst = -1;
-        IpSend(IP_P_ICMP, src, r, len, dst);
-    } else if (p[0] == 0 && NetGet16(p + 4) == net_ping_id) {
-        net_ping_got_seq = NetGet16(p + 6);
+        IpSend(IP_P_ICMP, k->src, r, len, dst);
+    } else if (k->itype == 0 && k->iid == net_ping_id) {
+        net_ping_got_seq = k->iseq;
         net_ping_got_jiffy = jiffies;
-        net_ping_got_ttl = ttl;
+        net_ping_got_ttl = k->ttl;
         net_ping_got_len = len;
     }
 }
@@ -441,30 +472,22 @@ CUdpSock *UdpFind(I64 port)
     return s;
 }
 
-U0 UdpRx(I64 src, I64 dst, U8 *u, I64 len)
+U0 UdpRx(CNetPkt *k, U8 *b)
 {
-    I64 ul, i;
+    I64 i;
     CUdpSock *s;
-    if (len < 8 || (ul = NetGet16(u + 4)) < 8 || ul > len) {
-        net_stats.ip_drop++;
-        return;
-    }
-    if (NetGet16(u + 6) && NetFold(NetSum(u, ul, NetPseudo(src, dst, IP_P_UDP, ul)))) {
-        net_stats.csum_bad++;
-        return;
-    }
     net_stats.udp_rx++;
-    s = UdpFind(NetGet16(u + 2));
+    s = UdpFind(k->dport);
     if (!s || s->cnt >= UDP_QLEN) {
         net_stats.udp_drop++;
         return;
     }
     i = (s->head + s->cnt) % UDP_QLEN;
-    s->data[i] = MAlloc(ul - 8 + 1);
-    MemCpy(s->data[i], u + 8, ul - 8);
-    s->len[i] = ul - 8;
-    s->src[i] = src;
-    s->sport[i] = NetGet16(u);
+    s->data[i] = MAlloc(k->dlen + 1);
+    MemCpy(s->data[i], b + k->data, k->dlen);
+    s->len[i] = k->dlen;
+    s->src[i] = k->src;
+    s->sport[i] = k->sport;
     s->cnt++;
 }
 
@@ -586,6 +609,7 @@ U0 NetPoll()
 {//Process received frames, looped-back packets and timers.
     U8 *f;
     I64 len, n, i, daif = NetLock;
+    CNetPkt k;
     if (net_nic) {
         n = 0;
         while (n++ < NET_RXN && (f = NetDrvRx(&len))) {
@@ -600,7 +624,8 @@ U0 NetPoll()
         len = net_loop_len[net_loop_head];
         net_loop_head = (net_loop_head + 1) % NET_LOOPQ;
         net_loop_cnt--;
-        IpRx(f, len);
+        NetParsePkt(&k, f, len, FALSE);
+        IpRx(&k, f);
         Free(f);
     }
     for (i = 0; i < NET_PENDS; i++)

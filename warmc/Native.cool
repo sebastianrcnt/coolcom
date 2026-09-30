@@ -45,6 +45,7 @@ I64 WNativeMain()
         else if (WPrefix(arg, "--output=")) output = arg + 9;
         else if (WPrefix(arg, "--entrypoint=")) entry = arg + 13;
         else if (WEq(arg, "--no-entrypoint")) entry = NULL;
+        else if (WPrefix(arg, "--kernel-module=")) u->prefix = arg + 16;
         else if (WEq(arg, "--error-format=json")) json = TRUE;
         else if (WEq(arg, "--target-type=hc") || WEq(arg, "--error-format=plain")) {}
         else if (WPrefix(arg, "--")) {WFail(u, NULL, "Command Line Arguments Error", "Unsupported compiler option");}
@@ -66,7 +67,8 @@ I64 WNativeMain()
     if (!u->error_kind && dump) for (m = u->modules; m; m = m->next) WDump(m, 0);
     if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u); if (!u->error_kind) WTypeCheck(u); if (!u->error_kind) WLinearity(u);}
     if (!u->error_kind && !parse && !dump && !check) {
-        generated = WEmit(u, entry, WRuntime(u), TRUE);
+        if (u->prefix) generated = WEmit(u, NULL, WModuleRuntime(u), TRUE);
+        else generated = WEmit(u, entry, WRuntime(u), TRUE);
         if (!u->error_kind) {
             if (!output) WFail(u, NULL, "Command Line Arguments Error", "--output is required");
             else if (!FileWrite(output, generated, StrLen(generated))) WFail(u, NULL, "Command Line Arguments Error", "Cannot write output");

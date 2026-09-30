@@ -1,0 +1,100 @@
+// The runtime of a Warm module compiled into the kernel (warmc --kernel-module=NAME, e.g.
+// os/Kernel/NetParse.warm). warmc prefixes every name here with NAME_, as it does the
+// generated ones, so modules and the shell's own Warm runtime never collide. There is no
+// output, input, argument or float support: a module that needs them does not compile.
+// An abort (a failed bounds, overflow or division check, or abort()) keeps its message in
+// wh_abort_message and throws 'WarmAbrt'; the Cool code that calls the module catches it.
+class au_span_t
+{
+    U8 *wh_data;
+    U64 wh_size;
+};
+
+U8 *wh_abort_message;
+
+U0 wh_abort(U8 *message)
+{
+    wh_abort_message = message;
+    throw('WarmAbrt');
+}
+
+U8 au_abort(au_span_t * message)
+{
+    wh_abort(message->wh_data);
+    return 0;
+}
+
+U0 au_make_span(au_span_t * out, U8 *data, U64 size)
+{
+    out->wh_data = data;
+    out->wh_size = size;
+}
+
+U0 au_make_span_from_string(au_span_t * out, U8 *data, U64 size)
+{
+    au_make_span(out, data, size);
+}
+
+U8 *au_array_index(au_span_t * sp, U64 index, U64 size)
+{
+    if (index >= sp->wh_size)
+        wh_abort("Array index out of bounds.");
+    if (size && index > 0xFFFFFFFFFFFFFFFF / size)
+        wh_abort("Multiplication overflow in array indexing operation.");
+    return sp->wh_data + index * size;
+}
+
+U8 *au_calloc(U64 size, U64 count)
+{//A private size header allows realloc.
+    U64 *p;
+    if (size && count > (0x7FFFFFFFFFFFFFFF - 8) / size)
+        return NULL;
+    p = CAlloc(size * count + 8);
+    *p = size * count;
+    return p(U8 *) + 8;
+}
+
+U8 au_free(U8 *p)
+{
+    if (p)
+        Free(p - 8);
+    return 0;
+}
+
+U8 *au_realloc(U8 *p, U64 size)
+{
+    U8 *q = au_calloc(size, 1);
+    U64 n;
+    if (!q)
+        return NULL;
+    if (p) {
+        n = *(p - 8)(U64 *);
+        if (size < n)
+            n = size;
+        MemCpy(q, p, n);
+        au_free(p);
+    }
+    return q;
+}
+
+U8 *au_memcpy(U8 *d, U8 *s, U64 n)
+{
+    MemCpy(d, s, n);
+    return d;
+}
+
+U8 *au_memmove(U8 *d, U8 *s, U64 n)
+{
+    U64 i;
+    if (d < s) {
+        for (i = 0; i < n; i++)
+            d[i] = s[i];
+    } else {
+        i = n;
+        while (i) {
+            i--;
+            d[i] = s[i];
+        }
+    }
+    return d;
+}

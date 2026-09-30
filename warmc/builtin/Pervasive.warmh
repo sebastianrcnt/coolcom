@@ -334,4 +334,27 @@ module Austral.Pervasive is
     instance Remainder(Int32);
     instance Remainder(Int64);
     instance Remainder(Index);
+
+    -- Widening conversions that cannot fail (Index and ByteSize are 64 bits here), so they
+    -- return the value itself instead of an Option.
+    typeclass WidenToNat64(T: Type) is
+        method widenToNat64(value: T): Nat64;
+    end;
+
+    instance WidenToNat64(Nat8);
+    instance WidenToNat64(Nat16);
+    instance WidenToNat64(Nat32);
+    instance WidenToNat64(Nat64);
+    instance WidenToNat64(Index);
+    instance WidenToNat64(ByteSize);
+
+    typeclass WidenToIndex(T: Type) is
+        method widenToIndex(value: T): Index;
+    end;
+
+    instance WidenToIndex(Nat8);
+    instance WidenToIndex(Nat16);
+    instance WidenToIndex(Nat32);
+    instance WidenToIndex(Nat64);
+    instance WidenToIndex(Index);
 end module.

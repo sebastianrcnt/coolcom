@@ -18,12 +18,14 @@ with out.open('w') as f:
         f.write(f'  WParse(u,"builtin/{name}",{name.replace('.', '_')},{"TRUE" if name.endswith(".warm") else "FALSE"});\n')
     f.write('}\n')
 
+# WRuntime: a program's runtime; WModuleRuntime: a kernel module's (--kernel-module).
 with (root / 'build/warmcool/RuntimeText.cool').open('w') as f:
-    text = (root / 'warmc/Runtime.cool').read_text()
-    f.write('U8 *WRuntime(CWUnit *u) {\n')
-    f.write(f'  U8 *text=WAlloc(u,{len(text.encode())+1});\n')
-    offset = 0
-    for line in text.splitlines(keepends=True):
-        f.write(f'  MemCpy(text+{offset},{json.dumps(line)},{len(line.encode())});\n')
-        offset += len(line.encode())
-    f.write('  return text;\n}\n')
+    for fn, src in (('WRuntime', 'Runtime.cool'), ('WModuleRuntime', 'ModuleRuntime.cool')):
+        text = (root / 'warmc' / src).read_text()
+        f.write(f'U8 *{fn}(CWUnit *u) {{\n')
+        f.write(f'  U8 *text=WAlloc(u,{len(text.encode())+1});\n')
+        offset = 0
+        for line in text.splitlines(keepends=True):
+            f.write(f'  MemCpy(text+{offset},{json.dumps(line)},{len(line.encode())});\n')
+            offset += len(line.encode())
+        f.write('  return text;\n}\n')

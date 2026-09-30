@@ -62,6 +62,7 @@
 #include "DskTools.cool"
 #include "KPower.cool"
 #include "NetDrv.cool"
+#include "NetParse.cool"  // generated from NetParse.warm (Makefile)
 #include "Net.cool"
 #include "NetTcp.cool"
 #include "NetApp.cool"

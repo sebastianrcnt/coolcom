@@ -23,12 +23,12 @@ if gtimeout -k 2 45 build/coolvm --headless --cpus 2 --mem 1024 --timeout 40 --w
     && [ "$(grep -c 'ERROR: stack overflow, task Shell' "$log")" = 2 ] \
     && grep -q 'ERROR: kernel text write' "$log" \
     && tr -d '\r' <"$log" | grep -qx 'MEMSAFE RECOVERED 81' \
-    && grep -q 'KERNEL TEST PASS' "$log" && grep -q '  net: PASS' "$log" && grep -q 'net: loopback ok' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
+    && grep -q 'KERNEL TEST PASS' "$log" && grep -q '  net: PASS' "$log" && grep -q 'net: loopback ok' "$log" && grep -q 'net: parser ok' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
     && [ "$(tr -d '\r' <"$log" | grep -cx 'Break')" = 2 ] \
     && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx '63' && tr -d '\r' <"$log" | grep -qx 'A92' \
     && tr -d '\r' <"$log" | grep -A2 -x 'ERROR: Expected an expression' | grep -qx '            ^' && python3 tools/kernel-verify.py verify "$dir"; then
     tail -n 12 "$log"
-    grep -E '^net: (address|HTTP|DNS failed)' "$log" | tr -d '\r'
+    grep -E '^net: (parser|address|HTTP|DNS failed)' "$log" | tr -d '\r'
     # The network commands typed at the shell (prelude): NetRep and Ping to the gateway always,
     # Dns and HttpGet of example.com unless the first boot found the host offline.
     printf 'NetRep;\nPing("10.0.2.2", 1);\n' >"$dir/net.in"

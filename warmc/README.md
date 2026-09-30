@@ -24,6 +24,7 @@ the implementation boundaries.
 |---|---|
 | `Core.cool` `Lexer.cool` `Parser.cool` `Resolve.cool` `Types.cool` `Fold.cool` `Check.cool` `Linear.cool` `Emit.cool` `Diagnostic.cool` | the compiler (`Warm.cool` includes the passes) |
 | `Runtime.cool` | the runtime that every generated program starts with |
+| `ModuleRuntime.cool` | the smaller runtime of a kernel module (`--kernel-module`) |
 | `Native.cool` | the host command line (built into `build/warmcool/Warm.BIN`) |
 | `Kernel.cool` | `WarmRun` and `WarmCompile` for the kernel shell (`package_kernel.py` makes `C:/Warm.cool`) |
 | `builtin/` | Pervasive and Memory, original Warm source that is embedded into the compiler (`embed_builtins.py`) |
@@ -62,6 +63,8 @@ dependencies must be listed. Pervasive and Memory are embedded. Options of `comp
   concrete functions and exports without invoking main.
 - `--output=path` and `--target-type=hc`: write Cool source.
 - `--error-format=plain|json`: source/caret diagnostics or structured JSON.
+- `--kernel-module=NAME`: Cool source to be compiled into the kernel (below); implies
+  `--no-entrypoint`.
 
 The only target is Cool source; there is no C or executable target.
 
@@ -114,6 +117,51 @@ Limits:
   (`WarmRun`) it reads the shell terminal a line at a time with `GetLine`, and never ends.
 - Parser nesting is limited to 256, instance search to 64 levels and one output unit to
   100,000 specializations; exceeding a bound is a diagnostic.
+
+## Kernel modules
+
+`--kernel-module=NAME` makes a Warm module a part of the kernel itself, compiled ahead of time with
+it: the first is the network stack's packet parser, `os/Kernel/NetParse.warm`
+([docs/networking.md](../docs/networking.md#the-packet-parser-in-warm)). The Makefile runs
+
+```sh
+build/warmc compile os/Kernel/NetParse.warm os/Kernel/NetParseExport.warm \
+  --kernel-module=NetParse --target-type=hc --output=os/Kernel/NetParse.cool
+```
+
+and `os/Kernel/Kernel.cool` includes the result. The output lives in the kernel's global namespace, so:
+
+- Every generated name starts with `NAME_` (`NetParse_wf12`, `NetParse_WT8`), as do the names of
+  the runtime (`NetParse_au_span_t`, `NetParse_wh_abort`). Only `Foreign_Export` functions keep the
+  name they declare; they are the module's interface, and Cool calls them with scalars and pointers.
+- The runtime is `ModuleRuntime.cool`, not `Runtime.cool`: spans, abort, and allocation through
+  `CAlloc`/`Free`. It has no `#define`s, no output, input, arguments or Float32 helpers; a module that
+  uses those does not compile into the kernel.
+- An abort (a failed index, overflow or division check, or `abort`) does not exit: it keeps the
+  message in `NAME_wh_abort_message` and throws `'WarmAbrt'`. The Cool caller catches it (Net.cool's
+  `NetParsePkt` drops the packet and counts it), so a bug in the module costs a dropped packet, not a
+  fault or corrupted kernel memory.
+- The generated file is not committed: `make` makes it, and `tools/disk-files.sh` copies it to
+  `C:/Kernel` with the other kernel sources so `MakeKernel` in the OS compiles the same text.
+
+What the packet parser needed that Warm did not have, and what was added:
+
+- **Widening conversions that cannot fail.** Every `toNat64`, `toIndex` and so on returns an
+  `Option`, even from `Nat8`. Pervasive now has the typeclasses `WidenToNat64` (from Nat8, Nat16,
+  Nat32, Nat64, Index, ByteSize) and `WidenToIndex` (from Nat8, Nat16, Nat32, Nat64, Index) with
+  `widenToNat64` and `widenToIndex`, which return the value itself (Index is 64 bits here).
+- **Faster generated code.** Unoptimized, the parser was about 30 times slower than the Cool it
+  replaced (12.6 us instead of 0.35 us for a 1514-byte TCP segment), because every operator and every
+  span index was a call. The emitter now open-codes span indexing (the bounds check of
+  `au_array_index`, inline), the unsigned trapping `+`, `-` and `*` (the same checks and abort
+  messages as their Pervasive bodies), the bitwise and/or/xor and the widening conversions, and copies
+  aggregates with a class assignment instead of `MemCpy`. That brought it to about 7 times slower
+  (2.2 us) for a full segment and 9 times (280 ns) for a small one; see
+  [docs/networking.md](../docs/networking.md#the-packet-parser-in-warm). These apply to every
+  program, and all the test suites still pass.
+- Still missing: shift operators (the parser multiplies and divides by powers of two instead), and
+  a way to pass a span or record across `Foreign_Export` (the boundary uses a pointer and a length,
+  and writes its result as an array of `Nat64` through `spanWrite`).
 
 ## Tests
 
