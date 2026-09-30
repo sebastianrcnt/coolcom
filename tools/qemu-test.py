@@ -12,8 +12,54 @@ import qemu
 
 ROOT = qemu.ROOT
 
+# Run on the guest. Keep long definitions off the serial input queue by loading a file.
+# Hold the destination with IRQs and its timer masked, queue one SGI, then release
+# it into WFI. A pending masked IRQ must wake WFI and complete after IRQ restore.
+IPI_PROBE = r"""
+I64 qemu_ipi_gate, qemu_ipi_before;
+U0 QemuIpiHold(U8 *data)
+{
+    no_warn data;
+    I64 daif = ArchDaif, ctl = ArchCntvCtl;
+    ArchIrqOff;
+    ArchCntvCtlSet(0);
+    ArchStoreRel(&qemu_ipi_gate, 1);
+    while (ArchAdd(&qemu_ipi_gate, 0) != 2) {}
+    ArchWfi;
+    ArchStoreRel(&qemu_ipi_gate, 3);
+    ArchCntvCtlSet(ctl);
+    ArchIntRestore(daif);
+}
+U0 QemuIpiAwait(I64 seq)
+{
+    I64 count;
+    while ((count = ArchAdd(&gic_ipi_count[1], 0)) <= qemu_ipi_before) Yield;
+    Print("QEMU-IPI-ACK:%d:%d\n", seq, count);
+}
+U0 QemuIpiQueue()
+{
+    Spawn(&QemuIpiHold, NULL, "IpiHold", 1);
+    while (ArchAdd(&qemu_ipi_gate, 0) != 1) Yield;
+    qemu_ipi_before = ArchAdd(&gic_ipi_count[1], 0);
+    IntcSendIpi(fdt_cpu[1].mpidr);
+    Print("QEMU-IPI-HELD:%d:%d\n", qemu_ipi_before, ArchAdd(&gic_ipi_count[1], 0));
+}
+U0 QemuIpiRelease()
+{
+    ArchStoreRel(&qemu_ipi_gate, 2);
+    while (ArchAdd(&qemu_ipi_gate, 0) != 3) Yield;
+    QemuIpiAwait(0);
+}
+U0 QemuIpiRound(I64 seq)
+{
+    qemu_ipi_before = ArchAdd(&gic_ipi_count[1], 0);
+    IntcSendIpi(fdt_cpu[1].mpidr);
+    QemuIpiAwait(seq);
+}
+"""
 
-def run(image, accel, gic):
+
+def run(image, accel, gic, read_size=65536):
     outdir = ROOT / 'build' / f'qemu-test-gic{gic}'
     outdir.mkdir(parents=True, exist_ok=True)
     disk = outdir / 'disk.img'
@@ -23,6 +69,9 @@ def run(image, accel, gic):
     fixture = outdir / 'QEMU.TXT'
     fixture.write_text('QEMU-FILE-READ-PASS\n')
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(fixture), '::QEMU.TXT'], check=True)
+    probe = outdir / 'IPI.cool'
+    probe.write_text(IPI_PROBE)
+    subprocess.run(['mcopy', '-o', '-i', str(disk), str(probe), '::IPI.cool'], check=True)
     cmd = qemu.command(image, disk, accel, gic)
     with (outdir / 'serial.log').open('wb') as log:
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -45,7 +94,7 @@ def run(image, accel, gic):
                     raise AssertionError(f'timed out waiting for {pattern!r}; see {outdir}/serial.log')
                 if not sel.select(min(remaining, 1)):
                     continue
-                chunk = os.read(p.stdout.fileno(), 65536)
+                chunk = os.read(p.stdout.fileno(), read_size)
                 if not chunk:
                     raise AssertionError(f'QEMU exited before {pattern!r}; see {outdir}/serial.log')
                 log.write(chunk)
@@ -65,15 +114,24 @@ def run(image, accel, gic):
             line('U8 *q = FileRead("C:/QEMU.TXT"); Print("%s", q); Free(q);')
             expect(rb'\r?\nQEMU-FILE-READ-PASS\r?\n')
             expect(rb'C:/> ')
-            line('Print("IPI-BEFORE:%d\\n", ipi_count);')
-            before = int(expect(rb'\r?\nIPI-BEFORE:(\d+)')[1])
+            line('#include "C:/IPI.cool"')
             expect(rb'C:/> ')
-            line('IntcSendIpi(fdt_cpu[1].mpidr); Sleep(20); Print("IPI-AFTER:%d\\n", ipi_count);')
-            after = int(expect(rb'\r?\nIPI-AFTER:(\d+)')[1])
-            assert after > before, f'IPI was not acknowledged; see {outdir}/serial.log'
+            line('QemuIpiQueue;')
+            held = expect(rb'\r?\nQEMU-IPI-HELD:(\d+):(\d+)\r?\n')
+            previous = int(held[1])
+            assert int(held[2]) == previous, 'IPI completed while target IRQs were masked'
             expect(rb'C:/> ')
+            for seq in range(17):
+                line('QemuIpiRelease;' if seq == 0 else f'QemuIpiRound({seq});')
+                # A complete line prevents a pipe chunk ending mid-number from
+                # being mistaken for a complete counter. No fixed guest delay:
+                # the marker is emitted only after the target has completed EOI.
+                ack = expect(rb'\r?\nQEMU-IPI-ACK:(\d+):(\d+)\r?\n')
+                assert int(ack[1]) == seq and int(ack[2]) > previous, 'unexpected IPI acknowledgement'
+                previous = int(ack[2])
+                expect(rb'C:/> ')
             line('Print("QEMU-NET:%d\\n", Ping("10.0.2.2", 1));')
-            expect(rb'\r?\nQEMU-NET:1')
+            expect(rb'\r?\nQEMU-NET:1\r?\n')
             expect(rb'C:/> ')
             line('Reboot;')
             expect(rb'Rebooting\.')
@@ -100,7 +158,8 @@ def main():
     image = pathlib.Path(sys.argv[1]).resolve()
     run(image, qemu.accelerator(), 3)
     # HVF only exposes GICv3; exercise the MMIO GICv2 interface with TCG.
-    run(image, 'tcg', 2)
+    # Adversarial pipe fragmentation: numeric matches must wait for the newline.
+    run(image, 'tcg', 2, read_size=1)
 
 
 if __name__ == '__main__':
