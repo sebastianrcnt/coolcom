@@ -29,7 +29,7 @@ the implementation boundaries.
 | `Native.cool` | the host command line (built into `build/warmcool/Warm.BIN`) |
 | `Kernel.cool` | `WarmRun` and `WarmCompile` for the kernel shell (`package_kernel.py` makes `C:/Warm.cool`) |
 | `builtin/` | Pervasive and Memory, original Warm source that is embedded into the compiler (`embed_builtins.py`) |
-| `standard/` `examples/` | the standard library and example programs; `standard/src/Kernel` is `Warm.Kernel` for the OS |
+| `standard/` `examples/` | the standard library and example programs; `standard/src/OS` contains portable OS APIs |
 | `test-programs/` | the end-to-end test suites |
 | `fmt-tests/` | the formatter's fixtures (`NAME.in.warm` formats to `NAME.exp.warm`) |
 | `compare.py` `test_*.py` | the tests |
@@ -294,67 +294,24 @@ throwing `FileWrite` at the adapter boundary. Four negative fixtures in
 capability) must be rejected. `ForeignUnit` checks Unit, scalar and span foreign calls
 natively.
 
-## Kernel bindings and capabilities
+## OS bindings and capabilities
 
-`standard/src/Kernel/Kernel.warmh,Kernel.warm` provides `Warm.Kernel`. Its 45 operations,
-plus resource and capability lifecycle functions, use the kernel's actual FAT32, console,
-Key.cool, framebuffer, clock and scheduler APIs. The Cool boundary is
-`standard/src/Kernel/Adapter.cool`.
+`standard/src/OS` provides the common host and CoolOS API. `OS.Terminal` splits
+`Output` and `Input`, with typed `Key` and `Color`. `OS.File` owns whole-file
+`Bytes` and returns `Result` with `OS.Error.IoError`; a failed read returns no
+resource to close. Inputs borrow spans. `OS.CoolOS.Framebuffer`, `OS.CoolOS.Key`
+and `OS.CoolOS.Task` hold the platform-specific operations.
 
-| Area | Warm operations | Kernel implementation |
-| --- | --- | --- |
-| Memory | allocate, close, fill, copyBytes, readByte, storeByte, bufferSize, bufferError | CAlloc, Free, MemSet, MemCpy; bounds-checked owned bytes |
-| Strings | stringLength, stringCompare | StrLen, StrCmp |
-| Output | write, putByte, putCodepoint | PutS, ConsPut, ConsPutCp |
-| Filesystem | readFile, writeFile, dir, mkdir, cd, exists, delete, validName | FileRead, FileWrite, Dir, DirMk, Cd, FileFind, Del, FileNameChk |
-| Time | now, unixNow, ticks, ticksHP, dateToUnix, unixToDate | Now, UnixNow, __GetTicks, __GetTicksHP, CDate2Unix, Unix2CDate |
-| Keys | getKey, keyPending, keyPop, keyChar, utf8Width | Key.cool GetKey(FALSE), KeyPending, KeyPop, KeyChar; Utf8Width |
-| Screen | clear, cursorHide, cursorShow, setColor, fillRect, scroll, screenCodepoint, alternate, ansiColor | ConsClear, FbCursorHide/Show, FbSetColor, FbFillRect, FbScroll, FbPutCp, FbAlt, FbAnsiColor |
-| Tasks | yieldTask, sleep, sleepUntil, taskReport, isSilent | Yield, Sleep, SleepUntil, TaskRep, IsSilent |
+The scalar ABI is implemented in `OSHost.cool` and `OSKernel.cool`, packaged
+with the corresponding runtime. `OS.Raw` is the internal legacy binding;
+new applications should use the typed modules. The former `Warm.Kernel` is
+removed. `Standard.IO` remains a compatibility facade over the same terminal
+boundary for upstream library tests.
 
-### Boundary and ownership decisions
-
-* This is a kernel-shell target, not a portable C standard module. Include the adapter
-  **before** generated source. It defines `WARM_KERNEL`; native CLI imports are replaced
-  with kernel-compatible helpers. CLI argument count is zero. Warm abort/ExitFailure
-  returns control through the kernel's NativeExit.
-* The generated private aggregate ABI stays inside Warm. The adapter accepts integers,
-  opaque pointers and explicit pointer/length pairs. No generated class names, span
-  layouts or allocation headers cross the boundary.
-* Text inputs accept spans in any region. Use `Standard.String.getSpan` for heap strings.
-  The adapter copies text into a temporary NUL-terminated `U8*`, rejects embedded NUL and
-  text longer than 4096 bytes, and frees the copy on both success and caught exceptions.
-  Binary file contents and `copyBytes` preserve embedded zero bytes. Input pointers are
-  never retained.
-* `readFile` uses the kernel's whole-file API, not a fictitious open file descriptor. It
-  returns an opaque **linear Buffer**, even on failure. Read `bufferError`, borrow it for
-  byte access, and consume it exactly once with `close`. `allocate` returns the same owned
-  resource. Neither raw pointers nor escaping borrowed spans are exposed. Copies and
-  indexes check buffer bounds. Allocation and write sizes are capped at 256 MiB. Rectangle
-  coordinates are limited to signed 16-bit and sizes to 0..32767 before calling the
-  framebuffer clipping code.
-* Error values are `-1` (caught Cool throw), `-2` (invalid input/bounds), `-3` (missing
-  file/allocation or write failure), with zero for successful commands. Query functions
-  return their documented nonnegative value or a negative error. Kernel boolean queries
-  retain 0/1; `dir` and `delete` retain counts. `stringCompare` returns 0/1/2 for
-  less/equal/greater, reserving negative values for errors. Date conversions retain signed
-  kernel dates. Exception identity is deliberately collapsed to -1; the catch marks the
-  exception handled and frees adapter-owned temporaries. The adapter cannot repair
-  internal allocations leaked by a kernel function before it throws.
-* `Filesystem`, `Terminal` and `Tasks` are opaque linear capability values. Acquire each
-  only through a mutable borrow of RootCapability, borrow the capability for operations,
-  and release it explicitly. Callers can pass a restricted capability to a helper without
-  handing over root. These are Austral-style authority tokens, not path ACLs or exclusive
-  device locks; root can derive multiple tokens. Open buffers outlive filesystem tokens
-  because they own a detached memory snapshot.
-* Opaque constructors are checked against module visibility, closing an upstream hole
-  that allowed constructing empty capability records outside their defining module. Tests
-  reject root/capability forgery, missing capability arguments, leaked buffers and double
-  close.
-* This is a language-level discipline for callers of the safe API. Unsafe modules,
-  arbitrary Cool, and the existing Pervasive printing builtins are outside its authority
-  boundary. Task creation/kill and raw kernel pointers are deliberately not exposed in
-  this initial scheduler binding.
+To list the dependencies for a program, see `warmc/os_modules.py`. The same
+sources run with `tools/warm run` on macOS and `WarmRun` in the kernel shell.
+Whole-file reads own a detached snapshot; release it exactly once using
+`OS.File.closeBytes`. Indexing outside its bounds is a programmer error.
 
 ## Fixes since the fork
 

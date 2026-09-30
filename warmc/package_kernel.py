@@ -16,6 +16,7 @@ for line in runtime.splitlines():
     elif not line.startswith(('#define ', 'import ')):
         lines.append(line)
 runtime = '\n'.join(lines) + '\n'
+runtime += (source / 'OSKernel.cool').read_text().replace('#define WARM_KERNEL 1', '')
 for name, adapter in [('NativeExit', 'WKernelExit'), ('NativeErrPutS', 'WKernelErrPutS'),
                       ('NativeArgCount', 'WKernelArgCount'), ('NativeGetChar', 'WKernelGetChar'), ('NativeArg', 'WKernelArg')]:
     runtime = runtime.replace(name, adapter)

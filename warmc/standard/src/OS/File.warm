@@ -1,0 +1,47 @@
+pragma Unsafe_Module;
+import Austral.Memory (Address, Pointer, spanToPointer);
+import OS.Error (IoError, fromCode, status);
+module body OS.File is
+    record Filesystem: Linear is end;
+    record Bytes: Linear is handle: Address[Nat8]; end;
+    function acquireFilesystem(root: &![RootCapability]): Filesystem is return Filesystem(); end;
+    function releaseFilesystem(fs: Filesystem): Unit is let {} := fs; return nil; end;
+    pragma Foreign_Import(External_Name => "WkreadFile");
+    private function rawRead(path: Pointer[Nat8], pathSize: Index): Address[Nat8] is end;
+    pragma Foreign_Import(External_Name => "WkwriteFile");
+    private function rawWrite(path: Pointer[Nat8], pathSize: Index, data: Pointer[Nat8], count: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkbufferError");
+    private function rawError(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkbufferSize");
+    private function rawSize(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkreadByte");
+    private function rawByte(handle: Address[Nat8], index: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "Wkclose");
+    private function rawClose(handle: Address[Nat8]): Int64 is end;
+    pragma Foreign_Import(External_Name => "Wkexists");
+    private function rawExists(path: Pointer[Nat8], pathSize: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "Wkdelete");
+    private function rawDelete(path: Pointer[Nat8], pathSize: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "Wkmkdir");
+    private function rawMkdir(path: Pointer[Nat8], pathSize: Index): Int64 is end;
+    function readAll(fs: &![Filesystem], name: Span[Nat8]): Result[Bytes, IoError] is
+        let handle: Address[Nat8] := rawRead(spanToPointer(name), spanLength(name));
+        let code: Int64 := rawError(handle);
+        if code < 0 then rawClose(handle); return Err(error => fromCode(code)); end if;
+        return Ok(value => Bytes(handle => handle)); end;
+    function writeAll(fs: &![Filesystem], name: Span[Nat8], data: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawWrite(spanToPointer(name), spanLength(name), spanToPointer(data), spanLength(data))); end;
+    function exists(fs: &![Filesystem], name: Span[Nat8]): Result[Bool, IoError] is
+        let code: Int64 := rawExists(spanToPointer(name), spanLength(name));
+        if code < 0 then return Err(error => fromCode(code)); end if;
+        return Ok(value => code /= 0); end;
+    function delete(fs: &![Filesystem], name: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawDelete(spanToPointer(name), spanLength(name))); end;
+    function makeDir(fs: &![Filesystem], name: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawMkdir(spanToPointer(name), spanLength(name))); end;
+    function size(bytes: &[Bytes]): Index is
+        case toIndex(rawSize(bytes->handle)) of when Some(value as n: Index) do return n; when None do abort("Invalid Bytes size"); end case; end;
+    function nth(bytes: &[Bytes], index: Index): Nat8 is
+        case toNat8(rawByte(bytes->handle, index)) of when Some(value as b: Nat8) do return b; when None do abort("Bytes index out of bounds"); end case; end;
+    function closeBytes(bytes: Bytes): Unit is let { handle: Address[Nat8] } := bytes; rawClose(handle); return nil; end;
+end module body.

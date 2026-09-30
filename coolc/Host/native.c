@@ -306,6 +306,21 @@ static int64_t host_file_write(const char *path, const void *data, int64_t size)
     return n == (size_t)size;
 }
 
+// 0 if the path does not exist, 1 for a file (or anything else), 2 for a directory.
+static int64_t host_file_stat(const char *path) {
+    struct stat st;
+    if (stat(path, &st)) return 0;
+    return S_ISDIR(st.st_mode) ? 2 : 1;
+}
+
+static int64_t host_io_error(void) {
+    switch(errno) {case ENOENT: return -10; case EEXIST: return -11;
+    case EACCES: case EPERM: return -13; case ENOSPC: return -14;
+    case ENOTEMPTY: return -15; default: return -1;}
+}
+static int64_t host_file_delete(const char *path) {return remove(path) ? host_io_error() : 0;}
+static int64_t host_file_mkdir(const char *path) {return mkdir(path, 0755) ? host_io_error() : 0;}
+
 static void register_host_symbols(Module *m) {
 #define HOST(name, fn) add_symbol(m, name, (uintptr_t)(fn))
     HOST("NativeJitAlloc", NativeJitAlloc);
@@ -355,6 +370,9 @@ static void register_host_symbols(Module *m) {
     HOST("FileNameAbs", host_file_name_abs);
     HOST("FileRead", host_file_read);
     HOST("FileWrite", host_file_write);
+    HOST("NativeFileStat", host_file_stat);
+    HOST("NativeFileDelete", host_file_delete);
+    HOST("NativeFileMkdir", host_file_mkdir);
     HOST("C2HFloor", floor);
     HOST("C2HCeil", ceil);
     HOST("C2HSqrt", sqrt);

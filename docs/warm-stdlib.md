@@ -1,7 +1,7 @@
 # The Warm standard library: design
 
 Status: reviewed; the decisions are at the end. Stage 0 is implemented (see
-[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-5 are not. The
+[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stage 1 is implemented; stages 2-5 are pending. The
 options and recommendations (**Rec.**) below are kept as the reasoning behind the decisions.
 
 Warm today has two unrelated libraries: `Standard.*` from Austral (String, Buffer, Box,
@@ -264,3 +264,11 @@ absolute paths, other drives, other hosts).
    (`Warm.Kernel` becomes `OS.*` plus `OS.CoolOS.*` in stage 1.)
 7. File streams: **buffer the whole file and write on close first**, then a kernel open-file
    API underneath.
+
+## Implementation notes
+
+Stage 1: portable `OS.Terminal`, `OS.File`, and `OS.Error` use `OSHost.cool`
+and `OSKernel.cool`. `Warm.Kernel` has been removed; `OS.Raw` keeps the scalar
+internal binding while the public API migrates. CoolOS extensions are in
+`OS.CoolOS.*`. The upstream `Standard.IO` compatibility module uses the same
+terminal boundary. Tests include host round trips and kernel shell examples.

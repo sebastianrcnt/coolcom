@@ -152,7 +152,7 @@ build/disk.img: | build
 WARMSRC := $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
 build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
 	./warmc/build.sh
-build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py
+build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool
 	python3 warmc/package_kernel.py
 
 # The network stack's packet parser (docs/networking.md), compiled to os/Kernel/NetParse.cool.
@@ -177,6 +177,7 @@ warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 	python3 warmc/test_numbers.py
 	python3 warmc/test_cli.py
 	python3 warmc/test_standard.py
+	python3 warmc/test_os.py
 	python3 warmc/test_fmt.py
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN

@@ -1,4 +1,4 @@
-import Warm.Kernel (write);
+import OS.Raw (write);
 module body NoCapability is
     function main(): ExitCode is
         write(0, "forbidden");

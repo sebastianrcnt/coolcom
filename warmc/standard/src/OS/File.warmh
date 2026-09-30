@@ -1,0 +1,15 @@
+import OS.Error (IoError);
+module OS.File is
+    type Filesystem: Linear;
+    type Bytes: Linear;
+    function acquireFilesystem(root: &![RootCapability]): Filesystem;
+    function releaseFilesystem(fs: Filesystem): Unit;
+    function readAll(fs: &![Filesystem], name: Span[Nat8]): Result[Bytes, IoError];
+    function writeAll(fs: &![Filesystem], name: Span[Nat8], data: Span[Nat8]): Result[Unit, IoError];
+    function exists(fs: &![Filesystem], name: Span[Nat8]): Result[Bool, IoError];
+    function delete(fs: &![Filesystem], name: Span[Nat8]): Result[Unit, IoError];
+    function makeDir(fs: &![Filesystem], name: Span[Nat8]): Result[Unit, IoError];
+    function size(bytes: &[Bytes]): Index;
+    function nth(bytes: &[Bytes], index: Index): Nat8;
+    function closeBytes(bytes: Bytes): Unit;
+end module.

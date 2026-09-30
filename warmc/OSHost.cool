@@ -1,0 +1,83 @@
+// Host implementation of the scalar OS boundary. No borrowed pointer is retained.
+import U8 *FileRead(U8 *path, I64 *size, U8 *attrs = 0);
+import I64 FileWrite(U8 *path, U8 *data, I64 size);
+import I64 NativeFileStat(U8 *path);
+import I64 NativeFileDelete(U8 *path);
+import I64 NativeFileMkdir(U8 *path);
+class WkBuffer {U8 *data; I64 size; I64 error;};
+U8 *WkString(U8 *s, U64 n) {
+    U64 i;
+    if (n > 4096) return 0;
+    for (i = 0; i < n; i++) if (!s[i]) return 0;
+    U8 *p = MAlloc(n + 1); if (!p) return 0;
+    MemCpy(p, s, n); p[n] = 0; return p;
+}
+WkBuffer *WkNew() {return CAlloc(sizeof(WkBuffer));}
+I64 Wkwrite(U8 *text, U64 size) {U64 i; for (i = 0; i < size; i++) Print("%c", text[i]); return 0;}
+I64 WkinputByte() {return NativeGetChar();}
+I64 WkgetKey() {I64 c = NativeGetChar(); if (c < 0) return -16; return c;}
+I64 WkputByte(I64 c) {Print("%c", c); return 0;}
+I64 WkputCodepoint(I64 c) {
+    if (c < 0 || c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) return -2;
+    if (c < 128) WkputByte(c);
+    else if (c < 2048) {WkputByte(192 | c >> 6); WkputByte(128 | c & 63);}
+    else if (c < 65536) {WkputByte(224 | c >> 12); WkputByte(128 | c >> 6 & 63); WkputByte(128 | c & 63);}
+    else {WkputByte(240 | c >> 18); WkputByte(128 | c >> 12 & 63); WkputByte(128 | c >> 6 & 63); WkputByte(128 | c & 63);} return 0;
+}
+I64 Wkexists(U8 *text, U64 size) {U8 *s = WkString(text, size); if (!s) return -2; I64 r = NativeFileStat(s); Free(s); return r;}
+I64 Wkdelete(U8 *text, U64 size) {U8 *s = WkString(text, size); if (!s) return -2; I64 r = NativeFileDelete(s); Free(s); return r;}
+I64 Wkmkdir(U8 *text, U64 size) {U8 *s = WkString(text, size); if (!s) return -2; I64 r = NativeFileMkdir(s); Free(s); return r;}
+WkBuffer *WkreadFile(U8 *path, U64 size) {
+    WkBuffer *b = WkNew(); if (!b) return 0;
+    U8 *s = WkString(path, size); if (!s) b->error = -2;
+    else {if (!NativeFileStat(s)) b->error = -10; else {b->data = FileRead(s, &b->size); if (!b->data) b->error = -1;} Free(s);} return b;
+}
+I64 WkwriteFile(U8 *path, U64 size, U8 *data, U64 count) {
+    U8 *s = WkString(path, size); if (!s) return -2;
+    I64 r = -2; if (count <= 0x10000000) {if (FileWrite(s, data, count)) r = 0; else r = -1;} Free(s); return r;
+}
+I64 WkbufferSize(WkBuffer *b) {if (!b) return -3; return b->size;}
+
+I64 WkbufferError(WkBuffer *b) {if (!b) return -3; return b->error;}
+
+I64 WkreadByte(WkBuffer *b, I64 index) {if (!b) return -3; if (b->error) return b->error; if (index < 0 || index >= b->size) return -2; return b->data[index];}
+
+I64 WkstoreByte(WkBuffer *b, I64 index, I64 value) {if (!b) return -3; if (b->error) return b->error; if (index < 0 || index >= b->size) return -2; b->data[index] = value; return 0;}
+
+I64 Wkfill(WkBuffer *b, I64 value) {if (!b) return -3; if (b->error) return b->error; MemSet(b->data, value, b->size); return 0;}
+
+I64 Wkclose(WkBuffer *b) {if (b) {Free(b->data); Free(b);} return 0;}
+
+WkBuffer *Wkallocate(I64 size) {WkBuffer *b = WkNew(); if (!b) return 0; if (size < 0 || size > 0x10000000) b->error = -2; else {b->data = CAlloc(size + 1); if (!b->data) b->error = -1; else b->size = size;} return b;}
+I64 WkcopyBytes(WkBuffer *b, U8 *data, U64 size) {if (!b) return -1; if (b->error) return b->error; if (size > b->size) return -2; MemCpy(b->data, data, size); return 0;}
+I64 WkstringLength(U8 *s, U64 n) {return n;}
+I64 WkstringCompare(U8 *a, U64 na, U8 *b, U64 nb) {U64 i; for (i = 0; i < na && i < nb; i++) {if (a[i] < b[i]) return 0; if (a[i] > b[i]) return 2;} if (na < nb) return 0; if (na > nb) return 2; return 1;}
+I64 Wknow() {return -1;}
+I64 WkunixNow() {return -1;}
+I64 Wkticks() {return -1;}
+I64 WkticksHP() {return -1;}
+I64 WkkeyPending() {return -1;}
+I64 WkkeyPop() {return -1;}
+I64 Wkclear() {return -1;}
+I64 WkcursorHide() {return -1;}
+I64 WkcursorShow() {return -1;}
+I64 WksetColor(I64 fg, I64 bg) {
+    Print("\x1b[38;2;%ld;%ld;%ld;48;2;%ld;%ld;%ldm", (fg >> 16) & 255, (fg >> 8) & 255, fg & 255, (bg >> 16) & 255, (bg >> 8) & 255, bg & 255); return 0;
+}
+I64 WkfillRect(I64 x, I64 y, I64 w, I64 h, I64 color) {return -1;}
+I64 Wkscroll() {return -1;}
+I64 WkscreenCodepoint(I64 value) {return -1;}
+I64 Wkalternate(I64 on) {return -1;}
+I64 WkyieldTask() {return -1;}
+I64 Wksleep(I64 ms) {return -1;}
+I64 WksleepUntil(I64 tick) {return -1;}
+I64 WktaskReport() {return -1;}
+I64 WkisSilent() {return -1;}
+I64 WkkeyChar(I64 event) {return -1;}
+I64 Wkutf8Width(I64 cp) {return -1;}
+I64 WkansiColor(I64 n) {return -1;}
+I64 WkdateToUnix(I64 date) {return -1;}
+I64 WkunixToDate(I64 stamp) {return -1;}
+I64 Wkdir(U8 *text, U64 size) {return -1;}
+I64 Wkcd(U8 *text, U64 size) {return -1;}
+I64 WkvalidName(U8 *text, U64 size) {return -1;}

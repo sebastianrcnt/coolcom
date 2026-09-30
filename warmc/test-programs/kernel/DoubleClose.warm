@@ -1,4 +1,4 @@
-import Warm.Kernel (Buffer, allocate, close);
+import OS.Raw (Buffer, allocate, close);
 module body DoubleClose is
     function main(): ExitCode is
         let buffer: Buffer := allocate(8);

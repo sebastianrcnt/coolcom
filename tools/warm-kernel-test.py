@@ -6,7 +6,10 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULE = ROOT / "warmc/standard/src/Kernel"
+MODULE = ROOT / "warmc/standard/src/OS"
+import sys
+sys.path.insert(0, str(ROOT / "warmc"))
+from os_modules import os_modules
 spec = importlib.util.spec_from_file_location("kv", ROOT / "tools/kernel-verify.py")
 kv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(kv)
@@ -25,9 +28,10 @@ def stdin_test(OUT):
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
     files = [(ROOT / "build/warmcool/Kernel.cool", "Warm.cool")]
-    for name in ("Buffer", "String", "StringBuilder", "IO/IO", "IO/Terminal"):
+    for name in ("Buffer", "String", "StringBuilder", "OS/Terminal") :
         base = name.split("/")[-1]
         files += [(std / (name + ".warmh"), base + ".warmh"), (std / (name + ".warm"), base + ".warm")]
+    files += [(std / "OS/Error.warm", "Error.warm")]
     files += [(ROOT / "warmc/examples/greet/Greet.warmh", "Greet.warmh"), (ROOT / "warmc/examples/greet/Greet.warm", "Greet.warm")]
     for src, name in files:
         run("mcopy", "-o", "-i", disk, src, "::" + name)
@@ -84,7 +88,7 @@ def main():
     for name, diagnostic in (("Leak", "not consumed"), ("DoubleClose", "consumed"),
                              ("NoCapability", "Type Error"), ("Forge", "callable named Filesystem")):
         result = subprocess.run([str(ROOT / "build/warmc"), "compile",
-            str(MODULE / "Kernel.warmh") + "," + str(MODULE / "Kernel.warm"),
+            *os_modules(ROOT),
             str(ROOT / "warmc/test-programs/kernel" / (name + ".warm")),
             "--entrypoint=" + name + ":main", "--target-type=hc",
             "--output=" + str(OUT / (name + ".cool"))], cwd=OUT, capture_output=True)
@@ -106,13 +110,13 @@ def main():
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
-    run("mcopy", "-o", "-i", disk, MODULE / "Adapter.cool", "::")
+    run("mcopy", "-o", "-i", disk, ROOT / "warmc/OSKernel.cool", "::Adapter.cool")
     for name in ("Files", "Screen", "Key", "Errors"):
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
         run(ROOT / "build/warmc", "compile",
-            str(MODULE / "Kernel.warmh") + "," + str(MODULE / "Kernel.warm"),
+            *os_modules(ROOT),
             ROOT / "warmc/examples/kernel" / (name + ".warm"),
             "--entrypoint=" + name + ":main", "--target-type=hc", "--output=" + str(hc))
         prefix = ""
@@ -140,7 +144,7 @@ def main():
         assert marker in output.splitlines(), output[-6000:]
         shell_output = output.split('> #include', 1)[-1]
         errors = [line for line in shell_output.splitlines() if "ERROR:" in line]
-        expected_errors = ['ERROR: File not found: "C:/Absent.txt".'] if name == "Errors" else []
+        expected_errors = []
         assert errors == expected_errors, shell_output[-6000:]
         assert "heap overflow" not in shell_output, shell_output[-6000:]
         if name == "Screen":

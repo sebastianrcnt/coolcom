@@ -22,6 +22,8 @@ with out.open('w') as f:
 with (root / 'build/warmcool/RuntimeText.cool').open('w') as f:
     for fn, src in (('WRuntime', 'Runtime.cool'), ('WModuleRuntime', 'ModuleRuntime.cool')):
         text = (root / 'warmc' / src).read_text()
+        if src == 'Runtime.cool':
+            text += '\n#ifndef WARM_KERNEL\n' + (root / 'warmc/OSHost.cool').read_text() + '\n#endif\n'
         f.write(f'U8 *{fn}(CWUnit *u) {{\n')
         f.write(f'  U8 *text=WAlloc(u,{len(text.encode())+1});\n')
         offset = 0

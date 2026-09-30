@@ -1,0 +1,71 @@
+module body OS.Error is
+    union IoError: Free is
+        case NotFound;
+        case Exists;
+        case InvalidName;
+        case Denied;
+        case NoSpace;
+        case NotEmpty;
+        case Closed;
+        case Timeout;
+        case Refused;
+        case Reset;
+        case Unreachable;
+        case Interrupted;
+        case Other is code: Int64;
+    end;
+    function ioErrorCode(error: IoError): Int64 is
+        case error of
+            when NotFound do return -10;
+            when Exists do return -11;
+            when InvalidName do return -12;
+            when Denied do return -13;
+            when NoSpace do return -14;
+            when NotEmpty do return -15;
+            when Closed do return -16;
+            when Timeout do return -17;
+            when Refused do return -18;
+            when Reset do return -19;
+            when Unreachable do return -20;
+            when Interrupted do return -21;
+            when Other(code as c: Int64) do return c;
+        end case;
+    end;
+    function fromCode(code: Int64): IoError is
+        if code = -10 then return NotFound(); end if;
+        if code = -11 then return Exists(); end if;
+        if code = -12 then return InvalidName(); end if;
+        if code = -13 then return Denied(); end if;
+        if code = -14 then return NoSpace(); end if;
+        if code = -15 then return NotEmpty(); end if;
+        if code = -16 then return Closed(); end if;
+        if code = -17 then return Timeout(); end if;
+        if code = -18 then return Refused(); end if;
+        if code = -19 then return Reset(); end if;
+        if code = -20 then return Unreachable(); end if;
+        if code = -21 then return Interrupted(); end if;
+        if code = -2 then return InvalidName(); end if;
+        return Other(code => code);
+    end;
+    function ioErrorText(error: IoError): Span[Nat8, Static] is
+        case error of
+            when NotFound do return "NotFound";
+            when Exists do return "Exists";
+            when InvalidName do return "InvalidName";
+            when Denied do return "Denied";
+            when NoSpace do return "NoSpace";
+            when NotEmpty do return "NotEmpty";
+            when Closed do return "Closed";
+            when Timeout do return "Timeout";
+            when Refused do return "Refused";
+            when Reset do return "Reset";
+            when Unreachable do return "Unreachable";
+            when Interrupted do return "Interrupted";
+            when Other(code as c: Int64) do return "Other";
+        end case;
+    end;
+    function status(code: Int64): Result[Unit, IoError] is
+        if code < 0 then return Err(error => fromCode(code)); end if;
+        return Ok(value => nil);
+    end;
+end module body.

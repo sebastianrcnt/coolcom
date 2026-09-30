@@ -1,37 +1,22 @@
-import Standard.IO (
-    acquireTerminal,
-    releaseTerminal,
-    TerminalCapability,
-    readByte
-);
-import Standard.IO.Terminal (
-    StandardInput,
-    acquireInput,
-    releaseInput,
-    readLine
-);
-import Standard.String (
-    String,
-    destroyString,
-    getSpan,
-    length
-);
-
+import OS.Terminal (Input, Output, acquireInput, acquireOutput, releaseInput, releaseOutput, readLine, write, writeLine);
+import OS.Error (IoError);
+import Standard.String (String, destroyString, getSpan, length);
 module body Example.Greet is
-    function main(root: RootCapability): ExitCode is
-        var mutRoot: RootCapability := root;
-        var terminal: TerminalCapability := acquireTerminal(&!mutRoot);
-        var input: StandardInput := acquireInput(&!terminal);
-
-        let line: String := readLine(&!input);
-        print("Hello, ");
-        print(getSpan(&line, 0, length(&line) - 1));
-        printLn("!");
-
-        destroyString(line);
-        releaseInput(input);
-        releaseTerminal(terminal);
-        surrenderRoot(mutRoot);
-        return ExitSuccess();
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var input: Input := acquireInput(&!root);
+        var output: Output := acquireOutput(&!root);
+        var success: Bool := false;
+        case readLine(&!input) of
+            when Ok(value as line: String) do
+                write(&!output, "Hello, ");
+                write(&!output, getSpan(&line, 0, length(&line) - 1));
+                writeLine(&!output, "!");
+                destroyString(line);
+                success := true;
+            when Err(error as e: IoError) do skip;
+        end case;
+        releaseInput(input); releaseOutput(output); surrenderRoot(root);
+        if success then return ExitSuccess(); else return ExitFailure(); end if;
     end;
 end module body.
