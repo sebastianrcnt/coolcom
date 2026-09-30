@@ -170,6 +170,7 @@ U0 KMain(U8 *image_end, U8 *dt)
         ShellStart;
     while (TRUE) {
         Yield;
+        ShellSupervise;
         IdleWait;
     }
 }
