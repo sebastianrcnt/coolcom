@@ -12,6 +12,13 @@ native-host: build/coolc
 build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/warm_task.h coolc/Host/warm_file.h coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $(filter %.c %.S,$^) -o $@
 
+build/coolc-x86_64: coolc/Host/native.c coolc/Host/x86.S coolc/Host/x86-native.h coolc/Host/warm_net.h coolc/Host/warm_task.h coolc/Host/warm_file.h | build
+	clang -arch x86_64 -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer coolc/Host/native.c coolc/Host/x86.S -o $@
+
+.PHONY: codegen-test
+codegen-test: build/coolc build/coolc-x86_64
+	python3 tools/native/codegen.py
+
 native-kernel: build/Kernel.BIN
 
 # Rebuild the seed from the current compiler sources: the old seed compiles
@@ -251,6 +258,10 @@ kernel-rebuild-test: build/kernel.Image build/BootStub.BIN build/ShellPrelude.co
 text-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/text-test.py $<
 
+.PHONY: input-limits-test
+input-limits-test: build/kernel.Image coolvm
+	python3 tools/input-limits-test.py
+
 # Hangul 2-beolsik input from the window's keyboard (os/Kernel/Ime.cool).
 ime-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/ime-test.py $<
@@ -270,7 +281,7 @@ cmdline-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test logos-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool

@@ -1773,7 +1773,7 @@ div_normal:
                 if (rpn->raw_type == BRT_F64) {
                     code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_fmulReg(MFR(cctrl, into_reg), next->res.reg, next2->res.reg));
                 } else {
-                    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_umullX(MIR(cctrl, into_reg), next->res.reg, next2->res.reg));
+                    code_off = AIWNIOS_ADD_CODE(bin, code_off, ARM_mulRegX(MIR(cctrl, into_reg), next->res.reg, next2->res.reg));
                 }
                 if (rpn->res.mode != MD_REG && rpn->res.mode != MD_NULL) {
                     tmp.raw_type = rpn->raw_type;
@@ -2934,7 +2934,7 @@ signed_cmp:
             break;
         case BIC_MUL_EQ:
             if (ICArgN(rpn, 1)->raw_type == BRT_U64i) {
-                code_off = __SexyAssignOp(cctrl, rpn, &ARM_umullX, NULL, &ARM_fmulReg,
+                code_off = __SexyAssignOp(cctrl, rpn, &ARM_mulRegX, NULL, &ARM_fmulReg,
                                           bin, code_off);
                 ;
             } else
@@ -3659,7 +3659,7 @@ fin:
 //
 U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
                  CBHeapCtrl *heap) {
-    I64 code_off, run, idx, cnt = 0, cnt2, final_size;
+    I64 code_off, run, idx, cnt = 0, cnt2, final_size, node_cnt = 0;
     I64 min_ln = 0, max_ln = 0, statics_sz = 0;
     U8 *bin = NULL, *obin;
     CBCodeMisc *misc;
@@ -3671,6 +3671,7 @@ U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
     I64 old_wnp = BSetWriteNP(0); //INTEGRATION: W^X toggle
     for (r = cctrl->code_ctrl->ir_code->next; r != cctrl->code_ctrl->ir_code;
             r = r->base.next) {
+        node_cnt++;
         if (r->ic_line) {
             if (!min_ln)
                 min_ln = r->ic_line;
@@ -3726,7 +3727,9 @@ U8 *OptPassFinal(CBCmpCtrl *cctrl, I64 *res_sz, U8 **dbg_info,
             }
             // C: A_MALLOC(code_off + 1024, heap ? heap : Fs->code_heap). BCodeAlloc
             // (BackendRT.cool) returns executable memory; write through MemGetWritePtr.
-            obin = BCodeAlloc(code_off + 1024, heap);
+            // Resolved addresses can require additional MOVK instructions in
+            // pass two. Reserve per IR node rather than a fixed 1 KiB.
+            obin = BCodeAlloc(code_off + 1024 + 32 * node_cnt, heap);
             bin = MemGetWritePtr(
                                  obin); // For OpenBSD sexy mapping(see mem.c or ask nroot)
             code_off = 0;

@@ -37,12 +37,19 @@ def disk_path(source):
     raise ValueError(source)
 
 def warm_run(paths, entry):
-    # The shell editor accepts 512 bytes per line; installed module paths can
-    # exceed that. Assemble the input list in short shell statements.
-    script = kv.typed("U8 warm_inputs[4096]; warm_inputs[0] = 0;")
-    assert len(paths) < 4096
-    for start in range(0, len(paths), 300):
-        script += kv.typed('StrCat(warm_inputs, "' + paths[start:start + 300] + '");')
+    # GetLine holds 511 bytes, but the guest key queue holds only 255 events.
+    # Keep each statement + acknowledgement below that and wait for execution
+    # before sending the next one (including after the compiler package loads).
+    if len(paths) >= 4096:
+        raise ValueError("Warm input paths exceed the guest buffer")
+    lines = ["U8 warm_inputs[4096]; warm_inputs[0] = 0;"]
+    lines += ['StrCat(warm_inputs, "' + paths[start:start + 160] + '");'
+              for start in range(0, len(paths), 160)]
+    script = ""
+    for index, line in enumerate(lines):
+        line += ' Print("WARM-INPUT-%d\\n", ' + str(index) + ');'
+        assert len(line) < 255
+        script += kv.typed(line) + "wait WARM-INPUT-" + str(index) + "\n"
     return script + kv.typed('WarmRun(warm_inputs, "' + entry + '");')
 
 def stdin_test(OUT):
@@ -66,11 +73,14 @@ def stdin_test(OUT):
                       "delay 3000\n" + kv.typed("Zed") + "wait Hello, Zed!\ndelay 200\nquit\n")
     log = OUT / "Stdin.log"
     with log.open("wb") as stream:
-        subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
+        proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
             "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
-            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT).wait()
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
+        proc.wait()
     output = log.read_text(errors="replace")
+    assert proc.returncode == 0, output[-6000:]
+    assert "ERROR:" not in output and "input FIFO overflow" not in output, output[-6000:]
     assert "Hello, Zed!" in output.split("WarmRun(", 1)[-1], output[-6000:]
     print("warm-kernel: Stdin (greet reads the terminal) PASS", flush=True)
 
@@ -98,11 +108,13 @@ def portable_test(OUT, name):
         "wait " + marker + "\ndelay 200\nquit\n")
     log = OUT / (name + "Run.log")
     with log.open("wb") as stream:
-        subprocess.run(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
+        proc = subprocess.run(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
             "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
     output = log.read_text(errors="replace")
+    assert proc.returncode == 0, output[-6000:]
+    assert "ERROR:" not in output and "input FIFO overflow" not in output, output[-6000:]
     assert marker in output.splitlines(), output[-6000:]
     print("warm-kernel: " + name + " WarmRun PASS", flush=True)
 
@@ -121,11 +133,14 @@ def fmt_test(OUT):
                       kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT OK C:/Fmt.warm\ndelay 300\nquit\n")
     log = OUT / "Fmt.log"
     with log.open("wb") as stream:
-        subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
+        proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
             "--headless", "--no-logos", "--cpus", "2", "--mem", "1024", "--timeout", "35",
             "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
-            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT).wait()
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
+        proc.wait()
     output = log.read_text(errors="replace")
+    assert proc.returncode == 0, output[-6000:]
+    assert "ERROR:" not in output and "input FIFO overflow" not in output, output[-6000:]
     assert "WARMFMT CHANGED C:/Fmt.warm" in output and "WARMFMT OK C:/Fmt.warm" in output, output[-6000:]
     assert "ERROR" not in output.split("WLOAD1", 1)[-1], output[-6000:]
     data = run("mtype", "-i", disk, "::Fmt.warm").stdout
@@ -203,6 +218,8 @@ def main():
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
             proc.wait()
         output = log.read_text(errors="replace")
+        assert proc.returncode == 0, output[-6000:]
+        assert "input FIFO overflow" not in output, output[-6000:]
         assert marker in output.splitlines(), output[-6000:]
         shell_output = output.split('> #include', 1)[-1]
         errors = [line for line in shell_output.splitlines() if "ERROR:" in line]
