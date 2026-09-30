@@ -12,6 +12,9 @@ native-host: build/coolc
 build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $(filter %.c %.S,$^) -o $@
 
+build/coolc-x86_64: coolc/Host/native.c coolc/Host/x86.S coolc/Host/x86-native.h coolc/Host/warm_net.h | build
+	clang -arch x86_64 -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer coolc/Host/native.c coolc/Host/x86.S -o $@
+
 native-kernel: build/Kernel.BIN
 
 # Rebuild the seed from the current compiler sources: the old seed compiles

@@ -16,6 +16,17 @@
 #include <time.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <stdarg.h>
+
+#ifdef __x86_64__
+void *NativeHostGS, *NativeCoolGS;
+extern uint64_t NativeX86Call(uintptr_t fn, size_t argc, const uint64_t *args);
+extern void NativeX86Bridge(void);
+static uintptr_t x86_missing_import(size_t id);
+#define pthread_jit_write_protect_np(x) ((void)(x))
+#undef MAP_JIT
+#define MAP_JIT 0
+#endif
 
 enum {
     IET_REL_I8 = 4, IET_IMM_U8, IET_REL_I16, IET_IMM_U16,
@@ -59,13 +70,17 @@ static void NativeJitCommit(void *code, const void *scratch, int64_t size);
 extern int64_t AIWNIOS_SetJmp(int64_t *context);
 extern void AIWNIOS_LongJmp(int64_t *context);
 static Module *active_module;
+static void host_backtrace(void);
 
 static void host_unimplemented(uint64_t id) {
     fprintf(stderr, "coolc-host: native runtime import %s was called\n",
             active_module->imports[id].name);
     exit(1);
 }
-static void host_exit(int64_t status) { exit((int)status); }
+static void host_exit(int64_t status) {
+    if (status && getenv("COOLC_DEBUG")) host_backtrace();
+    exit((int)status);
+}
 
 // Standalone program services. Compiler invocations do not expose their argv.
 static int native_argc;
@@ -102,6 +117,10 @@ static void host_err_puts(const char *text) {
 }
 
 static uintptr_t import_trap(size_t id) {
+#ifdef __x86_64__
+    // A missing import must fail without executing an ARM diagnostic thunk.
+    return x86_missing_import(id);
+#else
     if (id > UINT16_MAX)
         fail("too many native imports for diagnostic trap");
     uint8_t *code = NativeJitAlloc(24);
@@ -115,6 +134,7 @@ static uintptr_t import_trap(size_t id) {
     memcpy(code + sizeof(insn), &target, sizeof(target));
     __builtin___clear_cache((char *)code, (char *)code + 20);
     return (uintptr_t)code;
+#endif
 }
 
 typedef struct { uint64_t size, magic; } Allocation;
@@ -225,7 +245,11 @@ static int64_t host_stricmp(const char *a, const char *b) {
 }
 static uintptr_t host_caller(int64_t depth) {
     uintptr_t frame;
+#ifdef __x86_64__
+    __asm__ volatile("movq %%rbp, %0" : "=r"(frame));
+#else
     __asm__ volatile("mov %0, x29" : "=r"(frame));
+#endif
     if (depth < 0 || depth > 32) return 0;
     for (int64_t i = 0; i <= depth; i++) {
         if (!frame || (frame & 15)) return 0;
@@ -362,9 +386,16 @@ static HostDirEntry *host_dir_list(const char *path, int64_t *error) {
 }
 
 #include "warm_net.h"
+#ifdef __x86_64__
+#include "x86-native.h"
+#endif
 
 static void register_host_symbols(Module *m) {
+#ifdef __x86_64__
+#define HOST(name, fn) add_symbol(m, name, x86_host_import(name, (uintptr_t)(fn)))
+#else
 #define HOST(name, fn) add_symbol(m, name, (uintptr_t)(fn))
+#endif
     HOST("NativeJitAlloc", NativeJitAlloc);
     HOST("NativeJitCommit", NativeJitCommit);
     HOST("MAlloc", host_alloc);
@@ -509,6 +540,24 @@ static uintptr_t find_symbol(const Module *m, const char *name) {
         if (!strcmp(m->symbols[i - 1].name, name))
             return m->symbols[i - 1].value;
     return 0;
+}
+
+static void host_backtrace(void) {
+    uintptr_t *frame = __builtin_frame_address(0);
+    for (size_t depth = 0; frame && depth < 32; depth++) {
+        uintptr_t address = frame[1];
+        const Symbol *best = NULL;
+        for (size_t i = 0; i < active_module->symbol_count; i++) {
+            const Symbol *s = &active_module->symbols[i];
+            if (s->value >= (uintptr_t)active_module->code && s->value <= address &&
+                (!best || s->value > best->value)) best = s;
+        }
+        if (best && address < (uintptr_t)active_module->code + active_module->code_size)
+            fprintf(stderr, "  %s+0x%" PRIxPTR "\n", best->name, address - best->value);
+        uintptr_t *next = (uintptr_t *)frame[0];
+        if (next <= frame || (uintptr_t)next - (uintptr_t)frame > 1024 * 1024) break;
+        frame = next;
+    }
 }
 
 static void add_import(Module *m, uint8_t type, uint32_t at,
@@ -680,6 +729,12 @@ static Module load_bin(const char *path) {
     memcpy(memory, staging, (size_t)length);
     free(staging);
     fclose(input);
+    uint32_t signature = u32(memory + 4);
+#ifdef __x86_64__
+    if (signature != UINT32_C(0x363858)) fail("BIN architecture mismatch: x86_64 runner requires X86");
+#else
+    if (signature != UINT32_C(0x4d5241)) fail("BIN architecture mismatch: arm64 runner requires ARM");
+#endif
     uint64_t patch = u64(memory + 16);
     if (patch < 32 || patch >= (uint64_t)length)
         fail("invalid BIN patch table offset");
@@ -697,12 +752,36 @@ static Module load_bin(const char *path) {
 static void run_initializers(const Module *m) {
     for (size_t i = 0; i < m->main_count; i++) {
         void (*initialization)(void) = (void (*)(void))(m->code + m->mains[i]);
+#ifdef __x86_64__
+        NativeX86Call((uintptr_t)initialization, 0, NULL);
+#else
         initialization();
+#endif
     }
 }
 
 int main(int argc, char **argv) {
+#ifdef __x86_64__
+    // Darwin's GS base points to the TSD array, whose slot zero contains
+    // pthread_self(), rather than to the pthread structure itself. Locate
+    // that array using a temporary key instead of hard-coding its offset.
+    pthread_key_t key;
+    if (pthread_key_create(&key, NULL) || pthread_setspecific(key, &NativeHostGS))
+        fail("could not identify the host GS base");
+    uintptr_t self = (uintptr_t)pthread_self();
+    uintptr_t *words = (uintptr_t *)self;
+    for (size_t i = key; i < sizeof(*pthread_self()) / sizeof(uintptr_t); i++) {
+        if (words[i] == (uintptr_t)&NativeHostGS && words[i - key] == self) {
+            NativeHostGS = words + i - key;
+            break;
+        }
+    }
+    pthread_key_delete(key);
+    if (!NativeHostGS) fail("could not locate the host TSD array");
+    NativeCoolGS = native_tls;
+#else
     __asm__ volatile("mov x28, %0" : : "r"(native_tls));
+#endif
     if (argc >= 3 && !strcmp(argv[1], "--run")) {
         native_argc = argc - 2;
         native_argv = argv + 2;
@@ -741,16 +820,27 @@ int main(int argc, char **argv) {
         if (!address)
             fail("probe symbol is not exported");
         int64_t (*probe)(void) = (int64_t (*)(void))address;
+#ifdef __x86_64__
+        printf("%" PRId64 "\n", (int64_t)NativeX86Call((uintptr_t)probe, 0, NULL));
+#else
         printf("%" PRId64 "\n", probe());
+#endif
         return 0;
     }
     // coolc [--compat] <entry.cool> <out.BIN> | coolc --vet [--compat] <entry.cool>
-    int vet = 0, compat = 0;
+    int vet = 0, compat = 0, target = 0;
     while (argc > 1 && argv[1][0] == '-' && argv[1][1] == '-') {
         if (!strcmp(argv[1], "--vet"))
             vet = 1;
         else if (!strcmp(argv[1], "--compat"))
             compat = 1; // the strict errors are only vet findings (.HC/.HH files always)
+        else if (!strcmp(argv[1], "--target")) {
+            if (argc < 3)
+                fail("--target requires arm64 or x86_64");
+            if (!strcmp(argv[2], "x86_64")) target = 1;
+            else if (strcmp(argv[2], "arm64")) fail("unknown target (expected arm64 or x86_64)");
+            argc--; argv++;
+        }
         else
             fail("usage: coolc [--compat] <entry.cool> <out.BIN> | coolc --vet [--compat] <entry.cool>");
         argc--;
@@ -764,7 +854,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "coolc-host: code base %p\n", (void *)module.code);
     active_module = &module;
     run_initializers(&module);
-    const char *symbol = vet ? (compat ? "CoolCVetCompat" : "CoolCVet") : (compat ? "CoolCMainCompat" : "CoolCMain");
+    const char *symbol = vet ? (compat ? "CoolCVetCompat" : "CoolCVet") : target ? "CoolCMainTarget" : (compat ? "CoolCMainCompat" : "CoolCMain");
     uintptr_t address = find_symbol(&module, symbol);
     if (!address) {
         fprintf(stderr, "coolc: compiler BIN does not export %s\n", symbol);
@@ -787,6 +877,11 @@ int main(int argc, char **argv) {
         int64_t (*check)(const char *) = (int64_t (*)(const char *))address;
         check(entry);
         return 0; // findings are reported, not failed on
+    }
+    if (target) {
+        int64_t (*compile_target)(const char *, const char *, int64_t, int64_t) =
+            (int64_t (*)(const char *, const char *, int64_t, int64_t))address;
+        return (int)compile_target(entry, output, target, compat);
     }
     int64_t (*compile)(const char *, const char *) =
         (int64_t (*)(const char *, const char *))address;

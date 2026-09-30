@@ -2007,6 +2007,7 @@ U0 ParserTest() {
 U8 *LexExpression2Bin(CCmpCtrl *cc, I64 *_type = NULL)
 {//Compile cc expression. You call the code.
     U8 *res;
+    Bool saved_target;
     CHashFun *old_fun;
     Bool old_trace = LBtr(&cc->flags, CCf_PASS_TRACE_PRESENT);
     COCPush(cc);
@@ -2017,7 +2018,10 @@ U8 *LexExpression2Bin(CCmpCtrl *cc, I64 *_type = NULL)
         if (_type) *_type = AssignRawTypeToNode(cc->coc.coc_head.next)->raw_type;
         old_fun = cc->htc.fun; //Changed by nroot
         cc->htc.fun = NULL;
+        saved_target = BTargetX86;
+        BTargetX86 = FALSE; // Evaluated immediately by the ARM host, even in AOT parsing.
         res = AiwniosCompile(cc);
+        BTargetX86 = saved_target;
         cc->htc.fun = old_fun;
     } else
         res = NULL;
