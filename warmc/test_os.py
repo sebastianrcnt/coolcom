@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/warm-os'
 OUT.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
-for name in ['Files']:
+for name in ['Files', 'Streams']:
     code = OUT / (name + '.cool')
     binary = OUT / (name + '.BIN')
     subprocess.run([ROOT / 'build/warmc', 'compile', *os_modules(ROOT),
@@ -17,6 +17,6 @@ for name in ['Files']:
     p = subprocess.run([ROOT / 'build/coolc', code, binary], check=True, capture_output=True, env=env)
     assert b'Errs:0 ' in p.stdout, p.stdout
     p = subprocess.run([ROOT / 'build/coolc', '--run', binary], cwd=OUT, check=True, capture_output=True)
-    assert p.stdout == b'WARM FILE PASS\n', p.stdout
+    assert p.stdout == ('WARM ' + ('FILE' if name == 'Files' else name.upper()) + ' PASS\n').encode(), p.stdout
     assert (OUT / 'Warm.txt').read_bytes() == b'Warm FAT32\n'
 print('OS: host file Result/Bytes round trip PASS')

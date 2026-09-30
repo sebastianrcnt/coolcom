@@ -1,0 +1,22 @@
+U8 *WoRootPath() {U8 *s = MAlloc(4); MemCpy(s, "C:/", 4); return s;}
+I64 WoStat(U8 *path) {
+    I64 r = -1; CDirEntry de;
+    try {if (!FileFind(path, &de)) r = 0; else if (de.attr & RS_ATTR_DIR) r = 2; else r = 1;}
+    catch {Fs->catch_except = TRUE;} return r;
+}
+WoEntry * WoListPath(U8 *path, I64 *error) {
+    CDirEntry *list = 0, *de; WoEntry * head = 0, *entry; U8 *mask = 0; Bool silent = Silent;
+    *error = -1;
+    try {
+        mask = MStrPrint("%s/*", path); Silent(TRUE); list = FilesFind(mask, 0); Silent(silent);
+        for (de = list; de; de = de->next) {
+            if (StrCmp(de->name, ".") && StrCmp(de->name, "..")) {
+                entry = CAlloc(sizeof(WoEntry)); entry->name = StrNew(de->name);
+                entry->size = de->size; entry->is_dir = (de->attr & RS_ATTR_DIR) != 0;
+                entry->modified = CDate2Unix(de->datetime); entry->next = head; head = entry;
+            }
+        }
+        *error = 0;
+    } catch {Fs->catch_except = TRUE; Silent(silent);}
+    Free(mask); DirTreeDel(list); return head;
+}

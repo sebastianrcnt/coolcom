@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <unistd.h>
 
 enum {
@@ -321,6 +322,30 @@ static int64_t host_io_error(void) {
 static int64_t host_file_delete(const char *path) {return remove(path) ? host_io_error() : 0;}
 static int64_t host_file_mkdir(const char *path) {return mkdir(path, 0755) ? host_io_error() : 0;}
 
+// Snapshot layout matches WoEntry; every allocation uses the HolyC heap header.
+typedef struct HostDirEntry {struct HostDirEntry *next; char *name; int64_t size, is_dir, modified;} HostDirEntry;
+static HostDirEntry *host_dir_list(const char *path, int64_t *error) {
+    DIR *dir = opendir(path);
+    *error = dir ? 0 : host_io_error();
+    if (!dir) return NULL;
+    HostDirEntry *head = NULL;
+    struct dirent *entry;
+    while ((entry = readdir(dir))) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        char full[PATH_MAX];
+        int len = snprintf(full, sizeof(full), "%s/%s", path, entry->d_name);
+        struct stat st;
+        if (len < 0 || len >= (int)sizeof(full)) {*error = -12; break;}
+        if (lstat(full, &st)) {*error = host_io_error(); break;}
+        HostDirEntry *e = host_calloc(sizeof(*e), NULL);
+        e->name = host_strnew(entry->d_name, NULL);
+        e->size = st.st_size; e->is_dir = S_ISDIR(st.st_mode); e->modified = st.st_mtime;
+        e->next = head; head = e;
+    }
+    closedir(dir);
+    return head;
+}
+
 static void register_host_symbols(Module *m) {
 #define HOST(name, fn) add_symbol(m, name, (uintptr_t)(fn))
     HOST("NativeJitAlloc", NativeJitAlloc);
@@ -371,6 +396,7 @@ static void register_host_symbols(Module *m) {
     HOST("FileRead", host_file_read);
     HOST("FileWrite", host_file_write);
     HOST("NativeFileStat", host_file_stat);
+    HOST("NativeDirList", host_dir_list);
     HOST("NativeFileDelete", host_file_delete);
     HOST("NativeFileMkdir", host_file_mkdir);
     HOST("C2HFloor", floor);

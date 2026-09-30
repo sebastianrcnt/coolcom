@@ -152,7 +152,7 @@ build/disk.img: | build
 WARMSRC := $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
 build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
 	./warmc/build.sh
-build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool
+build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool
 	python3 warmc/package_kernel.py
 
 # The network stack's packet parser (docs/networking.md), compiled to os/Kernel/NetParse.cool.

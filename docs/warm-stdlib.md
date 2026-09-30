@@ -1,7 +1,7 @@
 # The Warm standard library: design
 
 Status: reviewed; the decisions are at the end. Stage 0 is implemented (see
-[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stage 1 is implemented; stages 2-5 are pending. The
+[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-2 are implemented; stages 3-5 are pending. The
 options and recommendations (**Rec.**) below are kept as the reasoning behind the decisions.
 
 Warm today has two unrelated libraries: `Standard.*` from Austral (String, Buffer, Box,
@@ -272,3 +272,12 @@ and `OSKernel.cool`. `Warm.Kernel` has been removed; `OS.Raw` keeps the scalar
 internal binding while the public API migrates. CoolOS extensions are in
 `OS.CoolOS.*`. The upstream `Standard.IO` compatibility module uses the same
 terminal boundary. Tests include host round trips and kernel shell examples.
+
+Stage 2: `OS.Dir` owns directory handles and directory-entry snapshots. File APIs
+now take a borrowed `Dir` and a relative name. `Read` requires an existing file;
+`Write` truncates at open and persists at close; `Append` creates if missing and
+always writes at the end; `ReadWrite` reads an existing file. Seek beyond EOF
+zero-fills the gap on the next write. Stream snapshots survive closing their
+parent directory, and closing a stream releases it even when persistence fails.
+`OS.File.byteSize` queries `Bytes`; `size` queries `File`. Stream snapshots are
+limited to 256 MiB. Directory entries own names; close the iterator on early exit.

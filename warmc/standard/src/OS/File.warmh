@@ -1,15 +1,24 @@
+import OS.Dir (Dir);
 import OS.Error (IoError);
 module OS.File is
     type Filesystem: Linear;
     type Bytes: Linear;
     function acquireFilesystem(root: &![RootCapability]): Filesystem;
     function releaseFilesystem(fs: Filesystem): Unit;
-    function readAll(fs: &![Filesystem], name: Span[Nat8]): Result[Bytes, IoError];
-    function writeAll(fs: &![Filesystem], name: Span[Nat8], data: Span[Nat8]): Result[Unit, IoError];
-    function exists(fs: &![Filesystem], name: Span[Nat8]): Result[Bool, IoError];
-    function delete(fs: &![Filesystem], name: Span[Nat8]): Result[Unit, IoError];
-    function makeDir(fs: &![Filesystem], name: Span[Nat8]): Result[Unit, IoError];
-    function size(bytes: &[Bytes]): Index;
+    function readAll(dir: &[Dir], name: Span[Nat8]): Result[Bytes, IoError];
+    function writeAll(dir: &[Dir], name: Span[Nat8], data: Span[Nat8]): Result[Unit, IoError];
+    function exists(dir: &[Dir], name: Span[Nat8]): Result[Bool, IoError];
+    function delete(dir: &[Dir], name: Span[Nat8]): Result[Unit, IoError];
+    function makeDir(dir: &[Dir], name: Span[Nat8]): Result[Unit, IoError];
+    function byteSize(bytes: &[Bytes]): Index;
     function nth(bytes: &[Bytes], index: Index): Nat8;
     function closeBytes(bytes: Bytes): Unit;
+    type File: Linear;
+    union Mode: Free is case Read; case Write; case Append; case ReadWrite; end;
+    function open(dir: &[Dir], name: Span[Nat8], mode: Mode): Result[File, IoError];
+    function read(file: &![File], into: Span![Nat8]): Result[Index, IoError];
+    function write(file: &![File], data: Span[Nat8]): Result[Index, IoError];
+    function seek(file: &![File], position: Index): Result[Unit, IoError];
+    function size(file: &[File]): Index;
+    function close(file: File): Result[Unit, IoError];
 end module.

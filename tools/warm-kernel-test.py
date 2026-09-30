@@ -51,6 +51,36 @@ def stdin_test(OUT):
     assert "Hello, Zed!" in output.split("WarmRun(", 1)[-1], output[-6000:]
     print("warm-kernel: Stdin (greet reads the terminal) PASS", flush=True)
 
+def portable_test(OUT, name):
+    """Compile and run a portable file program with WarmRun itself."""
+    disk = OUT / (name + "-run.img")
+    with disk.open("wb") as f:
+        f.truncate(64 * 1024 * 1024)
+    run("mformat", "-i", disk, "-F", "::")
+    files = [(ROOT / "build/warmcool/Kernel.cool", "Warm.cool")]
+    for pair in os_modules(ROOT):
+        if "/Raw." in pair or "/CoolOS/" in pair or "/Terminal." in pair:
+            continue
+        files += [(Path(path), Path(path).name) for path in pair.split(",")]
+    files += [(ROOT / ("warmc/examples/kernel/" + name + ".warm"), name + ".warm")]
+    for src, target in files:
+        run("mcopy", "-o", "-i", disk, src, "::" + target)
+    modules = ",".join("C:/" + target for _, target in files[1:])
+    marker = "WARM " + name.upper() + " PASS"
+    script = OUT / (name + "Run.input")
+    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm.cool"') +
+        kv.typed('WarmRun("' + modules + '", "' + name + ':main");') +
+        "wait " + marker + "\ndelay 200\nquit\n")
+    log = OUT / (name + "Run.log")
+    with log.open("wb") as stream:
+        subprocess.run(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
+            "--headless", "--cpus", "2", "--mem", "1024", "--timeout", "35",
+            "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
+            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
+    output = log.read_text(errors="replace")
+    assert marker in output.splitlines(), output[-6000:]
+    print("warm-kernel: " + name + " WarmRun PASS", flush=True)
+
 def fmt_test(OUT):
     """WarmFmt in the shell formats a messy file on the disk (the fixture of warmc/test_fmt.py)."""
     disk = OUT / "fmt-disk.img"
@@ -79,7 +109,7 @@ def fmt_test(OUT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="", choices=("", "Files", "Screen", "Key", "Errors", "Stdin", "Fmt"))
+    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Screen", "Key", "Errors", "Stdin", "Fmt"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:
@@ -110,8 +140,10 @@ def main():
     with disk.open("wb") as f:
         f.truncate(64 * 1024 * 1024)
     run("mformat", "-i", disk, "-F", "::")
-    run("mcopy", "-o", "-i", disk, ROOT / "warmc/OSKernel.cool", "::Adapter.cool")
-    for name in ("Files", "Screen", "Key", "Errors"):
+    adapter = OUT / "Adapter.cool"
+    adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool"]))
+    run("mcopy", "-o", "-i", disk, adapter, "::Adapter.cool")
+    for name in ("Files", "Streams", "Screen", "Key", "Errors"):
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
@@ -153,6 +185,8 @@ def main():
             assert all(row[10*3:50*3] == bytes([0, 255, 0]) * 40
                        for row in rows[400:420]), "Warm framebuffer rectangle missing"
         print("warm-kernel: " + name + " PASS", flush=True)
+    if not args.filter or args.filter == "Streams":
+        portable_test(OUT, "Streams")
     if not args.filter or args.filter == "Stdin":
         stdin_test(OUT)
     if not args.filter or args.filter == "Fmt":

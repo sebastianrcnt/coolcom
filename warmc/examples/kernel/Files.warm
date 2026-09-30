@@ -1,20 +1,23 @@
-import OS.File (Filesystem, Bytes, acquireFilesystem, releaseFilesystem, readAll, writeAll, size, nth, closeBytes);
+import OS.File (Filesystem, Bytes, acquireFilesystem, releaseFilesystem, readAll, writeAll, byteSize, nth, closeBytes);
 import OS.Error (IoError);
+import OS.Dir (Dir, openRoot, closeDir);
 module body Files is
     function main(initial: RootCapability): ExitCode is
         var root: RootCapability := initial;
         var fs: Filesystem := acquireFilesystem(&!root);
+        let dir: Dir := openRoot(&!fs);
         var success: Bool := false;
-        case writeAll(&!fs, "Warm.txt", "Warm FAT32\n") of
+        case writeAll(&dir, "Warm.txt", "Warm FAT32\n") of
             when Ok(value as u: Unit) do
-                case readAll(&!fs, "Warm.txt") of
+                case readAll(&dir, "Warm.txt") of
                     when Ok(value as buffer: Bytes) do
-                        success := size(&buffer) = 11 and nth(&buffer, 0) = 87;
+                        success := byteSize(&buffer) = 11 and nth(&buffer, 0) = 87;
                         closeBytes(buffer);
                     when Err(error as e: IoError) do skip;
                 end case;
             when Err(error as e: IoError) do skip;
         end case;
+        closeDir(dir);
         releaseFilesystem(fs); surrenderRoot(root);
         if success then printLn("WARM FILE PASS"); return ExitSuccess(); else return ExitFailure(); end if;
     end;

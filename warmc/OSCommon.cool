@@ -1,0 +1,125 @@
+// Shared directory and buffered-stream implementation, used by both OS backends.
+// A stream owns a snapshot and its absolute path, so it survives closing its Dir.
+class WoDir {U8 *path; I64 error; I64 rights;};
+class WoEntry {WoEntry *next; U8 *name; I64 size; I64 is_dir; I64 modified;};
+class WoEntries {WoEntry *head; I64 error;};
+class WoFile {U8 *path; WkBuffer * bytes; I64 position; I64 mode; I64 dirty; I64 error;};
+
+extern U8 *WoRootPath();
+extern I64 WoStat(U8 *path);
+extern WoEntry *WoListPath(U8 *path, I64 *error);
+
+Bool WoName(U8 *s, U64 n) {
+    U64 i, start = 0;
+    if (!n || n > 4096 || s[0] == '/' || s[n - 1] == '/') return 0;
+    for (i = 0; i <= n; i++) {
+        if (i < n && (!s[i] || s[i] == ':' || s[i] == '\\' || s[i] == '*' || s[i] == '?')) return 0;
+        if (i == n || s[i] == '/') {
+            if (i == start || (i - start == 1 && s[start] == '.') || (i - start == 2 && s[start] == '.' && s[start + 1] == '.')) return 0;
+            start = i + 1;
+        }
+    }
+    return 1;
+}
+U8 *WoPath(WoDir *d, U8 *name, U64 n) {
+    if (!d || d->error || !WoName(name, n)) return 0;
+    I64 len = StrLen(d->path);
+    U8 *s = MAlloc(len + n + 2);
+    if (!s) return 0;
+    MemCpy(s, d->path, len);
+    if (len && s[len - 1] != '/') s[len++] = '/';
+    MemCpy(s + len, name, n); s[len + n] = 0; return s;
+}
+WoDir *WoRoot() {
+    WoDir *d = CAlloc(sizeof(WoDir)); if (!d) return 0;
+    d->path = WoRootPath(); d->rights = 15;
+    if (!d->path) d->error = -1; return d;
+}
+WoDir *WoOpenDir(WoDir *parent, U8 *name, U64 n) {
+    WoDir *d = CAlloc(sizeof(WoDir)); if (!d) return 0;
+    d->path = WoPath(parent, name, n);
+    if (!d->path) d->error = -12;
+    else {I64 stat = WoStat(d->path); if (stat != 2) {if (stat < 0) d->error = stat; else d->error = -10;}}
+    if (parent) d->rights = parent->rights; return d;
+}
+I64 WoDirError(WoDir *d) {if (!d) return -1; return d->error;}
+U0 WoCloseDir(WoDir *d) {if (d) {Free(d->path); Free(d);}}
+WkBuffer * WoReadAll(WoDir *d, U8 *name, U64 n) {
+    U8 *path = WoPath(d, name, n); WkBuffer * b;
+    if (!path) {b = WkNew(); if (b) b->error = -12; return b;}
+    b = WkreadFile(path, StrLen(path)); Free(path); return b;
+}
+I64 WoWriteAll(WoDir *d, U8 *name, U64 n, U8 *data, U64 count) {
+    U8 *path = WoPath(d, name, n); if (!path) return -12;
+    I64 r = WkwriteFile(path, StrLen(path), data, count); Free(path); return r;
+}
+I64 WoExists(WoDir *d, U8 *name, U64 n) {
+    U8 *path = WoPath(d, name, n); if (!path) return -12;
+    I64 r = WoStat(path); Free(path); return r;
+}
+I64 WoDelete(WoDir *d, U8 *name, U64 n) {
+    U8 *path = WoPath(d, name, n); if (!path) return -12;
+    I64 r = Wkdelete(path, StrLen(path)); Free(path); return r;
+}
+I64 WoMkdir(WoDir *d, U8 *name, U64 n) {
+    U8 *path = WoPath(d, name, n); if (!path) return -12;
+    I64 r = Wkmkdir(path, StrLen(path)); Free(path); return r;
+}
+WoEntries *WoList(WoDir *d) {
+    WoEntries *e = CAlloc(sizeof(WoEntries)); if (!e) return 0;
+    if (!d || d->error) {e->error = -16; return e;}
+    e->head = WoListPath(d->path, &e->error); return e;
+}
+I64 WoEntriesError(WoEntries *e) {if (!e) return -1; return e->error;}
+I64 WoEntriesHas(WoEntries *e) {return e && e->head;}
+I64 WoEntrySize(WoEntries *e) {return e->head->size;}
+I64 WoEntryIsDir(WoEntries *e) {return e->head->is_dir;}
+I64 WoEntryModified(WoEntries *e) {return e->head->modified;}
+I64 WoEntryNameSize(WoEntries *e) {return StrLen(e->head->name);}
+I64 WoEntryNameByte(WoEntries *e, I64 i) {return e->head->name[i];}
+U0 WoEntryPop(WoEntries *e) {WoEntry *head = e->head; e->head = head->next; Free(head->name); Free(head);}
+U0 WoCloseEntries(WoEntries *e) {if (e) {while (e->head) WoEntryPop(e); Free(e);}}
+WoFile *WoOpenFile(WoDir *d, U8 *name, U64 n, I64 mode) {
+    WoFile *f = CAlloc(sizeof(WoFile)); if (!f) return 0;
+    f->path = WoPath(d, name, n); f->mode = mode;
+    if (!f->path || mode < 0 || mode > 3) {f->error = -12; return f;}
+    if (mode == 1) {f->bytes = Wkallocate(0); f->dirty = 1;}
+    else {
+        f->bytes = WkreadFile(f->path, StrLen(f->path));
+        if (mode == 2 && WkbufferError(f->bytes) == -10) {Wkclose(f->bytes); f->bytes = Wkallocate(0); f->dirty = 1;}
+    }
+    f->error = WkbufferError(f->bytes);
+    if (mode == 2 && !f->error) f->position = f->bytes->size; return f;
+}
+I64 WoFileError(WoFile *f) {if (!f) return -1; return f->error;}
+I64 WoFileRead(WoFile *f, U8 *into, U64 n) {
+    if (!f) return -16; if (f->error) return f->error;
+    if (f->mode == 1) return -13;
+    I64 count = 0; if (f->position < f->bytes->size) count = f->bytes->size - f->position;
+    if (n < count) count = n;
+    if (count) MemCpy(into, f->bytes->data + f->position, count);
+    f->position += count; return count;
+}
+I64 WoFileWrite(WoFile *f, U8 *data, U64 n) {
+    if (!f) return -16; if (f->error) return f->error;
+    if (f->mode == 0) return -13;
+    if (f->mode == 2) f->position = f->bytes->size;
+    if (n > 0x10000000 || f->position > 0x10000000 - n) return -14;
+    I64 end = f->position + n;
+    if (end > f->bytes->size) {
+        U8 *p = CAlloc(end + 1); if (!p) return -14;
+        MemCpy(p, f->bytes->data, f->bytes->size); Free(f->bytes->data); f->bytes->data = p; f->bytes->size = end;
+    }
+    if (n) MemCpy(f->bytes->data + f->position, data, n);
+    f->position = end; f->dirty = 1; return n;
+}
+I64 WoFileSeek(WoFile *f, I64 position) {
+    if (!f) return -16; if (f->error) return f->error;
+    if (position < 0 || position > 0x10000000) return -12; f->position = position; return 0;
+}
+I64 WoFileSize(WoFile *f) {if (!f) return -16; if (f->error) return f->error; return f->bytes->size;}
+I64 WoFileClose(WoFile *f) {
+    if (!f) return -16; I64 r = f->error;
+    if (!r && f->dirty) r = WkwriteFile(f->path, StrLen(f->path), f->bytes->data, f->bytes->size);
+    Wkclose(f->bytes); Free(f->path); Free(f); return r;
+}
