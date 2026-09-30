@@ -77,7 +77,7 @@ def scenario(name, tmux, size):
     script += vim.finish(f'SIZE {size} 80', 300)  # the last statement's output
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',
+        subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--no-logos', '--cpus', '2', '--mem', '1024',
                         '--timeout', '16', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
                         '--disk', str(disk), '--screenshot', str(d / 'screen.png'), sys.argv[1]],
                        stdout=out, stderr=subprocess.STDOUT)

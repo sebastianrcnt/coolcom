@@ -32,6 +32,7 @@ class CFb
     U8 *scanout;             // optional FDT scanout-y register (pixel rows)
     I64 scan_top;            // offset last committed to the display
     Bool gpu;                // virtio-gpu resource backing, with a mirrored second screen
+    Bool logos;              // the GPU draws the cells (Logos.cool): no back buffer, no pixels here
     I64 top;                 // first visible pixel row in the text-area ring
     CVTerm *vt;               // the grid shown (vt_screen)
     CVtCell *drawn;           // per cell, what the back buffer shows (all bytes 0xFF: unknown)
@@ -51,6 +52,11 @@ class CFb
 };
 
 CFb fb;
+
+extern Bool LogosInit(I64 w, I64 h, I64 cols, I64 rows);
+extern Bool LogosGrid(I64 w, I64 h, I64 cols, I64 rows);
+extern U0 LogosFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells);
+extern U0 LogosFill(I64 x, I64 y, I64 w, I64 h, I64 rgb);
 
 #define FB_BLK_SHIFT  25   // level-2 block: 32 MiB
 #define FB_PAGE_SHIFT 14   // 16 KiB granule
@@ -311,6 +317,10 @@ U0 FbRenderLocked()
     }
     fb.pending = FALSE;
     SpinUnlock(&v->lock);
+    if (fb.logos) {
+        LogosFrame(all, scrolled, cx, cy, cw / FONT_CELL_W);
+        return;
+    }
 
     // Remove the cursor at its old physical location before rotating scanout.
     if (fb.scanout && fb.cur_w) {
@@ -519,6 +529,11 @@ U0 FbFillRect(I64 x, I64 y, I64 w, I64 h, I64 color)
         return;
     daif = FbRenderLock;
     FbRenderLocked;
+    if (fb.logos) {
+        LogosFill(x, y, w, h, color);
+        FbRenderUnlock(daif);
+        return;
+    }
     FbBackFill(x, y, w, h, color);
     FbCopyRect(x, y, w, h);
     if (fb.cur_w && y < (fb.cur_y + 1) * FONT_CELL_H && y + h > fb.cur_y * FONT_CELL_H &&
@@ -638,8 +653,12 @@ Bool FbInit()
     if (fb.cols < 1 || fb.rows < 2 || fb.stride < fb.w * 4)
         return FALSE;
     n = fb.cols * fb.rows;
-    fb.back = CAlloc(fb.stride * fb.h * (1 + fb.gpu));
-    if (fb.gpu) {
+    fb.logos = fb.gpu && LogosInit(fb.w, fb.h, fb.cols, fb.rows);
+    if (fb.logos)
+        fb.back = CAlloc(16);  // no pixels here; fb.base marks the console as present
+    else
+        fb.back = CAlloc(fb.stride * fb.h * (1 + fb.gpu));
+    if (fb.gpu && !fb.logos) {
         gpu.resource = GpuResource(fb.back, fb.w, fb.h * 2, 2);
         if (!gpu.resource) return FALSE;
     }
@@ -673,12 +692,37 @@ Bool FbInit()
     return TRUE;
 }
 
+Bool FbResizeLogos(I64 w, I64 h)
+{//The same for Logos: new cell arrays; the device gets the new grid with the first frame.
+    CVtCell *drawn, *snap;
+    U8 *snap_row;
+    I64 *x0, *x1, daif, cols = w / FONT_CELL_W, rows = h / FONT_CELL_H, i;
+    drawn = MAlloc(cols * rows * sizeof(CVtCell)); snap = MAlloc(cols * rows * sizeof(CVtCell));
+    snap_row = CAlloc(rows); x0 = MAlloc(rows * sizeof(I64)); x1 = CAlloc(rows * sizeof(I64));
+    if (!drawn || !snap || !snap_row || !x0 || !x1) {
+        Free(drawn); Free(snap); Free(snap_row); Free(x0); Free(x1);
+        return FALSE;
+    }
+    daif = FbRenderLock;
+    Free(fb.drawn); Free(fb.snap); Free(fb.snap_row); Free(fb.x0); Free(fb.x1);
+    fb.w = w; fb.h = h; fb.stride = w * 4; fb.cols = cols; fb.rows = rows;
+    fb.drawn = drawn; fb.snap = snap; fb.snap_row = snap_row; fb.x0 = x0; fb.x1 = x1;
+    for (i = 0; i < rows; i++) fb.x0[i] = cols;
+    VtResize(fb.vt, cols, rows);
+    fb.redraw_all = TRUE; fb.pending = TRUE;
+    FbRenderLocked;  // LogosGrid with the new size, then every row
+    FbRenderUnlock(daif);
+    return TRUE;
+}
+
 Bool FbResize(I64 w, I64 h)
 {//Prepare a replacement, then switch the grid and renderer under its lock.
     CFb next;
     I64 daif, n, i, id, old_id;
     U8 *old_back;
     if (!fb.gpu || (w == fb.w && h == fb.h)) return FALSE;
+    if (fb.logos)
+        return FbResizeLogos(w, h);
     MemSet(&next, 0, sizeof(CFb));
     next.w = w; next.h = h; next.stride = w * 4;
     next.cols = w / FONT_CELL_W; next.rows = h / FONT_CELL_H;

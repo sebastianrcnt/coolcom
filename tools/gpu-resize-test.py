@@ -24,7 +24,7 @@ def run(name, script, width, height, disk=None):
     d = OUT / name
     d.mkdir(exist_ok=True)
     (d / 'input.txt').write_text(script)
-    args = ['build/coolvm', '--headless', '--cpus', '2', '--mem', '1024', '--timeout', '35',
+    args = ['build/coolvm', '--headless', '--no-logos', '--cpus', '2', '--mem', '1024', '--timeout', '35',
             '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
             '--screenshot', str(d / 'screen.png')]
     if disk:

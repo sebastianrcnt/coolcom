@@ -217,7 +217,7 @@ def screen_test(d, disk, kernel):
     script.write_text(BOOT + typed('Vim("C:/Screen.cool");\n') + wait('NORMAL C:/Screen.cool') +
                       typed('jj9lv') + wait('VISUAL C:/Screen.cool') + typed('l') + finish('\x1b[3;18H'))
     with (d / 'screen.log').open('wb') as out:
-        proc = subprocess.run(['gtimeout', '-k', '2', '12', 'build/coolvm', '--headless',
+        proc = subprocess.run(['gtimeout', '-k', '2', '12', 'build/coolvm', '--headless', '--no-logos',
                         '--cpus', '2', '--mem', '1024', '--width', '640', '--height', '480',
                         '--timeout', '7', '--screenshot', str(d / 'screen.png'),
                         '--input-script', str(script), '--disk', str(disk), kernel],
@@ -300,7 +300,7 @@ def main():
     copy(path, path.name)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        proc = subprocess.Popen(['gtimeout', '-k', '2', '65', 'build/coolvm', '--headless',
+        proc = subprocess.Popen(['gtimeout', '-k', '2', '65', 'build/coolvm', '--headless', '--no-logos',
                                '--cpus', '2', '--mem', '1024', '--width', '640', '--height', '480', '--timeout', '60',
                                '--input-script', str(d / 'input.txt'), '--disk', str(disk),
                                sys.argv[1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

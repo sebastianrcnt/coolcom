@@ -45,6 +45,7 @@
 #include "Blk.cool"
 #include "Gpu.cool"
 #include "Fb.cool"
+#include "Logos.cool"
 #include "Key.cool"
 #include "Ime.cool"
 #include "Input.cool"

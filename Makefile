@@ -353,7 +353,7 @@ lua-kernel-test: build/lua/LuaRuntime.cool build/kernel.Image coolvm
 .PHONY: gpu-pixel-test
 gpu-pixel-test: build/kernel.Image coolvm
 	python3 tools/scroll-bench.py gpu-pixel-ref $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-gpu --expect-gpu 0
-	python3 tools/scroll-bench.py gpu-pixel $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --expect-gpu 1 --compare gpu-pixel-ref
+	python3 tools/scroll-bench.py gpu-pixel $< --repeat 1 --lines 160 --size 640x480 --size 1031x775 --extra=--no-logos --expect-gpu 1 --compare gpu-pixel-ref
 
 .PHONY: gpu-resize-test
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
