@@ -5,7 +5,7 @@ coolvm, our Hypervisor.framework VM. The QEMU serial console is also tested; the
 are marked **VM-only** and collected in [the last section](#vm-only). Deeper documents: [M1 kernel
 notes](../os/Kernel/M1.md), [C: programs](../os/Disk/README.md), [Vim](../os/Disk/Vim.md),
 [Tmux](terminal-multiplexer.md), [networking](networking.md), [FAT32 tools](fat32-tools.md),
-[rebuilding the kernel in the OS](kernel-rebuild.md), [Warm standard library design](warm-stdlib.md), [x86-64 design](x86-64.md), [shell JIT linking](shell-jit-linking.md), [Logos](logos.md), [coolvm](../tools/coolvm/README.md).
+[rebuilding the kernel in the OS](kernel-rebuild.md), [Warm standard library design](warm-stdlib.md), [x86-64 design](x86-64.md), [shell JIT linking](shell-jit-linking.md), [Logos](logos.md), [Venus/Vulkan design](venus.md), [coolvm](../tools/coolvm/README.md).
 
 ## Build and run
 
