@@ -268,8 +268,8 @@ absolute paths, other drives, other hosts).
 ## Implementation notes
 
 Stage 1: portable `OS.Terminal`, `OS.File`, and `OS.Error` use `OSHost.cool`
-and `OSKernel.cool`. `Warm.Kernel` has been removed; `OS.Raw` keeps the scalar
-internal binding while the public API migrates. CoolOS extensions are in
+and `OSKernel.cool`. `Warm.Kernel` has been removed. The temporary `OS.Raw`
+module was removed in stage 5 after migrating its final users. CoolOS extensions are in
 `OS.CoolOS.*`. The upstream `Standard.IO` compatibility module uses the same
 terminal boundary. Tests include host round trips and kernel shell examples.
 
@@ -289,3 +289,37 @@ a `Datagram` with the sender and source port, including empty datagrams.
 `listenPort`/`udpPort` report dynamically assigned ports. Host sockets use
 nonblocking descriptors with polling; the kernel keeps its existing network
 stack and translates its errors. The kernel UDP payload limit is 1486 bytes.
+
+Stage 4: `OS.Task` moves one typed argument to a named function and returns an
+owned `Task[R]`. Intrinsic structural `Sendable` excludes root capabilities,
+non-static borrows and raw pointers; audited owning Buffer/Box storage remains
+transferable. `join` returns the result or `Aborted`/`Killed`; detach requires
+a Free result. Task abort affects that task only. macOS uses pthreads; CoolOS
+uses kernel tasks and a completion hook for Kill. `spawnOn` is supported on
+CoolOS; macOS returns Other for explicit core affinity. Allocation/startup
+failure and abnormal termination cannot destruct arbitrary moved linear values
+without a destructor protocol: their nested owned resources may leak.
+`OS.Time` exposes UTC calendar conversion and wall/monotonic clocks; `OS.Random`
+is an explicitly seeded, non-cryptographic xorshift64 generator.
+
+Stage 5: `OS.Dir.Rights` is a runtime read/write/create/delete set; consuming
+`narrow` intersects rights and cannot restore them. Child directories inherit
+rights. Each file/listing/mutation/stream-open checks the required rights.
+Names must be relative without dot components, drive prefixes or backslashes.
+The host walks path components with openat/O_NOFOLLOW and performs IO through
+the resulting parent descriptor, including stream persistence, to prevent
+symlink traversal and check/open races. CoolOS FAT32 has no symlinks.
+
+`OS.Net.narrowNet(network, allowed: Span[Endpoint])` intersects IPv4 address/port
+allow lists. Empty policies deny every endpoint; unrestricted Network comes only
+from RootCapability. Restricted policies permit outbound TCP and ephemeral UDP,
+and deny listeners/explicit local UDP binds. Each socket retains its own policy
+snapshot after the Network is released. UDP send and receive check the peer;
+rejected datagrams are consumed without copying their bytes into caller storage.
+Resolution is checked against the allowed IP addresses.
+
+Framebuffer operations now require Output and return Result; CoolOS key polling
+requires Input and returns typed Key values. No public combined terminal token
+remains. Host/kernel capability fixtures cover attenuation, traversal, rights,
+network allow-list intersection and denied datagrams; host probes include final
+and intermediate symlinks whose outside target remains untouched.

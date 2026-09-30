@@ -39,11 +39,52 @@ Bool WVisibleInstance(CWNode *from, CWNode *inst)
     for (c = from->first; c; c = c->next) if (WEq(c->tag, "import") && WEq(c->name, im->name)) return TRUE;
     return FALSE;
 }
+Bool WSendableMarker(CWNode *tc) {
+    CWNode *m = WDeclModule(tc);
+    return tc && WEq(tc->name, "Sendable") && m && WEq(m->name, "Austral.Pervasive");
+}
+Bool WSendable(CWUnit *u, CWNode *t, CWNode *tc, CWNode *seen, I64 depth) {
+    CWNode *d, *m, *p, *c, *env, *node;
+    if (!t || depth > 64) return FALSE;
+    if (WTypeVar(t)) {
+        for (c = t->resolved->first; c; c = c->next) if (WEq(c->role, "constraint") && c->resolved == tc) return TRUE;
+        return FALSE;
+    }
+    d = WCanon(t->resolved); m = WDeclModule(d);
+    if (m && WEq(m->name, "Austral.Pervasive") && WEq(d->name, "RootCapability")) return FALSE;
+    if (m && WEq(m->name, "Austral.Memory") && (WEq(WCanon(t->resolved)->name, "Pointer") || WEq(WCanon(t->resolved)->name, "Address"))) return FALSE;
+    if (WEq(t->name, "&") || WEq(t->name, "&!") || WEq(t->name, "Span") || WEq(t->name, "Span!"))
+        return t->first && t->first->next && WEq(t->first->next->name, "Static") && WSendable(u, t->first, tc, seen, depth + 1);
+    if (WEq(t->name, "Fn")) return TRUE; // Top-level code pointers capture nothing.
+    for (node = seen; node; node = node->next) if (WTypeEq(node->ty, t)) return TRUE;
+    node = WNode(u, "seen", NULL); node->ty = t; node->next = seen; seen = node;
+    // These two audited owning containers encapsulate their storage pointer.
+    // Their element type still has to be Sendable; raw pointers never qualify.
+    if (m && ((WEq(m->name, "Standard.Buffer") && WEq(d->name, "Buffer")) ||
+              (WEq(m->name, "Standard.Box") && WEq(d->name, "Box"))))
+        return t->first && WSendable(u, t->first, tc, seen, depth + 1);
+    for (c = t->first; c; c = c->next) if (!WSendable(u, c, tc, seen, depth + 1)) return FALSE;
+    if (d && (WEq(d->tag, "record") || WEq(d->tag, "union"))) {
+        env = WTypeParameters(u, t);
+        for (p = d->first; p; p = p->next) {
+            if (WEq(p->role, "slot") && !WSendable(u, WSubst(u, WChild(p, "type"), env), tc, seen, depth + 1)) return FALSE;
+            if (WEq(p->role, "constructor")) for (c = p->first; c; c = c->next)
+                    if (WEq(c->role, "slot") && !WSendable(u, WSubst(u, WChild(c, "type"), env), tc, seen, depth + 1)) return FALSE;
+        }
+    }
+    return WUniverseOf(t) != 3 || WEq(t->name, "Static");
+}
+Bool WCodeScalar(CWNode *t) {
+    CWNode *m = WDeclModule(WCanon(t->resolved));
+    if (WNumber(t) || WEq(t->name, "Bool") || WEq(t->name, "Unit") || WEq(t->name, "Fn")) return TRUE;
+    return m && WEq(m->name, "Austral.Memory") && (WEq(WCanon(t->resolved)->name, "Pointer") || WEq(WCanon(t->resolved)->name, "Address"));
+}
 CWNode *WFindInstance(CWUnit *u, CWNode *from, CWNode *tc, CWNode *ty)
 {
     CWNode *m, *d, *env, *p, *c, *actual, *result = NULL;
     Bool valid;
     if (!ty || u->instance_depth >= 64) return NULL;
+    if (WSendableMarker(tc)) {if (WSendable(u, ty, tc, NULL, 0)) return tc; return NULL;}
     if (WTypeVar(ty)) {
         for (c = ty->resolved->first; c; c = c->next) if (WEq(c->role, "constraint") && c->resolved == tc) return ty->resolved;
         return NULL;
@@ -69,7 +110,7 @@ U0 WConstraints(CWUnit *u, CWNode *from, CWNode *decl, CWNode *bindings, CWToken
     for (p = decl->first; p && !u->error_kind; p = p->next) if (WEq(p->role, "type-parameter")) {
             ty = WBinding(bindings, p);
             if (ty) for (c = p->first; c; c = c->next) if (WEq(c->role, "constraint")) {
-                        if (!WFindInstance(u, from, c->resolved, ty)) WFail(u, at, "Type Error", "Typeclass constraint is not satisfied");
+                        if (!WFindInstance(u, from, c->resolved, ty)) WFail(u, at, "Type Error", WConcat(u, WConcat(u, c->name, " constraint is not satisfied by "), WTypeDisplay(u, ty)));
                     }
         }
 }
@@ -134,6 +175,14 @@ CWNode *WCall(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
             arg->resolved = p;
             if (!*arg->name) {arg = arg->next; while (arg && !WEq(arg->role, "argument")) arg = arg->next;}
         }
+    if (WEq(d->name, "codeAddress") && WDeclModule(d) && WEq(WDeclModule(d)->name, "Austral.Memory")) {
+        CWNode *home = WDeclModule(fun), *unsafe;
+        for (unsafe = home->first; unsafe; unsafe = unsafe->next) if (WEq(unsafe->tag, "pragma") && WEq(unsafe->name, "Unsafe_Module")) break;
+        if (!unsafe) WFail(u, n->token, "Type Error", "codeAddress requires Unsafe_Module");
+        arg = WChild(n, "argument"); ty = WChild(arg, "value")->ty;
+        if (!ty || !WEq(ty->name, "Fn")) WFail(u, n->token, "Type Error", "codeAddress requires a function value");
+        else for (p = ty->first; p; p = p->next) if (!WCodeScalar(p)) WFail(u, n->token, "Type Error", "codeAddress requires scalar parameters and result");
+    }
     WConstraints(u, fun, d, bindings, n->token);
     n->pair = bindings;
     if (WEq(d->tag, "method") && d->owner && WEq(d->owner->tag, "typeclass")) {
@@ -457,6 +506,7 @@ U0 WInstanceContract(CWUnit *u, CWNode *d)
     CWNode *tc = d->resolved, *tp, *arg = WChild(d, "argument"), *p, *q, *v, *b, *env, *m, *other, *home, *foreign;
     I64 count;
     if (!tc || u->error_kind) return;
+    if (WSendableMarker(tc)) {WFail(u, d->token, "Declaration Error", "Sendable instances are compiler-derived"); return;}
     tp = WChild(tc, "type-parameter"); v = WNode(u, "type", tp->token); v->name = tp->name; v->resolved = tp;
     env = WScope(u, NULL);
     if (!WMatch(u, v, arg, env)) WFail(u, d->token, "Type Error", "Instance argument has the wrong universe");

@@ -1,0 +1,70 @@
+// The completion slot is parent-owned. A task never holds a pointer into a parent's stack.
+class WtJob {WtJob *next; U8 *entry; U8 *data; U8 *result; U8 *message; CTask *task; U8 *compiler_task; I64 tls[2]; I64 state; I64 detached; I64 started;};
+WtJob *wt_jobs;
+I64 wt_lock;
+U0 WtUnlink(WtJob *j) {
+    WtJob **p = &wt_jobs;
+    while (*p && *p != j) p = &(*p)->next;
+    if (*p) *p = j->next;
+}
+U0 WtFree(WtJob *j) {Free(j->result - 8); Free(j->compiler_task); Free(j);}
+U0 WtKilled(U8 *data) {
+    WtJob *j = data; I64 daif = SpinLockIrq(&wt_lock), detached = j->detached;
+    j->state = 3;
+    if (!j->started) Free(j->data - 8);
+    if (detached) WtUnlink(j);
+    SpinUnlockIrq(&wt_lock, daif);
+    if (detached) WtFree(j);
+}
+U0 WtEntry(U8 *data) {
+    WtJob *j = data;
+    ArchX28Set(j->tls);
+    QueInit(&Fs->next_except);
+    I64 daif = SpinLockIrq(&wt_lock);
+    j->task = WarmTaskCurrent(); j->started = 1; SpinUnlockIrq(&wt_lock, daif);
+    I64 state = 1;
+    U8 (*entry)(U8 *arg); entry = j->entry;
+    try {entry(j->data);} catch {WarmTaskCurrent()->catch_except = TRUE; Fs->catch_except = TRUE; state = 2;}
+    // Clear the exit hook before publishing completion; join may now free the job.
+    daif = SpinLockIrq(&wt_lock);
+    j->task->exit_hook = NULL; j->task->exit_data = NULL;
+    j->state = state; I64 detached = j->detached;
+    if (detached) WtUnlink(j);
+    SpinUnlockIrq(&wt_lock, daif);
+    if (detached) WtFree(j);
+}
+I64 WtSpawn(U8 *entry, U8 *data, U8 *result, I64 core) {
+    if (core < -1 || core >= mp_cnt) return -12;
+    WtJob *j = CAlloc(sizeof(WtJob)); if (!j) return -1;
+    j->compiler_task = MAlloc(MSize(Fs));
+    if (!j->compiler_task) {Free(j); return -1;}
+    MemCpy(j->compiler_task, Fs, MSize(Fs)); j->tls[0] = j->compiler_task;
+    j->entry = entry; j->data = data; j->result = result; j->message = "Task aborted";
+    I64 daif = SpinLockIrq(&wt_lock); j->next = wt_jobs; wt_jobs = j; SpinUnlockIrq(&wt_lock, daif);
+    CTask *task = NULL;
+    try {task = Spawn(&WtEntry, j, "WarmTask", core, NULL, TASK_STACK_SIZE, &WtKilled, j);}
+    catch {WarmTaskCurrent()->catch_except = TRUE; Fs->catch_except = TRUE;}
+    if (!task) {daif = SpinLockIrq(&wt_lock); WtUnlink(j); SpinUnlockIrq(&wt_lock, daif); Free(j->compiler_task); Free(j); return -1;}
+    return j(I64);
+}
+I64 WtWait(WtJob *j) {
+    I64 state, daif;
+    while (TRUE) {daif = SpinLockIrq(&wt_lock); state = j->state; SpinUnlockIrq(&wt_lock, daif); if (state) return state; Sleep(1);}
+}
+U8 *WtResult(WtJob *j) {return j->result;}
+U8 *WtMessage(WtJob *j) {return j->message;}
+I64 WtMessageLength(WtJob *j) {return StrLen(j->message);}
+U0 WtRelease(WtJob *j) {I64 daif = SpinLockIrq(&wt_lock); WtUnlink(j); SpinUnlockIrq(&wt_lock, daif); WtFree(j);}
+U0 WtDetach(WtJob *j) {
+    I64 daif = SpinLockIrq(&wt_lock), done = j->state; j->detached = 1;
+    if (done) WtUnlink(j); SpinUnlockIrq(&wt_lock, daif); if (done) WtFree(j);
+}
+I64 WtAbort(U8 *message) {
+    I64 daif = SpinLockIrq(&wt_lock); WtJob *j;
+    for (j = wt_jobs; j; j = j->next) if (j->task == WarmTaskCurrent()) {j->message = message; break;}
+    SpinUnlockIrq(&wt_lock, daif); if (j) throw('WarmTask'); return 0;
+}
+I64 WtUnixNow() {return UnixNow;}
+I64 WtMonotonicMs() {return __GetTicks;}
+I64 WtSleep(I64 ms) {if (ms < 0) return -12; return Wksleep(ms);}
+I64 WtYield() {return WkyieldTask();}

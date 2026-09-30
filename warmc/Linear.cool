@@ -137,6 +137,7 @@ U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow)
     } else if (WEq(n->tag, "discard")) {
         v = WChild(n, "value"); WLinearExpr(u, v, flow); WReleaseTemps(flow);
         if (WMustConsume(v->ty)) WFail(u, n->token, "Type Error", "Discarded expression has a linear type");
+        if (WReturn(n)) flow->returned = TRUE; // abort has no continuation to consume resources on.
     } else if (WEq(n->tag, "if")) {
         WLinearExpr(u, WChild(n, "condition"), flow); WReleaseTemps(flow);
         a = WFork(u, flow); other = WFork(u, flow); WLinearStmt(u, WChild(n, "then"), a);

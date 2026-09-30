@@ -72,4 +72,6 @@ module Austral.Memory is
 
     generic [T: Type, R: Region]
     function spanWriteToPointer(sp: Span![T, R]): Pointer[T];
+    generic [F: Free]
+    function codeAddress(functionValue: F): Address[Nat8];
 end module.

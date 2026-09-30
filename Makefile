@@ -9,7 +9,7 @@ all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
 native-host: build/coolc
-build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/except.S | build
+build/coolc: coolc/Host/native.c coolc/Host/warm_net.h coolc/Host/warm_task.h coolc/Host/warm_file.h coolc/Host/except.S | build
 	clang -std=c11 -Wall -Wextra -Werror -O2 -fno-omit-frame-pointer -ffixed-x28 $(filter %.c %.S,$^) -o $@
 
 build/coolc-x86_64: coolc/Host/native.c coolc/Host/x86.S coolc/Host/x86-native.h coolc/Host/warm_net.h | build
@@ -155,7 +155,7 @@ build/disk.img: | build
 WARMSRC := coolc/LibC/LibC.cool $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
 build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
 	./warmc/build.sh
-build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool warmc/OSNetCommon.cool warmc/OSNetKernel.cool
+build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool warmc/OSNetCommon.cool warmc/OSNetKernel.cool warmc/OSTaskKernel.cool
 	python3 warmc/package_kernel.py
 
 # The network stack's packet parser (docs/networking.md), compiled to os/Kernel/NetParse.cool.
@@ -181,6 +181,7 @@ warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 	python3 warmc/test_cli.py
 	python3 warmc/test_standard.py
 	python3 warmc/test_os.py
+	python3 warmc/test_tasks.py
 	python3 warmc/test_fmt.py
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
@@ -329,16 +330,16 @@ warm-kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool build/war
 SCROLL_TEST_SIZES := --size 1024x768 --size 3200x2000 --size 1031x775 --size 1024x775
 .PHONY: scroll-test
 scroll-test: build/kernel.Image coolvm
-	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-fb-scroll --expect-scanout 0
-	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --expect-scanout 1 --compare scroll-test-ref
+	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
+	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
 # Lua is translated source, outside the compiler seed and kernel image.
-LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool
+LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool coolc/LibC/LibC.cool
 build/lua/generated.stamp: $(LUASRC) build/ShellPrelude.coolh
 	python3 tools/lua-support/build.py
 	touch $@
-build/lua/Lua.cool build/lua/LuaRuntime.cool: build/lua/generated.stamp
+build/lua/Lua.cool build/lua/LuaRuntime.cool build/lua/Host.cool: build/lua/generated.stamp
 	@test -f $@ || { rm -f build/lua/generated.stamp; $(MAKE) build/lua/generated.stamp; }
-build/lua/Lua.BIN: build/lua/Lua.cool coolc/LibC/LibC.cool build/coolc coolc/seed/Compiler.BIN
+build/lua/Lua.BIN: build/lua/Lua.cool build/lua/Host.cool coolc/LibC/LibC.cool build/coolc coolc/seed/Compiler.BIN
 	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc build/lua/Host.cool $@ > build/lua/compile.log 2>&1
 	tail -1 build/lua/compile.log
 
@@ -347,8 +348,6 @@ lua-test: build/lua/Lua.BIN
 	python3 tools/lua-support/test.py
 lua-kernel-test: build/lua/LuaRuntime.cool build/kernel.Image coolvm
 	python3 tools/lua-support/kernel_test.py
-	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
-	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
 
 .PHONY: gpu-pixel-test
 gpu-pixel-test: build/kernel.Image coolvm

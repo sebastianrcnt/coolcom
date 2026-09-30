@@ -22,6 +22,7 @@ module OS.Terminal is
     function write(output: &![Output], text: Span[Nat8]): Result[Unit, IoError];
     function writeLine(output: &![Output], text: Span[Nat8]): Result[Unit, IoError];
     function readLine(input: &![Input]): Result[String, IoError];
+    function decodeKey(event: Int64): Result[Key, IoError];
     function readKey(input: &![Input]): Result[Key, IoError];
     function setColor(output: &![Output], foreground: Color, background: Color): Result[Unit, IoError];
 end module.

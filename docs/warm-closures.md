@@ -168,3 +168,13 @@ reference-counted); cancellation (a token the parent can set and the task polls)
 one typed argument), a built-in `Sendable` marker, no `RootCapability` in tasks, `detach`
 only for `Free` results, an abort fails only its task (`join` returns `Err(Aborted)`), and
 an explicit capture list for later closures.
+
+## Stage 4 implementation
+
+Implemented using the decisions above: intrinsic structural Sendable, scalar-only
+unsafe codeAddress, typed job trampoline, pthread and CoolOS task adapters.
+Completion/result storage is released once across join/detach races; Kill uses
+a kernel task exit hook. The job shell is freed before invoking the worker.
+Abnormal termination and startup failure can leak nested resources owned by the
+moved argument; no generic destructor protocol exists yet. Explicit CPU affinity
+is available on CoolOS and returns IoError.Other on macOS.

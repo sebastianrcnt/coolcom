@@ -303,7 +303,7 @@ resource to close. Inputs borrow spans. `OS.CoolOS.Framebuffer`, `OS.CoolOS.Key`
 and `OS.CoolOS.Task` hold the platform-specific operations.
 
 The scalar ABI is implemented in `OSHost.cool` and `OSKernel.cool`, packaged
-with the corresponding runtime. `OS.Raw` is the internal legacy binding;
+with the corresponding runtime. The temporary `OS.Raw` binding has been removed;
 new applications should use the typed modules. The former `Warm.Kernel` is
 removed. `Standard.IO` remains a compatibility facade over the same terminal
 boundary for upstream library tests.
@@ -318,3 +318,21 @@ Whole-file reads own a detached snapshot; release it exactly once using
 Warm validates required typeclass methods, duplicate methods, and instance method
 signatures. It also corrects the built-in `Printable` instances, fixes Buffer growth after
 `realloc`, and checks `Index` and `ByteSize` literals against the host `size_t` width.
+
+`OS.Task` provides `spawn`/`spawnOn`, `join`, `detach`, `sleep` and `yield`.
+A worker is a named `Fn[T,R]`; arguments and results must satisfy intrinsic
+`Sendable`. RootCapability, non-static borrows and raw pointers cannot cross
+the task boundary. `detach` requires a Free result. `join` reports child abort
+and external kill as `Aborted` and `Killed`. `OS.Time` provides UTC time and
+monotonic milliseconds; `OS.Random.seeded` creates a deterministic xorshift64 RNG.
+
+`OS.Dir.narrow(dir, Rights(...))` consumes a directory and intersects its
+read/write/create/delete rights; `readOnly()` and `allRights()` construct common
+sets. Child handles retain the same restrictions. Paths are relative and cannot
+contain dot components, drive prefixes or symlinks on the host.
+`OS.Net.narrowNet(network, allowed: Span[Endpoint])` consumes Network and
+intersects its IPv4 address/port allow list. Restricted policies allow outbound
+TCP and ephemeral UDP; listeners and fixed local UDP ports require unrestricted
+authority. UDP sockets retain and enforce the policy independently.
+`OS.CoolOS.Framebuffer` takes Output; `OS.CoolOS.Key` takes Input and returns
+`Result[Bool,IoError]` or `Result[Option[Key],IoError]`.

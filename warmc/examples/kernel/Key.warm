@@ -1,18 +1,12 @@
-import OS.Raw (Terminal, acquireTerminal, releaseTerminal);
-import OS.CoolOS.Key (getKey);
+import OS.Terminal (Input, Key, Char, acquireInput, releaseInput, readKey);
+import OS.Error (IoError);
 module body Key is
     function main(initial: RootCapability): ExitCode is
-        var root: RootCapability := initial;
-        var term: Terminal := acquireTerminal(&!root);
-        printLn("WARM KEY READY");
-        let key: Int64 := getKey(&!term);
-        releaseTerminal(term);
-        surrenderRoot(root);
-        if key = 120 then
-            printLn("WARM KEY PASS");
-            return ExitSuccess();
-        else
-            return ExitFailure();
-        end if;
-    end;
+        var root: RootCapability := initial; var input: Input := acquireInput(&!root);
+        printLn("WARM KEY READY"); let event: Result[Key, IoError] := readKey(&!input);
+        releaseInput(input); surrenderRoot(root);
+        case event of when Ok(value as key: Key) do
+                case key of when Char(codepoint as cp: Nat32) do if cp = 120 then printLn("WARM KEY PASS"); return ExitSuccess(); end if; when Up do skip; when Down do skip; when Left do skip; when Right do skip; when Home do skip; when End do skip; when PageUp do skip; when PageDown do skip; when Insert do skip; when Delete do skip; when Enter do skip; when Escape do skip; when Backspace do skip; when Tab do skip; when Ctrl(codepoint as cp: Nat32) do skip; when FunctionKey(number as n: Nat8) do skip; when Unknown(event as n: Int64) do skip; end case;
+            when Err(error as e: IoError) do skip; end case;
+        return ExitFailure(); end;
 end module body.

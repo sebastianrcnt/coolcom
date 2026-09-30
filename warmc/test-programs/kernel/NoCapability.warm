@@ -1,4 +1,4 @@
-import OS.Raw (write);
+import OS.Terminal (write);
 module body NoCapability is
     function main(): ExitCode is
         write(0, "forbidden");

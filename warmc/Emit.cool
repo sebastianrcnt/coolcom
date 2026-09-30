@@ -3,7 +3,7 @@ class CWBuffer {U8 *data; I64 size, capacity;};
 class CWGen {
     CWUnit *unit;
     CWBuffer *types_text, *body;
-    CWNode *types, *names, *functions, *last_function, *current, *bindings;
+    CWNode *types, *names, *functions, *last_function, *current, *bindings, *address_dependencies;
     I64 serial; Bool native;
 };
 U0 WGPut(CWUnit *u, CWBuffer *b, U8 *text)
@@ -56,7 +56,7 @@ U0 WGLine(CWGen *g, U8 *text) {WGPut(g->unit, g->body, text); WGPut(g->unit, g->
 Bool WGMemoryPointer(CWNode *t)
 {
     CWNode *d = WCanon(t->resolved), *m = WDeclModule(d);
-    return (WEq(t->name, "Pointer") || WEq(t->name, "Address")) && m && WEq(m->name, "Austral.Memory");
+    return d && (WEq(d->name, "Pointer") || WEq(d->name, "Address")) && m && WEq(m->name, "Austral.Memory");
 }
 Bool WGAggregate(CWNode *t)
 {
@@ -581,14 +581,17 @@ U8 *WGExpr(CWGen *g, CWNode *n)
     if (WEq(n->tag, "variable")) {
         d = n->resolved;
         if (WEq(d->tag, "constant")) {
-            if (d->pair) d = d->pair;
+            if (!WChild(d, "value") && d->pair) d = d->pair;
             v = WChild(d, "value"); if (v) return WGExpr(g, v);
             WFail(u, n->token, "Unsupported Feature", "Constant has no implementation"); return "0";
         }
         if (WEq(d->tag, "function")) {
             CWNode *fe = WScope(u, NULL), *bp, *bound;
             if (n->pair) for (bp = n->pair->first; bp; bp = bp->next) {bound = WNode(u, "substitution", bp->token); bound->resolved = bp->resolved; bound->ty = WGConcrete(g, bp->ty); WAdd(fe, bound, "binding");}
-            CWNode *target = WGRequest(g, d, fe); return WGCat(u, "&", target->name);
+            CWNode *target = WGRequest(g, d, fe);
+            CWNode *edge = WNode(u, "address-dependency", n->token); edge->resolved = g->current; edge->pair = target;
+            edge->next = g->address_dependencies; g->address_dependencies = edge;
+            return WGCat(u, "&", target->name);
         }
         return WGName(g, d);
     }
@@ -649,7 +652,13 @@ U0 WGStmt(CWGen *g, CWNode *n)
         value = WGExpr(g, WChild(n, "value")); rt = WSubst(u, WChild(g->current->resolved, "result"), g->bindings);
         if (WGAggregate(rt)) {WGCopy(g, "*wr", value, rt); WGLine(g, "return;");}
         else WGLine(g, WG3(u, "return ", value, ";"));
-    } else if (WEq(n->tag, "discard")) WGExpr(g, WChild(n, "value"));
+    } else if (WEq(n->tag, "discard")) {
+        WGExpr(g, WChild(n, "value"));
+        if (WReturn(n)) {
+            rt = WSubst(u, WChild(g->current->resolved, "result"), g->bindings);
+            if (WGAggregate(rt)) WGLine(g, "return;"); else WGLine(g, "return 0;");
+        }
+    }
     else if (WEq(n->tag, "if")) {
         a = WGExpr(g, WChild(n, "condition")); WGLine(g, WG3(u, "if (", a, ") {")); WGStmt(g, WChild(n, "then"));
         c = WChild(n, "else"); if (c) {WGLine(g, "} else {"); WGStmt(g, c);} WGLine(g, "}");
@@ -748,6 +757,15 @@ U8 *WGPrefixRuntime(CWUnit *u, U8 *text)
     if (!b->data) return "";
     return b->data;
 }
+U0 WGWriteFunction(CWGen *g, CWBuffer *out, CWNode *f) {
+    CWNode *edge;
+    if (f->flags & 8192) return;
+    f->flags |= 8192;
+    // The kernel JIT requires a definition before taking a function's address.
+    for (edge = g->address_dependencies; edge; edge = edge->next)
+        if (edge->resolved == f && edge->pair != f) WGWriteFunction(g, out, edge->pair);
+    WGPut(g->unit, out, f->role);
+}
 U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
 {
     CWGen *g = WAlloc(u, sizeof(CWGen)); CWNode *m, *d, *f, *p, *ty, *entryfun = NULL;
@@ -803,7 +821,7 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
     if (u->error_kind) return NULL;
     WGPut(u, result, runtime); if (g->types_text->data) WGPut(u, result, g->types_text->data);
     if (protos->data) WGPut(u, result, protos->data);
-    for (f = g->functions; f; f = f->next) WGPut(u, result, f->role);
+    for (f = g->functions; f; f = f->next) WGWriteFunction(g, result, f);
     if (g->body->data) WGPut(u, result, g->body->data);
     if (u->prefix) return WGPrefixRuntime(u, result->data);
     return result->data;

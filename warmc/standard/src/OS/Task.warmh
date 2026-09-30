@@ -1,0 +1,18 @@
+import OS.Error (IoError);
+module OS.Task is
+    type Tasks: Linear;
+    type Task[R: Type(Sendable)]: Linear;
+    union TaskError: Free is case Aborted is message: Span[Nat8, Static]; case Killed; end;
+    function acquireTasks(root: &![RootCapability]): Tasks;
+    function releaseTasks(tasks: Tasks): Unit;
+    function sleep(tasks: &[Tasks], ms: Int64): Result[Unit, IoError];
+    function yield(tasks: &[Tasks]): Result[Unit, IoError];
+    generic [T: Type(Sendable), R: Type(Sendable)]
+    function spawn(tasks: &![Tasks], worker: Fn[T, R], arg: T): Result[Task[R], IoError];
+    generic [T: Type(Sendable), R: Type(Sendable)]
+    function spawnOn(tasks: &![Tasks], worker: Fn[T, R], arg: T, core: Index): Result[Task[R], IoError];
+    generic [R: Type(Sendable)]
+    function join(task: Task[R]): Result[R, TaskError];
+    generic [R: Free(Sendable)]
+    function detach(task: Task[R]): Unit;
+end module.

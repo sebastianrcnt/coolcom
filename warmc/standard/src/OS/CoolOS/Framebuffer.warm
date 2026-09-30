@@ -1,34 +1,25 @@
-import OS.Raw (Terminal, acquireTerminal, releaseTerminal, clear as rawclear, cursorHide as rawcursorHide, cursorShow as rawcursorShow, fillRect as rawfillRect, scroll as rawscroll, screenCodepoint as rawscreenCodepoint, alternate as rawalternate, ansiColor as rawansiColor);
+import OS.Terminal (Output);
+import OS.Error (IoError, status);
 module body OS.CoolOS.Framebuffer is
-    generic [R: Region]
-    function clear(cap: &![Terminal, R]): Int64 is
-        return rawclear(&~cap);
-    end;
-    generic [R: Region]
-    function cursorHide(cap: &![Terminal, R]): Int64 is
-        return rawcursorHide(&~cap);
-    end;
-    generic [R: Region]
-    function cursorShow(cap: &![Terminal, R]): Int64 is
-        return rawcursorShow(&~cap);
-    end;
-    generic [R: Region]
-    function fillRect(cap: &![Terminal, R], x: Int64, y: Int64, w: Int64, h: Int64, color: Int64): Int64 is
-        return rawfillRect(&~cap, x, y, w, h, color);
-    end;
-    generic [R: Region]
-    function scroll(cap: &![Terminal, R]): Int64 is
-        return rawscroll(&~cap);
-    end;
-    generic [R: Region]
-    function screenCodepoint(cap: &![Terminal, R], value: Int64): Int64 is
-        return rawscreenCodepoint(&~cap, value);
-    end;
-    generic [R: Region]
-    function alternate(cap: &![Terminal, R], on: Int64): Int64 is
-        return rawalternate(&~cap, on);
-    end;
-    function ansiColor(n: Int64): Int64 is
-        return rawansiColor(n);
-    end;
+    pragma Foreign_Import(External_Name => "Wkclear");
+    private function rawclear(): Int64 is end;
+    function clear(output: &![Output]): Result[Unit, IoError] is return status(rawclear()); end;
+    pragma Foreign_Import(External_Name => "WkcursorHide");
+    private function rawcursorHide(): Int64 is end;
+    function cursorHide(output: &![Output]): Result[Unit, IoError] is return status(rawcursorHide()); end;
+    pragma Foreign_Import(External_Name => "WkcursorShow");
+    private function rawcursorShow(): Int64 is end;
+    function cursorShow(output: &![Output]): Result[Unit, IoError] is return status(rawcursorShow()); end;
+    pragma Foreign_Import(External_Name => "WkfillRect");
+    private function rawfillRect(x: Int64, y: Int64, w: Int64, h: Int64, color: Int64): Int64 is end;
+    function fillRect(output: &![Output], x: Int64, y: Int64, w: Int64, h: Int64, color: Nat32): Result[Unit, IoError] is case toInt64(color) of when Some(value as n: Int64) do return status(rawfillRect(x, y, w, h, n)); when None do abort("Invalid codepoint/color"); end case; end;
+    pragma Foreign_Import(External_Name => "Wkscroll");
+    private function rawscroll(): Int64 is end;
+    function scroll(output: &![Output]): Result[Unit, IoError] is return status(rawscroll()); end;
+    pragma Foreign_Import(External_Name => "WkscreenCodepoint");
+    private function rawscreenCodepoint(value: Int64): Int64 is end;
+    function screenCodepoint(output: &![Output], value: Nat32): Result[Unit, IoError] is case toInt64(value) of when Some(value as n: Int64) do return status(rawscreenCodepoint(n)); when None do abort("Invalid codepoint/color"); end case; end;
+    pragma Foreign_Import(External_Name => "Wkalternate");
+    private function rawalternate(on: Int64): Int64 is end;
+    function alternate(output: &![Output], on: Bool): Result[Unit, IoError] is var flag: Int64 := 0; if on then flag := 1; end if; return status(rawalternate(flag)); end;
 end module body.

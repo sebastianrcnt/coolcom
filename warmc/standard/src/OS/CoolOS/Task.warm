@@ -1,11 +1,12 @@
-import OS.Raw (Tasks, acquireTasks, releaseTasks, taskReport as rawtaskReport, isSilent as rawisSilent);
+import OS.Task (Tasks);
+import OS.Error (IoError, status, fromCode);
 module body OS.CoolOS.Task is
-    generic [R: Region]
-    function taskReport(cap: &![Tasks, R]): Int64 is
-        return rawtaskReport(&~cap);
-    end;
-    generic [R: Region]
-    function isSilent(cap: &![Tasks, R]): Int64 is
-        return rawisSilent(&~cap);
-    end;
+    pragma Foreign_Import(External_Name => "WktaskReport");
+    private function rawReport(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkisSilent");
+    private function rawSilent(): Int64 is end;
+    function taskReport(cap: &[Tasks]): Result[Unit, IoError] is return status(rawReport()); end;
+    function isSilent(cap: &[Tasks]): Result[Bool, IoError] is
+        let code: Int64 := rawSilent(); if code < 0 then return Err(error => fromCode(code)); end if;
+        return Ok(value => code /= 0); end;
 end module body.

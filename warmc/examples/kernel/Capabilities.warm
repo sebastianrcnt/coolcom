@@ -1,0 +1,75 @@
+import OS.File (Filesystem, Bytes, File, Mode, Read, Write, Append, read as streamRead, acquireFilesystem, releaseFilesystem, readAll, writeAll, exists, delete, makeDir, open, close, closeBytes);
+import OS.Dir (Dir, Entries, Rights, openRoot, openDir, closeDir, entries, closeEntries, narrow, readOnly, allRights);
+import OS.Error (IoError, ioErrorCode);
+import OS.Net (Network, Address, Endpoint, TcpStream, TcpListener, UdpSocket, Datagram, acquireNetwork, releaseNetwork, narrowNet, resolve, listen, closeListener, connect, close as netClose, udpOpen, udpPort, udpSend, udpReceive, udpClose);
+import Standard.Buffer (Buffer, initialize, swapNth, getSpan, destroyFree);
+import Standard.String (String, makeString, getSpanMut, destroyString, nthByte);
+module body Capabilities is
+    private function expect(ok: Bool): Unit is if not ok then abort("Capability assertion failed"); end if; return nil; end;
+    private function command(r: Result[Unit, IoError]): Unit is case r of when Ok(value as u: Unit) do skip; when Err(error as e: IoError) do abort("Capability setup failed"); end case; return nil; end;
+    private function denied(r: Result[Unit, IoError]): Unit is case r of when Ok(value as u: Unit) do abort("Forbidden operation succeeded"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case; return nil; end;
+    private function invalid(dir: &[Dir], name: Span[Nat8]): Unit is case readAll(dir, name) of when Ok(value as b: Bytes) do closeBytes(b); abort("Escaped directory"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -12); end case; return nil; end;
+    private function linkDenied(dir: &[Dir], name: Span[Nat8]): Unit is case readAll(dir, name) of when Ok(value as b: Bytes) do closeBytes(b); abort("Followed symlink"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13 or ioErrorCode(e) = -10); end case; return nil; end;
+    private function files(rootDir: Dir): Unit is
+        let dir: Dir := rootDir;
+        case makeDir(&dir, "CapRoot") of when Ok(value as u: Unit) do skip; when Err(error as e: IoError) do expect(ioErrorCode(e) = -11); end case;
+        command(writeAll(&dir, "CapRoot/data", "safe"));
+        case openDir(&dir, "CapRoot") of when Err(error as e: IoError) do abort("Subtree open failed"); when Ok(value as child: Dir) do
+                let ro: Dir := narrow(narrow(child, readOnly()), allRights());
+                denied(writeAll(&ro, "data", "bad")); denied(writeAll(&ro, "new", "bad")); denied(delete(&ro, "data")); denied(makeDir(&ro, "newdir"));
+                case open(&ro, "data", Write()) of when Ok(value as f: File) do close(f); abort("Read-only stream writable"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+                invalid(&ro, "../Warm.txt"); invalid(&ro, "/Warm.txt"); invalid(&ro, "D:/Warm.txt"); invalid(&ro, "a/../../Warm.txt");
+                case readAll(&ro, "data") of when Ok(value as b: Bytes) do closeBytes(b); when Err(error as e: IoError) do abort("Read authority lost"); end case;
+                case entries(&ro) of when Ok(value as it: Entries) do closeEntries(it); when Err(error as e: IoError) do abort("Read-only listing failed"); end case;
+                linkDenied(&ro, "link"); linkDenied(&ro, "escape/secret"); closeDir(ro);
+        end case;
+        case openDir(&dir, "CapRoot") of when Err(error as e: IoError) do abort("Subtree reopen failed"); when Ok(value as child: Dir) do
+                let writer: Dir := narrow(child, Rights(read => false, write => true, create => false, delete => false));
+                command(writeAll(&writer, "data", "safe")); denied(writeAll(&writer, "link", "bad"));
+                case open(&writer, "link", Write()) of when Ok(value as f: File) do close(f); abort("Writable symlink opened"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case; denied(writeAll(&writer, "new", "bad"));
+                case readAll(&writer, "data") of when Ok(value as b: Bytes) do closeBytes(b); abort("Write-only read allowed"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+                case entries(&writer) of when Ok(value as it: Entries) do closeEntries(it); abort("Write-only listing allowed"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+                case open(&writer, "data", Append()) of
+                    when Err(error as e: IoError) do abort("Write-only append failed");
+                    when Ok(value as file: File) do
+                        var f: File := file; var into: String := makeString(1, 0);
+                        case streamRead(&!f, getSpanMut(&!into, 0, 0)) of
+                            when Ok(value as n: Index) do abort("Append stream leaked read authority");
+                            when Err(error as e: IoError) do expect(ioErrorCode(e) = -13);
+                        end case;
+                        destroyString(into); command(close(f));
+                end case;
+                closeDir(writer); end case; closeDir(dir); return nil; end;
+    private function network(net: Network, a: UdpSocket, b: UdpSocket, c: UdpSocket): Unit is
+        let address: Address := Address(ip => 2130706433);
+        let endpoint: Endpoint := Endpoint(address => address, port => udpPort(&b));
+        var peers: Buffer[Endpoint] := initialize(2, endpoint);
+        swapNth(&!peers, 1, Endpoint(address => address, port => udpPort(&a)));
+        let firstPolicy: Network := narrowNet(net, getSpan(&peers, 0, 1)); destroyFree(peers);
+        var request: Buffer[Endpoint] := initialize(2, endpoint);
+        swapNth(&!request, 1, Endpoint(address => address, port => udpPort(&c)));
+        let restricted: Network := narrowNet(firstPolicy, getSpan(&request, 0, 1)); destroyFree(request);
+        case resolve(&restricted, "127.0.0.2") of when Ok(value as bad: Address) do abort("Resolved forbidden host"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+        case connect(&restricted, address, udpPort(&c), 100) of when Ok(value as stream: TcpStream) do netClose(stream); abort("Connected forbidden endpoint"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+        case listen(&restricted, 0) of when Ok(value as l: TcpListener) do closeListener(l); abort("Restricted listener allowed"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+        case udpOpen(&restricted, 0) of when Err(error as e: IoError) do abort("Restricted UDP failed"); when Ok(value as socket: UdpSocket) do
+                var s: UdpSocket := socket; var first: UdpSocket := a; var second: UdpSocket := b; var third: UdpSocket := c;
+                releaseNetwork(restricted);
+                case udpSend(&!s, address, udpPort(&third), "bad") of when Ok(value as n: Index) do abort("Forbidden UDP send allowed"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+                case udpSend(&!s, address, udpPort(&second), "ok") of when Ok(value as n: Index) do expect(n = 2); when Err(error as e: IoError) do abort("Allowed UDP send denied"); end case;
+                var text: String := makeString(2, 0);
+                case udpReceive(&!second, getSpanMut(&!text, 0, 1), 2000) of when Ok(value as d: Datagram) do expect(d.count = 2); when Err(error as e: IoError) do abort("Allowed UDP missing"); end case;
+                udpSend(&!third, address, udpPort(&s), "NO");
+                case udpReceive(&!s, getSpanMut(&!text, 0, 1), 2000) of when Ok(value as d: Datagram) do abort("Forbidden UDP receive allowed"); when Err(error as e: IoError) do expect(ioErrorCode(e) = -13); end case;
+                expect(nthByte(&text, 0) = 111);
+                udpSend(&!second, address, udpPort(&s), "ok");
+                case udpReceive(&!s, getSpanMut(&!text, 0, 1), 2000) of when Ok(value as d: Datagram) do expect(d.count = 2); when Err(error as e: IoError) do abort("Allowed UDP receive denied"); end case;
+                destroyString(text); command(udpClose(s)); command(udpClose(first)); command(udpClose(second)); command(udpClose(third)); end case; return nil; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial; var fs: Filesystem := acquireFilesystem(&!root); files(openRoot(&!fs)); releaseFilesystem(fs);
+        let net: Network := acquireNetwork(&!root);
+        case udpOpen(&net, 0) of when Err(error as e: IoError) do abort("UDP setup failed"); when Ok(value as a: UdpSocket) do
+                case udpOpen(&net, 0) of when Err(error as e: IoError) do udpClose(a); abort("UDP setup failed"); when Ok(value as b: UdpSocket) do
+                        case udpOpen(&net, 0) of when Err(error as e: IoError) do udpClose(a); udpClose(b); abort("UDP setup failed"); when Ok(value as c: UdpSocket) do network(net, a, b, c); end case; end case; end case;
+        surrenderRoot(root); printLn("WARM CAPABILITIES PASS"); return ExitSuccess(); end;
+end module body.

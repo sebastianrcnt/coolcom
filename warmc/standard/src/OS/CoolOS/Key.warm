@@ -1,21 +1,13 @@
-import OS.Raw (Terminal, acquireTerminal, releaseTerminal, getKey as rawgetKey, keyPending as rawkeyPending, keyPop as rawkeyPop, keyChar as rawkeyChar, utf8Width as rawutf8Width);
+import OS.Terminal (Input, Key, decodeKey);
+import OS.Error (IoError, fromCode);
 module body OS.CoolOS.Key is
-    generic [R: Region]
-    function getKey(cap: &![Terminal, R]): Int64 is
-        return rawgetKey(&~cap);
-    end;
-    generic [R: Region]
-    function keyPending(cap: &![Terminal, R]): Int64 is
-        return rawkeyPending(&~cap);
-    end;
-    generic [R: Region]
-    function keyPop(cap: &![Terminal, R]): Int64 is
-        return rawkeyPop(&~cap);
-    end;
-    function keyChar(event: Int64): Int64 is
-        return rawkeyChar(event);
-    end;
-    function utf8Width(cp: Int64): Int64 is
-        return rawutf8Width(cp);
-    end;
+    pragma Foreign_Import(External_Name => "WkkeyPending");
+    private function rawPending(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkkeyPop");
+    private function rawPop(): Int64 is end;
+    function keyPending(input: &![Input]): Result[Bool, IoError] is
+        let n: Int64 := rawPending(); if n < 0 then return Err(error => fromCode(n)); end if; return Ok(value => n /= 0); end;
+    function keyPop(input: &![Input]): Result[Option[Key], IoError] is
+        let n: Int64 := rawPop(); if n = 0 then return Ok(value => None()); end if;
+        case decodeKey(n) of when Ok(value as k: Key) do return Ok(value => Some(value => k)); when Err(error as e: IoError) do return Err(error => e); end case; end;
 end module body.
