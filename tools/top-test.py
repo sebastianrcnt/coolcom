@@ -42,7 +42,7 @@ def main():
     subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     free_bytes = int(re.search(r'([\d ]+) bytes free', subprocess.run(
         ['mdir', '-i', str(disk), '::'], check=True, capture_output=True, text=True).stdout).group(1).replace(' ', ''))
-    script = 'delay 5000\n'
+    script = vim.BOOT
     script += line('U0 Napper(U8 *d) {while (TRUE) Sleep(50);}')
     script += line('U0 Burner(U8 *d) {I64 i; while (TRUE) {for (i = 0; i < 5000000; i++) {} Yield;}}')
     script += line('Spawn(&Napper, 0, "Napper", 1); Spawn(&Burner, 0, "Burner", 1);', 800)
@@ -51,7 +51,7 @@ def main():
     script += f'1 {KEY_DOWN} 1\n1 {KEY_DOWN} 0\ndelay 200\n' * 2   # select Napper
     script += 'delay 1200\n' + vim.typed('k') + 'delay 300\n' + vim.typed('y') + 'delay 2500\n'
     script += vim.typed('q') + 'delay 400\n'
-    script += line('Print("\\nTOPDONE\\n");')
+    script += line('Print("\\nTOPDONE%d\\n", 1);') + vim.finish('TOPDONE1')
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',
@@ -62,7 +62,7 @@ def main():
     after = raw.split('Running C:/Init.HC', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
     failures = []
-    if 'TOPDONE' not in raw:
+    if 'TOPDONE1' not in raw:
         failures.append('the shell did not come back after q')
     top = raw.split('\x1b[?1049h', 1)[-1].split('\x1b[?1049l', 1)[0]
     frames = [strip(f.replace('\x1b[K', '')) for f in top.split('\x1b[1;1H')[1:]]

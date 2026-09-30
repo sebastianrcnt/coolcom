@@ -26,7 +26,7 @@ LINE = r'I64 i; for (i = 0; i < 6; i++) Print("key %X\n", GetKey);'
 
 def main():
     script = ROOT / "build/key-test-input.txt"
-    script.write_text("delay 3000\n" + kv.typed(LINE) +
+    script.write_text("wait Cool shell\nwait > \n" + kv.typed(LINE) +
                       f"1 {LCTRL} 1\n" + kv.keys_of(B) + f"1 {LCTRL} 0\n" +
                       kv.keys_of(UP) + kv.keys_of(ESC))
     vm = subprocess.Popen(["gtimeout", "-k", "2", "25", "build/coolvm", "--headless", "--cpus", "2",

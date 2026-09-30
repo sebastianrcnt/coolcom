@@ -46,7 +46,7 @@ def main():
     subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
     (d / 'A.TXT').write_text('alpha one\nbeta two\n')
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(d / 'A.TXT'), '::A.TXT'], check=True)
-    script = 'delay 5000\n'
+    script = vim.BOOT
     script += line('U0 Zzquux(U8 *s, I64 n) {Print("ZZ[%s][%d]\\n", s, n);}')
     script += line('U0 Zzquuz(U8 *s) {Print("QQ[%s]\\n", s);}')
     script += line('U0 Pingpong() {Print("PONG\\n");}')
@@ -67,6 +67,7 @@ def main():
     script += keys('hexdump C:/Kernel/Dsk\t') + keys('Blk.HC 0 2\n', 500)    # a list, then finished by hand
     script += keys('Prin\t') + keys('\t') + line('("\\nSTEP-P\\n");')            # Print, PrintErr, ... listed
     script += line('Print("\\nSTEP-END\\n");')
+    script += vim.wait('STEP-END') + vim.finish('STEP-END')  # the echo, then the output
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
         subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',

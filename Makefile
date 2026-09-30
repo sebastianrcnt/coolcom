@@ -1,7 +1,7 @@
 KSRC    := $(wildcard os/Kernel/*.HC os/Kernel/*.HH coolc/Runtime/*.HC) coolc/Fmt/HCTok.HC
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
-.PHONY: c2hc-test stbtt-test all run test vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test cmdline-test
+.PHONY: c2hc-test stbtt-test all run test kernel-test kernel-test-reloc vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test cmdline-test
 all: build/kernel.Image
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
@@ -194,8 +194,15 @@ top-test: build/kernel.Image coolvm
 cmdline-test: build/kernel.Image coolvm
 	python3 tools/cmdline-test.py $<
 
-test: build/kernel.Image reloc-check coolvm vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test
+# Every check boots its own VMs with its own disk images and output directory, so
+# `make -j test` runs them side by side. The input scripts sync on the guest's output
+# (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
+test: reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc
+
+# The device and shell self-tests (DevTest.HC), at the link address and 4 MiB higher.
+kernel-test: build/kernel.Image coolvm
 	tools/kernel-test.sh $<
+kernel-test-reloc: build/kernel.Image coolvm
 	tools/kernel-test.sh $< --load-offset 0x600000
 
 $(B):

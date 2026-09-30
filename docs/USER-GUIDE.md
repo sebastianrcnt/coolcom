@@ -17,7 +17,7 @@ On an Apple silicon Mac, install the Homebrew packages `aarch64-elf-gcc`, `aarch
 | `make` | compiles the kernel with the checked-in compiler seed and writes `build/kernel.Image` |
 | `make run` | boots the Image in a coolvm window with 2 CPUs, 1 GiB and `build/disk.img` as `C:` |
 | `make run-net` | the same with a network card and the Mac's ports 2323 and 8080 forwarded to the guest's 23 and 80 |
-| `make test` | all checks (about 5 minutes); each part has its own target, e.g. `make vim-test`, `make kernel-rebuild-test` |
+| `make -j test` | all checks, side by side (about 40 s; `make test` runs them one after another in about 3 minutes); each part has its own target, e.g. `make vim-test`, `make kernel-rebuild-test` |
 | `make disk-install` | overwrites the programs and sources on `build/disk.img` with the repository's versions |
 | `make m1n1-payload` | `build/m1n1-payload.bin` for real hardware (m1n1 + device tree + the Image; not yet booted on a Mac) |
 

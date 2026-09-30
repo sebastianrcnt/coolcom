@@ -114,9 +114,13 @@ loads up to 255 records before the guest starts, one `type code value` decimal t
 lines and `#` comments are allowed. A `delay MS` line holds back every record after it until MS
 milliseconds (cumulative) after coolvm loaded the script (to type at a program that is already running;
 delayed records are fed one at a time, so they are not part of the 255-record preload limit). A
-`wait TEXT` line holds back every record after it until the guest has written TEXT to the UART (after
-the previous `wait` matched); later delays count from that moment. Use it before anything whose timing
-matters (Ctrl+Alt+C for a running statement): host-time delays race a guest slowed by host load. Example:
+`wait TEXT` line holds back every record after it until the guest has written TEXT to the UART, after
+the previous `wait`'s text (the texts are matched in order as the output streams, so output that comes
+early still counts); later delays count from that moment. `quit [STATUS]` stops the VM (status 0 by
+default; `--screenshot` is still written). Prefer `wait` to delays: host-time delays race a guest slowed
+by host load (a Ctrl+Alt+C meant for a running statement can arrive while the kernel is still booting),
+and a test that ends with `wait` and `quit` does not idle until `--timeout`. `COOLVM_WAIT_DEBUG=1` logs each
+`wait` the feeder reaches. The texts are compared with the raw UART bytes, escape sequences included. Example:
 
 ```
 1 30 1    # KEY_A down
