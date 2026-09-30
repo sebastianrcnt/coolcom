@@ -195,7 +195,19 @@ static uint32_t fill(const uint8_t *p, size_t len)
     return 0x1100;
 }
 
+static uint32_t command(uint32_t type, const uint8_t *p, size_t len);
 uint32_t logos_command(uint32_t type, const uint8_t *p, size_t len)
+{
+    /* LOGOS_DEBUG=1 in the environment logs failed commands, 2 every command. */
+    static int debug = -1;
+    uint32_t r = command(type, p, len);
+    if (debug < 0) debug = getenv("LOGOS_DEBUG") ? atoi(getenv("LOGOS_DEBUG")) : 0;
+    if (debug > 1 || (debug && r != 0x1100))
+        LOGE("logos: command %x (%zu bytes) %u %u %u: %x\n", type, len,
+             len >= 32 ? vio32(p + 28) : 0, len >= 36 ? vio32(p + 32) : 0, len >= 40 ? vio32(p + 36) : 0, r);
+    return r;
+}
+static uint32_t command(uint32_t type, const uint8_t *p, size_t len)
 {/* One command (caller holds g.lock); a virtio-gpu response type. */
     switch (type) {
     case LOGOS_CMD_GRID: return grid(p, len);

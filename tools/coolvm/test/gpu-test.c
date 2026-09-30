@@ -5,6 +5,8 @@
 struct vm g;
 void aic_update_locked(void) {}
 void fb_frame_dump(void) {}
+uint32_t logos_command(uint32_t type, const uint8_t *p, size_t len) {(void)type; (void)p; (void)len; return 0x1200;} /* logos.m (Metal) is not linked */
+void logos_reset(void) {}
 static void wr(uint64_t off,uint32_t v){uint64_t x=v;assert(gpu_mmio(off,4,true,&x));}
 static uint32_t rd(uint64_t off){uint64_t x=0;assert(gpu_mmio(off,4,false,&x));return x;}
 static uint8_t *mem(unsigned off){return g.ram+off;}

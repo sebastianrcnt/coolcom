@@ -28,8 +28,8 @@ class CLogosCell
 
 class CLogos
 {
-    I64 target, cols, rows;
-    CLogosCell *cells;        // the rows being sent: rows * cols
+    CLogosCell *cells;        // the rows being sent: fb.rows * fb.cols
+    I64 capacity;             // cells allocated
     U8 *have, *wide, *bad;    // per code point: glyph uploaded, two cells wide; no glyph
     I64 cur_col, cur_row, cur_cells;  // the cursor the device shows
 };
@@ -46,7 +46,7 @@ Bool LogosGrid(I64 w, I64 h, I64 cols, I64 rows)
     //only when the grid grows (not while a frame is drawn at the same size).
     U32 p[8];
     CLogosCell *cells = logos.cells;
-    if (!cells || cols * rows > logos.cols * logos.rows) {
+    if (!cells || cols * rows > logos.capacity) {
         cells = CAlloc(cols * rows * sizeof(CLogosCell));
         if (!cells)
             return FALSE;
@@ -61,8 +61,7 @@ Bool LogosGrid(I64 w, I64 h, I64 cols, I64 rows)
     if (cells != logos.cells) {
         Free(logos.cells);
         logos.cells = cells;
-        logos.cols = cols;
-        logos.rows = rows;
+        logos.capacity = cols * rows;
     }
     logos.cur_cells = 0;
     return TRUE;
@@ -163,12 +162,21 @@ U0 LogosRow(CVtCell *p, CLogosCell *d, I64 cols)
 U0 LogosSend(I64 row, I64 count)
 {
     U32 p[6];
-    I64 addr = logos.cells + row * logos.cols;
+    I64 addr = logos.cells + row * fb.cols;
     if (count <= 0)
         return;
     p[0] = LOGOS_TARGET_SCREEN; p[1] = row; p[2] = count; p[3] = 0;
     p[4] = addr & 0xFFFFFFFF; p[5] = addr >> 32;
     LogosCmd(LOGOS_ROWS, p, 6);
+}
+
+Bool LogosRowSame(I64 *a, I64 *b, I64 cols)
+{//Two rows of cells alike (as FbCellSame: 16 bytes are two I64s; MemCmp goes bytewise).
+    I64 i;
+    for (i = 0; i < 2 * cols; i++)
+        if (a[i] != b[i])
+            return FALSE;
+    return TRUE;
 }
 
 U0 LogosFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
@@ -197,7 +205,7 @@ U0 LogosFrame(Bool all, I64 scrolled, I64 cx, I64 cy, I64 cells)
             fb.snap_row[y] = 0;
             s = fb.snap + y * cols;
             d = fb.drawn + y * cols;
-            if (MemCmp(s, d, cols * sizeof(CVtCell))) {
+            if (!LogosRowSame(s, d, cols)) {
                 MemCpy(d, s, cols * sizeof(CVtCell));
                 LogosRow(s, logos.cells + y * cols, cols);
                 if (run < 0) run = y;
