@@ -236,7 +236,8 @@ WkBuffer *WkreadFile(U8 *path, U64 size) {
     WkBuffer *b = WkNew();
     if (!b) return NULL; U8 *s = NULL;
     try {s = WkString(path, size); if (!s) b->error = -2;
-        else {b->data = FileRead(s, &b->size); if (!b->data) b->error = -3;}
+        else if (!FileFind(s)) b->error = -10;
+        else {b->data = FileRead(s, &b->size); if (!b->data) b->error = -1;}
     } catch {Fs->catch_except = TRUE; b->error = -1;}
     Free(s); return b;
 }
@@ -297,4 +298,15 @@ I64 WkcopyBytes(WkBuffer *b, U8 *data, U64 size)
     if (size > b->size) return -2;
     MemCpy(b->data, data, size);
     return 0;
+}
+
+U8 wk_input_line[520];
+I64 wk_input_pos, wk_input_len;
+I64 WkinputByte() {
+    if (wk_input_pos >= wk_input_len) {
+        GetLine(wk_input_line, 512);
+        wk_input_len = StrLen(wk_input_line);
+        wk_input_line[wk_input_len++] = '\n'; wk_input_pos = 0;
+    }
+    return wk_input_line[wk_input_pos++];
 }

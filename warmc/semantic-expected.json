@@ -86,5 +86,20 @@
  },
  "opaque-destructure": {
   "kind": "Type Error"
+ },
+ "mutable-span-length-loop": {
+  "stdout": "",
+  "stderr": "",
+  "exit": 0
+ },
+ "positive-int64-index": {
+  "stdout": "11\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "record-named-address": {
+  "stdout": "42\n",
+  "stderr": "",
+  "exit": 0
  }
 }

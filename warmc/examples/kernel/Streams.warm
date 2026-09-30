@@ -1,0 +1,106 @@
+import OS.File (Filesystem, acquireFilesystem, releaseFilesystem, File, open, Read, Write, Append, ReadWrite, read, write, seek, size, close, makeDir, writeAll);
+import OS.Dir (Dir, Entries, Entry, openRoot, openDir, closeDir, entries, next, closeEntries);
+import OS.Error (IoError, Denied, ioErrorCode);
+import Standard.String (String, makeString, destroyString, getSpanMut, nthByte);
+module body Streams is
+    private function expect(ok: Bool): Unit is
+        if not ok then abort("Stream assertion failed"); end if;
+        return nil;
+    end;
+    private function command(result: Result[Unit, IoError]): Unit is
+        case result of
+            when Ok(value as u: Unit) do skip;
+            when Err(error as e: IoError) do abort("Stream command failed");
+        end case;
+        return nil;
+    end;
+    private function count(result: Result[Index, IoError], expected: Index): Unit is
+        case result of
+            when Ok(value as n: Index) do expect(n = expected);
+            when Err(error as e: IoError) do abort("Stream transfer failed");
+        end case;
+        return nil;
+    end;
+    private function create(file: File): Unit is
+        var f: File := file;
+        count(write(&!f, "abc"), 3);
+        expect(size(&f) = 3);
+        command(seek(&!f, 5));
+        count(write(&!f, "z"), 1);
+        expect(size(&f) = 6);
+        command(close(f));
+        return nil;
+    end;
+    private function verify(file: File): Unit is
+        var f: File := file;
+        var text: String := makeString(2, 0);
+        count(read(&!f, getSpanMut(&!text, 0, 1)), 2);
+        expect(nthByte(&text, 0) = 97 and nthByte(&text, 1) = 98);
+        command(seek(&!f, 3));
+        count(read(&!f, getSpanMut(&!text, 0, 1)), 2);
+        expect(nthByte(&text, 0) = 0 and nthByte(&text, 1) = 0);
+        count(read(&!f, getSpanMut(&!text, 0, 1)), 2);
+        expect(nthByte(&text, 0) = 122 and nthByte(&text, 1) = 33);
+        count(read(&!f, getSpanMut(&!text, 0, 1)), 0);
+        case write(&!f, "forbidden") of
+            when Ok(value as n: Index) do abort("Read stream allowed write");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -13);
+        end case;
+        destroyString(text);
+        command(close(f));
+        return nil;
+    end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var fs: Filesystem := acquireFilesystem(&!root);
+        let dir: Dir := openRoot(&!fs);
+        releaseFilesystem(fs);
+        makeDir(&dir, "WarmStreams");
+        case openDir(&dir, "WarmStreams") of
+            when Err(error as e: IoError) do abort("Cannot open subdirectory");
+            when Ok(value as sub: Dir) do
+                case open(&sub, "Data.bin", Write()) of
+                    when Ok(value as f: File) do create(f);
+                    when Err(error as e: IoError) do abort("Cannot open write stream");
+                end case;
+                case open(&sub, "Data.bin", Append()) of
+                    when Ok(value as f: File) do
+                        var appendFile: File := f;
+                        command(seek(&!appendFile, 0));
+                        count(write(&!appendFile, "!"), 1);
+                        command(close(appendFile));
+                    when Err(error as e: IoError) do abort("Cannot open append stream");
+                end case;
+                case entries(&sub) of
+                    when Ok(value as snapshot: Entries) do
+                        var iterator: Entries := snapshot;
+                        case next(&!iterator) of
+                            when Some(value as entry: Entry) do
+                                let { name: String, size as entrySize: Index, isDir: Bool, modified: Int64 } := entry;
+                                expect(entrySize = 7 and not isDir);
+                                destroyString(name);
+                            when None do abort("Missing directory entry");
+                        end case;
+                        case next(&!iterator) of
+                            when Some(value as entry: Entry) do
+                                let { name: String, size as entrySize: Index, isDir: Bool, modified: Int64 } := entry;
+                                destroyString(name);
+                                abort("Unexpected directory entry");
+                            when None do skip;
+                        end case;
+                        closeEntries(iterator);
+                    when Err(error as e: IoError) do abort("Cannot list directory");
+                end case;
+                case open(&sub, "Data.bin", Read()) of
+                    when Ok(value as f: File) do
+                        closeDir(sub);
+                        verify(f);
+                    when Err(error as e: IoError) do closeDir(sub); abort("Cannot open read stream");
+                end case;
+        end case;
+        closeDir(dir);
+        surrenderRoot(root);
+        printLn("WARM STREAMS PASS");
+        return ExitSuccess();
+    end;
+end module body.

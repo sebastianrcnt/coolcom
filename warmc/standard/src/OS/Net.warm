@@ -1,0 +1,92 @@
+pragma Unsafe_Module;
+import Austral.Memory (Pointer, spanToPointer, spanWriteToPointer);
+import OS.Error (IoError, fromCode, status);
+module body OS.Net is
+    record Network: Linear is handle: Int64; end;
+    record TcpStream: Linear is handle: Int64; end;
+    record TcpListener: Linear is handle: Int64; end;
+    record UdpSocket: Linear is handle: Int64; end;
+    pragma Foreign_Import(External_Name => "WnAcquire");
+    private function rawAcquire(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnRelease");
+    private function rawRelease(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WnResolve");
+    private function rawResolve(policy: Int64, host: Pointer[Nat8], count: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnConnect");
+    private function rawConnect(policy: Int64, ip: Nat32, port: Nat16, timeoutMs: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnListen");
+    private function rawListen(policy: Int64, port: Nat16): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnAccept");
+    private function rawAccept(handle: Int64, timeoutMs: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnSend");
+    private function rawSend(handle: Int64, data: Pointer[Nat8], count: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnReceive");
+    private function rawReceive(handle: Int64, into: Pointer[Nat8], count: Index, timeoutMs: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnUdpOpen");
+    private function rawUdpOpen(policy: Int64, port: Nat16): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnUdpSend");
+    private function rawUdpSend(handle: Int64, ip: Nat32, port: Nat16, data: Pointer[Nat8], count: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnUdpReceive");
+    private function rawUdpReceive(handle: Int64, into: Pointer[Nat8], count: Index, timeoutMs: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnClose");
+    private function rawClose(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnSource");
+    private function rawSource(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnSourcePort");
+    private function rawSourcePort(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WnPort");
+    private function rawPort(handle: Int64): Int64 is end;
+    function acquireNetwork(root: &![RootCapability]): Network is
+        let handle: Int64 := rawAcquire(); if handle = 0 then abort("Network allocation failed"); end if;
+        return Network(handle => handle); end;
+    function releaseNetwork(network: Network): Unit is let { handle: Int64 } := network; rawRelease(handle); return nil; end;
+    private function countResult(code: Int64): Result[Index, IoError] is
+        if code < 0 then return Err(error => fromCode(code)); end if;
+        case toIndex(code) of when Some(value as n: Index) do return Ok(value => n); when None do abort("Invalid network count"); end case; end;
+    function resolve(network: &[Network], host: Span[Nat8]): Result[Address, IoError] is
+        let code: Int64 := rawResolve(network->handle, spanToPointer(host), spanLength(host));
+        if code < 0 then return Err(error => fromCode(code)); end if;
+        case toNat32(code) of when Some(value as ip: Nat32) do return Ok(value => Address(ip => ip)); when None do abort("Invalid network address"); end case; end;
+    function connect(network: &[Network], address: Address, port: Nat16, timeoutMs: Int64): Result[TcpStream, IoError] is
+        let handle: Int64 := rawConnect(network->handle, address.ip, port, timeoutMs);
+        if handle < 0 then return Err(error => fromCode(handle)); end if;
+        return Ok(value => TcpStream(handle => handle)); end;
+    function listen(network: &[Network], port: Nat16): Result[TcpListener, IoError] is
+        let handle: Int64 := rawListen(network->handle, port);
+        if handle < 0 then return Err(error => fromCode(handle)); end if;
+        return Ok(value => TcpListener(handle => handle)); end;
+    function accept(listener: &![TcpListener], timeoutMs: Int64): Result[TcpStream, IoError] is
+        let handle: Int64 := rawAccept(listener->handle, timeoutMs);
+        if handle < 0 then return Err(error => fromCode(handle)); end if;
+        return Ok(value => TcpStream(handle => handle)); end;
+    function udpOpen(network: &[Network], port: Nat16): Result[UdpSocket, IoError] is
+        let handle: Int64 := rawUdpOpen(network->handle, port);
+        if handle < 0 then return Err(error => fromCode(handle)); end if;
+        return Ok(value => UdpSocket(handle => handle)); end;
+    function send(stream: &![TcpStream], data: Span[Nat8]): Result[Index, IoError] is
+        return countResult(rawSend(stream->handle, spanToPointer(data), spanLength(data))); end;
+    function receive(stream: &![TcpStream], into: Span![Nat8], timeoutMs: Int64): Result[Index, IoError] is
+        let count: Index := spanWriteLength(into);
+        return countResult(rawReceive(stream->handle, spanWriteToPointer(into), count, timeoutMs)); end;
+    function udpSend(socket: &![UdpSocket], address: Address, port: Nat16, data: Span[Nat8]): Result[Index, IoError] is
+        return countResult(rawUdpSend(socket->handle, address.ip, port, spanToPointer(data), spanLength(data))); end;
+    function udpReceive(socket: &![UdpSocket], into: Span![Nat8], timeoutMs: Int64): Result[Datagram, IoError] is
+        let count: Index := spanWriteLength(into);
+        case countResult(rawUdpReceive(socket->handle, spanWriteToPointer(into), count, timeoutMs)) of
+            when Err(error as e: IoError) do return Err(error => e);
+            when Ok(value as n: Index) do
+                case toNat32(rawSource(socket->handle)) of
+                    when Some(value as ip: Nat32) do
+                        case toNat16(rawSourcePort(socket->handle)) of
+                            when Some(value as port: Nat16) do return Ok(value => Datagram(count => n, sender => Address(ip => ip), port => port));
+                            when None do abort("Invalid datagram port"); end case;
+                    when None do abort("Invalid datagram sender"); end case;
+        end case; end;
+    function close(stream: TcpStream): Result[Unit, IoError] is let { handle: Int64 } := stream; return status(rawClose(handle)); end;
+    function closeListener(listener: TcpListener): Result[Unit, IoError] is let { handle: Int64 } := listener; return status(rawClose(handle)); end;
+    function udpClose(socket: UdpSocket): Result[Unit, IoError] is let { handle: Int64 } := socket; return status(rawClose(handle)); end;
+    function udpPort(socket: &[UdpSocket]): Nat16 is
+        case toNat16(rawPort(socket->handle)) of when Some(value as p: Nat16) do return p; when None do abort("Invalid local port"); end case; end;
+    function listenPort(listener: &[TcpListener]): Nat16 is
+        case toNat16(rawPort(listener->handle)) of when Some(value as p: Nat16) do return p; when None do abort("Invalid local port"); end case; end;
+end module body.

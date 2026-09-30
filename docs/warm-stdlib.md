@@ -1,7 +1,7 @@
 # The Warm standard library: design
 
 Status: reviewed; the decisions are at the end. Stage 0 is implemented (see
-[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-5 are not. The
+[warmc/README.md](../warmc/README.md#warms-additions-to-austral)); stages 1-3 are implemented; stages 4-5 are pending. The
 options and recommendations (**Rec.**) below are kept as the reasoning behind the decisions.
 
 Warm today has two unrelated libraries: `Standard.*` from Austral (String, Buffer, Box,
@@ -264,3 +264,28 @@ absolute paths, other drives, other hosts).
    (`Warm.Kernel` becomes `OS.*` plus `OS.CoolOS.*` in stage 1.)
 7. File streams: **buffer the whole file and write on close first**, then a kernel open-file
    API underneath.
+
+## Implementation notes
+
+Stage 1: portable `OS.Terminal`, `OS.File`, and `OS.Error` use `OSHost.cool`
+and `OSKernel.cool`. `Warm.Kernel` has been removed; `OS.Raw` keeps the scalar
+internal binding while the public API migrates. CoolOS extensions are in
+`OS.CoolOS.*`. The upstream `Standard.IO` compatibility module uses the same
+terminal boundary. Tests include host round trips and kernel shell examples.
+
+Stage 2: `OS.Dir` owns directory handles and directory-entry snapshots. File APIs
+now take a borrowed `Dir` and a relative name. `Read` requires an existing file;
+`Write` truncates at open and persists at close; `Append` creates if missing and
+always writes at the end; `ReadWrite` reads an existing file. Seek beyond EOF
+zero-fills the gap on the next write. Stream snapshots survive closing their
+parent directory, and closing a stream releases it even when persistence fails.
+`OS.File.byteSize` queries `Bytes`; `size` queries `File`. Stream snapshots are
+limited to 256 MiB. Directory entries own names; close the iterator on early exit.
+
+Stage 3: `OS.Net` has IPv4 address resolution, owned TCP streams/listeners and
+UDP sockets on both backends. Receive and accept take millisecond timeouts
+(`-1` waits indefinitely). TCP receive returns zero at EOF; UDP receive returns
+a `Datagram` with the sender and source port, including empty datagrams.
+`listenPort`/`udpPort` report dynamically assigned ports. Host sockets use
+nonblocking descriptors with polling; the kernel keeps its existing network
+stack and translates its errors. The kernel UDP payload limit is 1486 bytes.

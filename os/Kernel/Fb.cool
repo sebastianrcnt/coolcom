@@ -534,7 +534,7 @@ U0 FbSetColor(I64 fg, I64 bg)
 }
 
 // Direct console operations (the Warm standard library's screen functions,
-// warmc/standard/src/Kernel/Adapter.cool): the same grid changes as the escape
+// warmc/OSKernel.cool): the same grid changes as the escape
 // sequences, without going through the byte stream.
 
 U0 FbCursorHide()

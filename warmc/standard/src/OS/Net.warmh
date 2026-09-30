@@ -1,0 +1,25 @@
+import OS.Error (IoError);
+module OS.Net is
+    type Network: Linear;
+    type TcpStream: Linear;
+    type TcpListener: Linear;
+    type UdpSocket: Linear;
+    record Address: Free is ip: Nat32; end;
+    record Datagram: Free is count: Index; sender: Address; port: Nat16; end;
+    function acquireNetwork(root: &![RootCapability]): Network;
+    function releaseNetwork(network: Network): Unit;
+    function resolve(network: &[Network], host: Span[Nat8]): Result[Address, IoError];
+    function connect(network: &[Network], address: Address, port: Nat16, timeoutMs: Int64): Result[TcpStream, IoError];
+    function listen(network: &[Network], port: Nat16): Result[TcpListener, IoError];
+    function accept(listener: &![TcpListener], timeoutMs: Int64): Result[TcpStream, IoError];
+    function send(stream: &![TcpStream], data: Span[Nat8]): Result[Index, IoError];
+    function receive(stream: &![TcpStream], into: Span![Nat8], timeoutMs: Int64): Result[Index, IoError];
+    function close(stream: TcpStream): Result[Unit, IoError];
+    function closeListener(listener: TcpListener): Result[Unit, IoError];
+    function udpOpen(network: &[Network], port: Nat16): Result[UdpSocket, IoError];
+    function udpSend(socket: &![UdpSocket], address: Address, port: Nat16, data: Span[Nat8]): Result[Index, IoError];
+    function udpReceive(socket: &![UdpSocket], into: Span![Nat8], timeoutMs: Int64): Result[Datagram, IoError];
+    function udpPort(socket: &[UdpSocket]): Nat16;
+    function listenPort(listener: &[TcpListener]): Nat16;
+    function udpClose(socket: UdpSocket): Result[Unit, IoError];
+end module.

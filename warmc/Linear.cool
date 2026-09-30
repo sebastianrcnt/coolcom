@@ -60,6 +60,16 @@ U0 WLinearExpr(CWUnit *u, CWNode *n, CWFlow *flow)
     CWNode *c, *v;
     CWFlow *a, *b;
     if (!n || u->error_kind) return;
+    // The builtin length query observes a mutable span; it does not transfer its loan.
+    if (WEq(n->tag, "call") && n->resolved && WEq(n->resolved->name, "spanWriteLength") &&
+            n->resolved->owner && WEq(n->resolved->owner->name, "Austral.Pervasive")) {
+        for (c = n->first; c; c = c->next) if (WEq(c->role, "argument")) {
+                v = c; if (WEq(c->tag, "argument")) v = WChild(c, "value");
+                if (WEq(v->tag, "variable")) WUse(u, flow, v, v->resolved, FALSE);
+                else WLinearExpr(u, v, flow);
+            }
+        return;
+    }
     if (WEq(n->tag, "variable")) {WUse(u, flow, n, n->resolved, TRUE); return;}
     if (WEq(n->tag, "borrow-expression")) {
         v = WChild(n, "value"); WLoan(u, flow, n, v->resolved, !WEq(n->name, "&"), TRUE); return;

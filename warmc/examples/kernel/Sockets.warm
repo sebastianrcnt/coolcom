@@ -1,0 +1,78 @@
+import OS.Net (Network, Address, TcpListener, TcpStream, UdpSocket, Datagram, acquireNetwork, releaseNetwork, resolve, listen, connect, accept, send, receive, close, closeListener, udpOpen, udpSend, udpReceive, udpPort, udpClose);
+import OS.Error (IoError, ioErrorCode);
+import Standard.String (String, makeString, getSpanMut, nthByte, destroyString);
+module body Sockets is
+    private function expect(ok: Bool): Unit is if not ok then abort("Socket assertion failed"); end if; return nil; end;
+    private function command(result: Result[Unit, IoError]): Unit is
+        case result of when Ok(value as u: Unit) do skip; when Err(error as e: IoError) do abort("Socket close failed"); end case; return nil; end;
+    private function count(result: Result[Index, IoError], expected: Index): Unit is
+        case result of when Ok(value as n: Index) do expect(n = expected); when Err(error as e: IoError) do abort("Socket transfer failed"); end case; return nil; end;
+    private function tcp(network: &[Network], address: Address, listener: TcpListener): Unit is
+        var l: TcpListener := listener;
+        case accept(&!l, 0) of
+            when Ok(value as s: TcpStream) do close(s); abort("Accept succeeded without client");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -17);
+        end case;
+        case connect(network, address, 18765, 2000) of
+            when Err(error as e: IoError) do closeListener(l); abort("Loopback connect failed");
+            when Ok(value as client: TcpStream) do
+                var c: TcpStream := client;
+                case accept(&!l, 2000) of
+                    when Err(error as e: IoError) do close(c); closeListener(l); abort("Loopback accept failed");
+                    when Ok(value as peer: TcpStream) do
+                        var s: TcpStream := peer;
+                        count(send(&!c, "tcp"), 3);
+                        var text: String := makeString(3, 0);
+                        count(receive(&!s, getSpanMut(&!text, 0, 2), 2000), 3);
+                        expect(nthByte(&text, 0) = 116 and nthByte(&text, 2) = 112);
+                        command(close(c));
+                        count(receive(&!s, getSpanMut(&!text, 0, 2), 2000), 0);
+                        destroyString(text);
+                        command(close(s)); command(closeListener(l));
+                end case;
+        end case;
+        return nil; end;
+    private function udp(address: Address, first: UdpSocket, second: UdpSocket): Unit is
+        var a: UdpSocket := first; var b: UdpSocket := second;
+        var text: String := makeString(2, 0);
+        case udpReceive(&!b, getSpanMut(&!text, 0, 1), 0) of
+            when Ok(value as d: Datagram) do abort("Unexpected datagram");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -17);
+        end case;
+        count(udpSend(&!a, address, udpPort(&b), "udp"), 3);
+        case udpReceive(&!b, getSpanMut(&!text, 0, 1), 2000) of
+            when Err(error as e: IoError) do abort("UDP receive failed");
+            when Ok(value as d: Datagram) do
+                expect(d.count = 2 and d.port = udpPort(&a));
+                expect(d.sender.ip = address.ip);
+                expect(nthByte(&text, 0) = 117 and nthByte(&text, 1) = 100);
+        end case;
+        count(udpSend(&!a, address, udpPort(&b), ""), 0);
+        case udpReceive(&!b, getSpanMut(&!text, 0, 1), 2000) of
+            when Err(error as e: IoError) do abort("Empty UDP receive failed");
+            when Ok(value as d: Datagram) do expect(d.count = 0);
+        end case;
+        destroyString(text); command(udpClose(a)); command(udpClose(b));
+        return nil; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        let network: Network := acquireNetwork(&!root);
+        case resolve(&network, "127.0.0.1") of
+            when Err(error as e: IoError) do abort("Address resolution failed");
+            when Ok(value as address: Address) do
+                case listen(&network, 18765) of
+                    when Err(error as e: IoError) do abort("Listen failed");
+                    when Ok(value as listener: TcpListener) do tcp(&network, address, listener);
+                end case;
+                case udpOpen(&network, 0) of
+                    when Err(error as e: IoError) do abort("UDP open failed");
+                    when Ok(value as a: UdpSocket) do
+                        case udpOpen(&network, 0) of
+                            when Err(error as e: IoError) do udpClose(a); abort("UDP open failed");
+                            when Ok(value as b: UdpSocket) do udp(address, a, b);
+                        end case;
+                end case;
+        end case;
+        releaseNetwork(network); surrenderRoot(root);
+        printLn("WARM SOCKETS PASS"); return ExitSuccess(); end;
+end module body.

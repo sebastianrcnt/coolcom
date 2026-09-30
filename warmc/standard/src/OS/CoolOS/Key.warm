@@ -1,0 +1,21 @@
+import OS.Raw (Terminal, acquireTerminal, releaseTerminal, getKey as rawgetKey, keyPending as rawkeyPending, keyPop as rawkeyPop, keyChar as rawkeyChar, utf8Width as rawutf8Width);
+module body OS.CoolOS.Key is
+    generic [R: Region]
+    function getKey(cap: &![Terminal, R]): Int64 is
+        return rawgetKey(&~cap);
+    end;
+    generic [R: Region]
+    function keyPending(cap: &![Terminal, R]): Int64 is
+        return rawkeyPending(&~cap);
+    end;
+    generic [R: Region]
+    function keyPop(cap: &![Terminal, R]): Int64 is
+        return rawkeyPop(&~cap);
+    end;
+    function keyChar(event: Int64): Int64 is
+        return rawkeyChar(event);
+    end;
+    function utf8Width(cp: Int64): Int64 is
+        return rawutf8Width(cp);
+    end;
+end module body.

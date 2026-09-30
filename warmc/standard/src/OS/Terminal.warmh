@@ -1,0 +1,27 @@
+import OS.Error (IoError);
+import Standard.String (String);
+module OS.Terminal is
+    type Output: Linear;
+    type Input: Linear;
+    union Color: Free is
+        case Black; case Red; case Green; case Yellow; case Blue; case Magenta; case Cyan; case White;
+        case Rgb is value: Nat32;
+    end;
+    union Key: Free is
+        case Char is codepoint: Nat32;
+        case Up; case Down; case Left; case Right; case Home; case End; case PageUp; case PageDown;
+        case Insert; case Delete; case Enter; case Escape; case Backspace; case Tab;
+        case Ctrl is codepoint: Nat32;
+        case FunctionKey is number: Nat8;
+        case Unknown is event: Int64;
+    end;
+    function acquireOutput(root: &![RootCapability]): Output;
+    function acquireInput(root: &![RootCapability]): Input;
+    function releaseOutput(output: Output): Unit;
+    function releaseInput(input: Input): Unit;
+    function write(output: &![Output], text: Span[Nat8]): Result[Unit, IoError];
+    function writeLine(output: &![Output], text: Span[Nat8]): Result[Unit, IoError];
+    function readLine(input: &![Input]): Result[String, IoError];
+    function readKey(input: &![Input]): Result[Key, IoError];
+    function setColor(output: &![Output], foreground: Color, background: Color): Result[Unit, IoError];
+end module.

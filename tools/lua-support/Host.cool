@@ -1,0 +1,2 @@
+#include "Lua.cool"
+NativeExit(LibCRun(&main));

@@ -10,6 +10,7 @@
 #include "C:/Diff.cool"
 #include "C:/Top.cool"
 #include "C:/Warm.cool"
+#include "C:/Lua.cool"
 
 U0 Cls()
 {//TempleOS's clear screen, as ANSI so the screen and the host terminal both clear.
