@@ -186,6 +186,7 @@ U0 TmRender()
     I64 i, n;
     U8 status[256], tmp[32];
     if (!tm_session->redraw && !TmDirty(w->root)) return;
+    AnsiCursorHide; // no cursor block at each intermediate write position while repainting
     TmDraw(w->root);
     StrCpy(status, " tmux");
     for (i = 0; i < TM_WINDOWS; i++)
@@ -203,6 +204,7 @@ U0 TmRender()
     Print("%s", status);
     AnsiReset;
     AnsiCursor(p->y + p->term->cy + 1, p->x + MinI64(p->term->cx, p->w - 1) + 1);
+    if (!p->term->cursor_off) AnsiCursorShow;
     tm_session->redraw = FALSE;
 }
 
@@ -245,5 +247,5 @@ tm_again:
     }
     if (!tm_session->panes) {Free(tm_session); tm_session = NULL;}
     vt_focus = old_focus;
-    AnsiAltScreen(FALSE);
+    AnsiCursorShow; AnsiAltScreen(FALSE);
 }
