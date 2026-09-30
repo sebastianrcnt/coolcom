@@ -1,0 +1,78 @@
+// Host services only; Warm.cool can also be included in the kernel shell.
+#define U8 U8i
+#define I64 I64i
+#define U64 U64i
+#define Bool I8i
+#define TRUE 1
+#define FALSE 0
+#define NULL 0
+import U8 *CAlloc(I64 size);
+import U0 Free(U8 *ptr);
+import U8 *MemCpy(U8 *dst, U8 *src, I64 size);
+import I64 StrLen(U8 *s);
+import I64 StrCmp(U8 *a, U8 *b);
+import U0 Print(U8 *format, ...);
+import U8 *FileRead(U8 *path, I64 *size, U8 *attrs = NULL);
+import I64 FileWrite(U8 *path, U8 *data, I64 size);
+import I64 NativeArgCount();
+import U8 *NativeArg(I64 index);
+import U0 NativeExit(I64 code);
+import U0 NativeErrPutS(U8 *text);
+#include "Warm.cool"
+#include "../build/warmcool/Builtins.cool"
+#include "../build/warmcool/RuntimeText.cool"
+#include "Diagnostic.cool"
+U0 WDump(CWNode *n, I64 indent)
+{
+    CWNode *c; I64 i;
+    for (i = 0; i < indent; i++) Print(" ");
+    Print("%s %s %s\n", n->role, n->tag, n->name);
+    for (c = n->first; c; c = c->next) WDump(c, indent + 1);
+}
+I64 WNativeMain()
+{
+    CWUnit *u = WNew();
+    U8 *arg, *source, *part, *output = NULL, *entry = "Test:main", *generated;
+    I64 i, j, start, size, n, code = 0;
+    Bool dump = FALSE, parse = FALSE, check = FALSE, json = FALSE;
+    CWNode *m, *files = WNode(u, "inputs", NULL), *file;
+    for (i = 1; i < NativeArgCount(); i++) {
+        arg = NativeArg(i);
+        if (WEq(arg, "--dump-ast")) dump = TRUE;
+        else if (WEq(arg, "--parse")) parse = TRUE;
+        else if (WEq(arg, "--check")) check = TRUE;
+        else if (WEq(arg, "compile")) {}
+        else if (WPrefix(arg, "--output=")) output = arg + 9;
+        else if (WPrefix(arg, "--entrypoint=")) entry = arg + 13;
+        else if (WEq(arg, "--no-entrypoint")) entry = NULL;
+        else if (WEq(arg, "--error-format=json")) json = TRUE;
+        else if (WEq(arg, "--target-type=hc") || WEq(arg, "--error-format=plain")) {}
+        else if (WPrefix(arg, "--")) {WFail(u, NULL, "Command Line Arguments Error", "Unsupported compiler option");}
+        else {file = WNode(u, "input", NULL); file->name = arg; WAdd(files, file, "input");}
+    }
+    for (file = files->first; file && !u->error_kind; file = file->next) {
+        arg = file->name;
+        start = 0; n = StrLen(arg);
+        for (j = 0; j <= n; j++) if (arg[j] == ',' || !arg[j]) {
+                part = WText(u, arg + start, j - start); start = j + 1;
+                source = FileRead(part, &size);
+                if (!source) {WFail(u, NULL, "Command Line Arguments Error", "Cannot read input file"); break;}
+                WParse(u, part, source, !WIsInterface(part)); Free(source);
+                if (u->error_kind) break;
+            }
+        if (u->error_kind) break;
+    }
+    if (!u->modules && !u->error_kind) WFail(u, NULL, "Command Line Arguments Error", "No input files");
+    if (!u->error_kind && dump) for (m = u->modules; m; m = m->next) WDump(m, 0);
+    if (!u->error_kind && !parse && !dump) {WBuiltins(u); if (!u->error_kind) WResolve(u); if (!u->error_kind) WTypeCheck(u); if (!u->error_kind) WLinearity(u);}
+    if (!u->error_kind && !parse && !dump && !check) {
+        generated = WEmit(u, entry, WRuntime(u), TRUE);
+        if (!u->error_kind) {
+            if (!output) WFail(u, NULL, "Command Line Arguments Error", "--output is required");
+            else if (!FileWrite(output, generated, StrLen(generated))) WFail(u, NULL, "Command Line Arguments Error", "Cannot write output");
+        }
+    }
+    if (u->error_kind) {if (json) NativeErrPutS(WDiagnosticJson(u)); else WDiagnostic(u); code = 1;}
+    WDestroy(u); return code;
+}
+NativeExit(WNativeMain());

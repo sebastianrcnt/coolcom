@@ -210,20 +210,22 @@ flush the disks and halt, because the SMC power interface is not implemented.
 ## Warm
 
 Warm is our fork of Austral, a language with linear types and capabilities, meant for safe code such as
-drivers and parsers ([warmc/README.md](../warmc/README.md)). A Warm program compiles to HolyC and runs in the
-shell. The kernel is reached through `Warm.Kernel` (files, console, keys, framebuffer, clock). There are two
-compilers:
+drivers and parsers ([warmc/README.md](../warmc/README.md)). A Warm program compiles to Cool and runs in the
+shell. The kernel is reached through `Warm.Kernel` (files, console, keys, framebuffer, clock). There is one
+compiler, written in Cool (`warmc`), and it runs in two places:
 
-- **On the Mac (OCaml warmc, built in the opam switch `austral`):** `./warmc/build.sh`, then `warmc/warmc compile ... --target-type=hc` writes a
-  `.cool` file. Copy it to `C:` together with `warmc/standard/src/Kernel/Adapter.cool`, and include both in the
+- **On the Mac:** `make build/warmc` builds it (`build/warmc compile ... --target-type=hc` writes a `.cool`
+  file, as `coolc` compiles it). `tools/warm run Foo.warm` compiles, builds and runs a program in one step
+  (entrypoint `Module:main` of the last file; add `--entrypoint=` and other modules as needed). To run generated
+  code in the OS, copy it to `C:` together with `warmc/standard/src/Kernel/Adapter.cool`, and include both in the
   shell: `#include "C:/Adapter.cool"`, then the generated file. `make warm-kernel-test` does exactly this with
-  `warmc/examples/kernel`.
-- **Inside the OS (Warm written in Cool, `warmc/Cool`):** `make disk-install` and `make disk-seed`
+  `warmc/examples/kernel`; `make warm-test` runs the compiler's own tests.
+- **Inside the OS:** `make disk-install` and `make disk-seed`
   automatically build and package the compiler as `C:/Warm.cool`. `C:/Init.cool` loads it for each shell,
   so after boot you can run `WarmRun("C:/HelloWarm.warm");` to print `Hello from Warm!`, or
   `WarmRun("C:/X.warm");` for your own module `Test` with a `main` function. For another module name,
   pass the entry point, e.g. `WarmRun("C:/X.warm", "X:main");`
-  ([warmc/Cool/README.md](../warmc/Cool/README.md)). No manual build, copy, or `#include` is needed.
+  ([warmc/README.md](../warmc/README.md)). No manual build, copy, or `#include` is needed.
   On an existing disk, run `make disk-install` once to update `Init.cool`; `disk-seed` (also used by
   `make run`) preserves existing files, including `Init.cool`, Warm, and the example. A disk from before
   the rename has `Init.HC` and `Warm.HC`: `make run` adds `Init.cool` and `Warm.cool`, and `Init.cool` wins.

@@ -1,0 +1,56 @@
+#!/bin/sh
+# Compile Warm sources with the Warm compiler written in Cool, and run them, on the Mac.
+#
+#   tools/warm run Foo.warm                     compile, build and run in one step
+#   tools/warm run Api.warmh,Api.warm Main.warm -- arg1 arg2
+#   tools/warm compile Foo.warm                 stop after writing build/warm-run/Foo/Foo.cool
+#
+# Sources are Warm modules: a body file `Foo.warm`, or an interface and body pair
+# `Foo.warmh,Foo.warm` (the older .aui/.aum names work too). Every module the program imports
+# must be listed. The entrypoint is `Module:main` for the module body of the last file, or
+# --entrypoint=Module:name. Extra arguments after `--` go to the program. The compiler
+# is build/warmc (`make build/warmc`); this script makes it, and build/coolc, when they are missing.
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+usage() {
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+}
+[ $# -ge 1 ] || usage
+mode=$1
+shift
+case "$mode" in run | compile) ;; *) usage ;; esac
+entry=
+files=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --) shift; break ;;
+        --entrypoint=*) entry=${1#--entrypoint=} ;;
+        *) files="$files $1" ;;
+    esac
+    shift
+done
+[ -n "$files" ] || usage
+make -s build/warmc build/coolc >/dev/null
+if [ -z "$entry" ]; then
+    last=${files##* }
+    last=${last##*,}
+    module=$(sed -n 's/^[[:space:]]*module body \([A-Za-z0-9_.]*\) is.*/\1/p' "$last" | head -1)
+    entry=${module:-Test}:main
+fi
+first=${files# }
+first=${first%% *}
+first=${first##*,}
+name=$(basename "$first")
+name=${name%.*}
+out=build/warm-run/$name
+mkdir -p "$out" build/tmp
+export TMPDIR=$ROOT/build/tmp
+export COOLC_COMPILER_BIN=$ROOT/coolc/seed/Compiler.BIN
+# shellcheck disable=SC2086
+build/warmc compile $files --entrypoint="$entry" --target-type=hc --output="$out/$name.cool"
+[ "$mode" = compile ] && { echo "$out/$name.cool"; exit 0; }
+build/coolc "$out/$name.cool" "$out/$name.BIN" >"$out/build.log" 2>&1 || { cat "$out/build.log"; exit 1; }
+grep -q 'Errs:0 ' "$out/build.log" || { cat "$out/build.log"; exit 1; }
+exec build/coolc --run "$out/$name.BIN" "$@"

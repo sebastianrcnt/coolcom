@@ -1,8 +1,5 @@
-_build
-warmc
-calltree.html
-error.html
+main.cool
+main.BIN
+test_bin
 *~
-lib/BuiltInModules.ml
 FAILURES.txt
-result

@@ -1,0 +1,90 @@
+{
+ "borrow-mode-from-operator": {
+  "stdout": "9\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "public-signature-interface-import": {
+  "stdout": "42\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "public-parameter-name-mismatch": {
+  "kind": "Declaration Error"
+ },
+ "opaque-parameter-count-mismatch": {
+  "kind": "Declaration Error"
+ },
+ "anonymous-region-escape": {
+  "kind": "Type Error"
+ },
+ "missing-record-payload": {
+  "kind": "Type Error"
+ },
+ "missing-case-payload": {
+  "kind": "Type Error"
+ },
+ "extract-linear-field": {
+  "kind": "Linearity Error"
+ },
+ "discard-linear": {
+  "kind": "Type Error"
+ },
+ "write-read-reference": {
+  "kind": "Type Error"
+ },
+ "write-mutable-reference": {
+  "stdout": "3\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "mutable-reference-cast": {
+  "stdout": "9\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "float32-rounding": {
+  "stdout": "16777216.000000\n1.000000\n-0.000000\n1.500000\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "float32-no-arithmetic-instance": {
+  "kind": "Type Error"
+ },
+ "ordinary-arithmetic-traps": {
+  "stdout": "",
+  "stderr": "Overflow in trappingAdd (Int8)\n",
+  "exit": 255
+ },
+ "unbounded-constant-fold": {
+  "stdout": "18446744073709551615\n7\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "constant-fold-overflow": {
+  "kind": "Type Error"
+ },
+ "unsigned-float-conversions": {
+  "stdout": "18446744073709551616.000000\n10000000000000000000\n",
+  "stderr": "",
+  "exit": 0
+ },
+ "constant-function-call": {
+  "kind": "Type Error"
+ },
+ "duplicate-named-argument": {
+  "kind": "Generic Error"
+ },
+ "non-exhaustive-case": {
+  "kind": "Type Error"
+ },
+ "duplicate-case": {
+  "kind": "Type Error"
+ },
+ "opaque-field": {
+  "kind": "Type Error"
+ },
+ "opaque-destructure": {
+  "kind": "Type Error"
+ }
+}

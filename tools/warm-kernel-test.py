@@ -26,8 +26,8 @@ def main():
         OUT = OUT / args.filter
     OUT.mkdir(parents=True, exist_ok=True)
     for name, diagnostic in (("Leak", "not consumed"), ("DoubleClose", "consumed"),
-                             ("NoCapability", "Type Error"), ("Forge", "callable named `Filesystem`")):
-        result = subprocess.run([str(ROOT / "warmc/warmc"), "compile",
+                             ("NoCapability", "Type Error"), ("Forge", "callable named Filesystem")):
+        result = subprocess.run([str(ROOT / "build/warmc"), "compile",
             str(MODULE / "Kernel.warmh") + "," + str(MODULE / "Kernel.warm"),
             str(ROOT / "warmc/test-programs/kernel" / (name + ".warm")),
             "--entrypoint=" + name + ":main", "--target-type=hc",
@@ -39,7 +39,7 @@ def main():
     # Exercise Unit/U0, scalar and decayed-span foreign calls directly.
     foreign_hc = OUT / "ForeignUnit.cool"
     foreign_bin = OUT / "ForeignUnit.BIN"
-    run(ROOT / "warmc/warmc", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.warm",
+    run(ROOT / "build/warmc", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.warm",
         "--entrypoint=ForeignUnit:main", "--target-type=hc", "--output=" + str(foreign_hc))
     compiled = run("env", "COOLC_COMPILER_BIN=" + str(ROOT / "coolc/seed/Compiler.BIN"),
                    ROOT / "build/coolc", foreign_hc, foreign_bin)
@@ -55,7 +55,7 @@ def main():
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
-        run(ROOT / "warmc/warmc", "compile",
+        run(ROOT / "build/warmc", "compile",
             str(MODULE / "Kernel.warmh") + "," + str(MODULE / "Kernel.warm"),
             ROOT / "warmc/examples/kernel" / (name + ".warm"),
             "--entrypoint=" + name + ":main", "--target-type=hc", "--output=" + str(hc))
