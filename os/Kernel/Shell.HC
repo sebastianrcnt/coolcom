@@ -545,6 +545,14 @@ U0 ShellTick(CExceptFrame *f)
     ArchIrqOff;
 }
 
+U0 ShellPrompt()
+{//The prompt, TempleOS style: the current directory, then "> " ("> " alone without a drive).
+    U8 *dir = DirCur;
+    if (dir) Print("%s> ", dir);
+    else Print(SHELL_PROMPT);
+    Free(dir);
+}
+
 #include "ShellCmd.HC"
 
 U0 ShellTask(U8 *data)
@@ -584,7 +592,7 @@ U0 ShellTask(U8 *data)
     }
     ShellCur->line_active = FALSE;
     while (n) {
-        Print(SHELL_PROMPT);
+        ShellPrompt;
         GetLine(ShellCur->line, SHELL_LINE_LEN);
         ShellCur->line_daif = ArchDaif & 0x3C0;
         ShellCur->line_active = TRUE;

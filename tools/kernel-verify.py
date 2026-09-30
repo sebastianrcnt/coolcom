@@ -353,7 +353,7 @@ def text_row_matches(px, font, r, text):
 
 def verify_shell(d):
     px, font = screen_of(d, "shell.png"), load_font()
-    echo, out = '> Print("한글 테스트 \\n");', "한글 테스트"
+    echo, out = 'C:/> Print("한글 테스트 \\n");', "한글 테스트"
     hits = [r for r in range(H // 16 - 1)
             if text_row_matches(px, font, r, echo) and text_row_matches(px, font, r + 1, out)]
     assert len(hits) == 1, f"the typed Korean line and its output are not on the shell screen (matches: {hits})"

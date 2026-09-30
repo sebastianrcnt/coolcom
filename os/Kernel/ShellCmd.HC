@@ -339,7 +339,7 @@ next_de:
         show = TRUE;
     if (show) {
         ShellList(cand, n, dirs);
-        Print("%s", SHELL_PROMPT);
+        ShellPrompt;
         LineOut(b, 0, *_n);
         LineBack(LineWidth(b, *_pos, *_n));
     }
@@ -393,7 +393,7 @@ next_h:
         ShellReplace(b, size, _n, _pos, ts, buf, common);
     } else {
         ShellList(cand, n, NULL);
-        Print("%s", SHELL_PROMPT);
+        ShellPrompt;
         LineOut(b, 0, *_n);
         LineBack(LineWidth(b, *_pos, *_n));
     }

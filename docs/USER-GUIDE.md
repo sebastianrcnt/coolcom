@@ -35,7 +35,8 @@ example `--width/--height`, `--cpus`, `--mem`, `--headless`, `--net` and `--time
 ## The shell
 
 After boot the shell prints `Cool shell: ... compiler loaded`, runs `C:/Init.HC` (which loads Vim, Tmux,
-Less, and the other programs) and shows the `>` prompt.
+Less, and the other programs) and shows the prompt: the current directory, as in TempleOS
+(`C:/> `, `C:/Kernel> `), or `> ` alone when there is no drive.
 
 ### HolyC lines
 
@@ -43,10 +44,10 @@ Each line is HolyC. It is compiled by the Cool compiler that runs inside the ker
 Functions and globals you define stay defined for later lines:
 
 ```
-> I64 Sq(I64 x) { return x * x; }
-> Print("%d\n", Sq(7));
+C:/> I64 Sq(I64 x) { return x * x; }
+C:/> Print("%d\n", Sq(7));
 49
-> "%d files\n", 3;
+C:/> "%d files\n", 3;
 3 files
 ```
 
@@ -72,19 +73,19 @@ be written in any capitalization. The function's parameter types decide whether 
 or a number. Quote words that contain spaces.
 
 ```
-> ls                          // Dir;          aliases: ls cat rm cp mv clear
-> cd Kernel                   // Cd("Kernel");
-> ls *.S
-> cd /
-> cat Init.HC                 // Type("Init.HC");
-> cp Init.HC I2.HC
-> mv I2.HC I3.HC
-> rm I3.HC
-> mkdir Foo
-> find Cls *.HC               // Find("Cls", "*.HC");
-> hexdump Init.HC 0 16
-> vim a.HC
-> top
+C:/> ls                          // Dir;          aliases: ls cat rm cp mv clear
+C:/> cd Kernel                   // Cd("Kernel");
+C:/Kernel> ls *.S
+C:/Kernel> cd /
+C:/> cat Init.HC                 // Type("Init.HC");
+C:/> cp Init.HC I2.HC
+C:/> mv I2.HC I3.HC
+C:/> rm I3.HC
+C:/> mkdir Foo
+C:/> find Cls *.HC               // Find("Cls", "*.HC");
+C:/> hexdump Init.HC 0 16
+C:/> vim a.HC
+C:/> top
 ```
 
 A line that is only a lowercase function name (`top`, `heapstats`) runs that function. A capitalized name
@@ -162,12 +163,12 @@ memory, and `HeapStats;` shows heap use and checks the heap for consistency.
 | `Load("Lib");` | load `Lib.BIN` and run its top-level code; declare its functions with `extern` to call them |
 
 ```
-> Cmp("Lib");                      // Lib.HC starts with #include "Kernel.HH"
+C:/> Cmp("Lib");                      // Lib.HC starts with #include "Kernel.HH"
 Errs:0 Warns:9 Code:C0 Size:11E
-> Load("Lib");
+C:/> Load("Lib");
 Lib loaded
-> extern I64 Tri(I64 x);
-> Print("%d\n", Tri(4));
+C:/> extern I64 Tri(I64 x);
+C:/> Print("%d\n", Tri(4));
 12
 ```
 
