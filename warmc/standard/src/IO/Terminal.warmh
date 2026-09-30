@@ -20,9 +20,9 @@ import Standard.String (
 
 module Standard.IO.Terminal is
     type StandardOutput: Linear;
-    
+
     type StandardError: Linear;
-    
+
     type StandardInput: Linear;
 
     generic [R: Region]
@@ -39,7 +39,7 @@ module Standard.IO.Terminal is
     function releaseError(stream: StandardError): Unit;
 
     function releaseInput(stream: StandardInput): Unit;
-    
+
     instance ByteOutputStream(StandardOutput);
 
     instance ByteOutputStream(StandardError);

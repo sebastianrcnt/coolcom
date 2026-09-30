@@ -46,4 +46,4 @@ module body Standard.StringBuilder is
         let { buffer: Buffer[Nat8] } := builder;
         return fromByteBuffer(buffer);
     end;
-end module body. 
+end module body.

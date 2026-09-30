@@ -4,7 +4,7 @@ module body Example.Record is
     end;
 
     function main(): ExitCode is
-        let Rec : R := R(X => 10);
+        let Rec: R := R(X => 10);
         let Y: Int32 := Rec.X;
         return ExitSuccess();
     end;

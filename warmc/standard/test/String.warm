@@ -54,7 +54,7 @@ module body Standard.Test.String is
         assertSuccess("destroyString complete");
         return nil;
     end;
-  
+
     function fromLiteralTest(): Unit is
         testHeading("fromLiteral");
         let s: String := fromLiteral("Hello, World!");
