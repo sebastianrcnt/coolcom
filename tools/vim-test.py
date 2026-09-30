@@ -91,6 +91,10 @@ CASES = [
     ('gd-missing', 'UnknownName\n', 'gd\x0f', 'UnknownName\n', 0),
     ('gd-dirty-local', 'Target();\nU0 Target() {}\n', ':set ft=cool\nA \x1b0gd', 'Target(); \nU0 Target() {}\n', 14),
     ('gd-dirty-kernel', 'StrLen\n', 'A \x1b0gd', 'StrLen \n', 0),
+    ('rnu-both', 'a\nb\nc\nd\n', ':set number relativenumber\njj', 'a\nb\nc\nd\n', 4),
+    ('rnu-only', 'a\nb\nc\nd\n', ':set nonu rnu\njj', 'a\nb\nc\nd\n', 4),
+    ('rnu-off', 'a\nb\nc\nd\n', ':set rnu\n:set nornu\njj', 'a\nb\nc\nd\n', 4),
+    ('rnu-no-number', 'a\nb\nc\nd\n', ':set nonumber norelativenumber\njj', 'a\nb\nc\nd\n', 4),
     ('insert', 'abc\n', 'iX\x1b', 'Xabc\n', 0),
     ('append', 'abc\n', 'aX\x1b', 'aXbc\n', 1),
     ('first-nonblank-insert', '  abc\n', 'IX\x1b', '  Xabc\n', 2),
@@ -332,6 +336,20 @@ def main():
         state = results.get(i)
         if got != (expected if isinstance(expected, bytes) else expected.encode()) or state is None or state[0] != pos:
             failures.append(f'{i} {name}: text={got[:150]!r} cursor={state}; expected {(expected if isinstance(expected, bytes) else expected.encode())[:150]!r}, {pos}')
+        if name.startswith('rnu-'):
+            end = log.index(f'VIMRESULT {i} ')
+            frame = log[log.rfind('\x1b[1;1H', 0, end):end]
+            numbers = {'rnu-both': [2, 1, 3, 1], 'rnu-only': [2, 1, 0, 1],
+                       'rnu-off': [1, 2, 3, 4], 'rnu-no-number': None}[name]
+            for row, char in enumerate('abcd', 1):
+                prefix = f'\x1b[{row};1H\x1b[0m\x1b[K'
+                if numbers:
+                    prefix += f'\x1b[90m{numbers[row-1]:5d} '
+                if prefix + '\x1b[0;37m' + char not in frame:
+                    failures.append(f'{name}: wrong rendered number on row {row}')
+            cursor = '\x1b[3;1H' if numbers is None else '\x1b[3;7H'
+            if cursor not in frame:
+                failures.append(f'{name}: wrong rendered cursor')
         if state and name == 'vertical-scroll' and state[1] == 0:
             failures.append('vertical viewport did not scroll')
         if state and name == 'horizontal-scroll' and state[2] == 0:

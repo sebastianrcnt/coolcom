@@ -20,6 +20,10 @@ loads the editor. The UART and VM keyboard use the same `GetKey` events.
 - Search: `/text` or `?text`, Enter; `n N` repeat in either direction.
   Searches are literal, case-sensitive UTF-8 and wrap around the buffer.
   An empty search repeats the previous pattern.
+- Numbers: `:set number/nu`, `nonumber/nonu`, `relativenumber/rnu`,
+  `norelativenumber/nornu` (space-separated options also work). With both
+  enabled, the current line is absolute and other lines are relative; with
+  only relative numbers the current line is zero. Default: number, nornu.
 - Ex: `:w :q :q! :wq`, `:e C:/Other.cool`, `:42`. Unsaved changes block
   `:q` and `:e`; failed reads/writes stay in the editor with a status message.
 

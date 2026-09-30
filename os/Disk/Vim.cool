@@ -32,6 +32,7 @@ I64 vim_win, vim_wl, vim_wr, vim_ol, vim_ocap, vim_wbad;
 // Syntax highlighting (os/Kernel/Syntax.cool): the language, the group of each byte of the
 // line being drawn (vim_line is a copy of it), and the lexer state at the start of a line,
 // kept while the text before that line is unchanged so scrolling does not rescan the file.
+Bool vim_number, vim_rnu;
 I64 vim_lang, vim_syn_ok, vim_syn_off, vim_syn_lang;
 CSyn vim_syn_cp;
 
@@ -784,6 +785,21 @@ Bool VimCommand()
         vim_msg = "Filetype set";
         return FALSE;
     }
+    if (!StrNCmp(cmd, "set ", 4)) {
+        file = cmd + 4;
+        while (*file) {
+            while (*file == ' ') file++;
+            if (!*file) break;
+            for (i = 0; file[i] && file[i] != ' '; i++);
+            if (HCTStrEq(file, i, "number") || HCTStrEq(file, i, "nu")) vim_number = TRUE;
+            else if (HCTStrEq(file, i, "nonumber") || HCTStrEq(file, i, "nonu")) vim_number = FALSE;
+            else if (HCTStrEq(file, i, "relativenumber") || HCTStrEq(file, i, "rnu")) vim_rnu = TRUE;
+            else if (HCTStrEq(file, i, "norelativenumber") || HCTStrEq(file, i, "nornu")) vim_rnu = FALSE;
+            else {vim_msg = "Unknown option"; return FALSE;}
+            file += i;
+        }
+        return FALSE;
+    }
     if (!StrNCmp(cmd, "hi ", 3)) {//:hi comment 2  (a highlight group and an Ansi color 0..255)
         for (i = 0; i < SYN_G_COUNT; i++)
             if (!StrNCmp(cmd + 3, SynGroupName(i), StrLen(SynGroupName(i))) && cmd[3 + StrLen(SynGroupName(i))] == ' ') break;
@@ -1144,10 +1160,17 @@ U0 VimSynState(CSyn *st, I64 target)
     st->fast = FALSE;
 }
 
+I64 VimDisplayNumber(I64 line, I64 current)
+{
+    if (!vim_rnu || (vim_number && line == current)) return line;
+    if (line < current) return current - line;
+    return line - current;
+}
+
 U0 VimDraw()
 {
     I64 rows, cols, p, q, qe, y, x, k, w, col, row = 1, line = 1, a = -1, b = -1;
-    I64 color, cp, i, ls, last_color, last_sel, sel;
+    I64 color, cp, i, ls, last_color, last_sel, sel, gutter = 0, current;
     U8 number[32], status[512];
     CSyn st;
     AnsiTermSize(&rows, &cols);
@@ -1158,9 +1181,11 @@ U0 VimDraw()
     p = vim_top;
     for (y = 1; y < rows - 1; y++) p = VimNextLine(p);
     while (VimLine(vim_pos) > p) {vim_top = VimNextLine(vim_top); p = VimNextLine(p);}
+    if (vim_number || vim_rnu) gutter = 6;
+    current = 1 + VimNewlines(0, VimLine(vim_pos));
     col = VimCol(vim_pos);
     if (col < vim_left) vim_left = col;
-    if (col >= vim_left + cols - 8) vim_left = col - cols + 9;
+    if (col >= vim_left + cols - gutter - 2) vim_left = col - cols + gutter + 3;
     line += VimNewlines(0, vim_top);
     p = vim_top;
     VimSynState(&st, p);
@@ -1169,8 +1194,11 @@ U0 VimDraw()
         if (p > VimLastLine()) {AnsiFg(SynColor(SYN_G_NONTEXT)); ConsPut('~');}
         else {
             if (VimLine(vim_pos) == p) row = y;
-            StrPrint(number, "%5d ", line++);
-            AnsiFg(SynColor(SYN_G_LINENR)); ConsPutS(number);
+            if (gutter) {
+                StrPrint(number, "%5d ", VimDisplayNumber(line, current));
+                AnsiFg(SynColor(SYN_G_LINENR)); ConsPutS(number);
+            }
+            line++;
             q = VimEnd(p); x = 0; ls = p;
             qe = q; q = p + VimLineGet(p, q);
             SynLine(&st, vim_line, q - p, vim_grp);
@@ -1178,7 +1206,7 @@ U0 VimDraw()
             while (p < q) {
                 k = VimStep(p) - p; w = VimWidth(p, x);
                 cp = VimCp(p);
-                if (x >= vim_left && x + w <= vim_left + cols - 7) {
+                if (x >= vim_left && x + w <= vim_left + cols - gutter - 1) {
                     color = SynColor(vim_grp[p - ls]);
                     sel = p >= a && p < b;
                     if (color != last_color || sel != last_sel) {
@@ -1209,7 +1237,7 @@ U0 VimDraw()
         if (ime_on) StrCat(status, " [한]");
         StrCat(status, "  "); StrCat(status, vim_msg);
         VimText(status, cols - 1);
-        AnsiCursor(row, 7 + col - vim_left);
+        AnsiCursor(row, 1 + gutter + col - vim_left);
     }
     AnsiReset; AnsiCursorShow;
 }
@@ -1236,6 +1264,7 @@ Bool VimOpen(U8 *name)
     if (!vim_line || !vim_grp) {VimClose(); Print("Vim: out of memory\n"); return FALSE;}
     vim_mode = vim_count = vim_op = vim_pending = vim_transaction = 0;
     vim_record = vim_kn = vim_dn = vim_replay = vim_yank_len = 0;
+    vim_number = TRUE; vim_rnu = FALSE;
     vim_jn = 0;
     vim_search[0] = 0; vim_search_dir = 1; vim_goal = -1; vim_msg = "";
     if (!VimLoad(name)) {Print("Vim: %s\n", vim_msg); VimClose(); return FALSE;}
