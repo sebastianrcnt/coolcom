@@ -23,6 +23,7 @@ the implementation boundaries.
 | Path | What |
 |---|---|
 | `Core.cool` `Lexer.cool` `Parser.cool` `Resolve.cool` `Types.cool` `Fold.cool` `Check.cool` `Linear.cool` `Emit.cool` `Diagnostic.cool` | the compiler (`Warm.cool` includes the passes) |
+| `Format.cool` `FmtNative.cool` | the formatter (`WFmt`, `WarmFmt`) and its host command line (built into `build/warmfmt.BIN`) |
 | `Runtime.cool` | the runtime that every generated program starts with |
 | `ModuleRuntime.cool` | the smaller runtime of a kernel module (`--kernel-module`) |
 | `Native.cool` | the host command line (built into `build/warmcool/Warm.BIN`) |
@@ -30,6 +31,7 @@ the implementation boundaries.
 | `builtin/` | Pervasive and Memory, original Warm source that is embedded into the compiler (`embed_builtins.py`) |
 | `standard/` `examples/` | the standard library and example programs; `standard/src/Kernel` is `Warm.Kernel` for the OS |
 | `test-programs/` | the end-to-end test suites |
+| `fmt-tests/` | the formatter's fixtures (`NAME.in.warm` formats to `NAME.exp.warm`) |
 | `compare.py` `test_*.py` | the tests |
 
 ## Use on the Mac
@@ -87,6 +89,32 @@ Program arguments are just the source path as argv[0].
 
 This is Cool text handed to the existing coolc JIT, not direct IR emission. JIT code stays
 in the shell symbol table; the compilation arena is released after every operation.
+
+## Formatting
+
+`tools/warmfmt [--check] files` formats `.warm`/`.warmh` files in place (`--check` only reports and exits 1 when a
+file would change; 2 is an error). In the OS, `WarmFmt("C:/x.warm");` does the same to a file (`WarmFmt(path, TRUE)`
+only reports); it comes with `C:/Warm.cool`. `make fmt` and `make fmt-check` cover the tracked Warm files too, next to
+the HolyC ones (`tools/hcfmt.sh`), and the pre-commit hook (`make hooks`) refuses staged Warm files that are not
+formatted. The suites in `test-programs/suites` are left as they are: their expected diagnostics carry line and column numbers.
+
+The formatter is `Format.cool`. It lexes the text with `WLex` (`Lexer.cool`), so a change to the lexer changes what it
+sees, and it never parses: block structure comes from the keywords (`is`, `then`, `else`, `do`, `of`, `end`), so it also
+formats unfinished code. It only rewrites whitespace and keeps the line breaks:
+
+- Indentation is 4 spaces per block (module, record, union, function, typeclass, instance, `if`/`else`, `case` and its
+  `when`s, `while`, `for`, `borrow`; a union case's slots are one level in). A continuation line is one level past its
+  statement, and inside brackets one level past the line that opened them, with the closing bracket lined up with that line.
+- Spaces follow fixed rules: `name: Type`, `a + b`, `f(x, y)`, `Buffer[T]`, `&![T, R]`, `p->x`, `{ a: T }`, `-x`,
+  `import M (A, B);`. Trailing whitespace goes, runs of blank lines become one, the file ends with one newline.
+- Comments are kept, and a trailing comment keeps its column. A comment on its own line takes the indentation of the code
+  after it; before `end`, `else` or `when` it stays inside the block when it was indented past that word.
+  Docstrings move with their declaration. Strings and other triple-quoted values are untouched.
+
+The output is verified before it is written: it must lex to the same tokens (docstrings up to their indentation) and
+contain the same comments as the input; otherwise the file is left alone and the run reports an error. So does a file that
+does not lex. `python3 warmc/test_fmt.py` (part of `make warm-test`) checks the fixtures, odd inputs, and on all Warm files
+in the repository that formatting is idempotent and leaves the parse tree (`--dump-ast`) unchanged.
 
 ## The Cool backend
 
@@ -242,6 +270,7 @@ python3 warmc/test_semantics.py   # semantic probes (semantic-expected.json)
 python3 warmc/test_numbers.py     # exact numeric representation checks
 python3 warmc/test_cli.py         # entrypoint, export, CLI and diagnostic checks
 python3 warmc/test_standard.py    # the standard library and its tests, semantic checking
+python3 warmc/test_fmt.py         # the formatter (tools/warmfmt): fixtures, idempotence, same parse trees
 python3 warmc/test_kernel.py      # compile and run inside the kernel shell (make build/kernel.Image first)
 warmc/run-examples.sh             # compile and run the examples
 ```
@@ -258,7 +287,7 @@ report for each case are under `build/warmcool-comparison`.
 
 `make warm-kernel-test` (part of `make test`) compiles the kernel examples in
 `examples/kernel` with the Warm compiler and runs them in the real kernel shell. Files
-writes and reads `Warm.txt` (checked with mtools), Screen draws a rectangle whose pixels
+writes and reads `Warm.txt` (checked with mtools), Fmt runs `WarmFmt` on a messy file on the disk (the result is compared with the fixture), Screen draws a rectangle whose pixels
 are checked in the screenshot, Key waits for a scripted key press, and Errors injects a
 throwing `FileWrite` at the adapter boundary. Four negative fixtures in
 `test-programs/kernel` (leaked buffer, double close, missing capability, forged root

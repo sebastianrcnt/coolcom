@@ -99,4 +99,4 @@ module body Standard.String is
     function getSpanMut(string: &![String, R], start: Index, final: Index): Span![Nat8, R] is
         return bufferGetSpanMut(&(string->buf), start, final);
     end;
-end module body. 
+end module body.

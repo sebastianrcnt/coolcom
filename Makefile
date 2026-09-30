@@ -56,6 +56,11 @@ $(B)/Kernel.BIN: $(KSRC) coolc/seed/Compiler.BIN build/coolc | $(B)
 	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc os/Kernel/Kernel.cool $@ > $(B)/coolc-kernel.log 2>&1
 	tail -1 $(B)/coolc-kernel.log
 
+# The Warm formatter (tools/warmfmt): warmc/FmtNative.cool, built on the lexer of warmc.
+build/warmfmt.BIN: warmc/FmtNative.cool warmc/Format.cool warmc/Core.cool warmc/Lexer.cool coolc/seed/Compiler.BIN build/coolc | build
+	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc warmc/FmtNative.cool $@ > build/warmfmt-compile.log 2>&1
+	tail -1 build/warmfmt-compile.log
+
 build/hcfmt.BIN: coolc/Fmt/Native.cool coolc/Fmt/HCFmt.cool coolc/Fmt/HCTok.cool coolc/seed/Compiler.BIN build/coolc | build
 	COOLC_COMPILER_BIN=$(COOLC_SEED) gtimeout 45 build/coolc coolc/Fmt/Native.cool $@ > build/hcfmt-compile.log 2>&1
 	tail -1 build/hcfmt-compile.log
@@ -165,13 +170,14 @@ build/warmc: build/warmcool/Warm.BIN
 
 # The Warm compiler's own tests: every test-programs case against its stored expectation, and the probes.
 .PHONY: warm-test
-warm-test: build/warmc build/warmcool/Kernel.cool
+warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 	python3 warmc/compare.py
 	python3 warmc/test_frontend.py
 	python3 warmc/test_semantics.py
 	python3 warmc/test_numbers.py
 	python3 warmc/test_cli.py
 	python3 warmc/test_standard.py
+	python3 warmc/test_fmt.py
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
@@ -263,12 +269,17 @@ $(B):
 clean:
 	rm -rf build
 
-# HolyC formatting (coolc/Fmt). The pre-commit hook runs fmt-check on staged files.
+# HolyC formatting (coolc/Fmt) and Warm formatting (warmc/Format.cool). The pre-commit hook runs
+# fmt-check on staged files. The suites and the formatter's own fixtures keep their layout
+# (the suites' expected diagnostics carry line and column numbers).
 HC_FILES = $(shell git ls-files -- '*.cool' '*.coolh' | grep -v -e '^coolc/third_party/' -e '^coolc/Fmt/tests/')
+WARM_FILES = $(shell git ls-files -- '*.warm' '*.warmh' | grep -v -e '^warmc/test-programs/suites/' -e '^warmc/fmt-tests/')
 fmt:
 	tools/hcfmt.sh $(HC_FILES)
+	tools/warmfmt $(WARM_FILES)
 fmt-check:
 	tools/hcfmt.sh --check $(HC_FILES)
+	tools/warmfmt --check $(WARM_FILES)
 hooks:
 	git config core.hooksPath tools/git-hooks
 

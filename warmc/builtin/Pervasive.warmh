@@ -26,7 +26,7 @@ module Austral.Pervasive is
 
     function abort(message: Span[Nat8, Static]): Unit;
 
-    type RootCapability : Linear;
+    type RootCapability: Linear;
 
     function surrenderRoot(cap: RootCapability): Unit;
 

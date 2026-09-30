@@ -19,7 +19,6 @@ import Austral.Memory (
     loadRead
 );
 
-
 module body Standard.Box is
     record Box[T: Type]: Linear is
         pointer: Pointer[T];

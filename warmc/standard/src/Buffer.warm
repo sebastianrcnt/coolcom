@@ -200,7 +200,6 @@ module body Standard.Buffer is
         return nil;
     end;
 
-
     generic [T: Type, R: Region]
     function swapNth(buf: &![Buffer[T], R], pos: Index, element: T): T is
         if pos >= buf->size then
@@ -282,7 +281,7 @@ module body Standard.Buffer is
                 return nil;
             when None do
                 abort("bump: allocation failed");
-         end case;
+        end case;
     end;
 
     generic [T: Type, R: Region]
@@ -298,12 +297,12 @@ module body Standard.Buffer is
         -- If the array is non-empty, we have to move everything to the right of
         -- the position one step to the right.
         if buf->size > 0 then
-           shiftRight(
-               ptr => buf->array,
-               chunk_start => pos,
-               chunk_length => buf->size - pos,
-               count => 1
-           );
+            shiftRight(
+                ptr => buf->array,
+                chunk_start => pos,
+                chunk_length => buf->size - pos,
+                count => 1
+            );
         end if;
         -- Insert.
         let index_ptr: Pointer[T] := positiveOffset(buf->array, pos);

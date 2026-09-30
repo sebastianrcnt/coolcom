@@ -1,0 +1,49 @@
+// The Warm formatter as a host program (build/warmfmt.BIN; tools/warmfmt runs it):
+//   warmfmt [--check] file.warm...    format the files in place, or with --check only report
+// Exit status: 0 done (or with --check: nothing would change), 1 with --check when a file would change, 2 an error.
+#define U8 U8i
+#define I64 I64i
+#define U64 U64i
+#define Bool I8i
+#define TRUE 1
+#define FALSE 0
+#define NULL 0
+import U8 *CAlloc(I64 size);
+import U0 Free(U8 *ptr);
+import U8 *MemCpy(U8 *dst, U8 *src, I64 size);
+import I64 StrLen(U8 *s);
+import I64 StrCmp(U8 *a, U8 *b);
+import U0 Print(U8 *format, ...);
+import U8 *FileRead(U8 *path, I64 *size, U8 *attrs = NULL);
+import I64 FileWrite(U8 *path, U8 *data, I64 size);
+import I64 NativeArgCount();
+import U8 *NativeArg(I64 index);
+import U0 NativeExit(I64 code);
+#include "Core.cool"
+#include "Lexer.cool"
+#include "Format.cool"
+I64 WFmtMain()
+{
+    I64 i, r, code = 0, files = 0;
+    Bool check = FALSE;
+    U8 *arg;
+    for (i = 1; i < NativeArgCount(); i++) {
+        arg = NativeArg(i);
+        if (WEq(arg, "--check")) check = TRUE;
+        else if (WPrefix(arg, "--")) {
+            Print("warmfmt: unknown option %s\n", arg);
+            return 2;
+        } else {
+            r = WarmFmt(arg, check, TRUE);
+            files++;
+            if (r == 2) code = 2;
+            else if (r == 1 && check && code == 0) code = 1;
+        }
+    }
+    if (!files) {
+        Print("usage: warmfmt [--check] file.warm...\n");
+        return 2;
+    }
+    return code;
+}
+NativeExit(WFmtMain());

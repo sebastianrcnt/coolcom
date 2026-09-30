@@ -14,7 +14,7 @@ module body Austral.Pervasive is
     function spanWriteLength(sp: Span![T, R]): Index is
         return @embed(Index, "$1.size", sp);
     end;
-    
+
     function abort(message: Span[Nat8, Static]): Unit is
         return @embed(Unit, "au_abort($1)", message);
     end;
@@ -462,7 +462,6 @@ module body Austral.Pervasive is
             return @embed(Float64, "$1 / $2", lhs, rhs);
         end;
     end;
-
 
     ---
     --- Modular Arithmetic
@@ -1965,7 +1964,6 @@ module body Austral.Pervasive is
         end;
     end;
 
-
     -- ToFloat64
 
     instance ToFloat64(Nat8) is
@@ -2041,7 +2039,7 @@ module body Austral.Pervasive is
     instance Remainder(Nat8) is
         method rem(lhs: Nat8, rhs: Nat8): Nat8 is
             if rhs = 0 then
-               abort("Division by zero in rem(Nat8)");
+                abort("Division by zero in rem(Nat8)");
             end if;
             return @embed(Nat8, "($1 % $2)", lhs, rhs);
         end;
@@ -2050,7 +2048,7 @@ module body Austral.Pervasive is
     instance Remainder(Nat16) is
         method rem(lhs: Nat16, rhs: Nat16): Nat16 is
             if rhs = 0 then
-               abort("Division by zero in rem(Nat16)");
+                abort("Division by zero in rem(Nat16)");
             end if;
             return @embed(Nat16, "($1 % $2)", lhs, rhs);
         end;
@@ -2059,7 +2057,7 @@ module body Austral.Pervasive is
     instance Remainder(Nat32) is
         method rem(lhs: Nat32, rhs: Nat32): Nat32 is
             if rhs = 0 then
-               abort("Division by zero in rem(Nat32)");
+                abort("Division by zero in rem(Nat32)");
             end if;
             return @embed(Nat32, "($1 % $2)", lhs, rhs);
         end;
@@ -2068,7 +2066,7 @@ module body Austral.Pervasive is
     instance Remainder(Nat64) is
         method rem(lhs: Nat64, rhs: Nat64): Nat64 is
             if rhs = 0 then
-               abort("Division by zero in rem(Nat64)");
+                abort("Division by zero in rem(Nat64)");
             end if;
             return @embed(Nat64, "($1 % $2)", lhs, rhs);
         end;
@@ -2077,7 +2075,7 @@ module body Austral.Pervasive is
     instance Remainder(Nat8) is
         method rem(lhs: Int8, rhs: Int8): Int8 is
             if rhs = 0 then
-               abort("Division by zero in rem(Int8)");
+                abort("Division by zero in rem(Int8)");
             end if;
             if (lhs = minimum_int8) and (rhs = -1) then
                 abort("Overflow in rem(Int8)");
@@ -2089,7 +2087,7 @@ module body Austral.Pervasive is
     instance Remainder(Int8) is
         method rem(lhs: Int8, rhs: Int8): Int8 is
             if rhs = 0 then
-               abort("Division by zero in rem(Int8)");
+                abort("Division by zero in rem(Int8)");
             end if;
             if (lhs = minimum_int8) and (rhs = -1) then
                 abort("Overflow in rem(Int8)");
@@ -2101,7 +2099,7 @@ module body Austral.Pervasive is
     instance Remainder(Int16) is
         method rem(lhs: Int16, rhs: Int16): Int16 is
             if rhs = 0 then
-               abort("Division by zero in rem(Int16)");
+                abort("Division by zero in rem(Int16)");
             end if;
             if (lhs = minimum_int16) and (rhs = -1) then
                 abort("Overflow in rem(Int16)");
@@ -2113,7 +2111,7 @@ module body Austral.Pervasive is
     instance Remainder(Int32) is
         method rem(lhs: Int32, rhs: Int32): Int32 is
             if rhs = 0 then
-               abort("Division by zero in rem(Int32)");
+                abort("Division by zero in rem(Int32)");
             end if;
             if (lhs = minimum_int32) and (rhs = -1) then
                 abort("Overflow in rem(Int32)");
@@ -2125,7 +2123,7 @@ module body Austral.Pervasive is
     instance Remainder(Int64) is
         method rem(lhs: Int64, rhs: Int64): Int64 is
             if rhs = 0 then
-               abort("Division by zero in rem(Int64)");
+                abort("Division by zero in rem(Int64)");
             end if;
             if (lhs = minimum_int64) and (rhs = -1) then
                 abort("Overflow in rem(Int64)");
@@ -2137,7 +2135,7 @@ module body Austral.Pervasive is
     instance Remainder(Index) is
         method rem(lhs: Index, rhs: Index): Index is
             if rhs = 0 then
-               abort("Division by zero in rem(Index)");
+                abort("Division by zero in rem(Index)");
             end if;
             return @embed(Index, "($1 % $2)", lhs, rhs);
         end;

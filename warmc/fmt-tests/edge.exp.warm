@@ -1,0 +1,28 @@
+module Edge is
+    type T: Free;
+    generic [A: Type]
+    function id(x: A): A;
+    instance Show(T);
+    typeclass Show(A: Free) is
+        generic [R: Region]
+        method show(a: &[A, R]): Unit;
+        """A documented method."""
+        method show2(a: A): Unit;
+    end;
+    record P: Free is end;
+    function g(): Unit is -- nothing to do
+    end;
+    function h(): Int32 is
+        return 1; end;
+    constant longer: Int32 := (1 +
+        2) *
+        3;
+    function k(): Unit is
+        let s: String := """
+       multi line
+       string
+       """;
+        let t: Int32 := if true then 1 else other(2);
+        skip; --tight
+    end;
+end module.

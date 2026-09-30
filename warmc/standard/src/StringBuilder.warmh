@@ -20,4 +20,4 @@ module Standard.StringBuilder is
     function writeString(builder: &![StringBuilder, R], string: &[String, S]): Unit;
 
     function finalize(builder: StringBuilder): String;
-end module. 
+end module.
