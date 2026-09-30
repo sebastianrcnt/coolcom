@@ -3469,8 +3469,11 @@ binop:
             break;
         case BIC_DEREF:
             orig = r;
+            // PORT-NOTE: the C has `r->base.last != IC_ADDR_OF` (a queue link against a code: always
+            // true); the intent is the operand, as here. GetAddrModeParts only accepts an IC_ADD operand,
+            // so the test changes nothing.
 deref_norm:
-            if (!spilled && r->base.last(I64) != BIC_ADDR_OF && /*PORT-NOTE: compares the queue link with a code, always true; kept as translated*/ GetAddrModeParts(cctrl, r)) {
+            if (!spilled && r->base.next(CBRPN *)->type != BIC_ADDR_OF && GetAddrModeParts(cctrl, r)) {
                 if (r->res.__sib_base_rpn && r->res.__sib_idx_rpn) {
                     PushTmpDepthFirst(cctrl, r->res.__sib_base_rpn, 0);
                     PushTmpDepthFirst(cctrl, r->res.__sib_idx_rpn, 0);
