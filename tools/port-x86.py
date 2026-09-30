@@ -105,6 +105,13 @@ def main():
             if word.startswith(a): names[word] = b + word[len(a):]
     src = tokens(src, names)
     src = src.replace('extern void BDoNothing();', '')
+    # Match the shared frontend ABI: returns expose their bits in both banks.
+    src = src.replace('if (tmp.raw_type == BRT_F64)\n      AIWNIOS_ADD_CODE(X86MovQI64F64, MIR(cctrl, 0), 0);\n    {',
+                      'if (tmp.raw_type == BRT_F64) {\n      AIWNIOS_ADD_CODE(X86MovQI64F64, MIR(cctrl, 0), 0);\n    } else {\n      AIWNIOS_ADD_CODE(X86MovQF64I64, MFR(cctrl, 0), 0);\n    }\n    {')
+    src = src.replace('X86ShrRCX, MIR(cctrl, tmp.reg2)', 'X86ShrRCX, MIR(cctrl, tmp2.reg)')
+    # Retrying a failed speculative LEA recursively traverses long addition
+    # chains twice per level (exponential work). Keep the ordinary add path.
+    src = src.replace('!spilled && GetSIBParts(orig, &i, &b, &idx, &i2, 0)', '0')
     src = re.sub(r'^#include.*\n', '', src, flags=re.M)
     # GNU labels-as-values become a switch with the same destination labels.
     table = re.search(r'static const void \*poop_ants\[BIC_CNT\] = \{(.*?)\};', src, re.S)
@@ -116,6 +123,87 @@ def main():
     src = src.replace('CBRPN *forwards[cnt2 = cnt];', 'cnt2 = cnt; CBRPN **forwards = MAlloc(cnt2 * sizeof(CBRPN *));')
     at = src.rfind('return xbin;')
     src = src[:at] + 'Free(forwards);\n  ' + src[at:]
+    # Floating shifts operate on IEEE bits, then retain an F64 result.
+    start = src.index('    } else {\n      next = ICArgN(rpn, 1);', src.index('  ic_lsh:'))
+    end = src.index('    break;\n  ic_rsh:', start)
+    shift = """    } else {
+      next = ICArgN(rpn, 1); next2 = ICArgN(rpn, 0);
+      code_off = __OptPassFinal(cctrl, next2, bin, code_off);
+      code_off = PutICArgIntoReg(cctrl, &next2->res, BRT_I64i, RCX, bin, code_off);
+      code_off = PushToStack(cctrl, &next2->res, bin, code_off);
+      code_off = __OptPassFinal(cctrl, next, bin, code_off);
+      code_off = PutICArgIntoReg(cctrl, &next->res, BRT_F64, 0, bin, code_off);
+      AIWNIOS_ADD_CODE(X86MovQI64F64, MIR(cctrl, RAX), next->res.reg);
+      tmp.mode = MD_REG; tmp.raw_type = BRT_I64i; tmp.reg = RCX;
+      code_off = PopFromStack(cctrl, &tmp, bin, code_off);
+      AIWNIOS_ADD_CODE(X86ShlRCX, MIR(cctrl, RAX));
+      AIWNIOS_ADD_CODE(X86MovQF64I64, MFR(cctrl, 0), RAX);
+      tmp.raw_type = BRT_F64; tmp.reg = 0;
+      rpn->tmp_res = tmp;
+      if (rpn->res.keep_in_tmp) {rpn->res = tmp; rpn->res.keep_in_tmp = 1;}
+      code_off = ICMov(cctrl, &rpn->res, &tmp, bin, code_off);
+    }
+"""
+    src = src[:start] + shift + src[end:]
+    start = src.index('    if (rpn->raw_type == BRT_F64) {', src.index('  ic_rsh:'))
+    end = src.index('    switch (rpn->raw_type)', start)
+    src = src[:start] + shift.replace('    } else {', '    if (rpn->raw_type == BRT_F64) {', 1).replace('X86ShlRCX', 'X86SarRCX').replace('    }\n', '      break;\n    }\n') + src[end:]
+    src = """static int MutatingOperand(CBRPN *r) {
+      switch (r->type) {
+        case BIC_EQ: case BIC_ADD_EQ: case BIC_SUB_EQ: case BIC_MUL_EQ:
+        case BIC_DIV_EQ: case BIC_MOD_EQ: case BIC_LSH_EQ: case BIC_RSH_EQ:
+        case BIC_AND_EQ: case BIC_OR_EQ: case BIC_XOR_EQ:
+        case BIC_PRE_INC: case BIC_POST_INC: case BIC_PRE_DEC: case BIC_POST_DEC: return 1;
+      }
+      return 0;
+    }\n""" + src
+    a = src.index('#define BACKEND_BINOP(f_op')
+    b = src.index('#define BACKEND_BINOP_IMM', a)
+    pair = re.compile(r'code_off = __OptPassFinal\(cctrl, next, bin, code_off\);[ \t\\]*\n[ \t]*code_off = __OptPassFinal\(cctrl, next2, bin, code_off\);')
+    lines = ['if (MutatingOperand(next) || MutatingOperand(next2)) {',
+        'code_off = __OptPassFinal(cctrl, next2, bin, code_off);',
+        'code_off = __OptPassFinal(cctrl, next, bin, code_off);', '} else {',
+        'code_off = __OptPassFinal(cctrl, next, bin, code_off);',
+        'code_off = __OptPassFinal(cctrl, next2, bin, code_off);', '}']
+    src = src[:a] + pair.sub(lambda m: (' '+chr(92)+'\n').join(lines), src[a:b]) + src[b:]
+    src = src.replace('PushTmpDepthFirst(cctrl, arg, SpillsTmpRegs(arg2));\n    PushTmpDepthFirst(cctrl, arg2, 0);\n    PopTmp(cctrl, arg2);\n    PopTmp(cctrl, arg);',
+        'if (r->type == BIC_ADD || r->type == BIC_SUB || r->type == BIC_MUL || (r->type == BIC_DIV && r->raw_type == BRT_F64)) {\n'
+        'if (MutatingOperand(arg) || MutatingOperand(arg2)) {\n'
+        'PushTmpDepthFirst(cctrl, arg2, SpillsTmpRegs(arg)); PushTmpDepthFirst(cctrl, arg, 0); PopTmp(cctrl, arg); PopTmp(cctrl, arg2); goto fin;\n}\n}\n'
+        'PushTmpDepthFirst(cctrl, arg, SpillsTmpRegs(arg2));\n    PushTmpDepthFirst(cctrl, arg2, 0);\n    PopTmp(cctrl, arg2);\n    PopTmp(cctrl, arg);')
+    # The owned ARM frontend marks aggregate assignment with a byte size.
+    class_copy = """static int64_t ClassCopy(CBCmpCtrl *cctrl, CBRPN *rpn, char *bin, int64_t code_off) {
+
+      CBICArg src_addr = {0}, dst_addr = {0};
+      CBRPN *next, *next2;
+      int64_t copied = 0, step;
+      next = ICArgN(rpn,1); next2 = ICArgN(rpn,0);
+      code_off = __OptPassFinal(cctrl,next2,bin,code_off);
+      code_off = __OptPassFinal(cctrl,next,bin,code_off);
+      src_addr.mode = MD_REG; src_addr.raw_type = BRT_PTR; src_addr.reg = R8;
+      dst_addr.mode = MD_REG; dst_addr.raw_type = BRT_PTR; dst_addr.reg = RCX;
+      code_off = ICMov(cctrl,&src_addr,&next2->res,bin,code_off);
+      code_off = ICMov(cctrl,&dst_addr,&next->res,bin,code_off);
+      while (copied < rpn->integer) {
+        if (rpn->integer-copied >= 8) {
+          step = 8;
+          AIWNIOS_ADD_CODE(X86MovRegIndirI64,MIR(cctrl,RAX),-1,-1,R8,copied);
+          AIWNIOS_ADD_CODE(X86MovIndirRegI64,RAX,-1,-1,RCX,copied);
+        } else {
+          step = 1;
+          AIWNIOS_ADD_CODE(X86MovZXRegIndirI8,MIR(cctrl,RAX),-1,-1,R8,copied);
+          AIWNIOS_ADD_CODE(X86MovIndirRegI8,RAX,-1,-1,RCX,copied);
+        }
+        copied += step;
+      }
+      return code_off;
+    }
+"""
+    definition = re.search(r'\nint64_t __OptPassFinal\([^;]+?\{', src, re.S)
+    src = src[:definition.start()] + '\n' + class_copy + src[definition.start():]
+    src = src.replace('  ic_eq:\n', '  ic_eq:\n    if (rpn->integer > 8) {code_off = ClassCopy(cctrl,rpn,bin,code_off); break;}\n')
+    a = src.index('  ic_comma:'); b = src.index('  ic_eq:', a)
+    src = src[:a] + src[a:b].replace('code_off = __OptPassFinal(cctrl, next2, bin, code_off);\n    next->res.keep_in_tmp = 1;\n    code_off = __OptPassFinal(cctrl, next, bin, code_off);', 'code_off = __OptPassFinal(cctrl, next, bin, code_off);\n    code_off = __OptPassFinal(cctrl, next2, bin, code_off);') + src[b:]
     hdr = (ROOT / 'coolc/Compiler/BackendA.coolh').read_text()
     hdr = re.sub(r'//[^\n]*', '', hdr)
     classes = hdr[hdr.index('extern class'):hdr.index('// ---------------------------------------------------------------- constants') if '// ---------------------------------------------------------------- constants' in hdr else hdr.index('#define LEXF_')]

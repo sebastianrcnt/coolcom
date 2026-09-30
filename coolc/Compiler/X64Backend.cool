@@ -31,6 +31,28 @@ I64i _c2hc_call_3(U8i *fp, U8i *p0, I64i p1, I64i p2, I64i p3, I64i p4, I64i p5,
     return (*fn)(p0, p1, p2, p3, p4, p5, p6);
 }
 
+I32i X64MutatingOperand(CBRPN *r) {
+    switch ((r->type)) {
+        case 18:
+        case 45:
+        case 46:
+        case 47:
+        case 48:
+        case 56:
+        case 49:
+        case 50:
+        case 51:
+        case 52:
+        case 53:
+        case 34:
+        case 32:
+        case 35:
+        case 33:
+            return 1;
+    }
+    return 0;
+}
+
 I64i X64IsRBPDeref(CBRPN *r) {
     CBRPN *next;
     if ((!r)) {
@@ -15371,6 +15393,15 @@ _c2hc_label_104:;
 _c2hc_label_100:;
             (arg = ICArgN(r, 1));
             (arg2 = ICArgN(r, 0));
+            if ((((((r->type) == 17) || ((r->type) == 19)) || ((r->type) == 21)) || (((r->type) == 20) && ((r->raw_type) == 10)))) {
+                if ((X64MutatingOperand(arg) || X64MutatingOperand(arg2))) {
+                    X64PushTmpDepthFirst(cctrl, arg2, X64SpillsTmpRegs(arg));
+                    X64PushTmpDepthFirst(cctrl, arg, 0);
+                    X64PopTmp(cctrl, arg);
+                    X64PopTmp(cctrl, arg2);
+                    goto _c2hc_label_101;
+                }
+            }
             X64PushTmpDepthFirst(cctrl, arg, X64SpillsTmpRegs(arg2));
             X64PushTmpDepthFirst(cctrl, arg2, 0);
             X64PopTmp(cctrl, arg2);
@@ -15381,7 +15412,7 @@ _c2hc_label_100:;
             (orig = r);
             (tmp = 0);
             if (((r->raw_type) != 10)) {
-                if (((!spilled) && X64GetSIBParts(orig, (&i), (&b), (&idx), (&i2), 0))) {
+                if (0) {
                     if (b) {
                         if ((X64IsRBPDeref(b) && idx)) {
                             if ((((idx->type) == 70) && ((idx->integer) != 13))) {
@@ -15732,6 +15763,15 @@ _c2hc_label_114:;
 _c2hc_label_115:;
             (arg = ICArgN(r, 1));
             (arg2 = ICArgN(r, 0));
+            if ((((((r->type) == 17) || ((r->type) == 19)) || ((r->type) == 21)) || (((r->type) == 20) && ((r->raw_type) == 10)))) {
+                if ((X64MutatingOperand(arg) || X64MutatingOperand(arg2))) {
+                    X64PushTmpDepthFirst(cctrl, arg2, X64SpillsTmpRegs(arg));
+                    X64PushTmpDepthFirst(cctrl, arg, 0);
+                    X64PopTmp(cctrl, arg);
+                    X64PopTmp(cctrl, arg2);
+                    goto _c2hc_label_101;
+                }
+            }
             X64PushTmpDepthFirst(cctrl, arg, X64SpillsTmpRegs(arg2));
             X64PushTmpDepthFirst(cctrl, arg2, 0);
             X64PopTmp(cctrl, arg2);
@@ -20558,7 +20598,7 @@ _c2hc_label_140:;
                                 (code_off = X64ICMov(cctrl, (&(rpn->res)), (&dummy), bin, code_off));
                                 goto _c2hc_label_141;
                         }
-                        BAssert(FALSE, "x86 unreachable path: __SexyAssignOp:6173");
+                        BAssert(FALSE, "x86 unreachable path: __SexyAssignOp:6192");
                     }
                 }
             }
@@ -22792,6 +22832,61 @@ _c2hc_label_166:;
     }
 }
 
+I64i X64ClassCopy(CBCmpCtrl *cctrl, CBRPN *rpn, U8i *bin, I64i code_off) {
+    CBICArg src_addr;
+    CBICArg dst_addr;
+    CBRPN *next;
+    CBRPN *next2;
+    I64i copied;
+    I64i step;
+    MemSet(&src_addr, 0, 42);
+    src_addr.mode = 0;
+    MemSet(&dst_addr, 0, 42);
+    dst_addr.mode = 0;
+    copied = 0;
+    (next = ICArgN(rpn, 1));
+    (next2 = ICArgN(rpn, 0));
+    (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+    (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+    ((src_addr.mode) = 1);
+    ((src_addr.raw_type) = 9);
+    ((src_addr.reg) = (((8 & 0xFF) ^ 0x80) - 0x80));
+    ((dst_addr.mode) = 1);
+    ((dst_addr.raw_type) = 9);
+    ((dst_addr.reg) = (((1 & 0xFF) ^ 0x80) - 0x80));
+    (code_off = X64ICMov(cctrl, (&src_addr), (&(next2->res)), bin, code_off));
+    (code_off = X64ICMov(cctrl, (&dst_addr), (&(next->res)), bin, code_off));
+    while ((copied < (rpn->integer))) {
+        if ((((rpn->integer) - copied) >= 8)) {
+            (step = 8);
+            if (bin) {
+                (code_off += X64X86MovRegIndirI64((bin + code_off), X64MIR(cctrl, 0), (-1), (-1), 8, copied));
+            } else {
+                (code_off += X64X86MovRegIndirI64(((0)(U8i *)), X64MIR(cctrl, 0), (-1), (-1), 8, copied));
+            }
+            if (bin) {
+                (code_off += X64X86MovIndirRegI64((bin + code_off), 0, (-1), (-1), 1, copied));
+            } else {
+                (code_off += X64X86MovIndirRegI64(((0)(U8i *)), 0, (-1), (-1), 1, copied));
+            }
+        } else {
+            (step = 1);
+            if (bin) {
+                (code_off += X64X86MovZXRegIndirI8((bin + code_off), X64MIR(cctrl, 0), (-1), (-1), 8, copied));
+            } else {
+                (code_off += X64X86MovZXRegIndirI8(((0)(U8i *)), X64MIR(cctrl, 0), (-1), (-1), 8, copied));
+            }
+            if (bin) {
+                (code_off += X64X86MovIndirRegI8((bin + code_off), 0, (-1), (-1), 1, copied));
+            } else {
+                (code_off += X64X86MovIndirRegI8(((0)(U8i *)), 0, (-1), (-1), 1, copied));
+            }
+        }
+        (copied += step);
+    }
+    return code_off;
+}
+
 I64i X64__OptPassFinal(CBCmpCtrl *cctrl, CBRPN *rpn, U8i *bin, I64i code_off) {
     CBRPN *old_rpn;
     CBCodeMisc *misc;
@@ -22894,7 +22989,7 @@ I64i X64__OptPassFinal(CBCmpCtrl *cctrl, CBRPN *rpn, U8i *bin, I64i code_off) {
         ((rpn->start_ptr) = (bin + code_off));
     }
     if (((rpn->flags) & 8)) {
-        goto _c2hc_label_167;
+        goto _c2hc_label_168;
     }
     if (((((cctrl->code_ctrl)->dbg_info) && (((cctrl->code_ctrl)->final_pass) == 2)) && (rpn->ic_line))) {
         if (((MSize(((((cctrl->code_ctrl)->dbg_info))(U8i *))) / 8) > ((rpn->ic_line) - ((cctrl->code_ctrl)->min_ln)))) {
@@ -22908,206 +23003,206 @@ I64i X64__OptPassFinal(CBCmpCtrl *cctrl, CBRPN *rpn, U8i *bin, I64i code_off) {
     }
     switch ((rpn->type)) {
         case 107:
-            goto _c2hc_label_168;
-        case 108:
             goto _c2hc_label_169;
-        case 106:
+        case 108:
             goto _c2hc_label_170;
-        case 0:
+        case 106:
             goto _c2hc_label_171;
-        case 2:
+        case 0:
             goto _c2hc_label_172;
-        case 109:
+        case 2:
             goto _c2hc_label_173;
-        case 3:
+        case 109:
             goto _c2hc_label_174;
-        case 4:
+        case 3:
             goto _c2hc_label_175;
-        case 5:
+        case 4:
             goto _c2hc_label_176;
-        case 6:
+        case 5:
             goto _c2hc_label_177;
-        case 8:
+        case 6:
             goto _c2hc_label_178;
-        case 9:
+        case 8:
             goto _c2hc_label_179;
-        case 11:
+        case 9:
             goto _c2hc_label_180;
-        case 110:
+        case 11:
             goto _c2hc_label_181;
-        case 12:
+        case 110:
             goto _c2hc_label_182;
-        case 14:
+        case 12:
             goto _c2hc_label_183;
-        case 15:
+        case 14:
             goto _c2hc_label_184;
-        case 16:
+        case 15:
             goto _c2hc_label_185;
-        case 17:
+        case 16:
             goto _c2hc_label_186;
-        case 18:
+        case 17:
             goto _c2hc_label_187;
-        case 19:
+        case 18:
             goto _c2hc_label_188;
-        case 20:
+        case 19:
             goto _c2hc_label_189;
-        case 21:
+        case 20:
             goto _c2hc_label_190;
-        case 22:
+        case 21:
             goto _c2hc_label_191;
-        case 23:
+        case 22:
             goto _c2hc_label_192;
-        case 24:
+        case 23:
             goto _c2hc_label_193;
-        case 25:
+        case 24:
             goto _c2hc_label_194;
-        case 26:
+        case 25:
             goto _c2hc_label_195;
-        case 27:
+        case 26:
             goto _c2hc_label_196;
-        case 28:
+        case 27:
             goto _c2hc_label_197;
-        case 29:
+        case 28:
             goto _c2hc_label_198;
-        case 30:
+        case 29:
             goto _c2hc_label_199;
-        case 31:
+        case 30:
             goto _c2hc_label_200;
-        case 32:
+        case 31:
             goto _c2hc_label_201;
-        case 33:
+        case 32:
             goto _c2hc_label_202;
-        case 34:
+        case 33:
             goto _c2hc_label_203;
-        case 35:
+        case 34:
             goto _c2hc_label_204;
-        case 36:
+        case 35:
             goto _c2hc_label_205;
-        case 37:
+        case 36:
             goto _c2hc_label_206;
-        case 38:
+        case 37:
             goto _c2hc_label_207;
-        case 39:
+        case 38:
             goto _c2hc_label_208;
-        case 40:
+        case 39:
             goto _c2hc_label_209;
-        case 41:
+        case 40:
             goto _c2hc_label_210;
-        case 42:
+        case 41:
             goto _c2hc_label_211;
-        case 43:
+        case 42:
             goto _c2hc_label_212;
-        case 44:
+        case 43:
             goto _c2hc_label_213;
-        case 45:
+        case 44:
             goto _c2hc_label_214;
-        case 46:
+        case 45:
             goto _c2hc_label_215;
-        case 47:
+        case 46:
             goto _c2hc_label_216;
-        case 48:
+        case 47:
             goto _c2hc_label_217;
-        case 49:
+        case 48:
             goto _c2hc_label_218;
-        case 50:
+        case 49:
             goto _c2hc_label_219;
-        case 51:
+        case 50:
             goto _c2hc_label_220;
-        case 52:
+        case 51:
             goto _c2hc_label_221;
-        case 53:
+        case 52:
             goto _c2hc_label_222;
-        case 56:
+        case 53:
             goto _c2hc_label_223;
-        case 57:
+        case 56:
             goto _c2hc_label_224;
-        case 58:
+        case 57:
             goto _c2hc_label_225;
-        case 59:
+        case 58:
             goto _c2hc_label_226;
-        case 60:
+        case 59:
             goto _c2hc_label_227;
+        case 60:
+            goto _c2hc_label_228;
         case 61:
-            goto _c2hc_label_228;
-        case 62:
             goto _c2hc_label_229;
-        case 63:
+        case 62:
             goto _c2hc_label_230;
-        case 64:
+        case 63:
             goto _c2hc_label_231;
-        case 65:
+        case 64:
             goto _c2hc_label_232;
-        case 66:
+        case 65:
             goto _c2hc_label_233;
-        case 67:
+        case 66:
             goto _c2hc_label_234;
-        case 68:
+        case 67:
             goto _c2hc_label_235;
-        case 69:
+        case 68:
             goto _c2hc_label_236;
-        case 70:
+        case 69:
             goto _c2hc_label_237;
-        case 71:
+        case 70:
             goto _c2hc_label_238;
-        case 74:
+        case 71:
             goto _c2hc_label_239;
-        case 77:
+        case 74:
             goto _c2hc_label_240;
-        case 78:
-            goto _c2hc_label_228;
-        case 80:
+        case 77:
             goto _c2hc_label_241;
-        case 81:
+        case 78:
+            goto _c2hc_label_229;
+        case 80:
             goto _c2hc_label_242;
-        case 82:
+        case 81:
             goto _c2hc_label_243;
-        case 83:
+        case 82:
             goto _c2hc_label_244;
-        case 84:
+        case 83:
             goto _c2hc_label_245;
-        case 85:
+        case 84:
             goto _c2hc_label_246;
-        case 86:
+        case 85:
             goto _c2hc_label_247;
-        case 87:
+        case 86:
             goto _c2hc_label_248;
-        case 88:
+        case 87:
             goto _c2hc_label_249;
-        case 89:
+        case 88:
             goto _c2hc_label_250;
-        case 90:
+        case 89:
             goto _c2hc_label_251;
-        case 91:
+        case 90:
             goto _c2hc_label_252;
-        case 92:
+        case 91:
             goto _c2hc_label_253;
-        case 93:
+        case 92:
             goto _c2hc_label_254;
-        case 96:
+        case 93:
             goto _c2hc_label_255;
-        case 97:
+        case 96:
             goto _c2hc_label_256;
-        case 98:
+        case 97:
             goto _c2hc_label_257;
-        case 1:
+        case 98:
             goto _c2hc_label_258;
-        case 99:
+        case 1:
             goto _c2hc_label_259;
-        case 100:
+        case 99:
             goto _c2hc_label_260;
-        case 101:
+        case 100:
             goto _c2hc_label_261;
-        case 102:
+        case 101:
             goto _c2hc_label_262;
-        case 103:
+        case 102:
             goto _c2hc_label_263;
-        case 104:
+        case 103:
             goto _c2hc_label_264;
+        case 104:
+            goto _c2hc_label_265;
         default:
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
     }
     do {
-_c2hc_label_253:;
+_c2hc_label_254:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
@@ -23130,7 +23225,7 @@ _c2hc_label_253:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_251:;
+_c2hc_label_252:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
@@ -23153,7 +23248,7 @@ _c2hc_label_251:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_254:;
+_c2hc_label_255:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
@@ -23176,7 +23271,7 @@ _c2hc_label_254:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_252:;
+_c2hc_label_253:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
@@ -23199,21 +23294,21 @@ _c2hc_label_252:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_169:;
+_c2hc_label_170:;
         (next = ((((rpn->base).next))(CBRPN *)));
         if ((((next->type) != 77) && ((next->type) != 57))) {
             Print("Expected a relocation at IC_GS,aborting(Contact nrootcoauto for more info)\n");
-            BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7375");
+            BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7421");
         }
-        goto _c2hc_label_266;
+        goto _c2hc_label_267;
         break;
-_c2hc_label_168:;
+_c2hc_label_169:;
         (next = ((((rpn->base).next))(CBRPN *)));
         if ((((next->type) != 77) && ((next->type) != 57))) {
             Print("Expected a relocation at IC_FS,aborting(Contact nrootcoauto for more info)\n");
-            BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7384");
+            BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7430");
         }
-_c2hc_label_266:;
+_c2hc_label_267:;
         (into_reg = 0);
         if (bin) {
             (code_off += X64SEG_GS((bin + code_off), 0));
@@ -23254,12 +23349,12 @@ _c2hc_label_266:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_170:;
+_c2hc_label_171:;
         ((cctrl->is_lock_expr) = 1);
         (code_off = X64__OptPassFinal(cctrl, ((((rpn->base).next))(CBRPN *)), bin, code_off));
         ((cctrl->is_lock_expr) = 0);
         break;
-_c2hc_label_243:;
+_c2hc_label_244:;
         if ((((rpn->res).mode) == 1)) {
             (into_reg = ((rpn->res).reg));
         } else {
@@ -23286,7 +23381,7 @@ _c2hc_label_243:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_240:;
+_c2hc_label_241:;
         if ((((rpn->res).mode) == 1)) {
             (into_reg = ((rpn->res).reg));
         } else {
@@ -23307,17 +23402,17 @@ _c2hc_label_240:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_172:;
+_c2hc_label_173:;
         (reverse = 0);
         (next = ((((rpn->base).next))(CBRPN *)));
-_c2hc_label_267:;
+_c2hc_label_268:;
         if ((!X64IsCompoundCompare(next))) {
             switch ((next->type)) {
                 break;
                 case 30:
                     (reverse = (!reverse));
                     (next = ((((next->base).next))(CBRPN *)));
-                    goto _c2hc_label_267;
+                    goto _c2hc_label_268;
                     break;
                 case 39:
                     (next3 = ((((next->base).next))(CBRPN *)));
@@ -23422,7 +23517,7 @@ _c2hc_label_267:;
                         (code_off += X64X86Jcc(((0)(U8i *)), (96 ^ reverse), 6));
                     }
                     CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
-                    goto _c2hc_label_167;
+                    goto _c2hc_label_168;
                     break;
                 case 40:
                     (next3 = ((((next->base).next))(CBRPN *)));
@@ -23527,7 +23622,7 @@ _c2hc_label_267:;
                         (code_off += X64X86Jcc(((0)(U8i *)), ((96 | 1) ^ reverse), 6));
                     }
                     CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
-                    goto _c2hc_label_167;
+                    goto _c2hc_label_168;
                     break;
                 case 28:
                     (next3 = ((((next->base).next))(CBRPN *)));
@@ -23739,7 +23834,7 @@ _c2hc_label_267:;
                         }
                         CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
                     }
-                    goto _c2hc_label_167;
+                    goto _c2hc_label_168;
                     break;
                 case 29:
                     (next3 = ((((next->base).next))(CBRPN *)));
@@ -23951,7 +24046,7 @@ _c2hc_label_267:;
                         }
                         CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
                     }
-                    goto _c2hc_label_167;
+                    goto _c2hc_label_168;
                     break;
                 case 41:
                     (next3 = ((((next->base).next))(CBRPN *)));
@@ -24163,7 +24258,7 @@ _c2hc_label_267:;
                         }
                         CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
                     }
-                    goto _c2hc_label_167;
+                    goto _c2hc_label_168;
                     break;
                 case 42:
                     (next3 = ((((next->base).next))(CBRPN *)));
@@ -24375,7 +24470,7 @@ _c2hc_label_267:;
                         }
                         CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
                     }
-                    goto _c2hc_label_167;
+                    goto _c2hc_label_168;
                 case 83:
                 case 84:
                 case 85:
@@ -24393,13 +24488,13 @@ _c2hc_label_267:;
                         ((cctrl->backend_user_data6) = (((rpn->code_misc))(I64i)));
                         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
                         (((rpn->code_misc2)->addr) = (bin + code_off));
-                        goto _c2hc_label_167;
+                        goto _c2hc_label_168;
                     } else {
                         ((cctrl->backend_user_data5) = (((rpn->code_misc))(I64i)));
                         ((cctrl->backend_user_data6) = (((rpn->code_misc2))(I64i)));
                         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
                         (((rpn->code_misc2)->addr) = (bin + code_off));
-                        goto _c2hc_label_167;
+                        goto _c2hc_label_168;
                     }
                 case 37:
                 case 36:
@@ -24413,13 +24508,13 @@ _c2hc_label_267:;
                         ((cctrl->backend_user_data6) = (((rpn->code_misc))(I64i)));
                         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
                         (((rpn->code_misc2)->addr) = (bin + code_off));
-                        goto _c2hc_label_167;
+                        goto _c2hc_label_168;
                     } else {
                         ((cctrl->backend_user_data5) = (((rpn->code_misc))(I64i)));
                         ((cctrl->backend_user_data6) = (((rpn->code_misc2))(I64i)));
                         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
                         (((rpn->code_misc2)->addr) = (bin + code_off));
-                        goto _c2hc_label_167;
+                        goto _c2hc_label_168;
                     }
             }
         }
@@ -24493,7 +24588,7 @@ _c2hc_label_267:;
             }
         }
         break;
-_c2hc_label_173:;
+_c2hc_label_174:;
         (into_reg = 0);
         ((tmp.mode) = 1);
         ((tmp.raw_type) = 7);
@@ -24559,14 +24654,14 @@ _c2hc_label_173:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_174:;
 _c2hc_label_175:;
+_c2hc_label_176:;
         (next = ((((rpn->base).next))(CBRPN *)));
         (((next->res).keep_in_tmp) = (1 & 0xFF));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&(next->res)), bin, code_off));
         break;
-_c2hc_label_235:;
+_c2hc_label_236:;
         (next = ((((rpn->base).next))(CBRPN *)));
         if ((((next->raw_type) == 10) && ((rpn->raw_type) != 10))) {
             (((next->res).keep_in_tmp) = (1 & 0xFF));
@@ -24623,7 +24718,7 @@ _c2hc_label_235:;
             }
         }
         break;
-_c2hc_label_171:;
+_c2hc_label_172:;
         if ((!((rpn->flags) & 512))) {
             if (((cctrl->code_ctrl)->final_pass)) {
                 if (bin) {
@@ -24642,13 +24737,13 @@ _c2hc_label_171:;
             }
         }
         break;
-_c2hc_label_176:;
+_c2hc_label_177:;
         (((rpn->code_misc)->addr) = (bin + code_off));
         break;
-_c2hc_label_178:;
+_c2hc_label_179:;
         if (((((rpn->global_var)->base).type) & 16)) {
             (next = rpn);
-            goto _c2hc_label_268;
+            goto _c2hc_label_269;
         } else {
             BAssert(((((!(((rpn->global_var)->dim).next)) & 0xFF) ^ 0x80) - 0x80), "x86 backend assertion");
             ((tmp.mode) = 3);
@@ -24657,11 +24752,11 @@ _c2hc_label_178:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_179:;
+_c2hc_label_180:;
         break;
-        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7823");
+        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7869");
         break;
-_c2hc_label_181:;
+_c2hc_label_182:;
         (into_reg = 0);
         if ((((rpn->res).mode) == 1)) {
             (into_reg = ((rpn->res).reg));
@@ -24688,7 +24783,7 @@ _c2hc_label_181:;
         ((tmp.raw_type) = 10);
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_180:;
+_c2hc_label_181:;
         if (((rpn->raw_type) == 10)) {
             (next = ICArgN(rpn, 0));
             (((((&X64__OptPassFinal_ul))(I64i *))[0]) = (2147483648 << 32));
@@ -24748,14 +24843,14 @@ _c2hc_label_180:;
             }
         }
         break;
-_c2hc_label_182:;
+_c2hc_label_183:;
         (next = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&(next->res)), bin, code_off));
         break;
-        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7902");
+        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:7948");
         break;
-_c2hc_label_183:;
+_c2hc_label_184:;
         if ((((rpn->res).mode) == 1)) {
             (into_reg = ((rpn->res).reg));
         } else {
@@ -24783,7 +24878,7 @@ _c2hc_label_183:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_184:;
+_c2hc_label_185:;
         if ((((rpn->res).mode) == 1)) {
             (into_reg = ((rpn->res).reg));
         } else {
@@ -24802,10 +24897,10 @@ _c2hc_label_184:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_185:;
+_c2hc_label_186:;
         break;
         break;
-_c2hc_label_230:;
+_c2hc_label_231:;
         (next2 = ICArgN(rpn, 0));
         X64PushTmpDepthFirst(cctrl, next2, 0);
         X64PopTmp(cctrl, next2);
@@ -24816,9 +24911,9 @@ _c2hc_label_230:;
         ((tmp.reg) = (((0 & 0xFF) ^ 0x80) - 0x80));
         (code_off = X64ICMov(cctrl, (&tmp), (&(next2->res)), bin, code_off));
         (code_off = X64__ICMoveI64(cctrl, 8, ((((rpn->code_misc)->lo))(U64i)), bin, code_off));
-        goto _c2hc_label_269;
+        goto _c2hc_label_270;
         break;
-_c2hc_label_231:;
+_c2hc_label_232:;
         (next2 = ICArgN(rpn, 0));
         X64PushTmpDepthFirst(cctrl, next2, 0);
         X64PopTmp(cctrl, next2);
@@ -24854,7 +24949,7 @@ _c2hc_label_231:;
             (code_off += X64X86Jcc(((0)(U8i *)), 112, 6));
         }
         CodeMiscAddRef(((rpn->code_misc)->dft_lab), ((((bin + code_off) - 4))(I32i *)));
-_c2hc_label_269:;
+_c2hc_label_270:;
         if (bin) {
             (code_off += X64X86LeaSIB((bin + code_off), X64MIR(cctrl, 2), (-1), (-1), 16, 0));
         } else {
@@ -24867,16 +24962,16 @@ _c2hc_label_269:;
             (code_off += X64X86JmpSIB(((0)(U8i *)), 8, X64MIR(cctrl, (tmp.reg)), 2, ((-8) * ((rpn->code_misc)->lo))));
         }
         break;
-_c2hc_label_232:;
+_c2hc_label_233:;
         if (bin) {
             (code_off += X64X86Ret((bin + code_off), 0));
         } else {
             (code_off += X64X86Ret(((0)(U8i *)), 0));
         }
         break;
-_c2hc_label_233:;
-        break;
 _c2hc_label_234:;
+        break;
+_c2hc_label_235:;
         if (bin) {
             (code_off += X64X86Call32((bin + code_off), 5));
         } else {
@@ -24884,7 +24979,7 @@ _c2hc_label_234:;
         }
         CodeMiscAddRef((rpn->code_misc), ((((bin + code_off) - 4))(I32i *)));
         break;
-_c2hc_label_186:;
+_c2hc_label_187:;
         if ((((rpn->res).mode) == 10)) {
             if (((rpn->res).__sib_base_rpn)) {
                 if ((!X64IsRBPDeref(((rpn->res).__sib_base_rpn)))) {
@@ -24903,7 +24998,7 @@ _c2hc_label_186:;
             ((tmp.raw_type) = 7);
             ((tmp.reg) = ((rpn->res).fallback_reg));
             MemCpy(&(rpn->res), &tmp, 42);
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if (((rpn->raw_type) != 10)) {
             (((rpn->res).set_flags) = (1 & 0xFF));
@@ -25014,8 +25109,13 @@ _c2hc_label_186:;
                     break;
                 }
             }
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-            (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            } else {
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            }
             if ((((rpn->res).mode) == (-1))) {
                 break;
             }
@@ -25053,16 +25153,19 @@ _c2hc_label_186:;
             }
         } while (0);
         break;
-_c2hc_label_229:;
+_c2hc_label_230:;
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         MemCpy(&orig_dst, &(next->res), 42);
-        (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
-        (((next->res).keep_in_tmp) = (1 & 0xFF));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+        (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&(next2->res)), bin, code_off));
         break;
-_c2hc_label_187:;
+_c2hc_label_188:;
+        if (((rpn->integer) > 8)) {
+            (code_off = X64ClassCopy(cctrl, rpn, bin, code_off));
+            break;
+        }
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         MemCpy(&orig_dst, &(next->res), 42);
@@ -25165,7 +25268,7 @@ _c2hc_label_187:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&(next2->res)), bin, code_off));
         break;
-_c2hc_label_188:;
+_c2hc_label_189:;
         if (((rpn->raw_type) != 10)) {
             (((rpn->res).set_flags) = (1 & 0xFF));
         }
@@ -25275,8 +25378,13 @@ _c2hc_label_188:;
                     break;
                 }
             }
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-            (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            } else {
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            }
             if ((((rpn->res).mode) == (-1))) {
                 break;
             }
@@ -25314,7 +25422,7 @@ _c2hc_label_188:;
             }
         } while (0);
         break;
-_c2hc_label_189:;
+_c2hc_label_190:;
         (next = ((((rpn->base).next))(CBRPN *)));
         (next2 = ICArgN(rpn, 1));
         if ((((next->type) != 58) && ((next2->raw_type) != 10))) {
@@ -25326,7 +25434,7 @@ _c2hc_label_189:;
                         case 5:
                         case 7:
                             if ((__builtin_ffsll((next->integer)) >= 31)) {
-                                goto _c2hc_label_272;
+                                goto _c2hc_label_273;
                             }
                             (((next2->res).keep_in_tmp) = (1 & 0xFF));
                             (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
@@ -25399,7 +25507,7 @@ _c2hc_label_189:;
                 }
             }
         }
-_c2hc_label_272:;
+_c2hc_label_273:;
         if (((rpn->raw_type) == 8)) {
             (next = ICArgN(rpn, 1));
             (next2 = ICArgN(rpn, 0));
@@ -25613,8 +25721,13 @@ _c2hc_label_272:;
                             break;
                         }
                     }
-                    (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-                    (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                    if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                        (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                        (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                    } else {
+                        (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                        (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                    }
                     if ((((rpn->res).mode) == (-1))) {
                         break;
                     }
@@ -25654,7 +25767,7 @@ _c2hc_label_272:;
             }
         }
         break;
-_c2hc_label_190:;
+_c2hc_label_191:;
         (next = ((((rpn->base).next))(CBRPN *)));
         (next2 = ICArgN(rpn, 1));
         if ((((next->type) == 57) && ((next2->raw_type) != 10))) {
@@ -25827,8 +25940,13 @@ _c2hc_label_190:;
                         break;
                     }
                 }
-                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                    (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                    (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                } else {
+                    (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                    (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                }
                 if ((((rpn->res).mode) == (-1))) {
                     break;
                 }
@@ -25867,7 +25985,7 @@ _c2hc_label_190:;
             } while (0);
         }
         break;
-_c2hc_label_191:;
+_c2hc_label_192:;
         if (((rpn->flags) & 16)) {
             if ((!X64IsRBPDeref(((rpn->res).__sib_base_rpn)))) {
                 (code_off = X64__OptPassFinal(cctrl, ((rpn->res).__sib_base_rpn), bin, code_off));
@@ -25875,19 +25993,19 @@ _c2hc_label_191:;
             if (((rpn->res).__sib_idx_rpn)) {
                 (code_off = X64__OptPassFinal(cctrl, ((rpn->res).__sib_idx_rpn), bin, code_off));
             }
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         (next = ((((rpn->base).next))(CBRPN *)));
         (i = 0);
         if (((rpn->raw_type) == 11)) {
             (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&(next->res)), bin, code_off));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         (code_off = X64DerefToICArg(cctrl, (&tmp), rpn, 1, bin, code_off));
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_192:;
+_c2hc_label_193:;
         if (((rpn->raw_type) != 10)) {
             (((rpn->res).set_flags) = (1 & 0xFF));
         }
@@ -25997,8 +26115,13 @@ _c2hc_label_192:;
                     break;
                 }
             }
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-            (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            } else {
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            }
             if ((((rpn->res).mode) == (-1))) {
                 break;
             }
@@ -26036,7 +26159,7 @@ _c2hc_label_192:;
             }
         } while (0);
         break;
-_c2hc_label_193:;
+_c2hc_label_194:;
         (next = ((((rpn->base).next))(CBRPN *)));
         switch ((next->type)) {
             break;
@@ -26055,7 +26178,7 @@ _c2hc_label_193:;
                     _c2hc_t2346 = &(CodeMiscAddRef((cctrl->statics_label), ((((bin + code_off) - 4))(I32i *)))->offset);
                     ((*_c2hc_t2346) = ((((next->integer) & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000));
                 }
-                goto _c2hc_label_276;
+                goto _c2hc_label_277;
                 break;
             case 22:
                 (next = ((((rpn->base).next))(CBRPN *)));
@@ -26074,7 +26197,7 @@ _c2hc_label_193:;
                 } else {
                     (code_off += X64X86LeaSIB(((0)(U8i *)), X64MIR(cctrl, into_reg), (-1), (-1), 5, (-(next->integer))));
                 }
-                goto _c2hc_label_276;
+                goto _c2hc_label_277;
                 break;
             case 6:
                 if ((((rpn->res).mode) == 1)) {
@@ -26087,9 +26210,9 @@ _c2hc_label_193:;
                 } else {
                     (code_off += X64X86LeaSIB(((0)(U8i *)), X64MIR(cctrl, into_reg), (-1), (-1), 16, ((((rpn->integer))(U8i *)) - (bin + code_off))));
                 }
-                goto _c2hc_label_276;
+                goto _c2hc_label_277;
             case 8:
-_c2hc_label_268:;
+_c2hc_label_269:;
                 if ((((rpn->res).mode) == 1)) {
                     (into_reg = ((rpn->res).reg));
                 } else {
@@ -26101,7 +26224,7 @@ _c2hc_label_268:;
                     if (((((next->global_var)->base).type) & 16)) {
                         (enter_addr = ((((next->global_var))(CBHashFun *))->fun_ptr));
                     } else {
-                        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:8501");
+                        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:8552");
                     }
                 }
                 if (((!enter_addr) || (enter_addr == &BDoNothing))) {
@@ -26112,7 +26235,7 @@ _c2hc_label_268:;
                         (code_off += X64X86MovRegIndirI64(((0)(U8i *)), X64MIR(cctrl, into_reg), (-1), (-1), 16, X64X86MovRegIndirI64(((0)(U8i *)), into_reg, (-1), (-1), 16, 0)));
                     }
                     CodeMiscAddRef(misc, ((((bin + code_off) - 4))(I32i *)));
-                    goto _c2hc_label_276;
+                    goto _c2hc_label_277;
                 } else {
                     if (X64Is32Bit((enter_addr - MemGetExecPtr((bin + code_off))))) {
                         if (bin) {
@@ -26120,11 +26243,11 @@ _c2hc_label_268:;
                         } else {
                             (code_off += X64X86LeaSIB(((0)(U8i *)), X64MIR(cctrl, into_reg), (-1), (-1), 16, (enter_addr - MemGetExecPtr((bin + code_off)))));
                         }
-                        goto _c2hc_label_276;
+                        goto _c2hc_label_277;
                     }
                 }
                 (code_off = X64__ICMoveI64(cctrl, into_reg, ((((enter_addr)(I64i)))(U64i)), bin, code_off));
-_c2hc_label_276:;
+_c2hc_label_277:;
                 ((tmp.mode) = 1);
                 ((tmp.raw_type) = (rpn->raw_type));
                 ((tmp.reg) = (((into_reg & 0xFF) ^ 0x80) - 0x80));
@@ -26134,7 +26257,7 @@ _c2hc_label_276:;
                 BAssert(FALSE, "x86 unreachable path: __OptPassFinal:?");
         }
         break;
-_c2hc_label_194:;
+_c2hc_label_195:;
         if (((rpn->raw_type) != 10)) {
             (((rpn->res).set_flags) = (1 & 0xFF));
             (next = ICArgN(rpn, 1));
@@ -26244,8 +26367,13 @@ _c2hc_label_194:;
                     break;
                 }
             }
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-            (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            } else {
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            }
             if ((((rpn->res).mode) == (-1))) {
                 break;
             }
@@ -26283,7 +26411,7 @@ _c2hc_label_194:;
             }
         } while (0);
         break;
-_c2hc_label_195:;
+_c2hc_label_196:;
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         if (((rpn->raw_type) != 10)) {
@@ -26545,7 +26673,7 @@ _c2hc_label_195:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_196:;
+_c2hc_label_197:;
         if (((rpn->raw_type) != 10)) {
             (((rpn->res).set_flags) = (1 & 0xFF));
         }
@@ -26655,8 +26783,13 @@ _c2hc_label_196:;
                     break;
                 }
             }
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-            (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            if ((X64MutatingOperand(next) || X64MutatingOperand(next2))) {
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            } else {
+                (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+                (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
+            }
             if ((((rpn->res).mode) == (-1))) {
                 break;
             }
@@ -26694,15 +26827,15 @@ _c2hc_label_196:;
             }
         } while (0);
         break;
-_c2hc_label_197:;
 _c2hc_label_198:;
-_c2hc_label_210:;
+_c2hc_label_199:;
 _c2hc_label_211:;
+_c2hc_label_212:;
         (range = ((0)(CBRPN **)));
         (range_args = ((0)(CBRPN **)));
         (range_fail_addrs = ((0)(U8i ***)));
         (range_cmp_types = ((0)(I64i *)));
-_c2hc_label_279:;
+_c2hc_label_280:;
         (cnt = 0);
         (next = rpn);
         while (1) {
@@ -26711,13 +26844,13 @@ _c2hc_label_279:;
                 case 29:
                 case 41:
                 case 42:
-                    goto _c2hc_label_281;
+                    goto _c2hc_label_282;
             }
             if (range_args) {
                 ((range_args[cnt]) = next);
             }
             break;
-_c2hc_label_281:;
+_c2hc_label_282:;
             if (range_args) {
                 ((range_args[cnt]) = ((((next->base).next))(CBRPN *)));
             }
@@ -26732,7 +26865,7 @@ _c2hc_label_281:;
             (range = ((MAlloc((((8 * ((cnt)(U64i))))(I64i))))(CBRPN **)));
             (range_fail_addrs = ((MAlloc((((8 * ((cnt)(U64i))))(I64i))))(U8i ***)));
             (range_cmp_types = ((MAlloc((((8 * ((cnt)(U64i))))(I64i))))(I64i *)));
-            goto _c2hc_label_279;
+            goto _c2hc_label_280;
         }
         (code_off = X64__OptPassFinal(cctrl, (next = (range_args[cnt])), bin, code_off));
         (i = (cnt - 1));
@@ -26771,7 +26904,7 @@ _c2hc_label_281:;
                 }
             }
             if (use_flt_cmp) {
-_c2hc_label_283:;
+_c2hc_label_284:;
                 switch (((range[i])->type)) {
                     break;
                     case 28:
@@ -26788,7 +26921,7 @@ _c2hc_label_283:;
                 }
             } else {
                 if ((((next->raw_type) == 8) || ((next2->raw_type) == 8))) {
-                    goto _c2hc_label_283;
+                    goto _c2hc_label_284;
                 } else {
                     switch (((range[i])->type)) {
                         break;
@@ -26859,7 +26992,7 @@ _c2hc_label_283:;
         Free(((range_fail_addrs)(U8i *)));
         Free(((range_cmp_types)(U8i *)));
         break;
-_c2hc_label_199:;
+_c2hc_label_200:;
         (next = ((((rpn->base).next))(CBRPN *)));
         (((next->res).keep_in_tmp) = (1 & 0xFF));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
@@ -26898,7 +27031,7 @@ _c2hc_label_199:;
                     ((*_c2hc_t2351) = rpn);
                 }
             }
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if (((((rpn->res).mode) == 1) && (((rpn->res).mode) != 10))) {
             (into_reg = ((rpn->res).reg));
@@ -26922,7 +27055,7 @@ _c2hc_label_199:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_200:;
+_c2hc_label_201:;
         if (((rpn->raw_type) == 10)) {
             (((next->res).keep_in_tmp) = (1 & 0xFF));
             (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
@@ -26934,7 +27067,7 @@ _c2hc_label_200:;
             } else {
                 (code_off += X64X86XorPDReg(((0)(U8i *)), X64MFR(cctrl, ((next->res).reg)), 2));
             }
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if (((rpn->raw_type) != 10)) {
             (((rpn->res).set_flags) = (1 & 0xFF));
@@ -26973,19 +27106,19 @@ _c2hc_label_200:;
         }
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_201:;
+_c2hc_label_202:;
         (code_off = X64__SexyPostOp(cctrl, rpn, &X64X86AddImm32, &X64X86AddReg, &X64X86AddSDReg, &X64X86IncReg, &X64X86IncIndirX, &X64X86AddIndirXImm32, bin, code_off));
         break;
-_c2hc_label_202:;
+_c2hc_label_203:;
         (code_off = X64__SexyPostOp(cctrl, rpn, &X64X86SubImm32, &X64X86SubReg, &X64X86SubSDReg, &X64X86DecReg, &X64X86DecIndirX, &X64X86SubIndirXImm32, bin, code_off));
         break;
-_c2hc_label_203:;
+_c2hc_label_204:;
         (code_off = X64__SexyPreOp(cctrl, rpn, &X64X86AddImm32, &X64X86AddReg, &X64X86AddSDReg, &X64X86IncReg, &X64X86IncIndirX, &X64X86AddIndirXImm32, bin, code_off));
         break;
-_c2hc_label_204:;
+_c2hc_label_205:;
         (code_off = X64__SexyPreOp(cctrl, rpn, &X64X86SubImm32, &X64X86SubReg, &X64X86SubSDReg, &X64X86DecReg, &X64X86DecIndirX, &X64X86SubIndirXImm32, bin, code_off));
         break;
-_c2hc_label_205:;
+_c2hc_label_206:;
         if ((old_pass_misc && old_fail_misc)) {
             (a = ICArgN(rpn, 1));
             (b = ICArgN(rpn, 0));
@@ -27048,7 +27181,7 @@ _c2hc_label_205:;
                 _c2hc_t2354 = &(CodeMiscAddRef(old_pass_misc, ((((bin + code_off) - 4))(I32i *)))->from_ic);
                 ((*_c2hc_t2354) = rpn);
             }
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((!(rpn->code_misc))) {
             ((rpn->code_misc) = CodeMiscNew(cctrl, 1));
@@ -27086,7 +27219,7 @@ _c2hc_label_205:;
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         (((rpn->code_misc4)->addr) = (bin + code_off));
         break;
-_c2hc_label_206:;
+_c2hc_label_207:;
         if ((old_pass_misc || old_fail_misc)) {
             (a = ICArgN(rpn, 1));
             (b = ICArgN(rpn, 0));
@@ -27147,7 +27280,7 @@ _c2hc_label_206:;
                 _c2hc_t2357 = &(CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)))->from_ic);
                 ((*_c2hc_t2357) = rpn);
             }
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((!(rpn->code_misc))) {
             ((rpn->code_misc) = CodeMiscNew(cctrl, 1));
@@ -27188,7 +27321,7 @@ _c2hc_label_206:;
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         (((rpn->code_misc2)->addr) = (bin + code_off));
         break;
-_c2hc_label_207:;
+_c2hc_label_208:;
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
@@ -27260,7 +27393,7 @@ _c2hc_label_207:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_208:;
+_c2hc_label_209:;
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
@@ -27307,7 +27440,7 @@ _c2hc_label_208:;
             }
         }
         if (use_flags) {
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if (((((rpn->res).mode) == 1) && (((rpn->res).mode) != 10))) {
             (into_reg = ((rpn->res).reg));
@@ -27331,7 +27464,7 @@ _c2hc_label_208:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_209:;
+_c2hc_label_210:;
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
@@ -27378,7 +27511,7 @@ _c2hc_label_209:;
             }
         }
         if (use_flags) {
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if (((((rpn->res).mode) == 1) && (((rpn->res).mode) != 10))) {
             (into_reg = ((rpn->res).reg));
@@ -27402,7 +27535,7 @@ _c2hc_label_209:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_212:;
+_c2hc_label_213:;
         if (((rpn->raw_type) != 10)) {
             (next2 = ICArgN(rpn, 0));
             (next = ICArgN(rpn, 1));
@@ -27484,68 +27617,32 @@ _c2hc_label_212:;
         } else {
             (next = ICArgN(rpn, 1));
             (next2 = ICArgN(rpn, 0));
-            if ((X64BIsConst(next2) && X64Is32Bit(X64ConstVal(next2)))) {
-                if (((rpn->raw_type) != 10)) {
-                    (((rpn->res).set_flags) = (1 & 0xFF));
-                }
-                (next = ICArgN(rpn, 1));
-                (next2 = ICArgN(rpn, 0));
-                if (((((((rpn->raw_type) != 10) && X64BIsConst(next2)) && X64Is32Bit(X64ConstVal(next2))) && ((next2->type) != 58)) && ((next2->integer) >= 0))) {
-                    (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
-                    MemCpy(&tmp2, &(next->res), 42);
-                    if ((((rpn->res).mode) == (-1))) {
-                        break;
-                    }
-                    if ((((rpn->res).mode) == 1)) {
-                        (into_reg = ((rpn->res).reg));
-                    } else {
-                        (into_reg = 2);
-                    }
-                    (code_off = X64PutICArgIntoReg(cctrl, (&tmp2), 7, into_reg, bin, code_off));
-                    if (X64Is32Bit((next2->integer))) {
-                        ((tmp.reg) = (((into_reg & 0xFF) ^ 0x80) - 0x80));
-                        ((tmp.mode) = 1);
-                        ((tmp.raw_type) = (rpn->raw_type));
-                        (code_off = X64ICMov(cctrl, (&tmp), (&tmp2), bin, code_off));
-                        if (bin) {
-                            (code_off += X64X86ShlImm((bin + code_off), X64MIR(cctrl, into_reg), (next2->integer)));
-                        } else {
-                            (code_off += X64X86ShlImm(((0)(U8i *)), X64MIR(cctrl, into_reg), (next2->integer)));
-                        }
-                    } else {
-                        ((tmp.mode) = 1);
-                        ((tmp.reg) = (((8 & 0xFF) ^ 0x80) - 0x80));
-                        ((tmp.raw_type) = 7);
-                        (code_off = X64ICMov(cctrl, (&tmp), (&(next2->res)), bin, code_off));
-                        if (bin) {
-                            (code_off += X64X86AddReg((bin + code_off), X64MIR(cctrl, into_reg), (tmp.reg)));
-                        } else {
-                            (code_off += X64X86AddReg(((0)(U8i *)), X64MIR(cctrl, into_reg), (tmp.reg)));
-                        }
-                    }
-                    if (((((rpn->res).mode) != 1) && (((rpn->res).mode) != (-1)))) {
-                        ((tmp.raw_type) = (rpn->raw_type));
-                        ((tmp.reg) = (((into_reg & 0xFF) ^ 0x80) - 0x80));
-                        ((tmp.mode) = 1);
-                        (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
-                    }
-                    break;
-                }
-            }
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
             (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
-            (code_off = X64PutICArgIntoReg(cctrl, (&(next->res)), (rpn->raw_type), 1, bin, code_off));
-            (code_off = X64PushToStack(cctrl, (&(next->res)), bin, code_off));
-            (code_off = X64PutICArgIntoReg(cctrl, (&(next2->res)), 7, 0, bin, code_off));
-            ((tmp.raw_type) = 7);
-            ((tmp.mode) = 1);
-            ((tmp.reg) = (((0 & 0xFF) ^ 0x80) - 0x80));
-            (code_off = X64PopFromStack(cctrl, (&(next->res)), bin, code_off));
+            (code_off = X64PutICArgIntoReg(cctrl, (&(next2->res)), 7, 1, bin, code_off));
+            (code_off = X64PushToStack(cctrl, (&(next2->res)), bin, code_off));
+            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            (code_off = X64PutICArgIntoReg(cctrl, (&(next->res)), 10, 0, bin, code_off));
             if (bin) {
-                (code_off += X64X86ShlImm((bin + code_off), X64MIR(cctrl, (tmp.reg)), ((next2->res).integer)));
+                (code_off += X64X86MovQI64F64((bin + code_off), X64MIR(cctrl, 0), ((next->res).reg)));
             } else {
-                (code_off += X64X86ShlImm(((0)(U8i *)), X64MIR(cctrl, (tmp.reg)), ((next2->res).integer)));
+                (code_off += X64X86MovQI64F64(((0)(U8i *)), X64MIR(cctrl, 0), ((next->res).reg)));
             }
+            ((tmp.mode) = 1);
+            ((tmp.raw_type) = 7);
+            ((tmp.reg) = (((1 & 0xFF) ^ 0x80) - 0x80));
+            (code_off = X64PopFromStack(cctrl, (&tmp), bin, code_off));
+            if (bin) {
+                (code_off += X64X86ShlRCX((bin + code_off), X64MIR(cctrl, 0)));
+            } else {
+                (code_off += X64X86ShlRCX(((0)(U8i *)), X64MIR(cctrl, 0)));
+            }
+            if (bin) {
+                (code_off += X64X86MovQF64I64((bin + code_off), X64MFR(cctrl, 0), 0));
+            } else {
+                (code_off += X64X86MovQF64I64(((0)(U8i *)), X64MFR(cctrl, 0), 0));
+            }
+            ((tmp.raw_type) = 10);
+            ((tmp.reg) = (((0 & 0xFF) ^ 0x80) - 0x80));
             MemCpy(&(rpn->tmp_res), &tmp, 42);
             if (((rpn->res).keep_in_tmp)) {
                 MemCpy(&(rpn->res), &tmp, 42);
@@ -27554,27 +27651,38 @@ _c2hc_label_212:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_213:;
+_c2hc_label_214:;
         (next = ICArgN(rpn, 1));
         (next2 = ICArgN(rpn, 0));
         if (((rpn->raw_type) == 10)) {
-            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            (next = ICArgN(rpn, 1));
+            (next2 = ICArgN(rpn, 0));
             (code_off = X64__OptPassFinal(cctrl, next2, bin, code_off));
-            (code_off = X64PutICArgIntoReg(cctrl, (&(next->res)), (rpn->raw_type), 0, bin, code_off));
-            (code_off = X64PushToStack(cctrl, (&(next->res)), bin, code_off));
             (code_off = X64PutICArgIntoReg(cctrl, (&(next2->res)), 7, 1, bin, code_off));
-            ((tmp.raw_type) = 7);
-            ((tmp.mode) = 1);
-            ((tmp.reg) = (((0 & 0xFF) ^ 0x80) - 0x80));
-            (code_off = X64PopFromStack(cctrl, (&(next->res)), bin, code_off));
+            (code_off = X64PushToStack(cctrl, (&(next2->res)), bin, code_off));
+            (code_off = X64__OptPassFinal(cctrl, next, bin, code_off));
+            (code_off = X64PutICArgIntoReg(cctrl, (&(next->res)), 10, 0, bin, code_off));
             if (bin) {
-                (code_off += X64X86ShrImm((bin + code_off), X64MIR(cctrl, (tmp.reg)), ((next2->res).reg)));
+                (code_off += X64X86MovQI64F64((bin + code_off), X64MIR(cctrl, 0), ((next->res).reg)));
             } else {
-                (code_off += X64X86ShrImm(((0)(U8i *)), X64MIR(cctrl, (tmp.reg)), ((next2->res).reg)));
+                (code_off += X64X86MovQI64F64(((0)(U8i *)), X64MIR(cctrl, 0), ((next->res).reg)));
             }
-            if (((rpn->raw_type) != 10)) {
-                (((rpn->res).set_flags) = (1 & 0xFF));
+            ((tmp.mode) = 1);
+            ((tmp.raw_type) = 7);
+            ((tmp.reg) = (((1 & 0xFF) ^ 0x80) - 0x80));
+            (code_off = X64PopFromStack(cctrl, (&tmp), bin, code_off));
+            if (bin) {
+                (code_off += X64X86SarRCX((bin + code_off), X64MIR(cctrl, 0)));
+            } else {
+                (code_off += X64X86SarRCX(((0)(U8i *)), X64MIR(cctrl, 0)));
             }
+            if (bin) {
+                (code_off += X64X86MovQF64I64((bin + code_off), X64MFR(cctrl, 0), 0));
+            } else {
+                (code_off += X64X86MovQF64I64(((0)(U8i *)), X64MFR(cctrl, 0), 0));
+            }
+            ((tmp.raw_type) = 10);
+            ((tmp.reg) = (((0 & 0xFF) ^ 0x80) - 0x80));
             MemCpy(&(rpn->tmp_res), &tmp, 42);
             if (((rpn->res).keep_in_tmp)) {
                 MemCpy(&(rpn->res), &tmp, 42);
@@ -27651,9 +27759,9 @@ _c2hc_label_213:;
                 (code_off = X64PutICArgIntoReg(cctrl, (&tmp2), 8, 8, bin, code_off));
                 (code_off = X64ICMov(cctrl, (&tmp), (&(next2->res)), bin, code_off));
                 if (bin) {
-                    (code_off += X64X86ShrRCX((bin + code_off), X64MIR(cctrl, (tmp.reg2))));
+                    (code_off += X64X86ShrRCX((bin + code_off), X64MIR(cctrl, (tmp2.reg))));
                 } else {
-                    (code_off += X64X86ShrRCX(((0)(U8i *)), X64MIR(cctrl, (tmp.reg2))));
+                    (code_off += X64X86ShrRCX(((0)(U8i *)), X64MIR(cctrl, (tmp2.reg))));
                 }
                 if (((rpn->raw_type) != 10)) {
                     (((rpn->res).set_flags) = (1 & 0xFF));
@@ -27742,7 +27850,7 @@ _c2hc_label_213:;
                 (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp2), bin, code_off));
         }
         break;
-_c2hc_label_228:;
+_c2hc_label_229:;
         (i = (cctrl->backend_user_data2));
         (i2 = (cctrl->backend_user_data3));
         ((cctrl->backend_user_data2) = 0);
@@ -27751,7 +27859,7 @@ _c2hc_label_228:;
         ((cctrl->backend_user_data2) = i);
         ((cctrl->backend_user_data3) = i2);
         break;
-_c2hc_label_239:;
+_c2hc_label_240:;
         (i = ((rpn->length) - 1));
         while ((i >= 0)) {
             (next = ICArgN(rpn, (((rpn->length) - i) - 1)));
@@ -27761,9 +27869,6 @@ _c2hc_label_239:;
             (code_off = X64PushToStack(cctrl, (&tmp), bin, code_off));
             (--i);
         }
-        break;
-_c2hc_label_214:;
-        (code_off = X64__SexyAssignOp(cctrl, rpn, bin, code_off));
         break;
 _c2hc_label_215:;
         (code_off = X64__SexyAssignOp(cctrl, rpn, bin, code_off));
@@ -27789,14 +27894,17 @@ _c2hc_label_221:;
 _c2hc_label_222:;
         (code_off = X64__SexyAssignOp(cctrl, rpn, bin, code_off));
         break;
-        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9282");
-        break;
-        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9284");
-        break;
 _c2hc_label_223:;
         (code_off = X64__SexyAssignOp(cctrl, rpn, bin, code_off));
         break;
+        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9318");
+        break;
+        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9320");
+        break;
 _c2hc_label_224:;
+        (code_off = X64__SexyAssignOp(cctrl, rpn, bin, code_off));
+        break;
+_c2hc_label_225:;
         ((tmp.mode) = 5);
         ((tmp.raw_type) = 7);
         ((tmp.integer) = (rpn->integer));
@@ -27804,7 +27912,7 @@ _c2hc_label_224:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_225:;
+_c2hc_label_226:;
         ((tmp.mode) = 6);
         ((tmp.raw_type) = 10);
         ((tmp.flt) = (rpn->flt));
@@ -27812,10 +27920,10 @@ _c2hc_label_225:;
             (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         }
         break;
-_c2hc_label_226:;
+_c2hc_label_227:;
         BAssert(FALSE, "x86 unreachable path: __OptPassFinal:?");
         break;
-_c2hc_label_227:;
+_c2hc_label_228:;
         (next = ICArgN(rpn, 0));
         X64PushTmpDepthFirst(cctrl, next, 0);
         X64PopTmp(cctrl, next);
@@ -27842,6 +27950,12 @@ _c2hc_label_227:;
             } else {
                 (code_off += X64X86MovQI64F64(((0)(U8i *)), X64MIR(cctrl, 0), 0));
             }
+        } else {
+            if (bin) {
+                (code_off += X64X86MovQF64I64((bin + code_off), X64MFR(cctrl, 0), 0));
+            } else {
+                (code_off += X64X86MovQF64I64(((0)(U8i *)), X64MFR(cctrl, 0), 0));
+            }
         }
         if (bin) {
             if ((!((rpn->flags) & 512))) {
@@ -27855,36 +27969,36 @@ _c2hc_label_227:;
             }
         }
         break;
-_c2hc_label_236:;
+_c2hc_label_237:;
         ((tmp.raw_type) = (rpn->raw_type));
         ((tmp.off) = (rpn->integer));
         ((tmp.reg) = (((5 & 0xFF) ^ 0x80) - 0x80));
         ((tmp.mode) = 2);
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_177:;
+_c2hc_label_178:;
         ((tmp.raw_type) = (rpn->raw_type));
         ((tmp.off) = (rpn->integer));
         ((tmp.mode) = 3);
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_237:;
+_c2hc_label_238:;
         ((tmp.raw_type) = 7);
         ((tmp.reg) = ((((rpn->integer) & 0xFF) ^ 0x80) - 0x80));
         ((tmp.mode) = 1);
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_238:;
+_c2hc_label_239:;
         ((tmp.raw_type) = 10);
         ((tmp.reg) = ((((rpn->integer) & 0xFF) ^ 0x80) - 0x80));
         ((tmp.mode) = 1);
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9366");
+        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9405");
         break;
-        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9368");
+        BAssert(FALSE, "x86 unreachable path: __OptPassFinal:9407");
         break;
-_c2hc_label_244:;
+_c2hc_label_245:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
@@ -27981,7 +28095,7 @@ _c2hc_label_244:;
                 (code_off += X64X86Jmp(((0)(U8i *)), 0));
             }
             CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((((rpn->res).mode) != (-1))) {
             (into_reg = 0);
@@ -27993,119 +28107,7 @@ _c2hc_label_244:;
             } else {
                 (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
             }
-            goto _c2hc_label_276;
-        }
-        break;
-_c2hc_label_245:;
-        (a = ICArgN(rpn, 1));
-        (b = ICArgN(rpn, 0));
-        if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
-            if ((((a->res).mode) == 10)) {
-                if ((!X64IsRBPDeref(((a->res).__sib_base_rpn)))) {
-                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_base_rpn), bin, code_off));
-                    (((a->res).reg) = ((((a->res).__sib_base_rpn)->res).reg));
-                }
-                if (((a->res).__sib_idx_rpn)) {
-                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_idx_rpn), bin, code_off));
-                    (((a->res).reg2) = ((((a->res).__sib_idx_rpn)->res).reg));
-                }
-                if (0) {
-                    if (bin) {
-                        (code_off += X64X86Lock((bin + code_off), 0));
-                    } else {
-                        (code_off += X64X86Lock(((0)(U8i *)), 0));
-                    }
-                }
-                if (bin) {
-                    (code_off += X64X86BtcSIBImm((bin + code_off), X64ConstVal(b), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
-                } else {
-                    (code_off += X64X86BtcSIBImm(((0)(U8i *)), X64ConstVal(b), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
-                }
-            } else {
-                (((a->res).keep_in_tmp) = (1 & 0xFF));
-                (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
-                (code_off = X64PutICArgIntoReg(cctrl, (&(a->res)), 7, 1, bin, code_off));
-                if (0) {
-                    if (bin) {
-                        (code_off += X64X86Lock((bin + code_off), 0));
-                    } else {
-                        (code_off += X64X86Lock(((0)(U8i *)), 0));
-                    }
-                }
-                if (bin) {
-                    (code_off += X64X86BtcSIBImm((bin + code_off), X64ConstVal(b), (-1), (-1), ((a->res).reg), 0));
-                } else {
-                    (code_off += X64X86BtcSIBImm(((0)(U8i *)), X64ConstVal(b), (-1), (-1), ((a->res).reg), 0));
-                }
-            }
-        } else {
-            (code_off = X64__OptPassFinal(cctrl, b, bin, code_off));
-            if ((((a->res).mode) == 10)) {
-                if ((!X64IsRBPDeref(((a->res).__sib_base_rpn)))) {
-                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_base_rpn), bin, code_off));
-                    (((a->res).reg) = ((((a->res).__sib_base_rpn)->res).reg));
-                }
-                if (((a->res).__sib_idx_rpn)) {
-                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_idx_rpn), bin, code_off));
-                    (((a->res).reg2) = ((((a->res).__sib_idx_rpn)->res).reg));
-                }
-                (code_off = X64PutICArgIntoReg(cctrl, (&(b->res)), 7, 8, bin, code_off));
-                if (0) {
-                    if (bin) {
-                        (code_off += X64X86Lock((bin + code_off), 0));
-                    } else {
-                        (code_off += X64X86Lock(((0)(U8i *)), 0));
-                    }
-                }
-                if (bin) {
-                    (code_off += X64X86BtcSIBReg((bin + code_off), X64MFR(cctrl, ((b->res).reg)), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
-                } else {
-                    (code_off += X64X86BtcSIBReg(((0)(U8i *)), X64MFR(cctrl, ((b->res).reg)), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
-                }
-            } else {
-                (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
-                (code_off = X64PutICArgIntoReg(cctrl, (&(a->res)), 7, 1, bin, code_off));
-                (code_off = X64PutICArgIntoReg(cctrl, (&(b->res)), 7, 8, bin, code_off));
-                if (0) {
-                    if (bin) {
-                        (code_off += X64X86Lock((bin + code_off), 0));
-                    } else {
-                        (code_off += X64X86Lock(((0)(U8i *)), 0));
-                    }
-                }
-                if (bin) {
-                    (code_off += X64X86BtcSIBReg((bin + code_off), X64MIR(cctrl, ((b->res).reg)), (-1), (-1), ((a->res).reg), 0));
-                } else {
-                    (code_off += X64X86BtcSIBReg(((0)(U8i *)), X64MIR(cctrl, ((b->res).reg)), (-1), (-1), ((a->res).reg), 0));
-                }
-            }
-        }
-        if ((old_fail_misc && old_pass_misc)) {
-            if (bin) {
-                (code_off += X64X86Jcc((bin + code_off), 80, 0));
-            } else {
-                (code_off += X64X86Jcc(((0)(U8i *)), 80, 0));
-            }
-            CodeMiscAddRef(old_pass_misc, ((((bin + code_off) - 4))(I32i *)));
-            if (bin) {
-                (code_off += X64X86Jmp((bin + code_off), 0));
-            } else {
-                (code_off += X64X86Jmp(((0)(U8i *)), 0));
-            }
-            CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
-        }
-        if ((((rpn->res).mode) != (-1))) {
-            (into_reg = 0);
-            if ((((rpn->res).mode) == 1)) {
-                (into_reg = ((rpn->res).reg));
-            }
-            if (bin) {
-                (code_off += X64X86Setcc((bin + code_off), 80, X64MIR(cctrl, into_reg)));
-            } else {
-                (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
-            }
-            goto _c2hc_label_276;
+            goto _c2hc_label_277;
         }
         break;
 _c2hc_label_246:;
@@ -28129,6 +28131,118 @@ _c2hc_label_246:;
                     }
                 }
                 if (bin) {
+                    (code_off += X64X86BtcSIBImm((bin + code_off), X64ConstVal(b), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
+                } else {
+                    (code_off += X64X86BtcSIBImm(((0)(U8i *)), X64ConstVal(b), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
+                }
+            } else {
+                (((a->res).keep_in_tmp) = (1 & 0xFF));
+                (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
+                (code_off = X64PutICArgIntoReg(cctrl, (&(a->res)), 7, 1, bin, code_off));
+                if (0) {
+                    if (bin) {
+                        (code_off += X64X86Lock((bin + code_off), 0));
+                    } else {
+                        (code_off += X64X86Lock(((0)(U8i *)), 0));
+                    }
+                }
+                if (bin) {
+                    (code_off += X64X86BtcSIBImm((bin + code_off), X64ConstVal(b), (-1), (-1), ((a->res).reg), 0));
+                } else {
+                    (code_off += X64X86BtcSIBImm(((0)(U8i *)), X64ConstVal(b), (-1), (-1), ((a->res).reg), 0));
+                }
+            }
+        } else {
+            (code_off = X64__OptPassFinal(cctrl, b, bin, code_off));
+            if ((((a->res).mode) == 10)) {
+                if ((!X64IsRBPDeref(((a->res).__sib_base_rpn)))) {
+                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_base_rpn), bin, code_off));
+                    (((a->res).reg) = ((((a->res).__sib_base_rpn)->res).reg));
+                }
+                if (((a->res).__sib_idx_rpn)) {
+                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_idx_rpn), bin, code_off));
+                    (((a->res).reg2) = ((((a->res).__sib_idx_rpn)->res).reg));
+                }
+                (code_off = X64PutICArgIntoReg(cctrl, (&(b->res)), 7, 8, bin, code_off));
+                if (0) {
+                    if (bin) {
+                        (code_off += X64X86Lock((bin + code_off), 0));
+                    } else {
+                        (code_off += X64X86Lock(((0)(U8i *)), 0));
+                    }
+                }
+                if (bin) {
+                    (code_off += X64X86BtcSIBReg((bin + code_off), X64MFR(cctrl, ((b->res).reg)), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
+                } else {
+                    (code_off += X64X86BtcSIBReg(((0)(U8i *)), X64MFR(cctrl, ((b->res).reg)), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
+                }
+            } else {
+                (code_off = X64__OptPassFinal(cctrl, a, bin, code_off));
+                (code_off = X64PutICArgIntoReg(cctrl, (&(a->res)), 7, 1, bin, code_off));
+                (code_off = X64PutICArgIntoReg(cctrl, (&(b->res)), 7, 8, bin, code_off));
+                if (0) {
+                    if (bin) {
+                        (code_off += X64X86Lock((bin + code_off), 0));
+                    } else {
+                        (code_off += X64X86Lock(((0)(U8i *)), 0));
+                    }
+                }
+                if (bin) {
+                    (code_off += X64X86BtcSIBReg((bin + code_off), X64MIR(cctrl, ((b->res).reg)), (-1), (-1), ((a->res).reg), 0));
+                } else {
+                    (code_off += X64X86BtcSIBReg(((0)(U8i *)), X64MIR(cctrl, ((b->res).reg)), (-1), (-1), ((a->res).reg), 0));
+                }
+            }
+        }
+        if ((old_fail_misc && old_pass_misc)) {
+            if (bin) {
+                (code_off += X64X86Jcc((bin + code_off), 80, 0));
+            } else {
+                (code_off += X64X86Jcc(((0)(U8i *)), 80, 0));
+            }
+            CodeMiscAddRef(old_pass_misc, ((((bin + code_off) - 4))(I32i *)));
+            if (bin) {
+                (code_off += X64X86Jmp((bin + code_off), 0));
+            } else {
+                (code_off += X64X86Jmp(((0)(U8i *)), 0));
+            }
+            CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
+            goto _c2hc_label_168;
+        }
+        if ((((rpn->res).mode) != (-1))) {
+            (into_reg = 0);
+            if ((((rpn->res).mode) == 1)) {
+                (into_reg = ((rpn->res).reg));
+            }
+            if (bin) {
+                (code_off += X64X86Setcc((bin + code_off), 80, X64MIR(cctrl, into_reg)));
+            } else {
+                (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
+            }
+            goto _c2hc_label_277;
+        }
+        break;
+_c2hc_label_247:;
+        (a = ICArgN(rpn, 1));
+        (b = ICArgN(rpn, 0));
+        if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
+            if ((((a->res).mode) == 10)) {
+                if ((!X64IsRBPDeref(((a->res).__sib_base_rpn)))) {
+                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_base_rpn), bin, code_off));
+                    (((a->res).reg) = ((((a->res).__sib_base_rpn)->res).reg));
+                }
+                if (((a->res).__sib_idx_rpn)) {
+                    (code_off = X64__OptPassFinal(cctrl, ((a->res).__sib_idx_rpn), bin, code_off));
+                    (((a->res).reg2) = ((((a->res).__sib_idx_rpn)->res).reg));
+                }
+                if (0) {
+                    if (bin) {
+                        (code_off += X64X86Lock((bin + code_off), 0));
+                    } else {
+                        (code_off += X64X86Lock(((0)(U8i *)), 0));
+                    }
+                }
+                if (bin) {
                     (code_off += X64X86BtsSIBImm((bin + code_off), X64ConstVal(b), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
                 } else {
                     (code_off += X64X86BtsSIBImm(((0)(U8i *)), X64ConstVal(b), ((a->res).__SIB_scale), ((a->res).reg2), ((a->res).reg), ((a->res).off)));
@@ -28205,7 +28319,7 @@ _c2hc_label_246:;
                 (code_off += X64X86Jmp(((0)(U8i *)), 0));
             }
             CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((((rpn->res).mode) != (-1))) {
             (into_reg = 0);
@@ -28217,10 +28331,10 @@ _c2hc_label_246:;
             } else {
                 (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
             }
-            goto _c2hc_label_276;
+            goto _c2hc_label_277;
         }
         break;
-_c2hc_label_247:;
+_c2hc_label_248:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
@@ -28317,7 +28431,7 @@ _c2hc_label_247:;
                 (code_off += X64X86Jmp(((0)(U8i *)), 0));
             }
             CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((((rpn->res).mode) != (-1))) {
             (into_reg = 0);
@@ -28329,10 +28443,10 @@ _c2hc_label_247:;
             } else {
                 (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
             }
-            goto _c2hc_label_276;
+            goto _c2hc_label_277;
         }
         break;
-_c2hc_label_248:;
+_c2hc_label_249:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
@@ -28429,7 +28543,7 @@ _c2hc_label_248:;
                 (code_off += X64X86Jmp(((0)(U8i *)), 0));
             }
             CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((((rpn->res).mode) != (-1))) {
             (into_reg = 0);
@@ -28441,10 +28555,10 @@ _c2hc_label_248:;
             } else {
                 (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
             }
-            goto _c2hc_label_276;
+            goto _c2hc_label_277;
         }
         break;
-_c2hc_label_249:;
+_c2hc_label_250:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
@@ -28541,7 +28655,7 @@ _c2hc_label_249:;
                 (code_off += X64X86Jmp(((0)(U8i *)), 0));
             }
             CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((((rpn->res).mode) != (-1))) {
             (into_reg = 0);
@@ -28553,10 +28667,10 @@ _c2hc_label_249:;
             } else {
                 (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
             }
-            goto _c2hc_label_276;
+            goto _c2hc_label_277;
         }
         break;
-_c2hc_label_250:;
+_c2hc_label_251:;
         (a = ICArgN(rpn, 1));
         (b = ICArgN(rpn, 0));
         if ((X64BIsConst(b) && (X64ConstVal(b) <= 63))) {
@@ -28653,7 +28767,7 @@ _c2hc_label_250:;
                 (code_off += X64X86Jmp(((0)(U8i *)), 0));
             }
             CodeMiscAddRef(old_fail_misc, ((((bin + code_off) - 4))(I32i *)));
-            goto _c2hc_label_167;
+            goto _c2hc_label_168;
         }
         if ((((rpn->res).mode) != (-1))) {
             (into_reg = 0);
@@ -28665,33 +28779,33 @@ _c2hc_label_250:;
             } else {
                 (code_off += X64X86Setcc(((0)(U8i *)), 80, X64MIR(cctrl, into_reg)));
             }
-            goto _c2hc_label_276;
+            goto _c2hc_label_277;
         }
-_c2hc_label_255:;
 _c2hc_label_256:;
 _c2hc_label_257:;
 _c2hc_label_258:;
 _c2hc_label_259:;
-_c2hc_label_261:;
 _c2hc_label_260:;
 _c2hc_label_262:;
+_c2hc_label_261:;
 _c2hc_label_263:;
+_c2hc_label_264:;
         break;
-_c2hc_label_241:;
+_c2hc_label_242:;
         ((tmp.raw_type) = (rpn->raw_type));
         ((tmp.off) = (rpn->integer));
         ((tmp.mode) = 7);
         (code_off = X64ICMov(cctrl, (&(rpn->res)), (&tmp), bin, code_off));
         break;
-_c2hc_label_242:;
+_c2hc_label_243:;
         break;
-_c2hc_label_264:;
+_c2hc_label_265:;
         if (((cctrl->code_ctrl)->final_pass)) {
             MemCpy((bin + code_off), (rpn->raw_bytes), (((rpn->length))(U64i)));
         }
         (code_off += (rpn->length));
     } while (0);
-_c2hc_label_167:;
+_c2hc_label_168:;
     if ((old_fail_misc || old_pass_misc)) {
         (misc = old_fail_misc);
         (misc2 = old_pass_misc);
@@ -28892,7 +29006,7 @@ U8i *X64OptPassFinal(CBCmpCtrl *cctrl, I64i *res_sz, U8i **dbg_info, CBHeapCtrl 
         (code_off = X64FuncProlog(cctrl, bin, code_off));
         (cnt = 0);
         while ((cnt < cnt2)) {
-_c2hc_label_292:;
+_c2hc_label_293:;
             ((cctrl->backend_user_data1) = 0);
             ((cctrl->backend_user_data2) = 0);
             ((cctrl->backend_user_data3) = 0);
@@ -28915,7 +29029,7 @@ _c2hc_label_292:;
                 (++cnt);
                 while ((cnt < cnt2)) {
                     if ((((forwards[cnt])->type) == 5)) {
-                        goto _c2hc_label_292;
+                        goto _c2hc_label_293;
                     }
                     (++cnt);
                 }
@@ -28938,7 +29052,7 @@ _c2hc_label_292:;
                         ((*(((bin + code_off))(I64i *))) = (misc->integer));
                     }
                     (code_off += 8);
-_c2hc_label_296:;
+_c2hc_label_297:;
                     (cm_ref = (misc->refs));
                     while (cm_ref) {
                         (cm_ref_tmp = (cm_ref->next));
@@ -28970,7 +29084,7 @@ _c2hc_label_296:;
                         ((*(((bin + code_off))(F64 *))) = (misc->flt));
                     }
                     (code_off += 8);
-                    goto _c2hc_label_296;
+                    goto _c2hc_label_297;
                     break;
                 case 2:
                     if ((code_off % 8)) {
@@ -28988,7 +29102,7 @@ _c2hc_label_296:;
                         }
                     }
                     (code_off += ((((misc->hi) - (misc->lo)) + 1) * 8));
-                    goto _c2hc_label_296;
+                    goto _c2hc_label_297;
                     break;
                 case 1:
                     if ((misc->patch_addr)) {
@@ -28997,7 +29111,7 @@ _c2hc_label_296:;
                     if ((misc == (cctrl->statics_label))) {
                         break;
                     }
-                    goto _c2hc_label_296;
+                    goto _c2hc_label_297;
                 case 8:
                     if (((run == 2) && (misc->patch_addr))) {
                         ((*(misc->patch_addr)) = MemGetExecPtr((misc->addr)));
@@ -29034,7 +29148,7 @@ _c2hc_label_296:;
                     if (((run == 2) && (misc->patch_addr))) {
                         ((*(misc->patch_addr)) = MemGetExecPtr((misc->addr)));
                     }
-                    goto _c2hc_label_296;
+                    goto _c2hc_label_297;
                     break;
                 case 3:
                     if ((!((cctrl->flags) & 2))) {
@@ -29048,7 +29162,7 @@ _c2hc_label_296:;
                             ((misc->str) = ((0)(U8i *)));
                         }
                     }
-                    goto _c2hc_label_296;
+                    goto _c2hc_label_297;
             }
             (misc = ((((misc->base).next))(CBCodeMisc *)));
         }

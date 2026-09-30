@@ -502,6 +502,9 @@ I64 BAssignRawTypeToNode(CBCmpCtrl *ccmp, CBRPN *rpn)
     if (rpn->raw_type)
         return rpn->raw_type;
     switch (rpn->type) {
+        case BIC_RET:
+            if (rpn->ic_class) rpn->raw_type = rpn->ic_class->raw_type;
+            return rpn->raw_type;
         case BIC_SQRT:
             BAssignRawTypeToNode(ccmp, ICArgN(rpn, 0));
             rpn->ic_class = BHashFind("F64", BFs->hash_table, BHTT_CLASS, 1);

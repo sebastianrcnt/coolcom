@@ -761,8 +761,8 @@ static Module load_bin(const char *path) {
     Module module = {.map = memory, .code = memory + 32,
                      .file_size = (size_t)length, .code_size = (size_t)patch - 32,
                      .map_size = mapped};
-    parse_patches(&module, (size_t)patch);
     register_host_symbols(&module);
+    parse_patches(&module, (size_t)patch);
     resolve_imports(&module);
     __builtin___clear_cache((char *)module.code, (char *)module.code + module.code_size);
     pthread_jit_write_protect_np(1);
@@ -781,6 +781,7 @@ static void run_initializers(const Module *m) {
 }
 
 int main(int argc, char **argv) {
+    if (getenv("COOLC_UNBUFFERED")) setvbuf(stdout, NULL, _IONBF, 0);
 #ifdef __x86_64__
     // Darwin's GS base points to the TSD array, whose slot zero contains
     // pthread_self(), rather than to the pthread structure itself. Locate
@@ -810,6 +811,10 @@ int main(int argc, char **argv) {
         run_initializers(&module);
         return 0;
     }
+#ifdef __x86_64__
+    if (!(argc == 4 && !strcmp(argv[1], "--probe")))
+        fail("x86 host supports --run BIN or --probe BIN SYMBOL; cross-compile with build/coolc");
+#endif
     if (argc == 5 && !strcmp(argv[1], "--format")) {
         Module module = load_bin(argv[2]);
         active_module = &module;
@@ -862,14 +867,14 @@ int main(int argc, char **argv) {
             argc--; argv++;
         }
         else
-            fail("usage: coolc [--compat] <entry.cool> <out.BIN> | coolc --vet [--compat] <entry.cool>");
+            fail("usage: coolc [--compat] [--target arm64|x86_64] <entry.cool> <out.BIN> | coolc --vet [--compat] <entry.cool>");
         argc--;
         argv++;
     }
     if (argc != (vet ? 2 : 3))
-        fail("usage: coolc [--compat] <entry.cool> <out.BIN> | coolc --vet [--compat] <entry.cool>");
+        fail("usage: coolc [--compat] [--target arm64|x86_64] <entry.cool> <out.BIN> | coolc --vet [--compat] <entry.cool>");
     const char *compiler_image = getenv("COOLC_COMPILER_BIN");
-    Module module = load_bin(compiler_image ? compiler_image : "build/coolc-compiler.BIN");
+    Module module = load_bin(compiler_image ? compiler_image : "coolc/seed/Compiler.BIN");
     if (getenv("COOLC_DEBUG"))
         fprintf(stderr, "coolc-host: code base %p\n", (void *)module.code);
     active_module = &module;

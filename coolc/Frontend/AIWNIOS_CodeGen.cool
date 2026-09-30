@@ -1855,6 +1855,7 @@ found_offset:;;
                 break; case IC_LABEL:
                 new = __HC_ICAdd_Label(cc2, cur->ic_data(CCodeMisc *)->addr);
                 break; case IC_ASM:
+                if (BEmitX86) LexExcept(cc, "x86_64 inline assembly is not supported");
                 __HC_ICAdd_Label(cc2, __HC_CodeMiscLabelNew(acc, &cur->ic_data(CAiwniosAOTBlob *)->final_start_addr));
                 new = __HC_ICAdd_RawBytes(cc2, cur->ic_data(CAiwniosAOTBlob *)->data, cur->ic_data(CAiwniosAOTBlob *)->len);
 
@@ -2102,6 +2103,12 @@ found_offset:;;
                 __HC_ICAdd_UnboundedSwitch(cc2, cur->ic_data(CCodeMisc *)->addr);
                 break; case IC_RET:
                 new = __HC_ICAdd_Ret(cc2);
+                if (cur->ic_class) {
+                    if (cur->ic_class->ptr_stars_cnt)
+                        new(CBRPN *)->ic_class = rt2cls(BRT_PTR, 0);
+                    else
+                        new(CBRPN *)->ic_class = rt2cls(cur->ic_class->raw_type, 0);
+                }
                 break; case IC_CALL_INDIRECT:
                 new = __HC_ICAdd_Call(
                                       cc2,

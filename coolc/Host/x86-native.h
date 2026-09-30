@@ -4,6 +4,10 @@
 typedef struct { uintptr_t fn; size_t argc; int kind; } X86HostImport;
 
 uint64_t NativeX86Dispatch(const X86HostImport *desc, const uint64_t *args) {
+    if (desc->kind == 4) {
+        fprintf(stderr, "coolc-host: %s requires a threaded x86 runtime\n", (const char *)desc->fn);
+        exit(1);
+    }
     if (desc->kind == 3) host_unimplemented(desc->fn);
     if (desc->kind == 2) {
         // All HolyC varargs are eight-byte slots on the stack, including F64.
@@ -77,7 +81,12 @@ static uintptr_t x86_host_import(const char *name, uintptr_t fn) {
         {"NativeNetResolve",1}, {"NativeNetConnect",3}, {"NativeNetListen",1}, {"NativeNetAccept",2},
         {"NativeNetSend",3}, {"NativeNetReceive",4}, {"NativeNetUdpOpen",1}, {"NativeNetUdpSend",5},
         {"NativeNetUdpReceive",4}, {"NativeNetSource",1}, {"NativeNetSourcePort",1},
-        {"NativeNetPort",1}, {"NativeNetClose",1}
+        {"NativeNetPort",1}, {"NativeNetClose",1},
+        {"NativeSafeStat",1}, {"NativeSafeRead",1}, {"NativeSafeWrite",4},
+        {"NativeSafeDelete",1}, {"NativeSafeMkdir",1}, {"NativeSafeList",2},
+        {"NativeTaskSpawn",4}, {"NativeTaskAbort",1}, {"NativeTaskWait",1}, {"NativeTaskResult",1}, {"NativeTaskMessage",1},
+        {"NativeTaskRelease",1}, {"NativeTaskDetach",1},
+        {"NativeUnixNow",0}, {"NativeMonotonicMs",0}, {"NativeSleep",1}, {"NativeYield",0}
     };
     // Exception intrinsics see the Cool frame directly; wrapping setjmp would
     // save the bridge's already-returned stack frame.
@@ -95,6 +104,7 @@ static uintptr_t x86_host_import(const char *name, uintptr_t fn) {
              !strcmp(name, "Floor") || !strcmp(name, "Ceil")) kind = 1;
     X86HostImport *desc = malloc(sizeof(*desc));
     if (!desc) fail("out of memory creating host import");
+    if (!strcmp(name, "NativeTaskSpawn") || !strcmp(name, "NativeTaskAbort")) {kind = 4; fn = (uintptr_t)name;}
     *desc = (X86HostImport){fn, argc, kind};
     return x86_import_thunk(desc);
 }

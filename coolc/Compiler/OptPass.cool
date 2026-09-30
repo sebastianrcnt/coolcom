@@ -1602,8 +1602,11 @@ U0 OptPassMergeAddressOffsets(CBCmpCtrl *cctrl)
                         goto fin;
                         break;
                     case BIC_BASE_PTR:
-                        // Stack grows down
-                        base->integer += off->integer;
+                        // x86 frame offsets name RBP-offset; ARM offsets are signed.
+                        if (BTargetX86 && cctrl->flags & BCCF_AOT_COMPILE)
+                            base->integer -= off->integer;
+                        else
+                            base->integer += off->integer;
 fin:
                         arg->raw_type = r->raw_type;
                         ICFree(r);
