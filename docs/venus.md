@@ -4,7 +4,9 @@ Status: decisions accepted. Kernel transport, the guest subset generator and the
 optional real host renderer are implemented. Milestone 1 passes with real guest
 memory coherence, Vulkan triangle rendering and blob scanout pixel validation.
 Milestone 3 passes the Vulkan terminal screen and scroll tests; the subsequent
-Logos retirement leaves Venus → CPU selection.
+Logos retirement leaves Venus → CPU selection. The terminal now reuses draw
+commands, submits asynchronously at up to 120 Hz and presents Metal images
+without per-frame readback; see [latest timings](#terminal-performance-remeasurement).
 See [generator usage](../tools/venus/README.md) and the host validation log below.
 The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
@@ -787,3 +789,90 @@ The five screens, resize, cell-edit/no-op counters, shell lifecycle and immediat
 shutdown tests passed again (`build/venus-ring-term-test.log`). Row/byte counters
 count canonical cell edits; copies into immutable submitted slot snapshots are
 separate writes, not included in those counters.
+
+
+### Terminal performance remeasurement
+
+Apple M6/macOS 27, same headless FAT disk/prompt, 3,000 forced hooks followed by
+3,000 batched lines, sequential runs, three repeats at each resolution. All six
+final Venus scroll/fill screenshots match the current CPU reference **exactly**.
+CPU is remeasured on the final kernel (`venus-paced-cpu`); final Venus includes
+the physical comparison ring (`venus-final-metal`). Logos and original Venus
+rows below retain their pre-retirement `b2aaeb6` measurements, not reruns of a
+removed backend.
+
+| Resolution | Backend | Forced hook µs/line | 3,000 forced lines ms | Batched lines ms | Whole-run host CPU s |
+|---|---|---:|---:|---:|---:|
+| 1024×768 | CPU (current) | 106.4 | 709.0 | 453.5 | 1.64 |
+| 1024×768 | Logos (before removal) | 45.4 | 530.2 | 417.5 | 1.43 |
+| 1024×768 | Venus (original) | 428.3 | 1673.9 | 434.3 | 3.47 |
+| 1024×768 | Venus (final, Metal images) | 17.5 | 448.1 | 416.9 | 1.87 |
+| 3200×2000 | CPU (current) | 263.5 | 1232.2 | 642.4 | 2.52 |
+| 3200×2000 | Logos (before removal) | 135.1 | 852.7 | 500.6 | 1.94 |
+| 3200×2000 | Venus (original) | 1440.7 | 4773.6 | 579.3 | 7.80 |
+| 3200×2000 | Venus (final, Metal images) | 92.4 | 725.8 | 491.6 | 2.34 |
+
+At **3200×2000**, final forced hooks take **92.4 µs/line**, versus current CPU
+263.5 and historical Logos 135.1. Whole-process CPU is **2.34 s**, below current
+CPU **2.52 s**, but still above historical Logos **1.94 s**. Original Venus was
+1440.7 µs and 7.80 s. Thus the requested large-resolution CPU target is met;
+Logos's whole-process CPU target remains open. At **1024×768**, forced hooks are
+17.5 µs versus CPU 106.4, but whole-process CPU is **1.87 s versus CPU 1.64 s**:
+resident JIT, Vulkan initialization and driver work still outweigh the smaller
+steady-state rendering savings. There is no claim of a universal CPU win.
+
+**Timing semantics changed:** the old Venus hook waited for GPU completion on
+every forced line. The current hook captures the latest state, coalesces it and
+returns. During the 3,000-line forced phase it submitted/completed **53 actual
+GPU frames at 1024×768**, and **85 at 3200×2000** in each run. Draw-command
+recordings were **zero** during the measured phase; initial commands are cached
+and only resize rebuilds them. Image-upload recordings were zero or one (new
+atlas glyphs). The terminal continues rendering while headless; these are not
+3,000 GPU execution timings, nor screenshot-only rendering. The final-state
+pixel comparisons, idle-timer completion and immediate-shutdown test prevent
+coalescing from hiding a missing final frame. Regular `FbFlush` is asynchronous;
+`FbFinish` is the explicit completion operation, used by power/fatal-halt paths.
+
+Ablation at 3200×2000, three-run averages (before the final comparison-ring change):
+
+| Change | Forced hook µs/line | Whole-run host CPU s |
+|---|---:|---:|
+| Cached commands + async slots, linear readback | 129.9 | 2.64 |
+| Add opaque image export, no readback | 130.5 | 2.54 |
+| Add 120 Hz service pacing | 115.5 | 2.43 |
+| Add physical comparison ring (final) | 92.4 | 2.34 |
+
+Direct image export saves per-frame GPU readback and window CPU copies; headless
+benchmarks exclude the actual window drawable blit, so they do not measure GUI
+presentation CPU. Cache reuse and pacing produce most of the large improvement.
+The unpaced direct path submitted about 628 frames for the forced phase; pacing
+bounds work to displayable updates. Ring caching removes an additional full-grid
+memory copy on each scroll.
+
+Reproduction: install `tools/venus/install.sh build/venus-test/terminal.img` into
+a formatted FAT image, then run `tools/scroll-bench.py LABEL build/kernel.Image
+--disk build/venus-test/terminal.img --repeat 3 --size 1024x768 --size 3200x2000`.
+For CPU add `--extra=--no-venus --expect-venus 0`; for Venus add
+`--vm build/coolvm-venus --expect-venus 1 --compare venus-paced-cpu`. The final
+labels are `venus-paced-cpu` and `venus-final-metal`. Intermediate labels
+`venus-opt-*` and `venus-paced-*` retain the ablations. JSON/PNGs live under
+`build/scroll-bench/`, logs in `build/venus-opt-bench.log`,
+`build/venus-paced-bench.log`, `build/venus-final-bench.log`.
+
+Final verification: main `d168001` was fast-forwarded before the changes.
+`make -j test` passed offline on the final kernel (`build/venus-paced-final-test.log`);
+`make venus-term-test` passed after the ring change (`build/venus-ring-term-test.log`).
+Direct/linear fallback screen suites, one/two-core restarts, immediate shutdown,
+real CAMetalLayer window, triangle, guest coherence and host transport tests all
+passed during the relevant stages. Commits: `12fcf58` (cache/async), `7db2d1c`
+(Metal images/launcher), `89424fb` (pacing/final drain), `aee0f1a` (scroll cache).
+
+Remaining limits: two latest-state frame slots and a 120 Hz service ceiling,
+not a promise to display every output line; the framebuffer's existing timer can
+lower the effective rate. One guest context/queue and synchronous inline wire
+consumption remain. The direct image bridge is macOS/MoltenVK-specific, not
+portable Vulkan WSI; Linux/QEMU runtime, noncoherent memory and concurrent Vulkan
+apps are still unverified. The 256 MiB blob budget limits larger resolutions.
+Device loss times out/fails rather than recovering a running app into CPU;
+initialization failures still fall back. Startup JIT/pipeline cost and the
+small-resolution whole-process CPU overhead remain performance work.

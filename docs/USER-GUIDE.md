@@ -47,6 +47,8 @@ The guest renders cells/atlas/overlay with Vulkan. Completed images go directly
 to a `CAMetalLayer`; screenshots alone request GPU readback. Old host stacks
 without the image bridge use linear readback, as does `--venus-readback` on
 `build/coolvm-venus`. `--no-venus` forces CPU rendering in that executable.
+`FbFlush` requests an asynchronous display update; `FbFinish` waits for the latest
+frame when a program needs completion. Shutdown/reboot call it automatically.
 `make -j test` always keeps the ordinary monitor and needs no Venus dependencies
 or internet; optional GPU validation is `make venus-term-test venus-test`.
 
