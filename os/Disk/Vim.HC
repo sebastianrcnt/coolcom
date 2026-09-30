@@ -731,6 +731,7 @@ U0 VimDraw()
     AnsiTermSize(&rows, &cols);
     if (rows < 3 || cols < 12) return;
     if (vim_mode >= 3) VimRange(&a, &b);
+    AnsiCursorHide; // no cursor block at each intermediate write position while redrawing
     if (vim_top > VimLine(vim_pos)) vim_top = VimLine(vim_pos);
     p = vim_top;
     for (y = 1; y < rows - 1; y++) p = VimNextLine(p);
@@ -787,7 +788,7 @@ U0 VimDraw()
         VimText(status, cols - 1);
         AnsiCursor(row, 7 + col - vim_left);
     }
-    AnsiReset;
+    AnsiReset; AnsiCursorShow;
 }
 
 U0 VimClose()

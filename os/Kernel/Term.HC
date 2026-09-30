@@ -16,6 +16,7 @@ class CVTerm
     I64 sv_cx, sv_cy, sv_fg, sv_bg, sv_bold; // ESC 7 / CSI s
     Bool sv_reverse;
     Bool reverse, saved_reverse;
+    Bool cursor_off; // CSI ?25l; Tmux shows the host cursor only for a pane without it
     CVtCell *cells, *saved;
     I64 keys[256], head, tail;
     I64 dirty, refs, lock;
@@ -105,6 +106,8 @@ U0 VtCsi(CVTerm *v, U8 c)
     if (v->csi_private) {
         if ((c == 'h' || c == 'l') && (n == 1049 || n == 47))
             VtAlt(v, c == 'h');
+        else if ((c == 'h' || c == 'l') && n == 25)
+            v->cursor_off = c == 'l';
         return;
     }
     switch (c) {

@@ -129,7 +129,7 @@ disk-install: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
 	tools/disk-files.sh build/disk.img
 	mcopy -o -i build/disk.img build/ShellPrelude.HH ::Kernel.HH
 	tools/native/prepare.sh
-	mmd -i build/disk.img ::Compiler 2>/dev/null || true
+	mdir -i build/disk.img ::Compiler >/dev/null 2>&1 || mmd -i build/disk.img ::Compiler </dev/null
 	mcopy -o -i build/disk.img build/native-src/* ::Compiler/
 
 disk-seed: build/disk.img build/ShellPrelude.HH build/BootStub.BIN
