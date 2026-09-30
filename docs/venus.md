@@ -1,7 +1,8 @@
 # Venus: Vulkan for coolcom
 
-Status: decisions accepted; the kernel MMIO transport and an opt-in command-flow stub
-are implemented. The Vulkan layer and real host renderer remain later work.
+Status: decisions accepted. Implemented so far: the kernel MMIO transport with an opt-in
+command-flow stub, and the guest subset generator with host wire tests
+([generator usage](../tools/venus/README.md)). The real host renderer remains planned.
 The goal is one general GPU API, Vulkan,
 used for everything (the terminal, images, 3D, compute). It reaches the host through
 virtio-gpu **Venus**: under coolvm on the Mac through virglrenderer and MoltenVK to Metal,

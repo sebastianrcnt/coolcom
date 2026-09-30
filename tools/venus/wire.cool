@@ -1,0 +1,42 @@
+#define TRUE 1
+#define FALSE 0
+// Caller owns the buffer. error is sticky: never consume a failed stream.
+// Decoders write into caller supplied structs/arrays/pNext nodes; no allocation.
+class VenusWire {U8i *data; U64i capacity; U64i pos; I64i error;};
+class VenusBase {I32i sType; VenusBase *pNext;};
+U0 vn_put(VenusWire *w, U8i *src, U64i size, U64i padded)
+{
+    U64i i;
+    if (w->error) return;
+    if (padded < size || w->pos > w->capacity || padded > w->capacity - w->pos || (size && !src)) {w->error = 1; return;}
+    for (i = 0; i < size; i++) w->data[w->pos + i] = src[i];
+    for (; i < padded; i++) w->data[w->pos + i] = 0;
+    w->pos += padded;
+}
+U0 vn_get(VenusWire *w, U8i *dst, U64i size, U64i padded)
+{
+    U64i i;
+    if (w->error) return;
+    if (padded < size || w->pos > w->capacity || padded > w->capacity - w->pos || (size && !dst)) {w->error = 1; return;}
+    for (i = 0; i < size; i++) dst[i] = w->data[w->pos + i];
+    w->pos += padded;
+}
+U64i vn_strlen(U8i *s) {U64i n = 0; while (s[n]) n++; return n;}
+U0 vn_encode_array_size(VenusWire *enc, U64i size) {vn_put(enc, (&size)(U8i *), 8, 8);}
+U64i vn_decode_array_size_unchecked(VenusWire *dec) {U64i n = 0; vn_get(dec, (&n)(U8i *), 8, 8); return n;}
+U64i vn_decode_array_size(VenusWire *dec, U64i expected)
+{
+    U64i n = vn_decode_array_size_unchecked(dec);
+    if (n != expected) {dec->error = 1; return 0;}
+    return n;
+}
+U64i vn_peek_array_size(VenusWire *dec)
+{
+    U64i n, saved = dec->pos;
+    n = vn_decode_array_size_unchecked(dec); dec->pos = saved; return n;
+}
+I64i vn_encode_simple_pointer(VenusWire *enc, U8i *p) {vn_encode_array_size(enc, p != 0); return p != 0;}
+I64i vn_decode_simple_pointer(VenusWire *dec) {return vn_decode_array_size_unchecked(dec) != 0;}
+
+U64i vn_count(U32i *p) {if (p) return *p; return 0;}
+U64i vn_choose(U8i *p, U64i n) {if (p) return n; return 0;}

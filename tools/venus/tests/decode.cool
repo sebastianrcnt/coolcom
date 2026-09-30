@@ -1,0 +1,72 @@
+import U8i *MemSet(U8i *p, I64i v, I64i n);
+import U0 NativeExit(I64i n);
+I64i checkIndex;
+U0 Check(I64i ok) {checkIndex++; if (!ok) NativeExit(checkIndex);}
+U0 DecodeTests()
+{
+    U8i data[4096];
+    VenusWire enc, dec;
+    U64i handle = 0, devices[2], memoryId = 123, saved;
+    U32i count = 2;
+    I32i cmd, result;
+    VkMemoryRequirements requirements;
+    VkMemoryAllocateInfo allocation, decoded;
+    VkImportMemoryResourceInfoMESA resource, decodedResource;
+    enc.data = data; enc.capacity = 4096; enc.pos = 0; enc.error = 0;
+    // Create reply: command, VkResult, pointer presence, allocated object id.
+    cmd = VK_COMMAND_TYPE_vkCreateBuffer_EXT; result = -2;
+    vn_encode_VkCommandTypeEXT(&enc, &cmd); vn_encode_VkResult(&enc, &result);
+    vn_encode_simple_pointer(&enc, &handle); vn_encode_VkBuffer(&enc, &memoryId);
+    dec = enc; dec.pos = 0;
+    result = vn_decode_vkCreateBuffer_reply(&dec, 1, 0, 0, &handle);
+    Check(result == -2 && handle == 123 && !dec.error && dec.pos == enc.pos);
+    // Wrong reply tag is rejected before modifying caller storage.
+    data[0] = 20; dec.pos = 0; dec.error = 0; handle = 456;
+    vn_decode_vkCreateBuffer_reply(&dec, 1, 0, 0, &handle);
+    Check(dec.error && handle == 456);
+    // Enumeration reply includes in/out count and a 64-bit array length.
+    enc.pos = 0; cmd = VK_COMMAND_TYPE_vkEnumeratePhysicalDevices_EXT; result = 0;
+    vn_encode_VkCommandTypeEXT(&enc, &cmd); vn_encode_VkResult(&enc, &result);
+    vn_encode_simple_pointer(&enc, &count); vn_encode_uint32_t(&enc, &count);
+    vn_encode_array_size(&enc, 2); devices[0] = 111; devices[1] = 222;
+    vn_encode_VkPhysicalDevice_array(&enc, devices, 2);
+    devices[0] = 0; devices[1] = 0; dec = enc; dec.pos = 0;
+    Check(vn_decode_vkEnumeratePhysicalDevices_reply(&dec, 1, &count, devices) == 0);
+    Check(count == 2 && devices[0] == 111 && devices[1] == 222 && !dec.error);
+    // Host enumeration count may not exceed the caller's capacity.
+    count = 1; dec = enc; dec.pos = 0; devices[0] = 333;
+    vn_decode_vkEnumeratePhysicalDevices_reply(&dec, 1, &count, devices);
+    Check(dec.error && devices[0] == 333);
+    // Reply structs decode with native Cool field storage, without allocation.
+    enc.pos = 0; cmd = VK_COMMAND_TYPE_vkGetBufferMemoryRequirements_EXT;
+    vn_encode_VkCommandTypeEXT(&enc, &cmd); vn_encode_simple_pointer(&enc, &requirements);
+    memoryId = 4096; vn_encode_VkDeviceSize(&enc, &memoryId);
+    memoryId = 256; vn_encode_VkDeviceSize(&enc, &memoryId); count = 5; vn_encode_uint32_t(&enc, &count);
+    dec = enc; dec.pos = 0;
+    vn_decode_vkGetBufferMemoryRequirements_reply(&dec, 1, 2, &requirements);
+    Check(requirements.size == 4096 && requirements.alignment == 256 && requirements.memoryTypeBits == 5 && !dec.error);
+    // Selected pNext node: wire order is tag, next chain, then node body.
+    MemSet((&allocation)(U8i *), 0, sizeof(allocation));
+    MemSet((&resource)(U8i *), 0, sizeof(resource));
+    MemSet((&decoded)(U8i *), 0, sizeof(decoded));
+    MemSet((&decodedResource)(U8i *), 0, sizeof(decodedResource));
+    allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; allocation.allocationSize = 8192; allocation.memoryTypeIndex = 3;
+    resource.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_RESOURCE_INFO_MESA; resource.resourceId = 99; allocation.pNext = &resource;
+    decoded.sType = allocation.sType; decodedResource.sType = resource.sType; decoded.pNext = &decodedResource;
+    enc.pos = 0; vn_encode_VkMemoryAllocateInfo(&enc, &allocation); Check(!enc.error);
+    dec = enc; dec.pos = 0; vn_decode_VkMemoryAllocateInfo(&dec, &decoded);
+    Check(!dec.error && decoded.allocationSize == 8192 && decodedResource.resourceId == 99 && dec.pos == enc.pos);
+    // A missing caller pNext node fails safely.
+    decoded.pNext = 0; dec.pos = 0; dec.error = 0; vn_decode_VkMemoryAllocateInfo(&dec, &decoded); Check(dec.error);
+    // Truncated input, mismatching counts, and multiplication overflow are sticky.
+    dec = enc; dec.pos = 0; dec.capacity = 3; vn_decode_VkMemoryAllocateInfo(&dec, &decoded); Check(dec.error && dec.pos == 0);
+    enc.pos = 0; vn_encode_array_size(&enc, 3); dec = enc; dec.pos = 0;
+    Check(vn_decode_array_size(&dec, 2) == 0 && dec.error);
+    enc.pos = 0; enc.capacity = 3; vn_encode_vkCmdDraw(&enc, 0, 1, 3, 1, 0, 0); Check(enc.error && enc.pos == 0);
+    saved = enc.pos; vn_encode_array_size(&enc, 1); Check(enc.pos == saved);
+    enc.error = 0; enc.capacity = 4096; enc.pos = 0;
+    vn_encode_uint64_t_array(&enc, &memoryId, 0x4000000000000000); Check(enc.error && enc.pos == 0);
+    // Output commands request replies even when passed zero flags.
+    enc.error = 0; enc.pos = 0; vn_encode_vkDeviceWaitIdle(&enc, 0, 1); Check(data[4] == 1);
+}
+DecodeTests();
