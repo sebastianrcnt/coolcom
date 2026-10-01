@@ -1,0 +1,5 @@
+Owning resizable storage for any Type. Linear elements must be moved out and
+destroyed before destroyEmpty; destroyFree handles Free elements. borrowNth
+returns a checked read-only reference tied to the owner region. slice/sliceMut
+use half-open bounds including empty spans. Legacy getSpan bounds are inclusive.
+See Man("Standard.Vector") for the general-purpose array interface.

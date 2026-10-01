@@ -1,0 +1,7 @@
+Stable bottom-up mergesort: O(n log n) time and O(n) scratch memory.
+sort needs Ord; sortBy takes a named Fn[T,T,Ordering] comparator. Comparators
+must provide a consistent total order. Free elements are copied; Vector.reverse
+also supports moving linear elements. binarySearch finds the first equal index
+in sorted input, or None. min/max use Ord. map/filter produce owned vectors.
+Callbacks cannot capture state; compare fields through a named function.
+See Man("Standard.Vector"), Man("Standard.Ord").

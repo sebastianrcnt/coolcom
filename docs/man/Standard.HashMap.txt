@@ -1,0 +1,13 @@
+Open-addressed owning map with Free keys (Eq + Hash) and Type values.
+A 75% used-bucket threshold grows or compacts the table; removal leaves
+tombstones. rehash removes tombstones without changing capacity.
+insert returns the replaced value; remove/drainOne return owned values.
+borrowGet supports linear values; get/destroyFree require Free values.
+For linear values, drain and destroy each value before destroyEmpty. Repeated
+drainOne calls scan buckets once until insert/rehash restarts the scan.
+Free span keys must retain immutable live storage for the map lifetime.
+Owned String keys are not supported; use immutable Free IDs or spans.
+nextKey visits occupied buckets in unspecified order; restart its Index cursor
+after mutation. Live borrows prevent mutation. Eq must agree with Hash; hashes
+are not hardened against deliberate collisions. Import Eq and Hash at callers.
+See Man("Standard.HashSet"), Man("Standard.Eq"), Man("Standard.Hash").

@@ -1,0 +1,5 @@
+Read-only equality for any Type, including linear String.
+Eq must be reflexive, symmetric and transitive. Instances cover primitive
+integers, Index, ByteSize, Bool, Unit, String and spans of Eq elements (including linear elements).
+Import this module at generic call sites to make its instances visible.
+See Man("Standard.Hash"), Man("Standard.Ord"), Man("Standard.HashMap").

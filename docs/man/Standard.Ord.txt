@@ -1,0 +1,6 @@
+Total ordering through compare: Less, Equal or Greater.
+Independent read-only borrows allow comparing linear String owners. String
+uses byte lexicographic ordering; generic spans compare elements.
+Instances include integer widths, Index, ByteSize, Bool and Unit. NaN prevents
+floats from having a total-order instance. Ord has no implicit Eq superclass.
+Import this module where sort/min/max are called. See Man("Standard.Algorithms").

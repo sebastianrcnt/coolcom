@@ -1,5 +1,5 @@
 // Recursive descent over the reference Parser.mly grammar.
-Bool WAt(CWUnit *u, U8 *s) {return WEq(u->cursor->text, s);}
+Bool WAt(CWUnit *u, U8 *s) {return u->cursor->kind != 5 && u->cursor->kind != 6 && WEq(u->cursor->text, s);}
 CWToken *WTake(CWUnit *u)
 {
     CWToken *t = u->cursor;

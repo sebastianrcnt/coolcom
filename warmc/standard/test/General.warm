@@ -1,0 +1,13 @@
+import Standard.Test.Eq (eqTestSuite);
+import Standard.Test.Vector (vectorTestSuite);
+import Standard.Test.HashMap (hashMapTestSuite);
+import Standard.Test.HashSet (hashSetTestSuite);
+import Standard.Test.Algorithms (algorithmsTestSuite);
+import Standard.Test.Text (textTestSuite);
+module body Standard.Test.General is
+    function main(): ExitCode is
+        eqTestSuite(); vectorTestSuite(); hashMapTestSuite(); hashSetTestSuite(); algorithmsTestSuite(); textTestSuite();
+        printLn("WARM STDLIB PASS");
+        return ExitSuccess();
+    end;
+end module body.

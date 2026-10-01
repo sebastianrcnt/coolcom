@@ -1,0 +1,6 @@
+module body Standard.Test.GeneralSupport is
+    function check(condition: Bool): Unit is
+        if not condition then abort("standard library assertion failed"); end if;
+        return nil;
+    end;
+end module body.

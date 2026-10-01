@@ -1,0 +1,4 @@
+HashMap[T,Unit] with Free Eq + Hash elements. insert/remove return whether
+the set changed. next visits elements in unspecified order using an Index
+cursor initially zero. Restart after mutation. destroy frees the whole set.
+See Man("Standard.HashMap").

@@ -57,6 +57,7 @@ warm-test: warm-host
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_generated.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_cli.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_standard.py
+	WARM_TOOLCHAIN_READY=1 python3 warmc/test_stdlib.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_os.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_tasks.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_gui.py

@@ -1,0 +1,101 @@
+import Standard.String (String, slice, length);
+
+module body Standard.Eq is
+    instance Eq(Nat8) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Nat8, R], b: &[Nat8, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Nat16) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Nat16, R], b: &[Nat16, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Nat32) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Nat32, R], b: &[Nat32, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Nat64) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Nat64, R], b: &[Nat64, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Int8) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Int8, R], b: &[Int8, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Int16) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Int16, R], b: &[Int16, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Int32) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Int32, R], b: &[Int32, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Int64) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Int64, R], b: &[Int64, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Index) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Index, R], b: &[Index, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(ByteSize) is
+        generic [R: Region, S: Region]
+        method eq(a: &[ByteSize, R], b: &[ByteSize, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Bool) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Bool, R], b: &[Bool, S]): Bool is
+            return !a = !b;
+        end;
+    end;
+    instance Eq(Unit) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Unit, R], b: &[Unit, S]): Bool is
+            return true;
+        end;
+    end;
+    instance Eq(String) is
+        generic [R: Region, S: Region]
+        method eq(a: &[String, R], b: &[String, S]): Bool is
+            if length(a) /= length(b) then return false; end if;
+            let av: Span[Nat8, R] := slice(a, 0, length(a));
+            let bv: Span[Nat8, S] := slice(b, 0, length(b));
+            for i from 0 until length(a) do
+                if av[i] /= bv[i] then return false; end if;
+            end for;
+            return true;
+        end;
+    end;
+    generic [T: Type(Eq), P: Region]
+    instance Eq(Span[T, P]) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Span[T, P], R], b: &[Span[T, P], S]): Bool is
+            let av: Span[T, P] := !a;
+            let bv: Span[T, P] := !b;
+            if spanLength(av) /= spanLength(bv) then return false; end if;
+            for i from 0 until spanLength(av) do
+                if not eq(&(av[i]), &(bv[i])) then return false; end if;
+            end for;
+            return true;
+        end;
+    end;
+end module body.

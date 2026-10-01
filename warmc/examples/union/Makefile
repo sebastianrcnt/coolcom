@@ -5,6 +5,7 @@ STDLIB := \
 		../../standard/src/Order.warmh,../../standard/src/Order.warm \
 		../../standard/src/Box.warmh,../../standard/src/Box.warm \
 		../../standard/src/Buffer.warmh,../../standard/src/Buffer.warm \
+		../../standard/src/Vector.warmh,../../standard/src/Vector.warm \
 		../../standard/src/String.warmh,../../standard/src/String.warm \
 		../../standard/src/StringBuilder.warmh,../../standard/src/StringBuilder.warm \
 		../../standard/src/IO/IO.warmh,../../standard/src/IO/IO.warm \

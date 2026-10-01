@@ -682,3 +682,121 @@ The complete `make -j test` passed with exit code **0**; the final log is
 language, host/standard-library, real Vim/Tmux VM, kernel and GUI tests. An
 initial run failed on the new mutable-loan fixture's invalid region cast; the
 fixture was corrected without changing the language or borrow checker.
+
+## Stage 8: general-purpose library
+
+Decisions (2026-10-01), implemented in `warmc/standard/src`:
+
+- **Traits.** Options: extend upstream Equality/TotalOrder; add short Eq/Ord/Hash
+  traits; use by-value callbacks. **Chosen: Standard.Eq, Standard.Ord and
+  Standard.Hash**, keeping the upstream modules compatible. Trait methods take
+  independent read-only region-qualified references to `T: Type`, so linear
+  String instances never copy or consume their owners. Ord returns Less/Equal/
+  Greater; it has no implicit superclass (Austral has no superclass constraints).
+  Generic maps explicitly require both Eq and Hash. Instances cover Unit, Bool,
+  all signed/unsigned integer widths, Index, ByteSize, String and generic Type
+  spans. String and byte spans compare bytes lexicographically. Floats are
+  excluded from total Eq/Ord because NaN violates their laws. Import the trait
+  module at call sites to make its instances visible, as required by Austral.
+  Span traits borrow elements, including linear String elements; the two span
+  operands must have the same span-region type. String.equals compares byte
+  spans with independent regions. Eq must be reflexive/symmetric/transitive; equal keys must hash identically;
+  Ord must agree with Eq when both are implemented. Hashes are deterministic
+  Nat64 values, not a persistent serialization format or a cryptographic API.
+- **Vector.** Options: duplicate an unsafe allocator; wrap existing Buffer;
+  rename Buffer. **Chosen: a distinct owning Vector wrapping audited Buffer**.
+  push/insert move any Type in; pop/remove/replace move it out. Empty pop returns
+  None. get/set/filter copy only Free elements; borrowGet and half-open slices
+  support linear elements. A Cursor visits borrowed elements in index order.
+  map consumes the vector and invokes a named Fn once per moved element, in order.
+  destroyFree requires Free elements; otherwise drain and destroy each element,
+  then destroyEmpty. Index misuse and allocation failure abort as programmer/
+  resource errors. Empty slices, including at length, are valid. A live borrow
+  must end before mutation/growth/destruction; restart cursors after mutation.
+- **Hash storage and ownership.** Options: chaining; open addressing; borrowed
+  generic keys with custom destruction. **Chosen: linear probing with a power of
+  two capacity, Empty/Tomb/Full tags, 75% used-bucket threshold, doubling and
+  tombstone compaction**. Mixed hashes use a deterministic SplitMix64 finalizer.
+  Explicit rehash compacts without changing capacity. Free keys + Type values
+  keep the insertion API ownership-safe: insert returns Option of the previous
+  value, remove/drainOne return ownership, borrowGet does not copy. Repeated
+  drainOne calls scan buckets once until the next insert/rehash (O(capacity)
+  total), so destroying linear values does not require quadratic searches. Free values
+  allow get/destroyFree; linear values require draining and destroyEmpty.
+  Owned linear keys would require returning both replaced keys and values and a
+  borrowed-key query protocol: deferred instead of silently dropping a String.
+  Use immutable Free IDs or borrowed spans as keys; keep their storage alive and
+  unchanged for the entire map lifetime. HashSet wraps HashMap[T, Unit], and
+  therefore requires Free elements. nextKey/HashSet.next visit occupied buckets
+  in unspecified order. Restart cursors after any mutation. Deterministic hashes
+  are not resistant to deliberate collision attacks. No hidden destructor or
+  equality fallback is introduced. Deque and ordered maps are deferred.
+- **Algorithms and callbacks.** Options: insertion/quicksort; stable mergesort;
+  language closures. **Chosen: stable bottom-up mergesort**, O(n log n) time and
+  O(n) scratch, on mutable spans of Free elements. sortBy uses Fn[T,T,Ordering];
+  named functions can compare record fields, with no captured state. binarySearch
+  returns the first equal index or None. reverse on spans, min/max, span map and
+  filter complement Vector's moving map and Type-capable reverse. A comparator
+  must provide a consistent total order; copying sort of linear elements is
+  deliberately rejected. Move-aware sorting and closures can be added separately.
+- **Text.** Options: separate Text module; extend String; require UTF-8 validity.
+  **Chosen: extend Standard.String, with borrowed byte-span inputs**, keeping
+  existing byte-string semantics. Owned outputs work with Standard.Format.Text
+  through String.slice. equals/find/findFrom/contains/startsWith/endsWith operate
+  on bytes, including NUL. Empty needles match a boundary. split preserves empty
+  fields; an empty separator splits bytes (empty input gives zero fields). Its
+  Vector[String] owns every field. join borrows Strings and copies their bytes.
+  replace uses non-overlapping matches; empty needle inserts at every byte
+  boundary. trim returns a borrowed view removing ASCII 09-0D/20 whitespace.
+  ASCII case conversion copies and preserves other bytes. Strict decodeUtf8
+  returns Result[Decoded,Utf8Error], rejecting truncation, overlong encodings,
+  surrogates and values above U+10FFFF. utf8Next emits U+FFFD and advances one byte
+  on invalid input; utf8Length uses exactly that policy. parseInt/parseNat and
+  radix variants (2-36) return Result with empty/digit-position/overflow/radix
+  errors. Parsing accepts an optional sign (Nat accepts +), consumes the whole
+  input and checks limits before arithmetic, including INT64_MIN and UINT64_MAX.
+- **Implementation boundary.** Pure library operations use the same generated
+  runtime on host and CoolOS. Buffer.borrowNth is bounds checked; its only unsafe
+  operation returns an element pointer tied to the owner's region. HashMap's
+  internal owning-buffer swap moves the old field once and stores the replacement
+  once. Other collection/text/algorithm code uses checked APIs. The compiler carries caller-selected typeclass evidence through nested
+  generic calls and function values, including constraints of generic instances.
+  String tokens are distinguished from keyword/operator tokens. Its
+  read-reference type assertion now also accepts reference field paths, enabling
+  mutable field borrows to be shortened to read-only views without copying data.
+
+The executable suites in `warmc/standard/test/{Eq,Vector,HashMap,HashSet,
+Algorithms,Text}.warm` run on the host and CoolOS, both precompiled and through
+WarmRun. Tests exercise primitive and generic span instances, caller-provided
+collision hashes (including nested span keys), linear String values through
+rehash/drain, tombstones/churn, iterator exhaustion, stable ordering of equal
+record keys, first-duplicate binary search, UTF-8 errors, numeric limits and a
+Format round trip. `test_stdlib.py` additionally verifies seven ownership/API
+rejections and four checked runtime aborts. The unchanged Top and file-stream
+behavior tests cover their migrated comparison helpers.
+
+### Microbenchmarks
+
+Reproduce with `python3 tools/warm-stdlib-perf.py`; code, five raw samples and
+checksums are in `warmc/perf/stdlib/`. Measured 2026-10-01 on Apple M6,
+macOS 27.0 arm64, Warm host native (coolc arm64). OS.Time.monotonicMs has whole
+millisecond resolution. Values below are medians of five samples, not a host /
+CoolOS speed comparison. Push/insert include growth and allocation; sorting
+excludes input construction and result validation. Every sort checks its order
+and every lookup contributes to a checked, repeatable checksum.
+
+| Operation | Elements | Median ms | Sample range ms |
+|---|---:|---:|---:|
+| Vector push | 1,000,000 | 7 | 6-8 |
+| Vector get | 1,000,000 | 1 | 0-1 |
+| HashMap insert | 100,000 | 13 | 12-14 |
+| HashMap lookup | 100,000 | 2 | 1-2 |
+| Stable sort, reverse | 100,000 | 9 | 9-10 |
+| Stable sort, deterministic shuffled integers | 100,000 | 10 | 9-10 |
+| Stable sort, reverse | 1,000,000 | 109 | 107-110 |
+| Stable sort, deterministic shuffled integers | 1,000,000 | 123 | 122-140 |
+
+The get/lookup runs are close to timer resolution; their per-operation costs
+should not be inferred precisely from these millisecond readings. Shuffled
+input is `(i * 48271) % 2147483647`, deterministic and validated after sorting.
+No fragile performance threshold is added to correctness tests.

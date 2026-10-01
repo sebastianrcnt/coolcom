@@ -1,0 +1,200 @@
+pragma Unsafe_Module;
+import Austral.Memory (Pointer, refMutToPointer, load, store);
+import Standard.Eq (Eq, eq);
+import Standard.Hash (Hash, hash);
+import Standard.Buffer (Buffer, allocateEmpty, insertBack, length as bufLength, borrowNth, swapNth, removeLast, destroyFree as bufDestroyFree, destroyEmpty as bufDestroyEmpty);
+
+module body Standard.HashMap is
+    union Slot[K: Free, V: Type]: Type is
+        case Empty;
+        case Tomb;
+        case Full is
+            key: K;
+            value: V;
+    end;
+    record HashMap[K: Free(Eq, Hash), V: Type]: Linear is
+        slots: Buffer[Slot[K, V]];
+        size: Index;
+        used: Index;
+        drainIndex: Index;
+    end;
+    private generic [K: Free, V: Type]
+    function buckets(capacity: Index): Buffer[Slot[K, V]] is
+        var slots: Buffer[Slot[K, V]] := allocateEmpty();
+        for i from 0 until capacity do
+            let empty: Slot[K, V] := Empty();
+            insertBack(&!slots, empty);
+        end for;
+        return slots;
+    end;
+    generic [K: Free(Eq, Hash), V: Type]
+    function make(): HashMap[K, V] is
+        let slots: Buffer[Slot[K, V]] := buckets(16);
+        return HashMap(slots => slots, size => 0, used => 0, drainIndex => 0);
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function length(m: &[HashMap[K, V], R]): Index is return m->size; end;
+
+    private generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function locate(slots: &[Buffer[Slot[K, V]], R], key: K): Index is
+        let capacity: Index := bufLength(slots);
+        var h: Nat64 := hash(&key);
+        h := modularMultiply(h ^ (h >> 30), 13787848793156543929);
+        h := modularMultiply(h ^ (h >> 27), 10723151780598845931);
+        h := h ^ (h >> 31);
+        var at: Index := widenToIndex(h & widenToNat64(capacity - 1));
+        var tomb: Index := capacity;
+        for probe from 0 until capacity do
+            case borrowNth(slots, at) of
+                when Empty do return if tomb < capacity then tomb else at;
+                when Tomb do if tomb = capacity then tomb := at; end if;
+                when Full(key as stored: &[K, R], value: &[V, R]) do
+                    if eq(stored, &key) then return at; end if;
+            end case;
+            at := (at + 1) & (capacity - 1);
+        end for;
+        if tomb < capacity then return tomb; end if;
+        abort("HashMap: full table");
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function contains(m: &[HashMap[K, V], R], key: K): Bool is
+        case borrowNth(&(m->slots), locate(&(m->slots), key)) of
+            when Full(key: &[K, R], value: &[V, R]) do return true;
+            when Empty do return false;
+            when Tomb do return false;
+        end case;
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function borrowGet(m: &[HashMap[K, V], R], key: K): Option[&[V, R]] is
+        case borrowNth(&(m->slots), locate(&(m->slots), key)) of
+            when Full(key: &[K, R], value: &[V, R]) do return Some(value => value);
+            when Empty do return None();
+            when Tomb do return None();
+        end case;
+    end;
+    generic [K: Free(Eq, Hash), V: Free, R: Region]
+    function get(m: &[HashMap[K, V], R], key: K): Option[V] is
+        case borrowGet(m, key) of
+            when Some(value: &[V, R]) do return Some(value => !value);
+            when None do return None();
+        end case;
+    end;
+    private generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function put(m: &![HashMap[K, V], R], key: K, value: V): Option[V] is
+        m->drainIndex := 0;
+        let at: Index := locate(&(m->slots): &[Buffer[Slot[K, V]], R], key);
+        let full: Slot[K, V] := Full(key => key, value => value);
+        case swapNth(&(m->slots), at, full) of
+            when Full(key: K, value as old: V) do return Some(value => old);
+            when Empty do m->size := m->size + 1; m->used := m->used + 1; return None();
+            when Tomb do m->size := m->size + 1; return None();
+        end case;
+    end;
+    private generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function resize(m: &![HashMap[K, V], R], capacity: Index): Unit is
+        var fresh: Buffer[Slot[K, V]] := buckets(capacity);
+        var old: Buffer[Slot[K, V]] := swapSlots(&~m, fresh);
+        m->size := 0;
+        m->used := 0;
+        m->drainIndex := 0;
+        while bufLength(&old) > 0 do
+            case removeLast(&!old) of
+                when Full(key: K, value: V) do
+                    case put(&~m, key, value) of
+                        when None do skip;
+                        when Some(value as duplicate: V) do abort("HashMap: duplicate during rehash");
+                    end case;
+                when Empty do skip;
+                when Tomb do skip;
+            end case;
+        end while;
+        bufDestroyEmpty(old);
+        return nil;
+    end;
+    private generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function swapSlots(m: &![HashMap[K, V], R], slots: Buffer[Slot[K, V]]): Buffer[Slot[K, V]] is
+        -- Audited move: load the old owning field, replace it once, return the old owner.
+        let ptr: Pointer[Buffer[Slot[K, V]]] := refMutToPointer(&(m->slots));
+        let old: Buffer[Slot[K, V]] := load(ptr);
+        store(ptr, slots);
+        return old;
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function insert(m: &![HashMap[K, V], R], key: K, value: V): Option[V] is
+        let capacity: Index := bufLength(&(m->slots): &[Buffer[Slot[K, V]], R]);
+        if m->used >= capacity - capacity / 4 then
+            let target: Index := if m->size < capacity / 2 then capacity else capacity * 2;
+            resize(&~m, target);
+        end if;
+        return put(m, key, value);
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function rehash(m: &![HashMap[K, V], R]): Unit is
+        let capacity: Index := bufLength(&(m->slots): &[Buffer[Slot[K, V]], R]);
+        return resize(m, capacity);
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function remove(m: &![HashMap[K, V], R], key: K): Option[V] is
+        let at: Index := locate(&(m->slots): &[Buffer[Slot[K, V]], R], key);
+        case borrowNth(&(m->slots): &[Buffer[Slot[K, V]], R], at) of
+            when Full(key: &[K, R], value: &[V, R]) do skip;
+            when Empty do return None();
+            when Tomb do return None();
+        end case;
+        let tomb: Slot[K, V] := Tomb();
+        case swapNth(&(m->slots), at, tomb) of
+            when Full(key: K, value: V) do m->size := m->size - 1; return Some(value => value);
+            when Empty do return None();
+            when Tomb do return None();
+        end case;
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region, C: Region]
+    function nextKey(m: &[HashMap[K, V], R], cursor: &![Index, C]): Option[K] is
+        while !cursor < bufLength(&(m->slots)) do
+            let at: Index := !cursor;
+            store(refMutToPointer(&~cursor), at + 1);
+            case borrowNth(&(m->slots), at) of
+                when Full(key: &[K, R], value: &[V, R]) do return Some(value => !key);
+                when Empty do skip;
+                when Tomb do skip;
+            end case;
+        end while;
+        return None();
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function drainOne(m: &![HashMap[K, V], R]): Option[V] is
+        for at from m->drainIndex until bufLength(&(m->slots): &[Buffer[Slot[K, V]], R]) do
+            var found: Option[K] := None();
+            case borrowNth(&(m->slots): &[Buffer[Slot[K, V]], R], at) of
+                when Full(key: &[K, R], value: &[V, R]) do found := Some(value => !key);
+                when Empty do skip;
+                when Tomb do skip;
+            end case;
+            m->drainIndex := at + 1;
+            case found of
+                when Some(value as key: K) do return remove(m, key);
+                when None do skip;
+            end case;
+        end for;
+        return None();
+    end;
+    generic [K: Free(Eq, Hash), V: Type]
+    function destroyEmpty(m: HashMap[K, V]): Unit is
+        let { slots: Buffer[Slot[K, V]], size: Index, used: Index, drainIndex: Index } := m;
+        if size /= 0 then abort("HashMap: destroyEmpty on nonempty map"); end if;
+        var slots2: Buffer[Slot[K, V]] := slots;
+        while bufLength(&slots2) > 0 do
+            case removeLast(&!slots2) of
+                when Empty do skip;
+                when Tomb do skip;
+                when Full(key: K, value: V) do abort("HashMap: nonempty slot");
+            end case;
+        end while;
+        return bufDestroyEmpty(slots2);
+    end;
+    generic [K: Free(Eq, Hash), V: Free]
+    function destroyFree(m: HashMap[K, V]): Unit is
+        let { slots: Buffer[Slot[K, V]], size: Index, used: Index, drainIndex: Index } := m;
+        return bufDestroyFree(slots);
+    end;
+end module body.

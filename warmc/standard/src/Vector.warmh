@@ -1,0 +1,47 @@
+import Standard.Buffer (Buffer, borrowNth, allocateEmpty, destroyFree as bufDestroyFree, destroyEmpty as bufDestroyEmpty, length as bufLength, nth, storeNth, swapNth, insert as bufInsert, insertBack, remove as bufRemove, removeLast, slice as bufSlice, sliceMut as bufSliceMut, reverse as bufReverse, map as bufMap);
+
+module Standard.Vector is
+    """An owning growable array. push/insert consume values; pop/remove/replace return
+    ownership. get/set copy only Free values. Linear elements must be removed and
+    destroyed before destroyEmpty. slice bounds are half-open, including empty slices.
+    Borrows and iterators must end before mutation, growth or destruction."""
+    type Vector[T: Type]: Linear;
+    record Cursor: Free is position: Index; end;
+    function cursor(): Cursor;
+    generic [T: Type, R: Region, S: Region]
+    function next(v: &[Vector[T], R], it: &![Cursor, S]): Option[&[T, R]];
+    generic [T: Type]
+    function make(): Vector[T];
+    generic [T: Free]
+    function destroyFree(v: Vector[T]): Unit;
+    generic [T: Type]
+    function destroyEmpty(v: Vector[T]): Unit;
+    generic [T: Type, R: Region]
+    function length(v: &[Vector[T], R]): Index;
+    generic [T: Free, R: Region]
+    function get(v: &[Vector[T], R], at: Index): T;
+    generic [T: Free, R: Region]
+    function set(v: &![Vector[T], R], at: Index, value: T): Unit;
+    generic [T: Type, R: Region]
+    function replace(v: &![Vector[T], R], at: Index, value: T): T;
+    generic [T: Type, R: Region]
+    function push(v: &![Vector[T], R], value: T): Unit;
+    generic [T: Type, R: Region]
+    function pop(v: &![Vector[T], R]): Option[T];
+    generic [T: Type, R: Region]
+    function insert(v: &![Vector[T], R], at: Index, value: T): Unit;
+    generic [T: Type, R: Region]
+    function remove(v: &![Vector[T], R], at: Index): T;
+    generic [T: Type, R: Region]
+    function slice(v: &[Vector[T], R], start: Index, endExclusive: Index): Span[T, R];
+    generic [T: Type, R: Region]
+    function sliceMut(v: &![Vector[T], R], start: Index, endExclusive: Index): Span![T, R];
+    generic [T: Type, R: Region]
+    function reverse(v: &![Vector[T], R]): Unit;
+    generic [T: Type, U: Type]
+    function map(v: Vector[T], callback: Fn[T, U]): Vector[U];
+    generic [T: Free, R: Region]
+    function filter(v: &[Vector[T], R], predicate: Fn[T, Bool]): Vector[T];
+    generic [T: Type, R: Region]
+    function borrowGet(v: &[Vector[T], R], at: Index): &[T, R];
+end module.

@@ -178,17 +178,57 @@ I64 WGTag(CWNode *cons)
     for (c = cons->owner->first; c; c = c->next) if (WEq(c->role, "constructor")) {if (c == cons) return i; i++;}
     return -1;
 }
+// Carry the instances selected at the checked caller through monomorphization.
+// Looking only in a generic library function's imports loses user key instances.
+CWNode *WGEvidence(CWNode *env, CWNode *tc, CWNode *ty)
+{
+    CWNode *e;
+    for (e = env->first; e; e = e->next)
+        if (WEq(e->role, "evidence") && e->resolved == tc && WTypeEq(e->ty, ty)) return e->owner;
+    return NULL;
+}
+CWNode *WGInstance(CWGen *g, CWNode *tc, CWNode *ty)
+{
+    CWNode *inst = NULL;
+    if (g->bindings) inst = WGEvidence(g->bindings, tc, ty);
+    if (!inst && g->current) inst = WFindInstance(g->unit, g->current->resolved, tc, ty);
+    return inst;
+}
+U0 WGAddEvidence(CWGen *g, CWNode *env, CWNode *tc, CWNode *ty, I64 depth)
+{
+    CWUnit *u = g->unit;
+    CWNode *inst, *e, *matched, *p, *c, *actual;
+    if (!ty || depth >= 64 || WGEvidence(env, tc, ty)) return;
+    inst = WGInstance(g, tc, ty);
+    if (!inst) {WFail(u, tc->token, "Unsupported Feature", "Missing caller typeclass evidence"); return;}
+    e = WNode(u, "instance-evidence", tc->token); e->resolved = tc; e->ty = ty; e->owner = inst; WAdd(env, e, "evidence");
+    if (!WEq(inst->tag, "instance")) return;
+    matched = WScope(u, NULL); WMatch(u, WChild(inst, "argument"), ty, matched);
+    for (p = inst->first; p; p = p->next) if (WEq(p->role, "type-parameter")) {
+            actual = WBinding(matched, p);
+            for (c = p->first; c; c = c->next) if (WEq(c->role, "constraint")) WGAddEvidence(g, env, c->resolved, actual, depth + 1);
+        }
+}
+Bool WGEvidenceEq(CWNode *a, CWNode *b)
+{
+    CWNode *e;
+    for (e = a->first; e; e = e->next) if (WEq(e->role, "evidence") && WGEvidence(b, e->resolved, e->ty) != e->owner) return FALSE;
+    for (e = b->first; e; e = e->next) if (WEq(e->role, "evidence") && WGEvidence(a, e->resolved, e->ty) != e->owner) return FALSE;
+    return TRUE;
+}
 CWNode *WGRequest(CWGen *g, CWNode *decl, CWNode *env)
 {
     CWUnit *u = g->unit;
-    CWNode *f, *p, *signature = WNode(u, "type", decl->token), *ty;
+    CWNode *f, *p, *b, *c, *signature = WNode(u, "type", decl->token), *ty;
     if (decl->pair && WChild(decl->pair, "body")) decl = decl->pair;
     signature->name = "Fn";
     for (p = decl->first; p; p = p->next) if (WEq(p->role, "parameter") || WEq(p->role, "result")) {
             ty = p; if (WEq(p->role, "parameter")) ty = WChild(p, "type");
             WAdd(signature, WCopyType(u, WSubst(u, ty, env)), "argument");
         }
-    for (f = g->functions; f; f = f->next) if (f->resolved == decl && WTypeEq(f->ty, signature)) return f;
+    for (b = env->first; b; b = b->next) if (WEq(b->role, "binding") && b->resolved)
+            for (c = b->resolved->first; c; c = c->next) if (WEq(c->role, "constraint")) WGAddEvidence(g, env, c->resolved, b->ty, 0);
+    for (f = g->functions; f; f = f->next) if (f->resolved == decl && WTypeEq(f->ty, signature) && WGEvidenceEq(f->pair, env)) return f;
     f = WNode(u, "specialization", decl->token); f->resolved = decl; f->pair = env; f->ty = signature; f->name = WGFresh(g, "wf");
     for (p = decl->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Export")) {
             CWNode *arg = WChild(p, "argument"), *q;
@@ -680,7 +720,7 @@ U8 *WGCallExpr(CWGen *g, CWNode *n)
     // Resolve the class instance again after substituting enclosing generics.
     for (b = n->pair->first; b; b = b->next) {bound = WNode(u, "substitution", b->token); bound->resolved = b->resolved; bound->ty = WGConcrete(g, b->ty); WAdd(env, bound, "binding");}
     if (WEq(d->tag, "method") && d->owner && WEq(d->owner->tag, "typeclass")) {
-        tc = d->owner; bound = WBinding(env, WChild(tc, "type-parameter")); inst = WFindInstance(u, g->current->resolved, tc, bound);
+        tc = d->owner; bound = WBinding(env, WChild(tc, "type-parameter")); inst = WGInstance(g, tc, bound);
         if (inst && inst->pair) inst = inst->pair;
         if (!inst || WEq(inst->tag, "type-parameter")) {WFail(u, n->token, "Unsupported Feature", "Could not specialize typeclass call"); return "0";}
         CWNode *ie = WScope(u, NULL); WMatch(u, WChild(inst, "argument"), bound, ie);
@@ -758,8 +798,8 @@ U8 *WGExpr(CWGen *g, CWNode *n)
     if (u->error_kind) return "0";
     if (n->lowered) return WGExpr(g, n->lowered);
     if (WEq(n->tag, "literal")) {
-        if (WEq(n->name, "nil") || WEq(n->name, "false")) return "0";
-        if (WEq(n->name, "true")) return "1";
+        if (n->token->kind != 5 && n->token->kind != 6 && (WEq(n->name, "nil") || WEq(n->name, "false"))) return "0";
+        if (n->token->kind != 5 && n->token->kind != 6 && WEq(n->name, "true")) return "1";
         if (n->token->kind == 3 || n->token->kind == 4) {
             text = WGInteger(u, n->name); if (n->token->kind == 4) text = WGFloat(u, n->name);
             if (WEq(ty->name, "Float32")) {

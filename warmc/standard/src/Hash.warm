@@ -1,0 +1,142 @@
+import Standard.String (String, slice, length);
+
+module body Standard.Hash is
+    private generic [T: Free(ToInt64)]
+    function signed(value: T): Int64 is
+        case toInt64(value) of
+            when Some(value as v: Int64) do return v;
+            when None do abort("hash: signed conversion");
+        end case;
+    end;
+    instance Hash(Nat8) is
+        generic [R: Region]
+        method hash(a: &[Nat8, R]): Nat64 is
+            return widenToNat64(!a);
+        end;
+    end;
+    instance Hash(Nat16) is
+        generic [R: Region]
+        method hash(a: &[Nat16, R]): Nat64 is
+            return widenToNat64(!a);
+        end;
+    end;
+    instance Hash(Nat32) is
+        generic [R: Region]
+        method hash(a: &[Nat32, R]): Nat64 is
+            return widenToNat64(!a);
+        end;
+    end;
+    instance Hash(Nat64) is
+        generic [R: Region]
+        method hash(a: &[Nat64, R]): Nat64 is
+            return widenToNat64(!a);
+        end;
+    end;
+    instance Hash(Int8) is
+        generic [R: Region]
+        method hash(a: &[Int8, R]): Nat64 is
+            let v: Int64 := signed(!a);
+            if v < 0 then
+                case toNat64(-(v + 1)) of
+                    when Some(value: Nat64) do return (value + 1) | 9223372036854775808;
+                    when None do abort("hash: magnitude");
+                end case;
+            end if;
+            case toNat64(v) of
+                when Some(value: Nat64) do return value;
+                when None do abort("hash: magnitude");
+            end case;
+        end;
+    end;
+    instance Hash(Int16) is
+        generic [R: Region]
+        method hash(a: &[Int16, R]): Nat64 is
+            let v: Int64 := signed(!a);
+            if v < 0 then
+                case toNat64(-(v + 1)) of
+                    when Some(value: Nat64) do return (value + 1) | 9223372036854775808;
+                    when None do abort("hash: magnitude");
+                end case;
+            end if;
+            case toNat64(v) of
+                when Some(value: Nat64) do return value;
+                when None do abort("hash: magnitude");
+            end case;
+        end;
+    end;
+    instance Hash(Int32) is
+        generic [R: Region]
+        method hash(a: &[Int32, R]): Nat64 is
+            let v: Int64 := signed(!a);
+            if v < 0 then
+                case toNat64(-(v + 1)) of
+                    when Some(value: Nat64) do return (value + 1) | 9223372036854775808;
+                    when None do abort("hash: magnitude");
+                end case;
+            end if;
+            case toNat64(v) of
+                when Some(value: Nat64) do return value;
+                when None do abort("hash: magnitude");
+            end case;
+        end;
+    end;
+    instance Hash(Int64) is
+        generic [R: Region]
+        method hash(a: &[Int64, R]): Nat64 is
+            let v: Int64 := signed(!a);
+            if v < 0 then
+                case toNat64(-(v + 1)) of
+                    when Some(value: Nat64) do return (value + 1) | 9223372036854775808;
+                    when None do abort("hash: magnitude");
+                end case;
+            end if;
+            case toNat64(v) of
+                when Some(value: Nat64) do return value;
+                when None do abort("hash: magnitude");
+            end case;
+        end;
+    end;
+    instance Hash(Index) is
+        generic [R: Region]
+        method hash(a: &[Index, R]): Nat64 is
+            return widenToNat64(!a);
+        end;
+    end;
+    instance Hash(ByteSize) is
+        generic [R: Region]
+        method hash(a: &[ByteSize, R]): Nat64 is
+            return widenToNat64(!a);
+        end;
+    end;
+    instance Hash(Bool) is
+        generic [R: Region]
+        method hash(a: &[Bool, R]): Nat64 is
+            return if !a then 1 else 0;
+        end;
+    end;
+    instance Hash(Unit) is
+        generic [R: Region]
+        method hash(a: &[Unit, R]): Nat64 is
+            return 0;
+        end;
+    end;
+    instance Hash(String) is
+        generic [R: Region]
+        method hash(a: &[String, R]): Nat64 is
+            let bytes: Span[Nat8, R] := slice(a, 0, length(a));
+            return hash(&bytes);
+        end;
+    end;
+    generic [T: Type(Hash), P: Region]
+    instance Hash(Span[T, P]) is
+        generic [R: Region]
+        method hash(a: &[Span[T, P], R]): Nat64 is
+            let av: Span[T, P] := !a;
+            var h: Nat64 := 0;
+            for i from 0 until spanLength(av) do
+                h := (h * 257 + (hash(&(av[i])) % 4294967291) + 1) % 4294967291;
+            end for;
+            return h;
+        end;
+    end;
+end module body.

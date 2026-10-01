@@ -1,0 +1,19 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import Standard.HashSet (HashSet, make, insert, remove, contains, rehash, length, next, destroy);
+import Standard.Test.GeneralSupport (check);
+module body Standard.Test.HashSet is
+    function hashSetTestSuite(): Unit is
+        var s: HashSet[Index] := make();
+        check(insert(&!s, 1)); check(not insert(&!s, 1)); check(length(&s) = 1);
+        check(remove(&!s, 1)); check(not remove(&!s, 1));
+        for i from 0 until 1000 do check(insert(&!s, i)); end for;
+        for i from 0 until 500 do check(remove(&!s, i)); end for;
+        rehash(&!s);
+        var cursor: Index := 0; var count: Index := 0;
+        while true do case next(&s, &!cursor) of when None do break; when Some(value: Index) do check(value >= 500); check(contains(&s, value)); count := count + 1; end case; end while;
+        check(count = 500); check(length(&s) = 500); destroy(s);
+        printLn("STDLIB HASHSET PASS");
+        return nil;
+    end;
+end module body.

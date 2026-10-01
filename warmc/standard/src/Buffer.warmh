@@ -208,4 +208,7 @@ module Standard.Buffer is
     generic [T: Type, R: Region]
     function sliceMut(buf: &![Buffer[T], R], start: Index, endExclusive: Index): Span![T, R];
 
+    """Borrow one element without copying it. The borrow prevents mutation and growth."""
+    generic [T: Type, R: Region]
+    function borrowNth(buf: &[Buffer[T], R], pos: Index): &[T, R];
 end module.

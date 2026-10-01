@@ -21,7 +21,7 @@ p = subprocess.run(list(map(str, cmd)), cwd=OUT, env=env, capture_output=True, t
 (OUT / 'cool.stdout').write_bytes(p.stdout)
 (OUT / 'cool.stderr').write_bytes(p.stderr)
 assert p.returncode == 0, (p.stdout, p.stderr)
-report = dict(module_pairs=len(modules), sources=2 * len(modules), semantic_checks='PASS',
+report = dict(module_pairs=len(modules), sources=sum(len(pair.split(',')) for pair in modules), semantic_checks='PASS',
               note='Portable OS APIs and upstream compatibility modules checked.')
 (OUT / 'results.json').write_text(json.dumps(report, indent=2))
 print(json.dumps(report, indent=2))

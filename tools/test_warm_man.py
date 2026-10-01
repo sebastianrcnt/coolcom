@@ -48,7 +48,9 @@ class WarmManTests(unittest.TestCase):
         pages = manual.pages()
         required = {'Warm', 'WarmSyntax', 'WarmRun', 'WarmCompile', 'WarmExamples',
                     'OS.Terminal', 'OS.File', 'OS.Dir', 'OS.Net', 'OS.Task',
-                    'Standard.Format', 'OS.Time', 'OS.Random', 'OS.Error', 'OS.CoolOS',
+                    'Standard.Format', 'Standard.Eq', 'Standard.Ord', 'Standard.Hash',
+                    'Standard.Vector', 'Standard.HashMap', 'Standard.HashSet',
+                    'Standard.Algorithms', 'Standard.String', 'OS.Time', 'OS.Random', 'OS.Error', 'OS.CoolOS',
                     'OS.CoolOS.Framebuffer', 'OS.CoolOS.Key', 'OS.CoolOS.Task', 'OS.CoolOS.System'}
         self.assertTrue(required <= pages.keys())
         for name, content in pages.items():

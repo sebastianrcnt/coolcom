@@ -1,0 +1,23 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import Standard.HashMap (HashMap, make as mapMake, length as mapLength, contains as mapContains, insert as mapInsert, remove as mapRemove, rehash as mapRehash, nextKey, destroyFree as mapDestroy);
+
+module Standard.HashSet is
+    type HashSet[T: Free(Eq, Hash)]: Linear;
+    generic [T: Free(Eq, Hash)]
+    function make(): HashSet[T];
+    generic [T: Free(Eq, Hash)]
+    function destroy(s: HashSet[T]): Unit;
+    generic [T: Free(Eq, Hash), R: Region]
+    function length(s: &[HashSet[T], R]): Index;
+    generic [T: Free(Eq, Hash), R: Region]
+    function contains(s: &[HashSet[T], R], value: T): Bool;
+    generic [T: Free(Eq, Hash), R: Region]
+    function insert(s: &![HashSet[T], R], value: T): Bool;
+    generic [T: Free(Eq, Hash), R: Region]
+    function remove(s: &![HashSet[T], R], value: T): Bool;
+    generic [T: Free(Eq, Hash), R: Region]
+    function rehash(s: &![HashSet[T], R]): Unit;
+    generic [T: Free(Eq, Hash), R: Region, C: Region]
+    function next(s: &[HashSet[T], R], cursor: &![Index, C]): Option[T];
+end module.

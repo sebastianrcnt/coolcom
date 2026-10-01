@@ -1,0 +1,26 @@
+import Standard.Ord (Ord, Ordering);
+import Standard.Vector (Vector);
+module Standard.Algorithms is
+    """Stable bottom-up mergesort, O(n log n) time and O(n) scratch space.
+    Comparators must define a consistent total order. Callbacks are named Fn values,
+    without captured state. Copying sort and span algorithms require Free elements."""
+    generic [T: Free(Ord), R: Region]
+    function sort(values: Span![T, R]): Unit;
+    generic [T: Free, R: Region]
+    function sortBy(values: Span![T, R], comparator: Fn[T, T, Ordering]): Unit;
+    """Return the first equal index in sorted input, or None."""
+    generic [T: Free(Ord), R: Region]
+    function binarySearch(values: Span[T, R], needle: T): Option[Index];
+    generic [T: Free, R: Region]
+    function binarySearchBy(values: Span[T, R], needle: T, comparator: Fn[T, T, Ordering]): Option[Index];
+    generic [T: Free, R: Region]
+    function reverse(values: Span![T, R]): Unit;
+    generic [T: Free(Ord)]
+    function min(a: T, b: T): T;
+    generic [T: Free(Ord)]
+    function max(a: T, b: T): T;
+    generic [T: Free, U: Type, R: Region]
+    function map(values: Span[T, R], callback: Fn[T, U]): Vector[U];
+    generic [T: Free, R: Region]
+    function filter(values: Span[T, R], predicate: Fn[T, Bool]): Vector[T];
+end module.
