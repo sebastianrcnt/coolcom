@@ -85,7 +85,8 @@ p.write_text(s)
 PY
 # Reproducible host-only Metal image bridge on the pinned renderer source.
 patch_file=$ROOT/tools/venus/virgl-metal.patch
-if ! patch --batch --fuzz=0 --dry-run -R -p1 -d "$V/virglrenderer" < "$patch_file" >/dev/null 2>&1; then
+# macOS patch's reverse dry run succeeds on unpatched source too, so test for the export itself.
+if ! grep -q virgl_renderer_venus_metal_texture "$V/virglrenderer/src/venus/vkr_renderer.c"; then
     patch --batch --fuzz=0 -p1 -d "$V/virglrenderer" < "$patch_file"
 fi
 run virgl-setup meson setup --reconfigure "$V/virglrenderer/build" "$V/virglrenderer" --prefix="$P" --libdir=lib -Dvenus=true -Drender-server=false -Ddrm=disabled -Dplatforms=[]

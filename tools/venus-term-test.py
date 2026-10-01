@@ -49,10 +49,10 @@ def disk_image(d):
     return disk
 
 
-def run(d, mode, script, size, disk):
+def run(d, mode, script, size, disk, scale=1):
     size = START.get(d.name, size)
     args = [str(ROOT / ('build/coolvm-venus' if mode == 'venus' else 'build/coolvm')), '--headless', '--cpus', '2', '--mem', '1024', '--timeout', '120',
-            '--width', str(size[0]), '--height', str(size[1]), '--input-script', str(d / 'input.txt'),
+            '--width', str(size[0]), '--height', str(size[1]), '--scale', str(scale), '--input-script', str(d / 'input.txt'),
             '--screenshot', str(d / f'{mode}.png')]
     if mode == 'venus' and READBACK:
         args.append('--venus-readback')
@@ -170,6 +170,6 @@ if '--window' in sys.argv or '--window-only' in sys.argv:
     # The real window negotiates Retina backing pixels; compare at that size.
     reference=OUT/'window'; reference.mkdir(parents=True,exist_ok=True)
     (reference/'input.txt').write_text((d/'input.txt').read_text())
-    assert window==run(reference,'venus','',window[:2],d/'disk.img')
+    assert window==run(reference,'venus','',window[:2],d/'disk.img',scale=window[0]//1024)  # the window's backing scale
     print('venus-term-test: CAMetalLayer window matches headless image PASS',flush=True)
 print('venus-term-test: PASS')
