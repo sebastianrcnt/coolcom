@@ -1,0 +1,13 @@
+Declarative application framework: Model, Msg, update and view.
+
+view(&model) builds a View[Msg] with newView, containers (column, row, grid,
+split, group ... done), controls and modifiers that apply to the most recent
+node. next(&!app, view(&model)) lays the view out, repaints only what changed,
+presents, waits for input and returns the next message (None once the window
+is closed). Messages are Free values; controls that report a value take a
+named function (Fn[Int64, Msg], Fn[TextEdit, Msg]).
+
+openApp(&!gui, title, width, height) opens the window; closeApp releases it.
+Focus moves with Tab/Shift+Tab, Return presses the default button and Escape
+the cancel button; shortcut declares Ctrl/Alt chords and every declares a
+timer. See C:/Warm/Docs/ui-framework.md and C:/Warm/Examples/gui/Gallery.warm.

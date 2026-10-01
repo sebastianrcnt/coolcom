@@ -6,7 +6,7 @@ I64 GuiMenuX(I64 index)
     if (gui.menu_window) for (i = 0; i < index; i++) x += StrLen(gui.menu_window->menus[i].title) * 8 + 16;
     return x;
 }
-I64 GuiMenuCount() {if (gui.menu_index < 0) return 8; if (!gui.menu_window) return 0; return gui.menu_window->menus[gui.menu_index].count;}
+I64 GuiMenuCount() {if (gui.menu_index < 0) return 9; if (!gui.menu_window) return 0; return gui.menu_window->menus[gui.menu_index].count;}
 U0 GuiMenuPaint()
 {
     I64 x = GuiMenuX(gui.menu_index), i, y, px, py, s = gui.scale, width = 176, count = GuiMenuCount;
@@ -21,7 +21,7 @@ U0 GuiMenuPaint()
         GuiBox(gui.overlay, fb.w, fb.h, s, x, GUI_MENU, width, count * 22 + 2);
         for (i = 0; i < count; i++) {
             y = GUI_MENU + 1 + i * 22;
-            if (gui.menu_index < 0) {text = "New Shell"; if (i == 1) text = "Drawing"; if (i == 2) text = "Widgets"; if (i == 3) text = "Files"; if (i == 4) text = "Top"; if (i == 5) text = "Settings"; if (i == 6) text = "Cube"; if (i == 7) text = "Terminal";}
+            if (gui.menu_index < 0) {text = "New Shell"; if (i == 1) text = "Drawing"; if (i == 2) text = "Widgets"; if (i == 3) text = "Files"; if (i == 4) text = "Top"; if (i == 5) text = "Settings"; if (i == 6) text = "Cube"; if (i == 7) text = "Gallery"; if (i == 8) text = "Terminal";}
             else text = gui.menu_window->menus[gui.menu_index].items[i].label;
             GuiText(gui.overlay, fb.w, fb.h, s, x + 8, y + 3, text);
             if (i == gui.menu_hover) for (py = y * s; py < (y + 22) * s; py++) for (px = (x + 1) * s; px < MinI64(fb.w, (x + width - 1) * s); px++) gui.overlay[py * fb.w + px] ^= GUI_WHITE;
@@ -36,7 +36,7 @@ U0 GuiMenuSelect(I64 item)
 {
     CGuiEvent e;
     if (item >= 0 && item < GuiMenuCount) {
-        if (gui.menu_index < 0) {gui.action = 1; if (item == 1) gui.action = 7; if (item == 2) gui.action = 8; if (item == 3) gui.action = 9; if (item == 4) gui.action = 10; if (item == 5) gui.action = 11; if (item == 6) gui.action = 12; if (item == 7) gui.action = 2;}
+        if (gui.menu_index < 0) {gui.action = 1; if (item == 1) gui.action = 7; if (item == 2) gui.action = 8; if (item == 3) gui.action = 9; if (item == 4) gui.action = 10; if (item == 5) gui.action = 11; if (item == 6) gui.action = 12; if (item == 7) gui.action = 13; if (item == 8) gui.action = 2;}
         else if (gui.menu_window && !gui.menu_window->closed) {
             MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MENU; e.key = gui.menu_window->menus[gui.menu_index].items[item].id;
             GuiEventPush(gui.menu_window, &e);

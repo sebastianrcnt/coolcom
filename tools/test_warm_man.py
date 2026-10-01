@@ -24,7 +24,8 @@ def declarations(tree):
         header, _, details = part.partition('\n')
         # Function bodies are absent in interfaces; parameters, generic
         # constraints, result types, record slots and union cases must agree.
-        result[header] = details.split('  body ', 1)[0].rstrip()
+        # A constant's value stays in the body; the interface declares its type.
+        result[header] = details.split('  body ', 1)[0].split('\n  value ', 1)[0].rstrip()
     return result
 
 

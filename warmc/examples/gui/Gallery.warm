@@ -1,0 +1,82 @@
+import OS.Gui (Gui, acquireGui, releaseGui);
+import OS.Error (IoError);
+import OS.Ui (App, View, openApp, closeApp, next, newView, column, row, grid, split, group, done, spacer, padding, spacing, grow,
+    fixedWidth, label, paragraph, append, appendInt, button, defaultButton, cancelButton, separator, shortcut, every, plain, alignChildren, stretch);
+module body Gallery is
+    """The OS.Ui control gallery: every control and container, driven by
+    messages. Prints GALLERY markers for the VM tests."""
+    record Model: Free is clicks: Int64; ticks: Int64; last: Int64; end;
+    union Msg: Free is
+        case Clicked is which: Int64;
+        case Tick;
+        case Reset;
+        case Quit;
+    end;
+    function update(model: Model, msg: Msg): Model is
+        var m: Model := model;
+        case msg of
+            when Clicked(which as w: Int64) do m.clicks := m.clicks + 1; m.last := w; print("GALLERY CLICK "); printLn(w);
+            when Tick do m.ticks := m.ticks + 1; if m.ticks <= 2 then print("GALLERY TICK "); printLn(m.ticks); end if;
+            when Reset do m.clicks := 0; m.last := 0; printLn("GALLERY RESET");
+            when Quit do skip;
+        end case;
+        return m;
+    end;
+    function view(model: &[Model]): View[Msg] is
+        var v: View[Msg] := newView();
+        column(&!v); padding(&!v, 12); spacing(&!v, 8);
+        label(&!v, "OS.Ui Gallery");
+        paragraph(&!v, "Containers lay out their children; buttons send messages; Tab moves the focus and Return presses the default button.");
+        row(&!v); spacing(&!v, 8);
+        button(&!v, "One", Clicked(which => 1));
+        button(&!v, "Two", Clicked(which => 2));
+        button(&!v, "Three", Clicked(which => 3));
+        done(&!v);
+        separator(&!v);
+        grid(&!v, 2); spacing(&!v, 6);
+        label(&!v, "Clicks"); label(&!v, ""); appendInt(&!v, model->clicks); plain(&!v);
+        label(&!v, "Last"); label(&!v, "Button "); appendInt(&!v, model->last); plain(&!v);
+        done(&!v);
+        split(&!v, false, 150); grow(&!v, 1);
+        group(&!v, "Left pane");
+        label(&!v, "Drag the bar");
+        done(&!v);
+        group(&!v, "Right pane");
+        label(&!v, "Shortcut Ctrl+R");
+        done(&!v);
+        done(&!v);
+        row(&!v); spacing(&!v, 8);
+        spacer(&!v);
+        button(&!v, "Reset", Reset()); cancelButton(&!v);
+        button(&!v, "OK", Clicked(which => 9)); defaultButton(&!v);
+        done(&!v);
+        done(&!v);
+        shortcut(&!v, "Ctrl+R", Reset());
+        -- A timer that changes nothing visible: the view is rebuilt, nothing is repainted.
+        every(&!v, 400, Tick());
+        return v;
+    end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root);
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Gallery", 420, 360);
+        case opening of
+            when Ok(value as opened: App[Msg]) do
+                var app: App[Msg] := opened;
+                var model: Model := Model(clicks => 0, ticks => 0, last => 0);
+                printLn("GALLERY READY");
+                var running: Bool := true;
+                while running do
+                    case next(&!app, view(&model)) of
+                        when Some(value as msg: Msg) do model := update(model, msg);
+                        when None do running := false;
+                    end case;
+                end while;
+                closeApp(app);
+            when Err(error as e: IoError) do printLn("GALLERY NO GUI");
+        end case;
+        releaseGui(gui); surrenderRoot(root);
+        printLn("GALLERY CLOSED");
+        return ExitSuccess();
+    end;
+end module body.

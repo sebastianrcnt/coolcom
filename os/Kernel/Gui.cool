@@ -17,7 +17,8 @@
 class CGuiMenuItem {I64 id; U8 label[64];};
 class CGuiMenu {U8 title[32]; I64 count; CGuiMenuItem items[GUI_MENU_ITEMS];};
 #define GUI_EVENTS GUI_INPUT // one complete compositor input backlog fits a window
-class CGuiEvent {I64 type, key, x, y, buttons, wheel, timestamp;};
+class CGuiEvent {I64 type, key, x, y, buttons, wheel, timestamp, vct;};
+#define GUI_LATENCY 512
 class CGuiWindow
 {
     CTask *owner;
@@ -35,6 +36,11 @@ class CGuiWindow
     CGuiMenu menus[GUI_MENUS]; I64 menu_count, id, close_deadline; Bool closing;
     I64 restore_x, restore_y, restore_w, restore_h;
     U8 title[64];
+    // Gr clip rectangle in logical client pixels (clip_x1 < 0: whole client).
+    I64 clip_x0, clip_y0, clip_x1, clip_y1;
+    // Input-to-composition latency: counter stamps of the oldest event dequeued
+    // since the last present, and of the presented revision awaiting composition.
+    I64 input_vct, present_vct;
 };
 class CGui
 {
@@ -50,6 +56,9 @@ class CGui
     Bool menu_open; I64 menu_index, menu_hover; CGuiWindow *menu_window;
     CGuiEvent input[GUI_INPUT];
     I64 input_head, input_tail, input_lock; Bool input_lost;
+    I64 input_vct, latency[GUI_LATENCY], latency_count, presented_at[GUI_LATENCY], present_count;
+    I64 last_present_vct, wake_gap, wake_gaps;
+    Bool shot_pending; I64 shots, trace; // trace: OS.Ui prints frame and layout traces (tests)
 };
 CGui gui;
 I64 gui_window_id;
@@ -62,6 +71,7 @@ extern U0 GuiMenuPaint();
 extern I64 GuiMenuCount();
 extern CTask *GuiDraw();
 extern CTask *GuiCubeUnavailable();
+extern I64 GuiLatency(Bool reset = FALSE);
 U8 *gui_start_hook; // resident Venus renderer, installed by Terminal.cool
 
 U0 GuiDamage(I64 x, I64 y, I64 w, I64 h)
@@ -162,7 +172,7 @@ Bool GuiResize(CGuiWindow *w, I64 width, I64 height)
     w->pixels = pixels; w->back = back; w->pending = FALSE;
     w->w = width; w->h = height; w->scale = gui.scale;
     w->pw = (width + 2 * GUI_PAD + 3) * gui.scale; w->ph = (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * gui.scale;
-    w->serial = font.serial; w->cursor_w = 0;
+    w->serial = font.serial; w->cursor_w = 0; w->clip_x1 = -1;
     if (w->term) VtResize(w->term, cols, rows);
     GuiDecorate(w); w->dirty = TRUE;
     if (w->pixel && w->owner && w->owner->gui_window == w) {
@@ -172,11 +182,15 @@ Bool GuiResize(CGuiWindow *w, I64 width, I64 height)
 }
 // Pixel producers and the compositor run cooperatively on core 0. This copy
 // never yields: neither CPU composition nor Venus upload can see a partial frame.
-Bool GuiPresent()
-{
+Bool GuiPresent(Bool explicit = FALSE)
+{//explicit: the app finished handling its dequeued input (OS.Gui.present).
     CGuiWindow *w = Fs->gui_window; I64 x, y, width, s;
     if (!gui_active || Gs->num || !w || w->owner != Fs || w->closed || !w->pixel) return FALSE;
-    if (!w->pending) return TRUE;
+    if (!w->pending) {if (explicit) w->input_vct = 0; return TRUE;}
+    if (!w->present_vct) w->present_vct = w->input_vct;
+    if (w->input_vct) gui.presented_at[gui.present_count++ % GUI_LATENCY] = ArchCntVct - w->input_vct;
+    if (!gui.last_present_vct) gui.last_present_vct = ArchCntVct;
+    w->input_vct = 0;
     s = w->scale; x = (1 + GUI_PAD + w->dirty_x0) * s;
     width = (w->dirty_x1 - w->dirty_x0) * s;
     for (y = (GUI_TITLE + GUI_PAD + w->dirty_y0) * s; y < (GUI_TITLE + GUI_PAD + w->dirty_y1) * s; y++)
@@ -185,6 +199,7 @@ Bool GuiPresent()
     GuiDamage(w->x + 1 + GUI_PAD + w->dirty_x0, w->y + GUI_TITLE + GUI_PAD + w->dirty_y0,
               w->dirty_x1 - w->dirty_x0, w->dirty_y1 - w->dirty_y0);
     w->pending = FALSE;
+    if (gui.task) TaskWake(gui.task); // compose the new revision promptly
     return TRUE;
 }
 U0 GuiMove(CGuiWindow *w, I64 x, I64 y)
@@ -249,8 +264,14 @@ U0 GuiProgramTask(CGuiProgram *app)
     CVTerm *v = VtNew(80, 24); U8 *modules, *paths, *command;
     VtBind(Fs, v); v->owner = Fs; v->sink = &GuiShellSink; VtRelease(v);
     ShellTask(0);
+    // The installer writes each example's library imports to C:/<EntryModule>Modules.txt;
+    // other programs (and older disks) compile the whole OS library list.
+    U8 *name = StrNew(app->entry), *colon = StrFirstOcc(name, ":"), *list;
     modules = NULL;
-    if (!StrCmp(app->entry, "GuiFiles:main") && FileFind("C:/GuiFilesModules.txt")) modules = FileRead("C:/GuiFilesModules.txt");
+    if (colon) *colon = 0;
+    list = MStrPrint("C:/%sModules.txt", name);
+    if (FileFind(list)) modules = FileRead(list);
+    Free(list); Free(name);
     if (!modules) modules = FileRead("C:/GuiModules.txt");
     if (modules) {
         paths = MStrPrint("%s,%s", modules, app->program);
@@ -276,6 +297,7 @@ CTask *GuiApp(U8 *name, U8 *entry)
 CTask *GuiFiles() {return GuiApp("Files", "GuiFiles:main");}
 CTask *GuiTop() {return GuiApp("Top", "GuiTop:main");}
 CTask *GuiSettings() {return GuiApp("Settings", "GuiSettings:main");}
+CTask *GuiGallery() {return GuiRun("C:/Warm/Examples/gui/Gallery.warm", "Gallery:main");}
 U0 GuiCubeTask(U8 *data)
 {
     no_warn data;
@@ -305,6 +327,8 @@ Bool GuiDispatchKey(I64 ev, I64 timestamp)
         else if ((ev & KEY_CODE) == KEY_RIGHT) gui.action = 4;
         else if ((ev & KEY_CODE) == KEY_UP) gui.action = 5;
         else if ((ev & KEY_CODE) == KEY_TAB) {if (gui.count) GuiFocus(gui.windows[0]);}
+        else if ((ev & KEY_CODE) == 'p') gui.shot_pending = TRUE;
+        else if ((ev & KEY_CODE) == 'l') GuiLatency(TRUE);
         else shortcut = FALSE;
         if (shortcut) return TRUE;
     }
@@ -319,13 +343,14 @@ Bool GuiDispatchKey(I64 ev, I64 timestamp)
 U0 GuiEventPush(CGuiWindow *w, CGuiEvent *e)
 {
     I64 next = (w->event_tail + 1) % GUI_EVENTS;
+    if (!e->vct) e->vct = gui.input_vct;
     if (next == w->event_head) w->event_lost = TRUE;
     else {MemCpy(&w->events[w->event_tail], e, sizeof(CGuiEvent)); w->event_tail = next;}
     if (w->owner) {TaskWake(w->owner); if (w->pixel) gui.input_wake = TRUE;}
 }
 U0 GuiInputPush(CGuiEvent *e)
 {
-    e->timestamp = TimerJiffies;
+    e->timestamp = TimerJiffies; e->vct = ArchCntVct;
     I64 daif = SpinLockIrq(&gui.input_lock), next = (gui.input_tail + 1) % GUI_INPUT;
     if (next == gui.input_head) gui.input_lost = TRUE;
     else {MemCpy(&gui.input[gui.input_tail], e, sizeof(CGuiEvent)); gui.input_tail = next;}
@@ -355,7 +380,11 @@ Bool GuiPoll(CGuiEvent *e)
     GuiPresent; // Legacy event loops commit the preceding drawing before polling.
     MemSet(e, 0, sizeof(CGuiEvent));
     if (w->event_lost) {w->event_lost = FALSE; e->type = GUI_EVENT_KEY; e->key = KEY_INPUT_LOST; return TRUE;}
-    if (w->event_head != w->event_tail) {MemCpy(e, &w->events[w->event_head], sizeof(CGuiEvent)); w->event_head = (w->event_head + 1) % GUI_EVENTS; return TRUE;}
+    if (w->event_head != w->event_tail) {
+        MemCpy(e, &w->events[w->event_head], sizeof(CGuiEvent)); w->event_head = (w->event_head + 1) % GUI_EVENTS;
+        if (!w->input_vct) w->input_vct = e->vct;
+        return TRUE;
+    }
     if (key = KeyPop) {e->type = GUI_EVENT_KEY; e->key = key; if (key == KEY_RESIZE) e->type = GUI_EVENT_RESIZE; return TRUE;}
     return FALSE;
 }
@@ -451,6 +480,7 @@ U0 GuiPointerInit()
 U0 GuiCompose()
 {
     I64 started = ArchCntVct, x, y, i, sx, s = gui.scale, pw = fb.w;
+    if (gui.last_present_vct) {gui.wake_gap += started - gui.last_present_vct; gui.wake_gaps++; gui.last_present_vct = 0;}
     I64 x0 = MaxI64(0, gui.x0) * s, y0 = MaxI64(0, gui.y0) * s;
     I64 x1 = MinI64(gui.w, gui.x1) * s, y1 = MinI64(gui.h, gui.y1) * s;
     CGuiWindow *w; U0 (*frame)(); U32 *src, *dst; I64 cy, cx; U32 p;
@@ -484,7 +514,13 @@ U0 GuiCompose()
         for (y = y0; y < y1; y++) MemCpy(fb.back + y * fb.stride + x0 * 4, gui.canvas + y * pw + x0, (x1 - x0) * 4);
         FbCopyRect(x0, y0, x1 - x0, y1 - y0); FbDamage(y0, y1);
     }
-    for (i = 0; i < gui.count; i++) gui.windows[i]->presented = gui.windows[i]->revision;
+    for (i = 0; i < gui.count; i++) {
+        w = gui.windows[i];
+        if (w->present_vct && w->presented != w->revision) {
+            gui.latency[gui.latency_count++ % GUI_LATENCY] = ArchCntVct - w->present_vct; w->present_vct = 0;
+        }
+        w->presented = w->revision;
+    }
     gui.damage = FALSE; gui.frames++; gui.compose_ticks += ArchCntVct - started;
 }
 U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
@@ -554,6 +590,50 @@ U0 GuiRescale()
     GuiDesktop; GuiPointerApply; if (start = gui_start_hook) (*start)();
     GuiLog("GUI SCALE APPLIED\n");
 }
+Bool GuiShot(U8 *path)
+{//Save the composed desktop (physical pixels, no pointer) as a 32-bit BMP.
+    I64 w = fb.w, h = fb.h, size = 54 + w * h * 4, y; U8 *bmp; Bool ok;
+    if (!gui_active || !gui.canvas) return FALSE;
+    bmp = CAlloc(size); if (!bmp) return FALSE;
+    bmp[0] = 'B'; bmp[1] = 'M'; *(bmp + 2)(U32 *) = size; *(bmp + 10)(U32 *) = 54;
+    *(bmp + 14)(U32 *) = 40; *(bmp + 18)(I32 *) = w; *(bmp + 22)(I32 *) = -h;
+    *(bmp + 26)(U16 *) = 1; *(bmp + 28)(U16 *) = 32; *(bmp + 34)(U32 *) = w * h * 4;
+    for (y = 0; y < h; y++) MemCpy(bmp + 54 + y * w * 4, gui.canvas + y * w, w * 4);
+    ok = FileWrite(path, bmp, size) > 0; Free(bmp);
+    return ok;
+}
+U0 GuiShotNext()
+{//Ctrl+Alt+P: C:/Shots/NNN.BMP after the pending composition; "GUI SHOT n" on the UART.
+    U8 *path, *s;
+    if (!FileFind("C:/Shots")) DirMk("C:/Shots");
+    path = MStrPrint("C:/Shots/%03d.BMP", gui.shots);
+    // Writing the file stalls core 0: samples spanning it would not be input latency.
+    if (GuiShot(path)) {gui.latency_count = gui.present_count = 0; s = MStrPrint("GUI SHOT %d\n", gui.shots); GuiLog(s); Free(s);}
+    else GuiLog("GUI SHOT FAILED\n");
+    gui.shots++; Free(path);
+}
+I64 GuiLatency(Bool reset = FALSE)
+{//Print input-to-composition samples (microseconds); returns the maximum.
+    I64 n = MinI64(gui.latency_count, GUI_LATENCY), i, j, t, *v = MAlloc(MaxI64(n, 1) * sizeof(I64)), max = 0, sum = 0;
+    for (i = 0; i < n; i++) {v[i] = gui.latency[i] * 1000000 / cnt_freq; sum += v[i]; if (v[i] > max) max = v[i];}
+    for (i = 1; i < n; i++) {t = v[i]; for (j = i; j > 0 && v[j - 1] > t; j--) v[j] = v[j - 1]; v[j] = t;}
+    U8 *s;
+    if (n) s = MStrPrint("GUI LATENCY n=%d max=%d p50=%d p95=%d mean=%d us\n", n, max, v[n / 2], v[n * 95 / 100], sum / n);
+    else s = MStrPrint("GUI LATENCY n=0\n");
+    GuiLog(s); Free(s);
+    n = MinI64(gui.present_count, GUI_LATENCY); sum = 0; t = 0;
+    for (i = 0; i < n; i++) {j = gui.presented_at[i] * 1000000 / cnt_freq; sum += j; if (j > t) t = j;}
+    if (n) {
+        s = MStrPrint("GUI LATENCY input-to-present n=%d max=%d mean=%d us; compose mean=%d us over %d frames\n", n, t, sum / n,
+                      gui.compose_ticks * 1000000 / cnt_freq / MaxI64(gui.frames, 1), gui.frames);
+        GuiLog(s); Free(s);
+        s = MStrPrint("GUI LATENCY present-to-compose mean=%d us over %d\n", gui.wake_gap * 1000000 / cnt_freq / MaxI64(gui.wake_gaps, 1), gui.wake_gaps);
+        GuiLog(s); Free(s);
+    }
+    Free(v);
+    if (reset) gui.latency_count = gui.present_count = 0;
+    return max;
+}
 U0 GuiTask(U8 *data)
 {
     I64 i, j, action; CGuiWindow *w;
@@ -562,9 +642,11 @@ U0 GuiTask(U8 *data)
         if (font.scale != gui.scale) GuiRescale;
         CGuiEvent input;
         while (GuiInputPop(&input)) {
+            gui.input_vct = input.vct;
             if (input.type == GUI_EVENT_MOUSE) GuiMouse(input.x, input.y, input.buttons, input.wheel);
             else GuiDispatchKey(input.key, input.timestamp);
         }
+        gui.input_vct = 0;
         if (gui.input_lost) {gui.input_lost = FALSE; if (gui.focus) VtKeyPush(gui.focus->term, KEY_INPUT_LOST);}
         action = gui.action; gui.action = 0;
         if (action == 1) GuiShell;
@@ -574,6 +656,7 @@ U0 GuiTask(U8 *data)
         else if (action == 10) GuiTop;
         else if (action == 11) GuiSettings;
         else if (action == 12) GuiCube;
+        else if (action == 13) GuiGallery;
         else if (action == 2) {GuiEnd; break;}
         else if (action >= 3 && action <= 5 && gui.focus) {
             w = gui.focus; i = gui.w / 2;
@@ -601,6 +684,7 @@ U0 GuiTask(U8 *data)
         }
         if (gui.clock_minute != Now / (60 * CDATE_FREQ)) GuiDesktop;
         if (gui.damage) GuiCompose;
+        if (gui.shot_pending) {gui.shot_pending = FALSE; GuiShotNext;}
         Sleep(8);
     }
     // Reap detached windows after producer tasks acknowledge close.

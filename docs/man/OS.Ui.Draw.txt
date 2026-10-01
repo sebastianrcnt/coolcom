@@ -1,0 +1,5 @@
+The classic one-bit Macintosh look used by OS.Ui.
+
+Rounded buttons with a bold default ring, inverted pressed state, 50% gray
+patterns for disabled and dotted outlines. paint draws one node into the
+current clip rectangle.

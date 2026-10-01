@@ -1,0 +1,5 @@
+UTF-8 stepping, text metrics of the UI font and text edits for OS.Ui.
+
+Widths are logical pixels: 8 per terminal cell (16 for Hangul and other wide
+characters), 16 pixels per line. TextEdit describes one change to a text value;
+applyEdit applies it to an owned String.

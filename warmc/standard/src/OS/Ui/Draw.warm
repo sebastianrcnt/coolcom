@@ -1,0 +1,155 @@
+import OS.Gui (Window, Rect, fill, line, styledText, pattern, invert, setClip, clearClip, bitmap);
+import OS.Error (IoError);
+import OS.Ui.Text (width as textWidth, wrapLine, Line, lineHeight, fit);
+import OS.Ui.Tree (Node, Geom, textSpan, has, enabled, intersect, maxInt, minInt, clampInt,
+    kindRoot, kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindCheckbox, kindRadio,
+    kindSlider, kindProgress, kindSeparator, kindImage, kindTextBox, kindToolbar, kindStatus,
+    flagDefault, flagPlain, flagWrap, flagCenter, defaultRing, checkSize, splitBar);
+module body OS.Ui.Draw is
+    -- The classic Macintosh look, one bit: black on white, 50% gray patterns,
+    -- rounded buttons with a bold default ring, inverted pressed state. All
+    -- coordinates are logical pixels; the kernel scales every pixel by an
+    -- integer, so 2x stays crisp.
+    constant black: Int64 := 0;
+    constant white: Int64 := 16777215;
+    -- 8x8 patterns: byte (y mod 8), bit 7 = column 0.
+    constant gray: Nat64 := 12273903644374837845;      -- 0xAA55AA55AA55AA55
+    constant lightGray: Nat64 := 9259542123273814144;  -- 0x8080...: sparse
+    constant styleBold: Int64 := 1;
+    constant styleDim: Int64 := 2;
+    constant styleUnderline: Int64 := 4;
+
+    function rect(x: Int64, y: Int64, width: Int64, height: Int64): Rect is return Rect(x => x, y => y, width => width, height => height); end;
+    function inset(r: Rect, by: Int64): Rect is return Rect(x => r.x + by, y => r.y + by, width => maxInt(r.width - 2 * by, 0), height => maxInt(r.height - 2 * by, 0)); end;
+    function box(w: &![Window], r: Rect, color: Int64): Unit is
+        if r.width <= 0 or r.height <= 0 then return nil; end if;
+        fill(&~w, rect(r.x, r.y, r.width, 1), color); fill(&~w, rect(r.x, r.y + r.height - 1, r.width, 1), color);
+        fill(&~w, rect(r.x, r.y, 1, r.height), color); fill(&~w, rect(r.x + r.width - 1, r.y, 1, r.height), color);
+        return nil;
+    end;
+    -- A one-pixel frame drawn through the gray pattern (disabled, dotted).
+    function grayBox(w: &![Window], r: Rect): Unit is
+        if r.width <= 0 or r.height <= 0 then return nil; end if;
+        pattern(&~w, rect(r.x, r.y, r.width, 1), gray, black, -1); pattern(&~w, rect(r.x, r.y + r.height - 1, r.width, 1), gray, black, -1);
+        pattern(&~w, rect(r.x, r.y, 1, r.height), gray, black, -1); pattern(&~w, rect(r.x + r.width - 1, r.y, 1, r.height), gray, black, -1);
+        return nil;
+    end;
+    function isqrt(v: Int64): Int64 is
+        if v <= 0 then return 0; end if;
+        var r: Int64 := 0; while (r + 1) * (r + 1) <= v do r := r + 1; end while; return r;
+    end;
+    -- Inset of row k (from the top or bottom edge) of a rounded corner.
+    function cornerInset(radius: Int64, k: Int64): Int64 is
+        if k >= radius then return 0; end if;
+        let d: Int64 := radius - k; return radius - isqrt(radius * radius - d * d);
+    end;
+    -- A filled rounded rectangle.
+    function roundFill(w: &![Window], r: Rect, radius: Int64, color: Int64): Unit is
+        if r.width <= 0 or r.height <= 0 then return nil; end if;
+        let rad: Int64 := minInt(radius, minInt(r.width, r.height) / 2);
+        for row from 0 until 64 do
+            let k: Int64 := rowInt(row);
+            if k < rad then
+                let s: Int64 := cornerInset(rad, k);
+                fill(&~w, rect(r.x + s, r.y + k, r.width - 2 * s, 1), color);
+                fill(&~w, rect(r.x + s, r.y + r.height - 1 - k, r.width - 2 * s, 1), color);
+            end if;
+        end for;
+        fill(&~w, rect(r.x, r.y + rad, r.width, r.height - 2 * rad), color);
+        return nil;
+    end;
+    function rowInt(i: Index): Int64 is case toInt64(i) of when Some(value as v: Int64) do return v; when None do return 0; end case; end;
+    -- A rounded rectangle with a one-pixel outline.
+    function roundRect(w: &![Window], r: Rect, radius: Int64, outline: Int64, inside: Int64): Unit is
+        roundFill(&~w, r, radius, outline);
+        roundFill(&~w, inset(r, 1), maxInt(radius - 1, 0), inside);
+        return nil;
+    end;
+    -- A rounded outline of the given thickness (the default button ring).
+    function roundRing(w: &![Window], r: Rect, radius: Int64, thickness: Int64, outline: Int64, inside: Int64): Unit is
+        roundFill(&~w, r, radius, outline);
+        roundFill(&~w, inset(r, thickness), maxInt(radius - thickness, 0), inside);
+        return nil;
+    end;
+    function text(w: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, style: Int64): Int64 is
+        case styledText(&~w, x, y, value, color, style) of when Ok(value as advance: Int64) do return advance; when Err(error as e: IoError) do return 0; end case;
+    end;
+    -- Text fitted into a width, ending with an ellipsis when it does not fit.
+    function fittedText(w: &![Window], x: Int64, y: Int64, value: Span[Nat8], room: Int64, color: Int64, style: Int64): Unit is
+        if textWidth(value) <= room then text(&~w, x, y, value, color, style); return nil; end if;
+        let stop: Index := fit(value, 0, maxInt(room - 8, 0));
+        let advance: Int64 := text(&~w, x, y, sliceSpan(value, 0, stop), color, style);
+        text(&~w, x + advance, y, "\u{2026}", color, style);
+        return nil;
+    end;
+    -- Dotted keyboard focus rectangle.
+    function focusRing(w: &![Window], r: Rect): Unit is grayBox(&~w, r); return nil; end;
+
+    -- Paint one node clipped to region (already the kernel clip).
+    generic [R: Region]
+    function paint(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool): Unit is
+        let k: Int64 := ps[i].kind;
+        let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
+        let on: Bool := enabled(ps, i);
+        var style: Int64 := styleBold; if has(ps[i].flags, flagPlain) then style := 0; end if;
+        if not on then style := style | styleDim; end if;
+        if k = kindLabel then
+            let t: Span[Nat8, R] := textSpan(all, ps, i);
+            if has(ps[i].flags, flagWrap) then
+                var at: Index := 0; var y: Int64 := r.y;
+                while at < spanLength(t) and y < r.y + r.height do
+                    let l: Line := wrapLine(t, at, maxInt(r.width - 1, 8));
+                    text(&~w, r.x, y, sliceSpan(t, at, l.finish), black, style);
+                    y := y + lineHeight;
+                    if l.resume = at then at := spanLength(t); else at := l.resume; end if;
+                end while;
+            else
+                var x: Int64 := r.x; if has(ps[i].flags, flagCenter) then x := r.x + (r.width - textWidth(t)) / 2; end if;
+                fittedText(&~w, x, r.y + (r.height - lineHeight) / 2, t, r.width, black, style);
+            end if;
+        else if k = kindButton then
+            paintButton(&~w, all, ps, i, r, pressed, focused and keyboard, on, style);
+        else if k = kindGroup then
+            let t: Span[Nat8, R] := textSpan(all, ps, i);
+            let frame: Rect := rect(r.x, r.y + 8, r.width, maxInt(r.height - 8, 0));
+            if on then box(&~w, frame, black); else grayBox(&~w, frame); end if;
+            if spanLength(t) > 0 then
+                fill(&~w, rect(r.x + 6, r.y, textWidth(t) + 5, 16), white);
+                text(&~w, r.x + 8, r.y, t, black, style);
+            end if;
+        else if k = kindSeparator then
+            if gs[i].width >= gs[i].height then pattern(&~w, rect(r.x, r.y + r.height / 2, r.width, 1), gray, black, -1);
+            else pattern(&~w, rect(r.x + r.width / 2, r.y, 1, r.height), gray, black, -1); end if;
+        else if k = kindSplit then
+            let first: Index := ps[i].first;
+            if first /= 0 then
+                if ps[i].value = 0 then
+                    let bx: Int64 := gs[first].x + gs[first].width;
+                    fill(&~w, rect(bx, r.y, 1, r.height), black); fill(&~w, rect(bx + splitBar - 1, r.y, 1, r.height), black);
+                    pattern(&~w, rect(bx + 1, r.y, splitBar - 2, r.height), gray, black, white);
+                else
+                    let by: Int64 := gs[first].y + gs[first].height;
+                    fill(&~w, rect(r.x, by, r.width, 1), black); fill(&~w, rect(r.x, by + splitBar - 1, r.width, 1), black);
+                    pattern(&~w, rect(r.x, by + 1, r.width, splitBar - 2), gray, black, white);
+                end if;
+            end if;
+        end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function paintButton(w: &![Window], all: Span[Nat8, R], ps: Span[Node], i: Index, r: Rect, pressed: Bool, ring: Bool, on: Bool, style: Int64): Unit is
+        var face: Rect := r;
+        if has(ps[i].flags, flagDefault) then
+            roundRing(&~w, r, 8, 3, black, white);
+            face := inset(r, defaultRing);
+        end if;
+        var fg: Int64 := black; var bg: Int64 := white;
+        if pressed then fg := white; bg := black; end if;
+        roundRect(&~w, face, 4, black, bg);
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let tw: Int64 := textWidth(t);
+        fittedText(&~w, face.x + maxInt((face.width - tw) / 2, 4), face.y + (face.height - lineHeight) / 2, t, face.width - 8, fg, style);
+        if ring then focusRing(&~w, inset(face, 3)); end if;
+        return nil;
+    end;
+end module body.

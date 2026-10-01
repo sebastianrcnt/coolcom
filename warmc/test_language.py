@@ -114,6 +114,15 @@ for label, expr in [('reversed-slice', 'sliceSpan("abc", 2, 1)'), ('past-end-sli
 for i, template in enumerate(['{', '}', '{:q}', '{} {}', '', '{:s}', '{:d', '{:00s}']):
     src = 'import Standard.Buffer(Buffer, allocateEmpty, insertBack, slice, destroyFree); import Standard.String(String,destroyString); import Standard.Format(FormatArg,Signed,format); ' + program(f'var args: Buffer[FormatArg[Static]] := allocateEmpty(); insertBack(&!args,Signed(value => 3)); let result: String := format("{template}",slice(&args,0,1)); destroyString(result); destroyFree(args);')
     execute(src, f'bad-format-{i}', trap='format:', library=LIBRARY)
+# A generic union that holds a vector of itself: the emitter forward-declares classes.
+recursive = 'import Standard.Vector (Vector, make, push, pop, destroyEmpty); ' + program(
+    'var v: Vector[Tree[Int64]] := make(); push(&!v, Leaf(value => 2)); push(&!v, Leaf(value => 3)); printLn(total(Branch(children => v)));',
+    'union Tree[T: Free]: Linear is case Leaf is value: T; case Branch is children: Vector[Tree[T]]; end; '
+    'function total(t: Tree[Int64]): Int64 is case t of when Leaf(value as n: Int64) do return n; '
+    'when Branch(children as c: Vector[Tree[Int64]]) do var cs: Vector[Tree[Int64]] := c; var sum: Int64 := 0; var more: Bool := true; '
+    'while more do case pop(&!cs) of when Some(value as x: Tree[Int64]) do sum := sum + total(x); when None do more := false; end case; end while; '
+    'destroyEmpty(cs); return sum; end case; end;')
+execute(recursive, 'recursive-generic-union', b'5\n', library=LIBRARY)
 # Public CLI discovers Standard.Format and its transitive dependencies automatically.
 p = run([ROOT / 'tools/warm', 'run', ROOT / 'warmc/language-tests/Stage6.warm'], 'public-run')
 assert (p.returncode, p.stdout, p.stderr) == (0, b'STAGE 6 PASS\n', b''), (p.stdout, p.stderr)

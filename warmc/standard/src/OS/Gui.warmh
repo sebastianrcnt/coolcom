@@ -57,4 +57,25 @@ module OS.Gui is
     -- Desktop authority changes terminal fonts; chrome remains bitmap art.
     function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError];
     function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError];
+    -- Drawing support for OS.Ui. Every Gr operation honours the clip rectangle.
+    function setClip(window: &![Window], rect: Rect): Result[Unit, IoError];
+    function clearClip(window: &![Window]): Result[Unit, IoError];
+    -- An 8x8 one-bit pattern aligned to client coordinates: byte (y mod 8),
+    -- bit 7 is column (x mod 8) = 0. A negative background is transparent.
+    function pattern(window: &![Window], rect: Rect, bits: Nat64, foreground: Int64, background: Int64): Result[Unit, IoError];
+    -- Exchange black and white inside rect.
+    function invert(window: &![Window], rect: Rect): Result[Unit, IoError];
+    -- Style bits: 1 bitmap bold, 2 dimmed (50% gray mask), 4 underline. Returns the advance.
+    function styledText(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, style: Int64): Result[Int64, IoError];
+    -- One-bit image, most significant bit first; set bits are drawn in color.
+    function bitmap(window: &![Window], rect: Rect, bits: Span[Nat8], stride: Int64, color: Int64): Result[Unit, IoError];
+    -- BGRA pixels with a byte stride, at logical size.
+    function blit(window: &![Window], rect: Rect, pixels: Span[Nat8], stride: Int64): Result[Unit, IoError];
+    -- Queued input events, including one held back by poll's folding.
+    function queued(window: &![Window]): Int64;
+    -- Sleep until an event is queued or the time elapses.
+    function wait(window: &![Window], milliseconds: Int64): Result[Unit, IoError];
+    -- Kernel test switch (gui_trace) and a monotonic microsecond clock.
+    function traceEnabled(): Bool;
+    function micros(): Int64;
 end module.

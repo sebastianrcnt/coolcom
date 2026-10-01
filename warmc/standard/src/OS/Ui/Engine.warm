@@ -1,0 +1,379 @@
+import Standard.Vector (Vector, make as vectorMake, push, pop, get, set, length, slice, destroyFree);
+import Standard.HashMap (HashMap, make as mapMake, get as mapGet, insert as mapInsert, remove as mapRemove, nextKey, destroyFree as mapDestroy);
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import OS.Gui (Rect, Event, Idle, Mouse, Key, Resize, Close, Menu);
+import OS.Ui.Text (TextEdit);
+import OS.Ui.Tree (Tree, Node, Geom, Damage, props, geometry, textBytes, textSpan, has, find, hit, visible, enabled,
+    focusable, nextFocus, special, shortcut, topOverlay, within, contains, visibleRect, addDamage, setFull, mix, bits, hashBytes,
+    readVector, maxInt, minInt, clampInt, toInt, toIndex64,
+    kindRoot, kindButton, kindCheckbox, kindRadio, kindSlider, kindTextBox, kindSplit, kindList, kindTable, kindTreeView, kindTextView,
+    kindTimer, kindShortcut, kindMenuItem, kindTabs, kindScroll,
+    flagDisabled, flagDefault, flagCancel, flagFocusable, flagClickFocus,
+    keyCodeMask, keyShift, keyCtrl, keyAlt, keyTab, keyEnter, keyEscape, keyInputLost, splitBar);
+module body OS.Ui.Engine is
+    -- Framework-owned interaction state (focus, the control under the mouse,
+    -- drags, per-node state such as carets and split positions), visual
+    -- hashes, snapshots of what is on screen, and the translation of one input
+    -- event into one action. Pure: tested on the host.
+
+    -- Per-identity framework state; the meaning of a..d depends on the kind
+    -- (text box: caret, anchor, scroll; scroll view: x and y offsets).
+    record Ephemeral: Free is a: Int64; b: Int64; c: Int64; d: Int64; end;
+
+    -- What the mouse is doing.
+    constant dragNone: Int64 := 0;
+    constant dragPress: Int64 := 1;   -- a button-like control is held
+    constant dragSplit: Int64 := 2;   -- a split bar
+    constant dragValue: Int64 := 3;   -- a slider thumb
+    constant dragText: Int64 := 4;    -- selecting text
+    constant dragScroll: Int64 := 5;  -- a scroll bar thumb
+    constant dragItem: Int64 := 6;    -- drag and drop
+
+    record State: Linear is
+        store: HashMap[Nat64, Ephemeral];
+        splits: HashMap[Nat64, Int64];
+        timers: HashMap[Nat64, Int64];
+        focus: Nat64;
+        keyboard: Bool;
+        drag: Int64; target: Nat64; inside: Bool;
+        startX: Int64; startY: Int64; startValue: Int64;
+        mouseX: Int64; mouseY: Int64; buttons: Int64;
+        clickTime: Int64; clickCount: Int64; clickTarget: Nat64;
+        now: Int64;
+    end;
+    function makeState(): State is
+        return State(store => mapMake(), splits => mapMake(), timers => mapMake(), focus => 0, keyboard => false,
+            drag => dragNone, target => 0, inside => false, startX => 0, startY => 0, startValue => 0,
+            mouseX => -1, mouseY => -1, buttons => 0, clickTime => 0, clickCount => 0, clickTarget => 0, now => 0);
+    end;
+    function destroyState(state: State): Unit is
+        let { store as s: HashMap[Nat64, Ephemeral], splits as p: HashMap[Nat64, Int64], timers as t: HashMap[Nat64, Int64],
+            focus as f: Nat64, keyboard as k: Bool, drag as d: Int64, target as g: Nat64, inside as i: Bool,
+            startX as sx: Int64, startY as sy: Int64, startValue as sv: Int64, mouseX as mx: Int64, mouseY as my: Int64,
+            buttons as b: Int64, clickTime as ct: Int64, clickCount as cc: Int64, clickTarget as cg: Nat64, now as n: Int64 } := state;
+        mapDestroy(s); mapDestroy(p); mapDestroy(t); return nil;
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function readMap(m: &![HashMap[K, V], R]): &[HashMap[K, V], R] is return (m: &[HashMap[K, V], R]); end;
+    generic [R: Region]
+    function readState(s: &![State, R]): &[State, R] is return (s: &[State, R]); end;
+    function ephemeral(state: &[State], ident: Nat64): Ephemeral is
+        case mapGet(&(state->store), ident) of
+            when Some(value as e: Ephemeral) do return e;
+            when None do return Ephemeral(a => 0, b => 0, c => 0, d => 0);
+        end case;
+    end;
+    function setEphemeral(state: &![State], ident: Nat64, e: Ephemeral): Unit is
+        mapInsert(&(state->store), ident, e); return nil;
+    end;
+    generic [R: Region]
+    function splitPositions(state: &[State, R]): &[HashMap[Nat64, Int64], R] is return &(state->splits); end;
+    function focused(state: &[State]): Nat64 is return state->focus; end;
+    function setFocus(state: &![State], ident: Nat64): Unit is state->focus := ident; return nil; end;
+
+    -- Forget framework state of nodes that are gone and move focus off nodes
+    -- that can no longer take it.
+    function prune(state: &![State], ps: Span[Node]): Unit is
+        var gone: Vector[Nat64] := vectorMake();
+        var cursor: Index := 0; var more: Bool := true;
+        while more do
+            case nextKey(readMap(&(state->store)), &!cursor) of
+                when Some(value as k: Nat64) do if find(ps, k) = 0 then push(&!gone, k); end if;
+                when None do more := false;
+            end case;
+        end while;
+        while length(&gone) > 0 do
+            case pop(&!gone) of
+                when Some(value as k: Nat64) do
+                    case mapRemove(&(state->store), k) of when Some(value as e: Ephemeral) do skip; when None do skip; end case;
+                when None do skip;
+            end case;
+        end while;
+        cursor := 0; more := true;
+        while more do
+            case nextKey(readMap(&(state->splits)), &!cursor) of
+                when Some(value as k: Nat64) do if find(ps, k) = 0 then push(&!gone, k); end if;
+                when None do more := false;
+            end case;
+        end while;
+        while length(&gone) > 0 do
+            case pop(&!gone) of
+                when Some(value as k: Nat64) do
+                    case mapRemove(&(state->splits), k) of when Some(value as e: Int64) do skip; when None do skip; end case;
+                when None do skip;
+            end case;
+        end while;
+        destroyFree(gone);
+        let f: Index := find(ps, state->focus);
+        if state->focus /= 0 and (f = 0 or not focusable(ps, f)) then state->focus := 0; end if;
+        if state->drag /= dragNone and find(ps, state->target) = 0 then state->drag := dragNone; state->target := 0; end if;
+        return nil;
+    end;
+
+    ------------------------------------------------------------------ visuals
+
+    -- Everything that changes how a node is drawn, including framework state.
+    function visualHash(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, state: &[State]): Nat64 is
+        var h: Nat64 := mix(bits(ps[i].kind), bits(ps[i].flags));
+        h := mix(h, bits(ps[i].value)); h := mix(h, bits(ps[i].low)); h := mix(h, bits(ps[i].high)); h := mix(h, bits(ps[i].aux));
+        h := mix(h, bits(gs[i].x)); h := mix(h, bits(gs[i].y)); h := mix(h, bits(gs[i].width)); h := mix(h, bits(gs[i].height));
+        h := mix(h, bits(gs[i].clipX)); h := mix(h, bits(gs[i].clipY)); h := mix(h, bits(gs[i].clipWidth)); h := mix(h, bits(gs[i].clipHeight));
+        h := hashBytes(h, textSpan(all, ps, i));
+        h := hashBytes(h, sliceSpan(all, ps[i].extra, ps[i].extraEnd));
+        if not enabled(ps, i) then h := mix(h, 3); end if;
+        let id: Nat64 := ps[i].ident;
+        if state->focus = id then h := mix(h, 5); if state->keyboard then h := mix(h, 6); end if; end if;
+        if state->target = id and state->drag /= dragNone then h := mix(h, bits(state->drag)); if state->inside then h := mix(h, 11); end if; end if;
+        let e: Ephemeral := ephemeral(state, id);
+        h := mix(h, bits(e.a)); h := mix(h, bits(e.b)); h := mix(h, bits(e.c)); h := mix(h, bits(e.d));
+        return h;
+    end;
+
+    -- What is on screen: identities, rectangles and visual hashes.
+    record Snapshot: Linear is idents: Vector[Nat64]; rects: Vector[Rect]; visuals: Vector[Nat64]; valid: Bool; end;
+    function makeSnapshot(): Snapshot is return Snapshot(idents => vectorMake(), rects => vectorMake(), visuals => vectorMake(), valid => false); end;
+    function destroySnapshot(s: Snapshot): Unit is
+        let { idents as i: Vector[Nat64], rects as r: Vector[Rect], visuals as v: Vector[Nat64], valid as ok: Bool } := s;
+        destroyFree(i); destroyFree(r); destroyFree(v); return nil;
+    end;
+    function invalidate(s: &![Snapshot]): Unit is s->valid := false; return nil; end;
+    -- Compute the visual hashes of the current frame, compare them with the
+    -- snapshot, add damage, and replace the snapshot.
+    function compareAndRecord(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &[State], shown: &![Snapshot], d: &![Damage]): Unit is
+        var visuals: Vector[Nat64] := vectorMake();
+        for i from 0 until spanLength(ps) do push(&!visuals, visualHash(all, ps, gs, i, state)); end for;
+        if not shown->valid then setFull(&~d);
+        else
+            let oldCount: Index := length(readVector(&(shown->idents)));
+            let same: Bool := oldCount = spanLength(ps);
+            var oldIndex: HashMap[Nat64, Index] := mapMake();
+            if not same then
+                for o from 1 until oldCount do mapInsert(&!oldIndex, get(readVector(&(shown->idents)), o), o); end for;
+            end if;
+            var newIndex: HashMap[Nat64, Index] := mapMake();
+            if not same then for i from 1 until spanLength(ps) do mapInsert(&!newIndex, ps[i].ident, i); end for; end if;
+            for i from 1 until spanLength(ps) do
+                var o: Index := 0;
+                if same and get(readVector(&(shown->idents)), i) = ps[i].ident then o := i;
+                else case mapGet(&oldIndex, ps[i].ident) of when Some(value as at: Index) do o := at; when None do o := 0; end case; end if;
+                if o = 0 then addDamage(&~d, visibleRect(ps, gs, i));
+                else if get(readVector(&(shown->visuals)), o) /= get(&visuals, i) then
+                    addDamage(&~d, get(readVector(&(shown->rects)), o)); addDamage(&~d, visibleRect(ps, gs, i));
+                end if;
+            end for;
+            for o from 1 until oldCount do
+                var present: Bool := false;
+                let oldIdent: Nat64 := get(readVector(&(shown->idents)), o);
+                if same and ps[o].ident = oldIdent then present := true;
+                else case mapGet(&newIndex, oldIdent) of when Some(value as at: Index) do present := true; when None do present := false; end case; end if;
+                if not present then addDamage(&~d, get(readVector(&(shown->rects)), o)); end if;
+            end for;
+            mapDestroy(oldIndex); mapDestroy(newIndex);
+        end if;
+        while length(readVector(&(shown->idents))) > 0 do pop(&(shown->idents)); pop(&(shown->rects)); pop(&(shown->visuals)); end while;
+        for i from 0 until spanLength(ps) do
+            push(&(shown->idents), ps[i].ident); push(&(shown->rects), visibleRect(ps, gs, i)); push(&(shown->visuals), get(&visuals, i));
+        end for;
+        shown->valid := true;
+        destroyFree(visuals); return nil;
+    end;
+
+    ------------------------------------------------------------------ input
+
+    constant actNone: Int64 := 0;      -- nothing changed
+    constant actRepaint: Int64 := 1;   -- framework state changed: compare and repaint
+    constant actRelayout: Int64 := 2;  -- geometry changed (split moved, resize)
+    constant actFire: Int64 := 3;      -- the node's first handler, with value / edit
+    constant actFire2: Int64 := 4;     -- the node's second handler
+    constant actClose: Int64 := 5;     -- the window was closed
+    constant actResize: Int64 := 6;    -- new window size in value (width) and aux (height)
+    constant actMenu: Int64 := 7;      -- a kernel menu item id in value
+
+    record Action: Free is kind: Int64; node: Index; value: Int64; aux: Int64; edit: TextEdit; end;
+    function noEdit(): TextEdit is return TextEdit(start => 0, finish => 0, codepoint => -1, paste => 0); end;
+    function act(kind: Int64): Action is return Action(kind => kind, node => 0, value => 0, aux => 0, edit => noEdit()); end;
+    function fire(node: Index, value: Int64): Action is return Action(kind => actFire, node => node, value => value, aux => 0, edit => noEdit()); end;
+
+    -- Kinds that react to a click and a release inside (classic tracking).
+    function pressable(kind: Int64): Bool is return kind = kindButton or kind = kindCheckbox or kind = kindRadio; end;
+    -- The nearest enabled ancestor-or-self that handles the mouse.
+    function interactive(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do
+            let k: Int64 := ps[p].kind;
+            if pressable(k) or k = kindSlider or k = kindTextBox or k = kindSplit or k = kindList or k = kindTable
+                or k = kindTreeView or k = kindTextView or k = kindTabs or k = kindScroll then
+                if enabled(ps, p) then return p; end if; return 0;
+            end if;
+            p := ps[p].parent;
+        end while;
+        return 0;
+    end;
+    -- The split whose bar is under the point, if any.
+    function splitAt(ps: Span[Node], gs: Span[Geom], x: Int64, y: Int64): Index is
+        var found: Index := 0;
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindSplit and visible(ps, i) and contains(gs, i, x, y) then
+                let first: Index := ps[i].first;
+                if first /= 0 then
+                    if ps[i].value = 0 and x >= gs[first].x + gs[first].width and x < gs[first].x + gs[first].width + splitBar then found := i; end if;
+                    if ps[i].value /= 0 and y >= gs[first].y + gs[first].height and y < gs[first].y + gs[first].height + splitBar then found := i; end if;
+                end if;
+            end if;
+        end for;
+        return found;
+    end;
+    -- Handle one input event against the current laid-out tree.
+    function handle(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], event: Event): Action is
+        case event of
+            when Idle do return act(actNone);
+            when Close do return act(actClose);
+            when Menu(id as id: Int64) do return Action(kind => actMenu, node => 0, value => id, aux => 0, edit => noEdit());
+            when Resize(width as w: Int64, height as h: Int64) do return Action(kind => actResize, node => 0, value => w, aux => h, edit => noEdit());
+            when Key(code as code: Int64) do return key(all, ps, gs, state, code);
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                return mouse(all, ps, gs, state, x, y, buttons, wheel);
+        end case;
+    end;
+    function mouse(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], x: Int64, y: Int64, buttons: Int64, wheel: Int64): Action is
+        let previous: Int64 := state->buttons;
+        state->buttons := buttons; state->mouseX := x; state->mouseY := y;
+        let down: Bool := (buttons & 1) /= 0 and (previous & 1) = 0;
+        let up: Bool := (buttons & 1) = 0 and (previous & 1) /= 0;
+        if down then
+            let s: Index := splitAt(ps, gs, x, y);
+            if s /= 0 then
+                state->drag := dragSplit; state->target := ps[s].ident; state->inside := true;
+                let first: Index := ps[s].first;
+                if ps[s].value = 0 then state->startValue := gs[first].width - x; else state->startValue := gs[first].height - y; end if;
+                return act(actRepaint);
+            end if;
+            let h: Index := hit(ps, gs, x, y);
+            let target: Index := interactive(ps, h);
+            if target = 0 then return act(actNone); end if;
+            var changed: Bool := false;
+            if has(ps[target].flags, flagClickFocus) and has(ps[target].flags, flagFocusable) and state->focus /= ps[target].ident then
+                state->focus := ps[target].ident; state->keyboard := false; changed := true;
+            end if;
+            if pressable(ps[target].kind) then
+                state->drag := dragPress; state->target := ps[target].ident; state->inside := true;
+                return act(actRepaint);
+            end if;
+            if changed then return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        if state->drag = dragNone then return act(actNone); end if;
+        let t: Index := find(ps, state->target);
+        if t = 0 then state->drag := dragNone; return act(actRepaint); end if;
+        if state->drag = dragSplit then
+            let first: Index := ps[t].first;
+            var size: Int64 := 0;
+            if ps[t].value = 0 then size := x + state->startValue; else size := y + state->startValue; end if;
+            var room: Int64 := gs[t].width; if ps[t].value /= 0 then room := gs[t].height; end if;
+            size := clampInt(size, 16, maxInt(16, room - 2 * ps[t].padding - splitBar - 16));
+            if up then state->drag := dragNone; end if;
+            var old: Int64 := -1;
+            case mapGet(readMap(&(state->splits)), ps[t].ident) of when Some(value as v: Int64) do old := v; when None do skip; end case;
+            mapInsert(&(state->splits), ps[t].ident, size);
+            if old /= size then return act(actRelayout); end if;
+            return act(actRepaint);
+        end if;
+        if state->drag = dragPress then
+            let inside: Bool := contains(gs, t, x, y);
+            if up then
+                state->drag := dragNone;
+                if inside then return activate(ps, state, t); end if;
+                return act(actRepaint);
+            end if;
+            if inside /= state->inside then state->inside := inside; return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        if up then state->drag := dragNone; return act(actRepaint); end if;
+        return act(actNone);
+    end;
+    -- A press-like control fires: buttons send their message, checkboxes
+    -- report the new state, radios their selection.
+    function activate(ps: Span[Node], state: &![State], t: Index): Action is
+        let k: Int64 := ps[t].kind;
+        if k = kindCheckbox then
+            var next: Int64 := 1; if ps[t].value /= 0 then next := 0; end if;
+            return fire(t, next);
+        end if;
+        return fire(t, ps[t].value);
+    end;
+    function key(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], code: Int64): Action is
+        let base: Int64 := code & keyCodeMask;
+        if base = keyInputLost then return act(actNone); end if;
+        -- Shortcuts are Ctrl/Alt chords (and function keys); they win over controls.
+        if (code & (keyCtrl | keyAlt)) /= 0 or base >= 1114129 then
+            let s: Index := shortcut(ps, code);
+            if s /= 0 then return fire(s, 0); end if;
+        end if;
+        if base = keyTab and (code & (keyCtrl | keyAlt)) = 0 then
+            let n: Index := nextFocus(ps, state->focus, (code & keyShift) /= 0);
+            if n /= 0 then state->focus := ps[n].ident; state->keyboard := true; return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        let f: Index := find(ps, state->focus);
+        if f /= 0 then
+            let k: Int64 := ps[f].kind;
+            if base = 32 and pressable(k) and (code & (keyCtrl | keyAlt)) = 0 then
+                return activate(ps, state, f);
+            end if;
+        end if;
+        if base = keyEnter and (code & (keyCtrl | keyAlt)) = 0 then
+            let d: Index := special(ps, flagDefault);
+            if d /= 0 then return fire(d, 0); end if;
+        end if;
+        if base = keyEscape then
+            let c: Index := special(ps, flagCancel);
+            if c /= 0 then return fire(c, 0); end if;
+        end if;
+        return act(actNone);
+    end;
+
+    ------------------------------------------------------------------ timers
+
+    -- Register new timers (due one interval from now) and forget gone ones.
+    function syncTimers(ps: Span[Node], state: &![State], now: Int64): Unit is
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTimer and ps[i].value > 0 then
+                case mapGet(readMap(&(state->timers)), ps[i].ident) of
+                    when Some(value as due: Int64) do skip;
+                    when None do mapInsert(&(state->timers), ps[i].ident, now + ps[i].value * 1000);
+                end case;
+            end if;
+        end for;
+        return nil;
+    end;
+    -- The first due timer node (and its next due time), or 0.
+    function dueTimer(ps: Span[Node], state: &![State], now: Int64): Index is
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTimer and ps[i].value > 0 then
+                case mapGet(readMap(&(state->timers)), ps[i].ident) of
+                    when Some(value as due: Int64) do
+                        if due <= now then
+                            var next: Int64 := due + ps[i].value * 1000; if next <= now then next := now + ps[i].value * 1000; end if;
+                            mapInsert(&(state->timers), ps[i].ident, next); return i;
+                        end if;
+                    when None do skip;
+                end case;
+            end if;
+        end for;
+        return 0;
+    end;
+    -- Milliseconds until the next timer (capped), for waiting.
+    function timeout(ps: Span[Node], state: &[State], now: Int64, cap: Int64): Int64 is
+        var best: Int64 := cap;
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTimer and ps[i].value > 0 then
+                case mapGet(&(state->timers), ps[i].ident) of
+                    when Some(value as due: Int64) do best := minInt(best, maxInt((due - now + 999) / 1000, 0));
+                    when None do skip;
+                end case;
+            end if;
+        end for;
+        return best;
+    end;
+end module body.

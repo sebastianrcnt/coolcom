@@ -1,0 +1,223 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import Standard.HashMap (HashMap, make as mapMake, destroyFree as mapDestroy);
+import OS.Gui (Rect, Event, Mouse, Key, Idle);
+import OS.Ui.Text (width as textWidth, lineCount, wrapLine, Line, previous, following, offsetAt, wordStart, wordEnd);
+import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open, close, add, setText, appendText, appendNumber, setFlag, setGrow,
+    setPadding, setSpacing, setColumns, setChildAlign, setRange, setValue, setKey, setHandler, setSize, keyOf, finishBuild, layout, props,
+    geometry, textBytes, nodeText, nextFocus, parseKey, makeDamage, destroyDamage, addDamage, damageRects, damageFull, readDamage,
+    kindColumn, kindRow, kindGrid, kindSplit, kindLabel, kindButton, kindSpacer, kindTextBox, kindShortcut,
+    flagDisabled, flagDefault, flagCancel, alignCenter, keyCtrl, keyAlt, keyShift, keyLeft, keyEscape, keyEnter);
+import OS.Ui.Engine (State, Snapshot, Action, makeState, destroyState, makeSnapshot, destroySnapshot, compareAndRecord, handle, readState,
+    actNone, actRepaint, actFire, actRelayout);
+module body UiTest is
+    function check(ok: Bool, what: Span[Nat8, Static]): Unit is
+        if not ok then print("UI TEST FAILED: "); printLn(what); abort("UI TEST FAILED"); end if;
+        return nil;
+    end;
+    function rectOf(t: &[Tree], i: Index): Rect is return rectIn(geometry(t), i); end;
+    function rectIn(g: Span[Geom], i: Index): Rect is
+        return Rect(x => g[i].x, y => g[i].y, width => g[i].width, height => g[i].height);
+    end;
+    function onlyRect(rs: Span[Rect], x: Int64, w: Int64): Bool is
+        return spanLength(rs) = 1 and rs[0].x = x and rs[0].width = w;
+    end;
+    function rectCount(rs: Span[Rect]): Index is return spanLength(rs); end;
+    function twoRects(rs: Span[Rect]): Bool is
+        -- The overlapping pair merges; the far one stays separate.
+        return spanLength(rs) = 2 and ((rs[0].width = 15 and rs[1].x = 100) or (rs[1].width = 15 and rs[0].x = 100));
+    end;
+    function same(r: Rect, x: Int64, y: Int64, w: Int64, h: Int64): Bool is
+        return r.x = x and r.y = y and r.width = w and r.height = h;
+    end;
+    function lay(t: &![Tree], w: Int64, h: Int64): Unit is
+        let splits: HashMap[Nat64, Int64] := mapMake();
+        finishBuild(&~t); layout(&~t, w, h, &splits); mapDestroy(splits); return nil;
+    end;
+
+    -- column(padding 10, spacing 8): label, row(OK, spacer, Cancel)
+    function dialogTree(extra: Bool): Tree is
+        var t: Tree := makeTree();
+        open(&!t, kindColumn); setPadding(&!t, 10); setSpacing(&!t, 8);
+        if extra then add(&!t, kindLabel); setText(&!t, "Extra"); end if;
+        add(&!t, kindLabel); setText(&!t, "Hello");
+        open(&!t, kindRow); setSpacing(&!t, 4);
+        add(&!t, kindButton); setText(&!t, "OK"); setFlag(&!t, flagDefault, true); setHandler(&!t, 0);
+        add(&!t, kindSpacer); setGrow(&!t, 1);
+        add(&!t, kindButton); setText(&!t, "Cancel"); setFlag(&!t, flagCancel, true); setHandler(&!t, 1);
+        add(&!t, kindButton); setText(&!t, "Off"); setFlag(&!t, flagDisabled, true);
+        close(&!t);
+        close(&!t);
+        add(&!t, kindShortcut); setValue(&!t, parseKey("Ctrl+S")); setHandler(&!t, 2);
+        return t;
+    end;
+
+    function layoutTests(): Unit is
+        var t: Tree := dialogTree(false);
+        lay(&!t, 300, 200);
+        check(same(rectOf(&t, 1), 0, 0, 300, 200), "root child fills the window");
+        check(same(rectOf(&t, 2), 10, 10, 41, 16), "label: text width + 1, start aligned");
+        check(same(rectOf(&t, 3), 10, 34, 280, 32), "row stretches across the column");
+        check(same(rectOf(&t, 4), 10, 34, 72, 32), "default button includes its ring");
+        check(rectOf(&t, 5).width = 280 - 72 - 72 - 64 - 3 * 4, "spacer takes the extra width");
+        check(rectOf(&t, 6).x = 300 - 10 - 64 - 4 - 72, "buttons after the spacer are pushed right");
+        check(rectOf(&t, 6).y = 34 + 4, "row children are centered vertically");
+        destroyTree(t);
+
+        -- Grid: two columns, the second grows; rows are as tall as their tallest cell.
+        var g: Tree := makeTree();
+        open(&!g, kindGrid); setColumns(&!g, 2); setSpacing(&!g, 6);
+        add(&!g, kindLabel); setText(&!g, "Name");
+        add(&!g, kindTextBox); setGrow(&!g, 1);
+        add(&!g, kindLabel); setText(&!g, "Longer");
+        add(&!g, kindLabel); setText(&!g, "x");
+        close(&!g);
+        lay(&!g, 300, 100);
+        check(same(rectOf(&g, 2), 0, 4, 33, 16), "grid label centered in its row");
+        check(same(rectOf(&g, 3), 55, 0, 245, 24), "growing column takes the rest");
+        check(rectOf(&g, 4).y = 30 and rectOf(&g, 5).x = 55, "second row");
+        destroyTree(g);
+
+        -- Split: first pane at its initial size, the bar, then the rest.
+        var s: Tree := makeTree();
+        open(&!s, kindSplit); setRange(&!s, 100, 0);
+        add(&!s, kindLabel); setText(&!s, "A");
+        add(&!s, kindLabel); setText(&!s, "B");
+        close(&!s);
+        lay(&!s, 300, 100);
+        check(same(rectOf(&s, 2), 0, 0, 100, 100), "split first pane");
+        check(same(rectOf(&s, 3), 106, 0, 194, 100), "split second pane after the bar");
+        destroyTree(s);
+
+        -- Centered children, wrapped paragraphs.
+        var c: Tree := makeTree();
+        open(&!c, kindColumn); setChildAlign(&!c, alignCenter);
+        add(&!c, kindLabel); setText(&!c, "Mid");
+        add(&!c, kindLabel); setText(&!c, "one two three four five"); setFlag(&!c, 32, true);
+        close(&!c);
+        lay(&!c, 101, 100);
+        check(rectOf(&c, 2).x = (101 - 25) / 2, "centered child");
+        check(rectOf(&c, 3).height = 48, "wrapped text grows to three lines in 100 px");
+        destroyTree(c);
+        printLn("UI LAYOUT PASS"); return nil;
+    end;
+
+    function identityTests(): Unit is
+        var a: Tree := dialogTree(false); var b: Tree := dialogTree(true);
+        lay(&!a, 300, 200); lay(&!b, 300, 200);
+        -- The OK button keeps its identity when a label is inserted before it.
+        check(props(&a)[4].ident = props(&b)[5].ident, "identity follows kind ordinal");
+        check(props(&a)[2].ident /= props(&b)[3].ident, "a label shifted by an inserted label changes identity");
+        destroyTree(a); destroyTree(b);
+        var k1: Tree := makeTree(); var k2: Tree := makeTree();
+        add(&!k1, kindLabel); setKey(&!k1, keyOf("x")); add(&!k1, kindLabel); setKey(&!k1, keyOf("y"));
+        add(&!k2, kindLabel); setKey(&!k2, keyOf("y")); add(&!k2, kindLabel); setKey(&!k2, keyOf("x"));
+        lay(&!k1, 10, 10); lay(&!k2, 10, 10);
+        check(props(&k1)[1].ident = props(&k2)[2].ident, "keyed identity is independent of order");
+        destroyTree(k1); destroyTree(k2);
+        printLn("UI IDENTITY PASS"); return nil;
+    end;
+
+    function keyTests(): Unit is
+        check(parseKey("Ctrl+S") = 115 | keyCtrl, "Ctrl+S");
+        check(parseKey("ctrl+shift+Z") = 122 | keyCtrl, "character keys drop Shift");
+        check(parseKey("Alt+Left") = keyLeft | keyAlt, "Alt+Left");
+        check(parseKey("Shift+Left") = keyLeft | keyShift, "special keys keep Shift");
+        check(parseKey("F5") = 1114133, "F5");
+        check(parseKey("Escape") = keyEscape and parseKey("Enter") = keyEnter, "names");
+        check(parseKey("Ctrl+Nope") = 0, "unknown");
+        printLn("UI KEYS PASS"); return nil;
+    end;
+
+    function damageTests(): Unit is
+        var d: Damage := makeDamage();
+        addDamage(&!d, Rect(x => 0, y => 0, width => 10, height => 10));
+        addDamage(&!d, Rect(x => 5, y => 5, width => 10, height => 10));
+        addDamage(&!d, Rect(x => 100, y => 100, width => 10, height => 10));
+        check(twoRects(damageRects(&d)), "overlapping damage merges, distant damage stays apart");
+        destroyDamage(d);
+        printLn("UI DAMAGE PASS"); return nil;
+    end;
+
+    function interactionTests(): Unit is
+        var t: Tree := dialogTree(false);
+        lay(&!t, 300, 200);
+        var state: State := makeState();
+        var shown: Snapshot := makeSnapshot();
+        var d: Damage := makeDamage();
+        borrow r: &[Tree, Q] := &t do
+            let all: Span[Nat8, Q] := textBytes(r); let ps: Span[Node, Q] := props(r); let gs: Span[Geom, Q] := geometry(r);
+            compareAndRecord(all, ps, gs, readState(&!state), &!shown, &!d);
+            check(damageFull(&d), "the first frame is a full paint");
+            -- Tab focuses OK (Cancel next; Off is disabled and skipped).
+            var a: Action := handle(all, ps, gs, &!state, Key(code => 9));
+            check(a.kind = actRepaint and state.focus = ps[4].ident, "Tab focuses the first button");
+            a := handle(all, ps, gs, &!state, Key(code => 9));
+            check(state.focus = ps[6].ident, "Tab moves to Cancel");
+            a := handle(all, ps, gs, &!state, Key(code => 9));
+            check(state.focus = ps[4].ident, "Tab skips the disabled button and wraps");
+            a := handle(all, ps, gs, &!state, Key(code => 9 | keyShift));
+            check(state.focus = ps[6].ident, "Shift+Tab goes back");
+            -- Return and Escape press the default and cancel buttons.
+            a := handle(all, ps, gs, &!state, Key(code => keyEnter));
+            check(a.kind = actFire and a.node = 4, "Return presses the default button");
+            a := handle(all, ps, gs, &!state, Key(code => keyEscape));
+            check(a.kind = actFire and a.node = 6, "Escape presses the cancel button");
+            a := handle(all, ps, gs, &!state, Key(code => 115 | keyCtrl));
+            check(a.kind = actFire and a.node = 8, "declared shortcut");
+            -- Space presses the focused button.
+            a := handle(all, ps, gs, &!state, Key(code => 32));
+            check(a.kind = actFire and a.node = 6, "Space presses the focused button");
+            -- Mouse: press inside, leave, return, release inside fires.
+            let x: Int64 := gs[4].x + 10; let y: Int64 := gs[4].y + 10;
+            a := handle(all, ps, gs, &!state, Mouse(x => x, y => y, buttons => 1, wheel => 0));
+            check(a.kind = actRepaint and state.inside, "press tracks the button");
+            a := handle(all, ps, gs, &!state, Mouse(x => 299, y => 199, buttons => 1, wheel => 0));
+            check(a.kind = actRepaint and not state.inside, "leaving releases the inverted state");
+            a := handle(all, ps, gs, &!state, Mouse(x => x, y => y, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => x, y => y, buttons => 0, wheel => 0));
+            check(a.kind = actFire and a.node = 4, "release inside fires");
+            a := handle(all, ps, gs, &!state, Mouse(x => x, y => y, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => 299, y => 199, buttons => 0, wheel => 0));
+            check(a.kind /= actFire, "release outside does not fire");
+            -- A disabled button ignores the mouse.
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[7].x + 5, y => gs[7].y + 5, buttons => 1, wheel => 0));
+            check(a.kind = actNone, "disabled");
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[7].x + 5, y => gs[7].y + 5, buttons => 0, wheel => 0));
+            -- An unchanged frame has no damage; a pressed button damages only itself.
+            var d2: Damage := makeDamage();
+            compareAndRecord(all, ps, gs, readState(&!state), &!shown, &!d2);
+            check(not damageFull(&d2), "later frames are partial");
+            check(rectCount(damageRects(&d2)) >= 1, "later frames have damage");
+            destroyDamage(d2);
+            var d3: Damage := makeDamage();
+            compareAndRecord(all, ps, gs, readState(&!state), &!shown, &!d3);
+            check(rectCount(damageRects(&d3)) = 0, "no change, no damage");
+            destroyDamage(d3);
+            a := handle(all, ps, gs, &!state, Mouse(x => x, y => y, buttons => 1, wheel => 0));
+            var d4: Damage := makeDamage();
+            compareAndRecord(all, ps, gs, readState(&!state), &!shown, &!d4);
+            check(onlyRect(damageRects(&d4), gs[4].x, gs[4].width), "pressing damages the button only");
+            destroyDamage(d4);
+        end borrow;
+        destroyDamage(d); destroySnapshot(shown); destroyState(state); destroyTree(t);
+        printLn("UI INTERACTION PASS"); return nil;
+    end;
+
+    function textTests(): Unit is
+        check(textWidth("abc") = 24 and textWidth("가나") = 32, "cell widths");
+        let l: Line := wrapLine("hello world foo", 0, 80);
+        check(l.finish = 5 and l.resume = 6, "wrap at the last space");
+        check(lineCount("a\nb\n", 80) = 3, "newlines");
+        check(previous("a가", 4) = 1 and following("a가", 1) = 4, "UTF-8 stepping");
+        check(offsetAt("abcd", 13) = 2, "pixel to offset");
+        check(wordStart("foo bar", 6) = 4 and wordEnd("foo bar", 0) = 3, "words");
+        printLn("UI TEXT PASS"); return nil;
+    end;
+
+    function main(): ExitCode is
+        textTests(); layoutTests(); identityTests(); keyTests(); damageTests(); interactionTests();
+        printLn("UI HOST PASS");
+        return ExitSuccess();
+    end;
+end module body.

@@ -1,10 +1,15 @@
 // Immediate-mode drawing into the calling task's BGRA back buffer.
 // Coordinates and damage are logical pixels. The compositor owns the chrome.
 CGuiWindow *GrWindow() {CGuiWindow *w = Fs->gui_window; if (Gs->num || !w || w->owner != Fs || w->closed || !w->pixel) return NULL; return w;}
+// The clip rectangle (GrClip) bounds every operation and its damage.
+I64 GrClipX0(CGuiWindow *w) {if (w->clip_x1 < 0) return 0; return MaxI64(0, w->clip_x0);}
+I64 GrClipY0(CGuiWindow *w) {if (w->clip_x1 < 0) return 0; return MaxI64(0, w->clip_y0);}
+I64 GrClipX1(CGuiWindow *w) {if (w->clip_x1 < 0) return w->w; return MinI64(w->w, w->clip_x1);}
+I64 GrClipY1(CGuiWindow *w) {if (w->clip_x1 < 0) return w->h; return MinI64(w->h, w->clip_y1);}
 U0 GrDamage(CGuiWindow *w, I64 x, I64 y, I64 width, I64 height)
 {
-    if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
-    if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
+    I64 x0 = MaxI64(x, GrClipX0(w)), y0 = MaxI64(y, GrClipY0(w)), x1 = MinI64(x + width, GrClipX1(w)), y1 = MinI64(y + height, GrClipY1(w));
+    x = x0; y = y0; width = x1 - x0; height = y1 - y0;
     if (width <= 0 || height <= 0) return;
     if (!w->pending) {w->dirty_x0 = x; w->dirty_y0 = y; w->dirty_x1 = x + width; w->dirty_y1 = y + height;}
     else {w->dirty_x0 = MinI64(w->dirty_x0, x); w->dirty_y0 = MinI64(w->dirty_y0, y);
@@ -15,8 +20,8 @@ U0 GrRect(I64 x, I64 y, I64 width, I64 height, I64 color)
 {
     CGuiWindow *w = GrWindow;
     if (!w || x < -32768 || x > 32767 || y < -32768 || y > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return;
-    if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
-    if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
+    I64 x0 = MaxI64(x, GrClipX0(w)), y0 = MaxI64(y, GrClipY0(w)), x1 = MinI64(x + width, GrClipX1(w)), y1 = MinI64(y + height, GrClipY1(w));
+    x = x0; y = y0; width = x1 - x0; height = y1 - y0;
     if (width <= 0 || height <= 0) return;
     GuiFill(w->back + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, width, height, (color & 0xFFFFFF) | 0xFF000000);
     GrDamage(w, x, y, width, height);
@@ -41,7 +46,7 @@ Bool GuiVulkanPresent(I64 device, I64 view, I64 width, I64 height, U32 *mirror =
 }
 U0 GrPoint(CGuiWindow *w, I64 x, I64 y, I64 color)
 {
-    if (0 <= x < w->w && 0 <= y < w->h)
+    if (GrClipX0(w) <= x < GrClipX1(w) && GrClipY0(w) <= y < GrClipY1(w))
         GuiFill(w->back + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, 1, 1, (color & 0xFFFFFF) | 0xFF000000);
 }
 U0 GrLine(I64 x0, I64 y0, I64 x1, I64 y1, I64 color)
@@ -96,4 +101,110 @@ I64 GrMeasure(U8 *text)
     I64 width = 0, len, cp, i;
     while (*text) {len = Utf8Len(*text); if (!len) len = 1; for (i = 1; i < len; i++) if (!text[i]) {len = 1; break;} cp = Utf8Cp(text, len); width += Utf8Width(cp) * 8; text += len;}
     return width;
+}
+
+// ---- OS.Ui support: clip, patterns, inversion, styled text, one-bit images, waiting ----
+U0 GrClip(I64 x, I64 y, I64 width, I64 height)
+{//Restrict later Gr drawing to a logical client rectangle; a negative width restores the whole client.
+    CGuiWindow *w = GrWindow; if (!w) return;
+    if (width < 0) {w->clip_x1 = -1; return;}
+    w->clip_x0 = ClampI64(x, -32768, 32767); w->clip_y0 = ClampI64(y, -32768, 32767);
+    w->clip_x1 = MaxI64(w->clip_x0, ClampI64(x + MaxI64(0, width), -32768, 65535));
+    w->clip_y1 = MaxI64(w->clip_y0, ClampI64(y + MaxI64(0, height), -32768, 65535));
+}
+U0 GrSpan(CGuiWindow *w, I64 x0, I64 x1, I64 y, U32 color)
+{//One clipped logical row segment [x0, x1) at the window's integer scale.
+    I64 s = w->scale, i, j, end; U32 *row;
+    x0 = MaxI64(x0, GrClipX0(w)); x1 = MinI64(x1, GrClipX1(w));
+    if (x0 >= x1 || y < GrClipY0(w) || y >= GrClipY1(w)) return;
+    end = x1 * s;
+    for (j = 0; j < s; j++) {
+        row = w->back + ((GUI_TITLE + GUI_PAD + y) * s + j) * w->pw + (1 + GUI_PAD) * s;
+        for (i = x0 * s; i < end; i++) row[i] = color;
+    }
+}
+U0 GrPattern(I64 x, I64 y, I64 width, I64 height, U64 pattern, I64 fg, I64 bg = -1)
+{//8x8 one-bit pattern aligned to client coordinates: byte (y & 7), bit 7 is x & 7 == 0. bg < 0: transparent.
+    CGuiWindow *w = GrWindow; I64 i, j, bits, x0, x1; U32 f, b;
+    if (!w || width < 0 || height < 0 || width > 32767 || height > 32767) return;
+    f = (fg & 0xFFFFFF) | 0xFF000000; b = (bg & 0xFFFFFF) | 0xFF000000;
+    x0 = MaxI64(x, GrClipX0(w)); x1 = MinI64(x + width, GrClipX1(w));
+    for (j = MaxI64(y, GrClipY0(w)); j < MinI64(y + height, GrClipY1(w)); j++) {
+        bits = (pattern >> ((j & 7) * 8)) & 0xFF;
+        if (bits == 0xFF) GrSpan(w, x0, x1, j, f);
+        else if (!bits) {if (bg >= 0) GrSpan(w, x0, x1, j, b);}
+        else for (i = x0; i < x1; i++) {
+                if (bits & (0x80 >> (i & 7))) GrSpan(w, i, i + 1, j, f);
+                else if (bg >= 0) GrSpan(w, i, i + 1, j, b);
+            }
+    }
+    GrDamage(w, x, y, width, height);
+}
+U0 GrInvert(I64 x, I64 y, I64 width, I64 height)
+{//Exchange black and white (XOR the colour bits) inside the clip.
+    CGuiWindow *w = GrWindow; I64 i, j, s, x0, y0, x1, y1; U32 *row;
+    if (!w || width <= 0 || height <= 0) return;
+    s = w->scale;
+    x0 = MaxI64(x, GrClipX0(w)); y0 = MaxI64(y, GrClipY0(w)); x1 = MinI64(x + width, GrClipX1(w)); y1 = MinI64(y + height, GrClipY1(w));
+    for (j = y0 * s; j < y1 * s; j++) {
+        row = w->back + ((GUI_TITLE + GUI_PAD) * s + j) * w->pw + (1 + GUI_PAD) * s;
+        for (i = x0 * s; i < x1 * s; i++) row[i] ^= 0xFFFFFF;
+    }
+    GrDamage(w, x, y, width, height);
+}
+#define GR_BOLD 1
+#define GR_DIM 2
+#define GR_UNDERLINE 4
+I64 GrTextStyle(I64 x, I64 y, U8 *text, I64 size, I64 color, I64 flags)
+{//size bytes of UTF-8 in Unifont; bitmap bold, 50% gray mask (disabled), underline. Returns the advance.
+    CGuiWindow *w = GrWindow; U8 *glyph, *end = text + size; I64 cp, len, cells, row, col, bits, start = x, run, px, width;
+    U32 c = (color & 0xFFFFFF) | 0xFF000000;
+    if (!w || !text || size < 0 || x < -32768 || x > 32767 || y < -32768 || y > 32767) return 0;
+    while (text < end && x < GrClipX1(w)) {
+        len = Utf8Len(*text); if (!len || text + len > end) len = 1;
+        cp = Utf8Cp(text, len); if (len == 1 && *text >= 0x80) cp = 0xFFFD;
+        text += len; glyph = FontGlyph(cp, &cells);
+        // Advance like GrMeasure (and OS.Ui's measurement): terminal width of the code point.
+        width = cells * 8; if (!Utf8Width(cp)) glyph = NULL;
+        if (glyph && x + width + 1 > GrClipX0(w) && y + 16 > GrClipY0(w) && y < GrClipY1(w))
+            for (row = 0; row < 16; row++) {
+                bits = glyph[row]; if (cells == 2) bits = glyph[row * 2] << 8 | glyph[row * 2 + 1];
+                bits <<= 1; // bit 0 is one column past the glyph cell, for bold
+                if (flags & GR_BOLD) bits |= bits >> 1;
+                for (col = 0; col <= width; col += run) {
+                    run = 1;
+                    if (bits & (1 << (width - col))) {
+                        while (col + run <= width && (bits & (1 << (width - col - run)))) run++;
+                        if (flags & GR_DIM) {for (px = x + col; px < x + col + run; px++) if (!((px + y + row) & 1)) GrSpan(w, px, px + 1, y + row, c);}
+                        else GrSpan(w, x + col, x + col + run, y + row, c);
+                    }
+                }
+            }
+        x += Utf8Width(cp) * 8;
+    }
+    if (flags & GR_UNDERLINE) GrSpan(w, start, x, y + 15, c);
+    GrDamage(w, start, y, x - start + 1, 16);
+    return x - start;
+}
+U0 GrBits(I64 x, I64 y, I64 width, I64 height, U8 *bits, I64 stride, I64 color)
+{//One-bit bitmap, most significant bit first, stride in bytes; 1 bits are drawn in color.
+    CGuiWindow *w = GrWindow; I64 i, j; U32 c = (color & 0xFFFFFF) | 0xFF000000;
+    if (!w || !bits || width < 0 || height < 0 || width > 4096 || height > 4096 || stride < (width + 7) / 8) return;
+    for (j = 0; j < height; j++) for (i = 0; i < width; i++)
+            if (bits[j * stride + i / 8] & (0x80 >> (i & 7))) GrSpan(w, x + i, x + i + 1, y + j, c);
+    GrDamage(w, x, y, width, height);
+}
+I64 GuiPending()
+{//Events queued for the calling task's window.
+    CGuiWindow *w = Fs->gui_window;
+    if (!w || Gs->num) return 0;
+    return (w->event_tail - w->event_head + GUI_EVENTS) % GUI_EVENTS + w->event_lost;
+}
+U0 GuiWait(I64 ms)
+{//Block until an event is queued for this task's window or ms elapse (GuiEventPush wakes it).
+    CTask *t = Fs; CGuiWindow *w = t->gui_window;
+    if (!w || Gs->num || ms <= 0 || GuiPending) return;
+    t->wake_jiffy = jiffies + ms * JIFFY_FREQ / 1000;
+    while (jiffies < t->wake_jiffy && !GuiPending) Yield;
+    TaskBreakCheck(t);
 }

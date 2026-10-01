@@ -1,0 +1,5 @@
+Interaction state, visual hashes and input translation for OS.Ui.
+
+State keeps focus, the control under the mouse, split positions, timers and
+per-node state such as carets by node identity. handle turns one OS.Gui event
+into one Action; compareAndRecord finds the damaged rectangles of a frame.

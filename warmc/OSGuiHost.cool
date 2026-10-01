@@ -16,3 +16,13 @@ I64 WgScale(I64 scale) {return -1;}
 I64 WgFont(I64 choice, I64 size) {return -1;}
 
 I64 WgTextClip(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 cx, I64 cy, I64 width, I64 height) {return -1;}
+I64 WgClip(I64 handle, I64 x, I64 y, I64 width, I64 height) {return -1;}
+I64 WgPattern(I64 handle, I64 x, I64 y, I64 width, I64 height, I64 pattern, I64 fg, I64 bg) {return -1;}
+I64 WgInvert(I64 handle, I64 x, I64 y, I64 width, I64 height) {return -1;}
+I64 WgTextStyle(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 flags) {return -1;}
+I64 WgBits(I64 handle, I64 x, I64 y, I64 width, I64 height, U8 *bits, U64 size, I64 stride, I64 color) {return -1;}
+I64 WgBlit(I64 handle, I64 x, I64 y, I64 width, I64 height, U8 *pixels, U64 size, I64 stride) {return -1;}
+I64 WgPending(I64 handle) {return -1;}
+I64 WgWait(I64 handle, I64 ms) {return -1;}
+I64 WgTrace() {return 0;}
+I64 WgMicros() {return 0;}
