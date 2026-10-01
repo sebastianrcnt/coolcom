@@ -281,8 +281,17 @@ U0 FbCursorDraw(I64 cx, I64 cy, I64 w)
     I64 off = cy * font.ch * fb.stride + cx * font.cw * 4, y, x;
     U32 *s, *d;
     if (fb.gpu) {
-        GpuCursor(cx * font.cw, cy * font.ch, w, font.ch,
-                  fb.back + FbBackY(cy * font.ch) * fb.stride + cx * font.cw * 4, fb.stride);
+        // The text caret belongs to scanout, leaving the hardware pointer free.
+        // Restore cached pixels immediately after the synchronous DMA upload.
+        for (y = 0; y < font.ch; y++) {
+            s = fb.back + FbBackY(cy * font.ch + y) * fb.stride + cx * font.cw * 4;
+            for (x = 0; x < w; x++) s[x] ^= 0xFFFFFF;
+        }
+        FbCopyRect(cx * font.cw, cy * font.ch, w, font.ch);
+        for (y = 0; y < font.ch; y++) {
+            s = fb.back + FbBackY(cy * font.ch + y) * fb.stride + cx * font.cw * 4;
+            for (x = 0; x < w; x++) s[x] ^= 0xFFFFFF;
+        }
         return;
     }
     for (y = 0; y < font.ch; y++) {
@@ -355,7 +364,7 @@ U0 FbRenderLocked()
     }
 
     // Remove the cursor at its old physical location before rotating scanout.
-    if (fb.scanout && fb.cur_w) {
+    if ((fb.scanout || fb.gpu) && fb.cur_w) {
         FbCopyRect(fb.cur_x * font.cw, fb.cur_y * font.ch, fb.cur_w, font.ch);
         dy0 = fb.cur_y * font.ch;
         dy1 = dy0 + font.ch;
@@ -399,7 +408,7 @@ U0 FbRenderLocked()
         }
 
     // The old cursor goes with its row's copy.
-    if (fb.cur_w && !fb.gpu)
+    if (fb.cur_w)
         FbSpan(fb.cur_y, fb.cur_x, fb.cur_x + fb.cur_w / font.cw);
     if (all || (scrolled && !hardware && fb.cols * font.cw == fb.w)) {
         FbCopyRect(0, 0, fb.w, fb.h);
@@ -804,7 +813,7 @@ Bool FbRegrid(I64 scale, CFontCfg *cfg = NULL)
         fb.scan_top = 0;
     }
     fb.top = 0; fb.cur_w = 0;
-    if (fb.gpu && !fb.venus) GpuCursorHide;
+    if (fb.gpu && !gui_active) GpuCursorHide;
     VtResize(fb.vt, cols, rows);
     fb.redraw_all = TRUE; fb.pending = TRUE;
     FbRenderLocked;

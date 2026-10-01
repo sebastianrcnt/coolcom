@@ -38,7 +38,7 @@ static void release_pixels(void *info, const void *data, size_t size)
     free((void *)data);
 }
 
-static CGImageRef framebuffer_image(void)
+static CGImageRef framebuffer_image(bool cursor)
 {
     CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
     uint8_t *visible = NULL;
@@ -46,7 +46,7 @@ static CGImageRef framebuffer_image(void)
     bool gpu_image = false;
     if (g.gpu && !gpu_image) {
         pthread_mutex_lock(&g.lock);
-        gpu_image = gpu_snapshot(&visible, &width, &height);
+        gpu_image = gpu_snapshot(&visible, &width, &height, cursor);
         pthread_mutex_unlock(&g.lock);
     }
     size_t size = (size_t)width * height * 4;
@@ -71,7 +71,7 @@ static CGImageRef framebuffer_image(void)
 
 bool display_screenshot(const char *path)
 {
-    CGImageRef image = framebuffer_image();
+    CGImageRef image = framebuffer_image(true);
     if (!image) return false;
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, strlen(path), false);
     CGImageDestinationRef dst = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, NULL);
@@ -98,10 +98,50 @@ static const uint16_t keymap[128] = {
     [123]=105,[124]=106,[125]=108,[126]=103
 };
 
-@interface VMView : NSView
+@interface VMView : NSView {
+    NSCursor *guestCursor;
+    uint64_t cursorSerial;
+    CGFloat cursorScaleX, cursorScaleY;
+}
+- (void)updateGuestCursor;
 @end
 @implementation VMView
 - (BOOL)acceptsFirstResponder { return YES; }
+- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:guestCursor ?: NSCursor.arrowCursor]; }
+- (void)updateGuestCursor {
+    if (!g.gpu) return;
+    uint32_t pixels[64*64],hx,hy;bool visible;
+    uint32_t w=g.fb_width,h=g.fb_height;
+    pthread_mutex_lock(&g.lock);
+    uint64_t serial=gpu_cursor_snapshot(pixels,&hx,&hy,&visible);
+    /* The current guest scanout may resize without changing the original FDT. */
+    w=gpu_display_width();h=gpu_display_height();
+    pthread_mutex_unlock(&g.lock);
+    CGFloat sx=self.bounds.size.width/w,sy=self.bounds.size.height/h;
+    if (serial==cursorSerial && sx==cursorScaleX && sy==cursorScaleY) return;
+    cursorSerial=serial;cursorScaleX=sx;cursorScaleY=sy;
+    NSCursor *next=nil;
+    if (visible) {
+        NSBitmapImageRep *rep=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+            pixelsWide:64 pixelsHigh:64 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES
+            isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:256 bitsPerPixel:32];
+        uint8_t *dst=rep.bitmapData;
+        for (unsigned i=0;i<64*64;i++) {
+            dst[4*i]=(pixels[i]>>16)&255;dst[4*i+1]=(pixels[i]>>8)&255;
+            dst[4*i+2]=pixels[i]&255;dst[4*i+3]=pixels[i]>>24;
+        }
+        NSImage *image=[[NSImage alloc] initWithSize:NSMakeSize(64*sx,64*sy)];
+        [image addRepresentation:rep];
+        next=[[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(hx*sx,hy*sy)];
+        [image release];[rep release];
+    }
+    [guestCursor release];guestCursor=next;
+    [self.window invalidateCursorRectsForView:self];
+    if (NSPointInRect([self convertPoint:self.window.mouseLocationOutsideOfEventStream fromView:nil],self.bounds))
+        [(guestCursor ?: NSCursor.arrowCursor) set];
+    if (getenv("COOLVM_CURSOR_DEBUG")) fprintf(stderr,"NATIVE CURSOR %s %llu %.3f %.3f %u %u\n",visible?"shape":"default",(unsigned long long)serial,(double)sx,(double)sy,hx,hy);
+}
+- (void)dealloc { [guestCursor release];[super dealloc]; }
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
@@ -115,7 +155,7 @@ static const uint16_t keymap[128] = {
         if (direct) return;
         venus_metal_hide();
 #endif
-        CGImageRef image = framebuffer_image();
+        CGImageRef image = framebuffer_image(false);
         CGContextDrawImage(ctx, NSRectToCGRect(self.bounds), image);
         CGImageRelease(image);
         return;
@@ -126,7 +166,7 @@ static const uint16_t keymap[128] = {
     if (fabs(device.width) != g.fb_width || fabs(device.height) != g.fb_height) {
         /* Interpolation across the ring seam needs neighboring visible rows.
          * Flatten scaled displays to retain the old whole-image filtering. */
-        CGImageRef image = framebuffer_image();
+        CGImageRef image = framebuffer_image(false);
         CGContextDrawImage(ctx, bounds, image);
         CGImageRelease(image);
         return;
@@ -254,6 +294,7 @@ void display_pump(double seconds)
             now = CFAbsoluteTimeGetCurrent();
             if (now >= next) {
                 next = now + (now < fast_until ? 0.001 : frame);
+                [view updateGuestCursor];
                 bool changed;
                 if (atomic_load(&g.fb_damage_used))
                     changed = atomic_exchange(&g.fb_damage, 0) != 0;

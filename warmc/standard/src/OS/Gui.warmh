@@ -27,6 +27,7 @@ module OS.Gui is
     function fill(window: &![Window], rect: Rect, color: Int64): Result[Unit, IoError];
     function line(window: &![Window], x0: Int64, y0: Int64, x1: Int64, y1: Int64, color: Int64): Result[Unit, IoError];
     function text(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64): Result[Unit, IoError];
+    function textClipped(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, clip: Rect): Result[Unit, IoError];
     function measure(value: Span[Nat8]): Int64;
     function label(window: &![Window], rect: Rect, value: Span[Nat8]): Result[Unit, IoError];
     function vertical(x: Int64, y: Int64, width: Int64, gap: Int64): Layout;
@@ -43,4 +44,7 @@ module OS.Gui is
     function textInput(window: &![Window], input: &![TextInput, R], rect: Rect, event: Event): Result[Bool, IoError];
     function addMenu(window: &![Window], title: Span[Nat8]): Result[Int64, IoError];
     function addMenuItem(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8]): Result[Unit, IoError];
+    -- Desktop authority changes terminal fonts; chrome remains bitmap art.
+    function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError];
+    function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError];
 end module.

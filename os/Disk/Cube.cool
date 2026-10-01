@@ -1,5 +1,5 @@
 // Interactive GPU 3D scene. Load once: #include "C:/Cube.cool", then Cube;
-// Requires the existing resident Venus terminal; no kernel/API changes.
+// Requires the resident Venus device. GuiCube; launches a task-owned window.
 #include "C:/Vulkan/Gfx.cool"
 #include "C:/Vulkan/Render.cool"
 class CCubeParams {U32i w, h; I32i ms, yaw, pitch, distance, pan_x, pan_y;};
@@ -12,6 +12,8 @@ class CCubeDemo
     Bool active, locked, hooks, paused;
     I64 daif, w, h, frames;
     CCubeParams params;
+    CGuiWindow *window;
+    I64 mouse_x, mouse_y; Bool mouse_down;
 };
 CCubeDemo cube;
 U64i cube_ids;
@@ -147,12 +149,14 @@ U0 CubeTarget()
     // Recreate only on resize. Object ids never repeat, including across runs.
     CubeTargetClose;
     cube.w = fb.w; cube.h = fb.h;
+    if (cube.window) {cube.w = cube.window->w * cube.window->scale; cube.h = cube.window->h * cube.window->scale;}
     GfxCheck(cube.w >= 160 && cube.h >= 120 && cube.w <= 4096 && cube.h <= 4096, "cube display size");
     cube.params.w = cube.w; cube.params.h = cube.h;
     GfxImageCreate(&cube.target, cube.w, cube.h, VK_FORMAT_B8G8R8A8_UNORM,
                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     GfxBufferCreate(&cube.readback, cube.w * cube.h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     CubePipeline(cube.w, cube.h, cube.shaders, &cube.layout, &cube.pipeline);
+    if (cube.window) Print("CUBE WINDOW SIZE %dx%d\n", cube.w, cube.h);
 }
 U0 CubeClose()
 {//Called normally, after a caught GPU failure, or by the shell on Ctrl+Alt+C.
@@ -241,7 +245,8 @@ U0 CubeDraw()
     VkRenderingAttachmentInfo attachment; VkRenderingInfo rendering;
     VkBufferImageCopy copy; VkMemoryBarrier barrier;
     I64 scale = 2;
-    if (cube.w != fb.w || cube.h != fb.h) CubeTarget;
+    if (cube.window) {if (cube.w != cube.window->w * cube.window->scale || cube.h != cube.window->h * cube.window->scale) CubeTarget;}
+    else if (cube.w != fb.w || cube.h != fb.h) CubeTarget;
     MemSet(&attachment, 0, sizeof(attachment)); attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     attachment.imageView = cube.target.view; attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -275,7 +280,12 @@ U0 CubeDraw()
     CubeText("WASD MOVE  ARROWS LOOK  +/- ZOOM", 26, cube.h - 54, scale, 0xA0BAC7);
     CubeText("SPACE PAUSE  R RESET  Q QUIT", 26, cube.h - 30, scale, 0xA0BAC7);
     ArchDsb;
-    GfxCheck(GpuScanoutBlob(cube.readback.blob, cube.w, cube.h, cube.w * 4), "cube scanout");
+    if (cube.window) {
+        I64 stride, row; U32 *pixels = GrPixels(&stride);
+        GfxCheck(pixels != NULL, "cube window surface");
+        for (row = 0; row < cube.h; row++) MemCpy(pixels(U8 *) + row * stride, cube.readback.mapping + row * cube.w * 4, cube.w * 4);
+        GrDirty(0, 0, cube.window->w, cube.window->h);
+    } else GfxCheck(GpuScanoutBlob(cube.readback.blob, cube.w, cube.h, cube.w * 4), "cube scanout");
     cube.frames++;
 }
 U0 CubeReset()
@@ -313,7 +323,7 @@ U0 Cube(I64 max_frames = 0)
     if (!fb.venus || !venus_frame_hook || !venus_fill_hook) {
         Print("Cube needs the Venus terminal and its local framebuffer (make cube-run).\n"); return;
     }
-    if (Fs->terminal != vt_screen) {Print("Run Cube in the main framebuffer shell, outside Tmux.\n"); return;}
+    if (!GrWindow && Fs->terminal != vt_screen) {Print("Run Cube in the main framebuffer shell, outside Tmux.\n"); return;}
     vert = FileRead("C:/Vulkan/cube.vert.spv", &vert_size);
     frag = FileRead("C:/Vulkan/cube.frag.spv", &frag_size);
     if (!vert || !frag || vert_size < 20 || frag_size < 20 || (vert_size & 3) || (frag_size & 3) ||
@@ -321,6 +331,7 @@ U0 Cube(I64 max_frames = 0)
         Free(vert); Free(frag); Print("Cube shaders missing or invalid; run make cube-disk.\n"); return;
     }
     MemSet(&cube, 0, sizeof(CCubeDemo)); MemSet(&gfx, 0, sizeof(CGfx));
+    cube.window = GrWindow;
     cube.active = TRUE; shell_stmt_cleanup = &CubeClose;
     gfx.next_id = cube_ids; if (!gfx.next_id) gfx.next_id = (Fs->task_num + 1) << 32;
     gfx.no_sleep = TRUE; gfx.soft_fail = TRUE;
@@ -330,16 +341,31 @@ U0 Cube(I64 max_frames = 0)
         // Recheck ownership while serialized with other framebuffer clients.
         GfxCheck(fb.venus && venus_fill_hook != NULL, "cube display already in use");
         cube.frame_hook = venus_frame_hook; cube.fill_hook = venus_fill_hook; cube.finish_hook = venus_finish_hook;
-        finish = cube.finish_hook; if (finish) (*finish)();
-        FbVenusHooks(&CubeConsole, NULL, &CubeFinish); cube.hooks = TRUE;
+        if (!cube.window) {
+            finish = cube.finish_hook; if (finish) (*finish)();
+            FbVenusHooks(&CubeConsole, NULL, &CubeFinish); cube.hooks = TRUE;
+        }
         CubeGpuInit;
         cube.shaders[0] = CubeShader(vert, vert_size); cube.shaders[1] = CubeShader(frag, frag_size);
         CubeTarget; CubeDraw; CubeUnlock;
         Free(vert); vert = NULL; Free(frag); frag = NULL;
+        if (cube.window) {Print("CUBE WINDOW READY\n"); GuiAddMenu(cube.window, "File"); GuiAddMenuItem(cube.window, 0, 0, "Close");}
         Print("CUBE READY\n"); last = ArchCntVct;
         while (running && (!max_frames || cube.frames < max_frames)) {
             deadline = ArchCntVct + cnt_freq / 30;
-            while (KeyPending && running) running = CubeKey(GetKey & KEY_CODE);
+            if (cube.window) {
+                CGuiEvent event;
+                while (GuiPoll(&event) && running) {
+                    if (event.type == GUI_EVENT_CLOSE || (event.type == GUI_EVENT_MENU && !event.key)) running = FALSE;
+                    else if (event.type == GUI_EVENT_KEY) {running = CubeKey(event.key & KEY_CODE); Print("CUBE WINDOW KEY\n");}
+                    else if (event.type == GUI_EVENT_MOUSE) {
+                        if ((event.buttons & 1) && cube.mouse_down) {cube.params.yaw += (event.x - cube.mouse_x) * 10; cube.params.pitch += (event.y - cube.mouse_y) * 5;}
+                        cube.mouse_down = event.buttons & 1; cube.mouse_x = event.x; cube.mouse_y = event.y;
+                        cube.params.distance = ClampI64(cube.params.distance - event.wheel * 220, 2800, 18000);
+                        cube.params.pitch = ClampI64(cube.params.pitch, 50, 1200);
+                    }
+                }
+            } else while (KeyPending && running) running = CubeKey(GetKey & KEY_CODE);
             if (!running) break;
             now = ArchCntVct;
             if (!cube.paused) cube.params.ms = (cube.params.ms + (now - last) * 1000 / cnt_freq) % 600000;
@@ -352,4 +378,10 @@ U0 Cube(I64 max_frames = 0)
     } catch {Fs->catch_except = TRUE; Print("Cube stopped after a graphics error.\n");}
     Free(vert); Free(frag); CubeClose;
     Print("CUBE CLOSED frames=%d\n", cube.frames);
+}
+
+U0 CubeWindow(I64 max_frames = 0)
+{
+    if (!GuiNewPixel("Cube", 480, 300)) {Print("CubeWindow needs an independent GUI task. Use GuiCube;\n"); return;}
+    Cube(max_frames);
 }

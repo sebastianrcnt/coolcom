@@ -20,6 +20,7 @@ static struct {
     uint32_t events, width, height, scan_id, sx, sy, sw, sh;
     uint32_t scale; /* coolcom extension, config offset 0x10: the display's backing scale (1 or 2) */
     uint32_t cursor[64*64], cx, cy, hx, hy;
+    uint64_t cursor_serial;
     bool cursor_on, active, venus;
     uint64_t bytes;
     uint32_t stub_ctx, shm_sel;
@@ -64,6 +65,7 @@ static size_t command(unsigned queue,const uint8_t *p,size_t len,uint8_t *out,si
             else {
                 gpu.cx=vio32(p+28);gpu.cy=vio32(p+32);
                 if(type==0x300) {
+                    gpu.cursor_serial++;
                     gpu.cursor_on=r!=NULL;gpu.hx=vio32(p+44);gpu.hy=vio32(p+48);
                     if(r) {
                         memcpy(gpu.cursor,r->pixels,sizeof gpu.cursor);
@@ -168,8 +170,8 @@ static void process(unsigned queue)
             if(!(flags&1)){done=true;break;}id=next;
         } while(valid);
         uint32_t written=0;
-        if(valid && done && nr>=24 && capacity>=24) {
-            size_t n=command(queue,req,nr,reply,capacity<sizeof reply?capacity:sizeof reply),off=0;
+        if(valid && done && nr>=24 && (capacity>=24 || queue==1)) {
+            size_t n=command(queue,req,nr,reply,queue==1?sizeof reply:(capacity<sizeof reply?capacity:sizeof reply)),off=0;
             for(unsigned i=0;i<nw && off<n;i++){size_t bytes=writable[i].len;if(bytes>n-off)bytes=n-off;memcpy(writable[i].p,reply+off,bytes);off+=bytes;}
             written=(uint32_t)off;
         } else LOGE("gpu: malformed chain %u\n",head);
@@ -204,7 +206,7 @@ bool gpu_mmio(uint64_t off,int size,bool wr,uint64_t *val)
     if(wr && off==0x50){if(x>=2)return false;process(x);return true;}
     if(wr && off==0x70 && x==0) {
         for(unsigned i=0;i<GPU_RESOURCES;i++)discard(&gpu.res[i]);
-        memset(&gpu.v,0,sizeof gpu.v);gpu.scan_id=0;gpu.cursor_on=false;gpu.active=false;
+        memset(&gpu.v,0,sizeof gpu.v);gpu.scan_id=0;gpu.cursor_on=false;gpu.cursor_serial++;gpu.active=false;
         if(gpu.venus){gpu3d_reset();gpu.venus=gpu3d_init();}
         gpu.stub_ctx=0;gpu.shm_sel=0;features();
     } else if(!virtio_regs(&gpu.v,16,off,wr,&x))return false;
@@ -224,16 +226,18 @@ void gpu_resize(uint32_t width,uint32_t height)
     if(width!=gpu.width || height!=gpu.height){gpu.width=width;gpu.height=height;gpu.events|=1;gpu.v.generation++;gpu.v.isr|=2;aic_update_locked();}
     pthread_mutex_unlock(&g.lock);
 }
-/* Copy the visible resource crop and ARGB hardware cursor, atomically relative
- * to queue processing. Caller holds g.lock. */
-bool gpu_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
+/* Native AppKit shape changes ignore MOVE_CURSOR; absolute input already tracks
+ * the Mac pointer. Exported images include its last guest position/hotspot. */
+uint32_t gpu_display_width(void){return gpu.width;}
+uint32_t gpu_display_height(void){return gpu.height;}
+uint64_t gpu_cursor_snapshot(uint32_t *pixels,uint32_t *hx,uint32_t *hy,bool *visible)
 {
-    if(gpu.venus && gpu3d_snapshot(pixels,width,height))return true;
-    if(!gpu.active)return false;
-    struct gpu_resource *r=resource(gpu.scan_id);
-    uint32_t w=r?gpu.sw:gpu.width,h=r?gpu.sh:gpu.height;
-    uint8_t *dst=calloc((size_t)w*h,4);if(!dst)return false;
-    if(r)for(uint32_t y=0;y<h;y++)memcpy(dst+(size_t)y*w*4,r->pixels+((size_t)(gpu.sy+y)*r->w+gpu.sx)*4,w*4);
+    *visible=gpu.cursor_on;*hx=gpu.hx;*hy=gpu.hy;
+    if(pixels)memcpy(pixels,gpu.cursor,sizeof gpu.cursor);
+    return gpu.cursor_serial;
+}
+static void cursor_compose(uint8_t *dst,uint32_t w,uint32_t h)
+{
     if(gpu.cursor_on)for(int y=0;y<64;y++)for(int x=0;x<64;x++) {
         int64_t dx=(int64_t)gpu.cx-gpu.hx+x,dy=(int64_t)gpu.cy-gpu.hy+y;
         if(dx<0 || dy<0 || dx>=w || dy>=h)continue;
@@ -241,5 +245,17 @@ bool gpu_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height)
         for(int b=0;b<24;b+=8)out|=((((s>>b)&255)*a+((*d>>b)&255)*(255-a)+127)/255)<<b;
         *d=out;
     }
+}
+/* Copy the visible resource crop and ARGB hardware cursor, atomically relative
+ * to queue processing. Caller holds g.lock. */
+bool gpu_snapshot(uint8_t **pixels,uint32_t *width,uint32_t *height,bool cursor)
+{
+    if(gpu.venus && gpu3d_snapshot(pixels,width,height)){if(cursor)cursor_compose(*pixels,*width,*height);return true;}
+    if(!gpu.active)return false;
+    struct gpu_resource *r=resource(gpu.scan_id);
+    uint32_t w=r?gpu.sw:gpu.width,h=r?gpu.sh:gpu.height;
+    uint8_t *dst=calloc((size_t)w*h,4);if(!dst)return false;
+    if(r)for(uint32_t y=0;y<h;y++)memcpy(dst+(size_t)y*w*4,r->pixels+((size_t)(gpu.sy+y)*r->w+gpu.sx)*4,w*4);
+    if(cursor)cursor_compose(dst,w,h);
     *pixels=dst;*width=w;*height=h;return true;
 }

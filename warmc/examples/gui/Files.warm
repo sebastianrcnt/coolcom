@@ -1,0 +1,106 @@
+import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button, List, TextInput,
+    acquireGui, releaseGui, close, fill, text, textClipped, button, listFrame, listItem, makeTextInput, destroyTextInput,
+    inputText, textInput, addMenu, addMenuItem);
+import GuiSupport (openWindow, nextEvent, shouldClose, drawString, drawNumber, copy, joinPath, parentPath, matches, index64);
+import OS.File (Filesystem, Bytes, acquireFilesystem, releaseFilesystem, readAll, byteSize, nth, closeBytes);
+import OS.Dir (Dir, Entries, Entry, openRoot, openDir, closeDir, entries, next, closeEntries, narrow, readOnly);
+import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
+import OS.Error (IoError);
+import Standard.String (String, length, getSpan, nthByte, destroyString);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+module body GuiFiles is
+    private function listing(dir: &[Dir]): Entries is
+        case entries(dir) of when Ok(value as list: Entries) do return list; when Err(error as e: IoError) do abort("Directory listing failed"); end case; end;
+    private function count(dir: &[Dir], filter: Span[Nat8]): Int64 is
+        var iterator: Entries := listing(dir); var total: Int64 := 0; var more: Bool := true;
+        while more do case next(&!iterator) of when Some(value as row: Entry) do
+                    let { name: String, size: Index, isDir: Bool, modified: Int64 } := row;
+                    if matches(&name, filter) then total := total + 1; end if; destroyString(name);
+                when None do more := false; end case; end while; closeEntries(iterator); return total; end;
+    private function readPreview(bytes: &[Bytes]): String is
+        var builder: StringBuilder := makeStringBuilder(); var at: Index := 0;
+        while at < byteSize(bytes) and at < 1024 do
+            let b: Nat8 := nth(bytes, at); if b >= 32 or b = 10 then writeByte(&!builder, b); else if b /= 13 then writeByte(&!builder, 46); end if; at := at + 1;
+        end while; return finalize(builder); end;
+    private function preview(window: &![Window], string: &[String]): Unit is
+        var at: Index := 0; var row: Int64 := 0;
+        while at < length(string) and row < 10 do
+            let start: Index := at; var columns: Int64 := 0;
+            while at < length(string) and columns < 28 and nthByte(string, at) /= 10 do at := at + 1; columns := columns + 1; end while;
+            if at > start then textClipped(&~window, 272, 84 + row * 20, getSpan(string, start, at - 1), 0, Rect(x => 272, y => 84 + row * 20, width => 224, height => 20)); end if;
+            if at < length(string) and nthByte(string, at) = 10 then at := at + 1; end if; row := row + 1;
+        end while; return nil; end;
+    private function rowTitle(name: &[String], isDir: Bool): String is
+        var builder: StringBuilder := makeStringBuilder();
+        if isDir then writeByte(&!builder, 91); writeByte(&!builder, 68); writeByte(&!builder, 93); writeByte(&!builder, 32); end if;
+        var at: Index := 0; while at < length(name) do writeByte(&!builder, nthByte(name, at)); at := at + 1; end while; return finalize(builder); end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial; var gui: Gui := acquireGui(&!root); let tasks: Tasks := acquireTasks(&!root);
+        var fs: Filesystem := acquireFilesystem(&!root); let rootDir: Dir := narrow(openRoot(&!fs), readOnly()); var dir: Dir := narrow(openRoot(&!fs), readOnly());
+        var path: String := copy(""); var selected: String := copy(""); var selectedDir: Bool := false; var content: String := copy(""); var fileBytes: Int64 := 0;
+        var w: Window := openWindow(&!gui, "Files", 520, 340); var filter: TextInput := makeTextInput();
+        var rows: List := List(selected => -1, first => 0); var up: Button := Button(pressed => false); var openButton: Button := Button(pressed => false);
+        case addMenu(&!w, "File") of when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 0, "Close"); when Err(error as e: IoError) do skip; end case;
+        var running: Bool := true; var redraw: Bool := true;
+        while running do
+            let e: Event := nextEvent(&!w); running := not shouldClose(e);
+            var draw: Bool := true; case e of when Idle do draw := redraw; when Close do skip; when Menu(id as id: Int64) do skip;
+                when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wheel: Int64) do skip;
+                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip; end case;
+            if draw then
+                fill(&!w, Rect(x => 0, y => 0, width => 520, height => 340), 16777215);
+                text(&!w, 12, 12, "C:/", 0); drawString(&!w, 36, 12, &path); text(&!w, 12, 42, "Filter", 0);
+                case textInput(&!w, &!filter, Rect(x => 72, y => 36, width => 232, height => 28), e) of
+                    when Ok(value as changed: Bool) do if changed then rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy(""); destroyString(content); content := copy(""); fileBytes := 0; printLn("GUI FILES FILTER"); end if;
+                    when Err(error as error: IoError) do skip; end case;
+                let total: Int64 := count(&dir, inputText(&filter));
+                listFrame(&!w, &!rows, Rect(x => 12, y => 78, width => 244, height => 222), total, e);
+                let firstRow: Int64 := rows.first; var i: Int64 := 0; var more: Bool := true; var iterator: Entries := listing(&dir);
+                while more do case next(&!iterator) of when Some(value as row: Entry) do
+                            let { name: String, size: Index, isDir: Bool, modified: Int64 } := row;
+
+                            if matches(&name, inputText(&filter)) then
+                                if i >= firstRow and i < firstRow + 10 then
+                                    let y: Int64 := 79 + (i - firstRow) * 20;
+
+                                    let title: String := rowTitle(&name, isDir);
+                                    case listItem(&!w, &!rows, Rect(x => 13, y => y, width => 226, height => 20), i, getSpan(&title, 0, length(&title) - 1), e) of
+                                        when Ok(value as clicked: Bool) do if clicked then destroyString(selected); selected := copy(getSpan(&name, 0, length(&name) - 1)); selectedDir := isDir; printLn("GUI FILES SELECTED"); end if;
+                                        when Err(error as error: IoError) do skip; end case; destroyString(title);
+                                end if; i := i + 1;
+                            end if; destroyString(name);
+                        when None do more := false; end case; end while; closeEntries(iterator);
+                text(&!w, 12, 312, "Items", 0); drawNumber(&!w, 60, 312, total);
+                var goUp: Bool := false; var goOpen: Bool := false;
+                case button(&!w, &!up, Rect(x => 424, y => 36, width => 72, height => 28), "Up", e, false) of when Ok(value as clicked: Bool) do goUp := clicked; when Err(error as error: IoError) do skip; end case;
+                case button(&!w, &!openButton, Rect(x => 336, y => 36, width => 72, height => 28), "Open", e, true) of when Ok(value as clicked: Bool) do goOpen := clicked; when Err(error as error: IoError) do skip; end case;
+                redraw := false;
+                if goUp then
+                    let parent: String := parentPath(&path);
+                    if length(&parent) = 0 then closeDir(dir); dir := narrow(openRoot(&!fs), readOnly()); destroyString(path); path := parent;
+                    else case openDir(&rootDir, getSpan(&parent, 0, length(&parent) - 1)) of
+                            when Ok(value as nextDir: Dir) do closeDir(dir); dir := nextDir; destroyString(path); path := parent;
+                            when Err(error as error: IoError) do destroyString(parent);
+                        end case; end if;
+                    rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy(""); destroyTextInput(filter); filter := makeTextInput(); destroyString(content); content := copy(""); fileBytes := 0; redraw := true; printLn("GUI FILES UP");
+                else if goOpen and length(&selected) > 0 then
+                    if selectedDir then
+                        let nextPath: String := joinPath(&path, &selected);
+                        case openDir(&rootDir, getSpan(&nextPath, 0, length(&nextPath) - 1)) of
+                            when Ok(value as nextDir: Dir) do closeDir(dir); dir := nextDir; destroyString(path); path := nextPath;
+                            when Err(error as error: IoError) do destroyString(nextPath);
+                        end case;
+                        rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy(""); destroyTextInput(filter); filter := makeTextInput(); destroyString(content); content := copy(""); fileBytes := 0; redraw := true; printLn("GUI FILES DIRECTORY");
+                    else
+                        case readAll(&dir, getSpan(&selected, 0, length(&selected) - 1)) of
+                            when Ok(value as bytes: Bytes) do destroyString(content); content := readPreview(&bytes); fileBytes := index64(byteSize(&bytes)); closeBytes(bytes); printLn("GUI FILES PREVIEW");
+                            when Err(error as error: IoError) do text(&!w, 272, 84, "Unable to read file", 0);
+                        end case;
+                    end if;
+                end if;
+                preview(&!w, &content); if fileBytes > 0 then text(&!w, 272, 312, "Bytes", 0); drawNumber(&!w, 320, 312, fileBytes); end if;
+                printLn("GUI FILES PAINTED");
+            end if; sleep(&tasks, 10);
+        end while; destroyTextInput(filter); destroyString(path); destroyString(selected); destroyString(content); closeDir(dir); closeDir(rootDir); releaseFilesystem(fs);
+        close(w); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI FILES CLOSED"); return ExitSuccess(); end;
+end module body.

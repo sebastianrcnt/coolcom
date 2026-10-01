@@ -26,3 +26,8 @@ and modifier bits. Menu contains the application-supplied action id.
 Menus belong to the focused application. addMenu adds a menu-bar label and
 addMenuItem adds an action. The System menu opens shells or the drawing demo
 and returns to the terminal. Escape dismisses; arrows/Enter navigate a popup.
+
+setScale changes desktop/terminal backing to 1x or 2x. setFont selects Unifont
+or the optional installed Sarasa Mono K (size 6..96); it returns NotFound when
+the font is absent. Chrome keeps integer-scaled bitmap glyphs. textClipped
+restricts text to a control rectangle, including wide or long labels.

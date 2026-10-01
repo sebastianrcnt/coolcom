@@ -54,8 +54,12 @@ module body OS.Gui is
         return status(rawLine(window->handle, x0, y0, x1, y1, color)); end;
     function text(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64): Result[Unit, IoError] is
         return status(rawText(window->handle, x, y, spanToPointer(value), spanLength(value), color)); end;
+    pragma Foreign_Import(External_Name => "WgTextClip");
+    private function rawTextClip(handle: Int64, x: Int64, y: Int64, value: Pointer[Nat8], byteCount: Index, color: Int64, cx: Int64, cy: Int64, width: Int64, height: Int64): Int64 is end;
+    function textClipped(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, clip: Rect): Result[Unit, IoError] is
+        return status(rawTextClip(window->handle, x, y, spanToPointer(value), spanLength(value), color, clip.x, clip.y, clip.width, clip.height)); end;
     function measure(value: Span[Nat8]): Int64 is return rawMeasure(spanToPointer(value), spanLength(value)); end;
-    function label(window: &![Window], rect: Rect, value: Span[Nat8]): Result[Unit, IoError] is return text(&~window, rect.x, rect.y, value, 0); end;
+    function label(window: &![Window], rect: Rect, value: Span[Nat8]): Result[Unit, IoError] is return textClipped(&~window, rect.x, rect.y, value, 0, rect); end;
     function vertical(x: Int64, y: Int64, width: Int64, gap: Int64): Layout is return Layout(x => x, y => y, width => width, gap => gap); end;
     function nextRow(layout: &![Layout], height: Int64): Rect is
         let r: Rect := Rect(x => layout->x, y => layout->y, width => layout->width, height => height);
@@ -86,7 +90,7 @@ module body OS.Gui is
         if state->pressed then fg := 16777215; bg := 0; end if;
         roundFill(&~window, rect, fg);
         roundFill(&~window, Rect(x => rect.x + inset, y => rect.y + inset, width => rect.width - 2 * inset, height => rect.height - 2 * inset), bg);
-        text(&~window, rect.x + (rect.width - measure(value)) / 2, rect.y + (rect.height - 16) / 2, value, fg);
+        textClipped(&~window, rect.x + (rect.width - measure(value)) / 2, rect.y + (rect.height - 16) / 2, value, fg, rect);
         return Ok(value => clicked); end;
     function scrollBar(window: &![Window], rect: Rect, first: Int64, count: Int64, page: Int64, event: Event): Result[Int64, IoError] is
         var maximum: Int64 := count - page; if maximum < 0 then maximum := 0; end if;
@@ -132,7 +136,7 @@ module body OS.Gui is
             when Close do skip; when Menu(id as id: Int64) do skip;
         end case;
         var fg: Int64 := 0; var bg: Int64 := 16777215; if state->selected = index then fg := 16777215; bg := 0; end if;
-        fill(&~window, rect, bg); text(&~window, rect.x + 4, rect.y + 2, value, fg); return Ok(value => clicked); end;
+        fill(&~window, rect, bg); textClipped(&~window, rect.x + 4, rect.y + 2, value, fg, rect); return Ok(value => clicked); end;
     function makeTextInput(): TextInput is return TextInput(data => makeString(256, 0), length => 0, cursor => 0, focused => false); end;
     function destroyTextInput(input: TextInput): Unit is let { data: String, length: Index, cursor: Index, focused: Bool } := input; destroyString(data); return nil; end;
     generic [R: Region]
@@ -214,4 +218,11 @@ module body OS.Gui is
         if menu < 0 then return Err(error => fromCode(menu)); end if; return Ok(value => menu); end;
     function addMenuItem(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8]): Result[Unit, IoError] is
         return status(rawMenuItem(window->handle, menu, id, spanToPointer(value), spanLength(value))); end;
+    pragma Foreign_Import(External_Name => "WgScale");
+    private function rawScale(scale: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgFont");
+    private function rawFont(choice: Int64, pointSize: Int64): Int64 is end;
+    function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError] is return status(rawScale(scale)); end;
+    function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError] is
+        var choice: Int64 := 0; if systemMono then choice := 1; end if; return status(rawFont(choice, pointSize)); end;
 end module body.

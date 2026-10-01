@@ -23,11 +23,11 @@ def boot(mode):
     script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n'
     script += testvm.typed('GuiDraw; GuiDraw; GuiDraw;\n') + 'wait GUI DRAW READY5\n'
     # Move from (400,300) to (140,205): local (20,50) in the last window.
-    script += '2 0 -260\n2 1 -95\n1 272 1\n1 272 0\nwait GUI DRAW MOUSE 20 50\n'
+    script += testvm.pointer_absolute(140, 205, 800, 600) + '1 272 1\n1 272 0\nwait GUI DRAW MOUSE 20 50\n'
     # An entire burst must survive unchanged even with five windows.
     for _ in range(80):
         script += testvm.typed('p', delay=0)
-    script += 'delay 100\nquit\n'
+    script += 'wait GUI DRAW PONG \n' * 80 + 'delay 100\nquit\n'
     (d / 'input.txt').write_text(script)
     vm = ROOT / ('build/coolvm-venus' if mode == 'venus' else 'build/coolvm')
     testvm.run_vm(testvm.vm_command(KERNEL, executable=vm, no_venus=mode == 'cpu', size=(800, 600),

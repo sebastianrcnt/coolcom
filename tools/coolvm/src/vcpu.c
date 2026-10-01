@@ -27,7 +27,7 @@ void fb_frame_dump(void)
     if (fd < 0) return;
     uint32_t width=g.fb_width, height=g.fb_height;
     uint8_t *visible=NULL;
-    if (!g.gpu || !gpu_snapshot(&visible,&width,&height)) {
+    if (!g.gpu || !gpu_snapshot(&visible,&width,&height,true)) {
         visible=malloc((size_t)width*height*4);
         if (!visible) { close(fd); return; }
         fb_snapshot(visible);

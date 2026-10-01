@@ -10,3 +10,8 @@ I64 WgPoll(I64 handle) {return -1;}
 I64 WgField(I64 handle, I64 field) {return -1;}
 I64 WgMenu(I64 handle, U8 *title, U64 size) {return -1;}
 I64 WgMenuItem(I64 handle, I64 menu, I64 id, U8 *label, U64 size) {return -1;}
+
+I64 WgScale(I64 scale) {return -1;}
+I64 WgFont(I64 choice, I64 size) {return -1;}
+
+I64 WgTextClip(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 cx, I64 cy, I64 width, I64 height) {return -1;}

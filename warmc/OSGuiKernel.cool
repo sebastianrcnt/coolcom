@@ -72,3 +72,18 @@ I64 WgMenuItem(I64 handle, I64 menu, I64 id, U8 *label, U64 size)
     s = WkString(label, size); if (!s) return -12;
     result = GuiAddMenuItem(w, menu, id, s); Free(s); return result;
 }
+
+I64 WgScale(I64 scale) {if (!gui_active || Gs->num) return -1; if (scale != 1 && scale != 2) return -12; if (FontScale(scale) != scale) return -1; return 0;}
+I64 WgFont(I64 choice, I64 size)
+{
+    if (!gui_active || Gs->num) return -1; if (choice < 0 || choice > 1 || size < 6 || size > 96) return -12;
+    U8 *path = NULL; if (choice) path = "C:/Fonts/SarasaMonoK-Regular.ttf";
+    if (!FontSet(path, size)) return -10; return 0;
+}
+
+I64 WgTextClip(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 cx, I64 cy, I64 width, I64 height)
+{
+    U8 *s; if (!WgWindow(handle)) return -16;
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || cx < -32768 || cx > 32767 || cy < -32768 || cy > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
+    s = WkString(text, size); if (!s) return -12; GrTextClip(x, y, s, color, cx, cy, width, height); Free(s); return 0;
+}

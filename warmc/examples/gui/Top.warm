@@ -1,0 +1,65 @@
+import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button, List,
+    acquireGui, releaseGui, close, fill, text, button, listFrame, listItem, addMenu, addMenuItem);
+import GuiSupport (openWindow, nextEvent, shouldClose, drawString, drawNumber, index64);
+import OS.CoolOS.System (System, Snapshot, TaskInfo, HeapInfo, Clock, acquireSystem, releaseSystem,
+    snapshotTasks, snapshotCount, snapshotTask, snapshotName, releaseSnapshot, heapStats, killTask, clock);
+import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
+import OS.Error (IoError);
+import Standard.String (String, length, getSpan, destroyString);
+module body GuiTop is
+    private function sample(system: &[System]): Snapshot is
+        case snapshotTasks(system, 256) of when Ok(value as s: Snapshot) do return s; when Err(error as e: IoError) do abort("Task snapshot failed"); end case; end;
+    private function time(system: &[System]): Clock is
+        case clock(system) of when Ok(value as c: Clock) do return c; when Err(error as e: IoError) do abort("Clock failed"); end case; end;
+    private function oldTicks(snapshot: &[Snapshot], id: Int64, fallback: Int64): Int64 is
+        var i: Index := 0; while i < snapshotCount(snapshot) do
+            case snapshotTask(snapshot, i) of when Ok(value as info: TaskInfo) do if info.taskNum = id then return info.ticks; end if; when Err(error as e: IoError) do skip; end case;
+            i := i + 1; end while; return fallback; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial; var gui: Gui := acquireGui(&!root); let tasks: Tasks := acquireTasks(&!root);
+        var system: System := acquireSystem(&!root); var w: Window := openWindow(&!gui, "Top", 520, 340);
+        var previous: Snapshot := sample(&system); var before: Clock := time(&system);
+        var rows: List := List(selected => -1, first => 0); var refresh: Button := Button(pressed => false); var kill: Button := Button(pressed => false);
+        var selectedTask: Int64 := 0; var running: Bool := true; var first: Bool := true;
+        case addMenu(&!w, "File") of when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 0, "Close"); when Err(error as e: IoError) do skip; end case;
+        while running do
+            let e: Event := nextEvent(&!w); running := not shouldClose(e); let now: Clock := time(&system);
+            var draw: Bool := true; case e of when Idle do draw := first or now.uptimeJiffies - before.uptimeJiffies >= 1000;
+                when Close do skip; when Menu(id as id: Int64) do skip; when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wheel: Int64) do skip;
+                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip; end case;
+            if draw then
+                let current: Snapshot := sample(&system);
+                fill(&!w, Rect(x => 0, y => 0, width => 520, height => 340), 16777215);
+                text(&!w, 16, 12, "Heap MB", 0);
+                case heapStats(&system) of when Ok(value as heap: HeapInfo) do drawNumber(&!w, 88, 12, heap.used / 1048576); text(&!w, 136, 12, "/", 0); drawNumber(&!w, 152, 12, heap.total / 1048576); when Err(error as error: IoError) do skip; end case;
+                text(&!w, 16, 38, "Task                     ID   Core CPU% State", 0);
+                listFrame(&!w, &!rows, Rect(x => 12, y => 58, width => 496, height => 222), index64(snapshotCount(&current)), e);
+                var i: Index := 0; var visible: Int64 := 0; let firstRow: Int64 := rows.first;
+                while i < snapshotCount(&current) do
+                    if index64(i) >= firstRow and visible < 10 then
+                        case snapshotTask(&current, i) of when Ok(value as info: TaskInfo) do
+                                case snapshotName(&current, i) of when Ok(value as name: String) do
+                                        case listItem(&!w, &!rows, Rect(x => 13, y => 59 + visible * 20, width => 210, height => 20), index64(i), getSpan(&name, 0, length(&name) - 1), e) of
+                                            when Ok(value as clicked: Bool) do if clicked then selectedTask := info.taskNum; printLn("GUI TOP SELECTED"); end if;
+                                            when Err(error as error: IoError) do skip; end case;
+                                        destroyString(name);
+                                    when Err(error as error: IoError) do skip; end case;
+                                let y: Int64 := 61 + visible * 20; drawNumber(&!w, 232, y, info.taskNum); drawNumber(&!w, 288, y, info.core);
+                                var share: Int64 := 0; if now.ticks > before.ticks then share := 100 * (info.ticks - oldTicks(&previous, info.taskNum, info.ticks)) / (now.ticks - before.ticks); end if;
+                                if share < 0 then share := 0; end if; if share > 100 then share := 100; end if;
+                                drawNumber(&!w, 328, y, share); var state: Span[Nat8, Static] := "ready";
+                                if info.state = 0 then state := "run"; else if info.state = 2 then state := "sleep"; else if info.state = 3 then state := "stop"; else if info.state = 4 then state := "kill"; end if;
+                                text(&!w, 384, y, state, 0);
+                            when Err(error as error: IoError) do skip; end case;
+                        visible := visible + 1;
+                    end if; i := i + 1;
+                end while;
+                case button(&!w, &!refresh, Rect(x => 16, y => 296, width => 112, height => 28), "Refresh", e, true) of when Ok(value as clicked: Bool) do skip; when Err(error as error: IoError) do skip; end case;
+                case button(&!w, &!kill, Rect(x => 392, y => 296, width => 112, height => 28), "Kill", e, false) of
+                    when Ok(value as clicked: Bool) do if clicked and selectedTask > 0 then case killTask(&!system, selectedTask) of when Ok(value as u: Unit) do printLn("GUI TOP KILLED"); when Err(error as error: IoError) do printLn("GUI TOP KILL DENIED"); end case; end if;
+                    when Err(error as error: IoError) do skip; end case;
+                releaseSnapshot(previous); previous := current; before := now;
+                if first then first := false; printLn("GUI TOP READY"); end if;
+            end if; sleep(&tasks, 10);
+        end while; releaseSnapshot(previous); close(w); releaseSystem(system); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI TOP CLOSED"); return ExitSuccess(); end;
+end module body.
