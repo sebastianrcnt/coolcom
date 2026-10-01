@@ -4,7 +4,7 @@
 // shell compiler's symbol table what an identifier is (function, type, global, #define).
 // Warm (.warm/.warmh) and ARM64 assembly (.S/.s/.asm) have small lexers; plain text has no highlighting.
 //
-//     CSyn st;  SynStart(&st, SynLang("C:/Vim.cool"), FALSE);
+//     CSyn st;  SynStart(&st, SynLang("C:/Example.cool"), FALSE);
 //     while (more lines) {st = SynLine(&st, line, n, groups) ...}   // groups[i] is byte i's group
 // A CSyn carries what spans lines (a /* */ comment, a string, a Warm """ string), so a
 // viewer that starts in the middle of a file scans the lines above with SynStart(..., TRUE)

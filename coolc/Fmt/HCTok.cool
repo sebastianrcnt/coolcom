@@ -1,5 +1,5 @@
 // HolyC (Cool) lexical scanner, shared by the formatter (HCFmt.cool) and Vim
-// (os/Disk/Vim.cool includes it from C:/HCTok.cool for syntax highlighting).
+// (the Warm editor uses it through kernel syntax/identifier services).
 // Plain HolyC: no calls, no allocation, no kernel services, so it compiles into the
 // native formatter image as well as on the shell.
 //

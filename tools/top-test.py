@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Top (os/Disk/Top.cool): the task monitor, driven by typed keys. Two tasks are started on core 1, a
+"""Top (os/Disk/Top.warm): the task monitor, driven by typed keys. Two tasks are started on core 1, a
 busy one (Burner: computes, yields) and a sleeping one (Napper); Top must list both with their core,
 show the busy one with a high CPU share and the sleeping one with a low one, list the FAT32 free space
 (compared with mtools' `mdir`), sort by name, and kill the selected task on `k`,`y`."""

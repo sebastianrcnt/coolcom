@@ -1,0 +1,448 @@
+-- A shell owns a detachable session. Warm owns windows and the binary pane tree;
+-- kernel terminal handles own pane shells, key queues and changed-cell painting.
+pragma Unsafe_Module;
+import Austral.Memory (Address, Pointer, allocate, nullCheck, store, deallocate);
+import OS.CoolOS.Editor (CAlloc, freeMemory, AnsiTermSize, AnsiAltScreen, AnsiCursor, AnsiCursorHide, AnsiCursorShow, AnsiSet, AnsiReset, AnsiClearEol, ConsPut, ConsPutS, StrCpy, StrCat, StrLen, EditorFormat);
+import OS.CoolOS.VirtualTerminal (VTermNewShell, VTermResize, VTermStopRelease, VTermFocus, VTermGetFocus, VTermAlive, VTermDirty, VTermDraw, VTermPushKey, VTermCursorX, VTermCursorY, VTermCursorHidden, VTermReadPhysical, VTermTime, VTermFrameTicks, VTermWait, VTermYield);
+module body TmuxApp is
+    record Pane: Free is
+        parent: Int64; a: Int64; b: Int64; terminal: Int64;
+        x: Int64; y: Int64; width: Int64; height: Int64; vertical: Bool;
+    end;
+    record Window: Free is root: Int64; active: Int64; end;
+    record Session: Free is
+        windows: Int64; current: Int64; panes: Int64; cols: Int64; rows: Int64;
+        redraw: Bool; attached: Bool; oldFocus: Int64; status: Int64; temporary: Int64;
+    end;
+    -- These casts concern only this module's own allocations, never kernel objects.
+    function pane(address: Int64): &![Pane, Static] is
+        return @embed(&![Pane, Static], "$1", address);
+    end;
+    function session(address: Int64): &![Session, Static] is
+        return @embed(&![Session, Static], "$1", address);
+    end;
+    function window(s: Int64, index: Int64): &![Window, Static] is
+        let state: &![Session, Static] := session(s);
+        let address: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", state->windows + index * 8));
+        return @embed(&![Window, Static], "$1", address);
+    end;
+    function literal(value: Span[Nat8, Static]): Int64 is
+        return @embed(Int64, "($1).data", value);
+    end;
+    function newPane(): Int64 is
+        let address: Address[Pane] := allocate();
+        case nullCheck(address) of
+            when None do return 0;
+            when Some(value as ptr: Pointer[Pane]) do
+                store(ptr, Pane(parent => 0, a => 0, b => 0, terminal => 0, x => 0, y => 0, width => 0, height => 0, vertical => false));
+                return @embed(Int64, "$1", ptr);
+        end case;
+    end;
+    function newWindow(): Int64 is
+        let address: Address[Window] := allocate();
+        case nullCheck(address) of
+            when None do return 0;
+            when Some(value as ptr: Pointer[Window]) do
+                store(ptr, Window(root => 0, active => 0));
+                return @embed(Int64, "$1", ptr);
+        end case;
+    end;
+    function leaf(address: Int64): Int64 is
+        var p: Int64 := address;
+        var walking: Bool := p /= 0;
+        while walking do
+            let node: &![Pane, Static] := pane(p);
+            if node->a = 0 then walking := false;
+            else p := node->a; end if;
+        end while;
+        return p;
+    end;
+    function layout(address: Int64, x: Int64, y: Int64, width: Int64, height: Int64): Unit is
+        let p: &![Pane, Static] := pane(address);
+        p->x := x; p->y := y; p->width := width; p->height := height;
+        if p->a = 0 then
+            let cols: Int64 := if width < 1 then 1 else width;
+            let rows: Int64 := if height < 1 then 1 else height;
+            VTermResize(p->terminal, cols, rows);
+        else
+            if p->vertical then
+                let n: Int64 := (width - 1) / 2;
+                layout(p->a, x, y, n, height);
+                layout(p->b, x + n + 1, y, width - n - 1, height);
+            else
+                let n: Int64 := (height - 1) / 2;
+                layout(p->a, x, y, width, n);
+                layout(p->b, x, y + n + 1, width, height - n - 1);
+            end if;
+        end if;
+        return nil;
+    end;
+    function newShellPane(s: Int64, width: Int64, height: Int64): Int64 is
+        let address: Int64 := newPane();
+        if address = 0 then return 0; end if;
+        let p: &![Pane, Static] := pane(address);
+        p->terminal := VTermNewShell(width, height);
+        let state: &![Session, Static] := session(s);
+        state->panes := state->panes + 1;
+        return address;
+    end;
+    function focus(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, state->current);
+        if w->active /= 0 then
+            let p: &![Pane, Static] := pane(w->active);
+            VTermFocus(p->terminal);
+        end if;
+        state->redraw := true;
+        return nil;
+    end;
+    function windowNew(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        if state->panes >= 16 then return nil; end if;
+        for index from 0 to 7 do
+            let i: Int64 := @embed(Int64, "$1", index);
+            let w: &![Window, Static] := window(s, i);
+            if w->root = 0 then
+                let address: Int64 := newShellPane(s, state->cols, state->rows - 1);
+                if address = 0 then return nil; end if;
+                w->root := address; w->active := address;
+                layout(address, 0, 0, state->cols, state->rows - 1);
+                state->current := i;
+                focus(s);
+                return nil;
+            end if;
+        end for;
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmSplit");
+    function split(s: Int64, vertical: Bool): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, state->current);
+        let parent: Int64 := w->active;
+        let p: &![Pane, Static] := pane(parent);
+        if state->panes >= 16 or (vertical and p->width < 21) or (not vertical and p->height < 7) then return nil; end if;
+        let a: Int64 := newPane();
+        if a = 0 then return nil; end if;
+        let b: Int64 := newShellPane(s, p->width, p->height);
+        if b = 0 then deallocate(@embed(Pointer[Pane], "$1", a)); return nil; end if;
+        let first: &![Pane, Static] := pane(a);
+        let second: &![Pane, Static] := pane(b);
+        first->terminal := p->terminal; first->parent := parent; second->parent := parent;
+        p->terminal := 0; p->a := a; p->b := b; p->vertical := vertical;
+        layout(parent, p->x, p->y, p->width, p->height);
+        w->active := b;
+        focus(s);
+        return nil;
+    end;
+    function next(address: Int64): Int64 is
+        var p: Int64 := address;
+        var walking: Bool := true;
+        while walking do
+            let node: &![Pane, Static] := pane(p);
+            if node->parent = 0 then return leaf(p); end if;
+            let parent: &![Pane, Static] := pane(node->parent);
+            if p = parent->b then p := node->parent;
+            else return leaf(parent->b); end if;
+        end while;
+        return 0;
+    end;
+    function move(s: Int64, key: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, state->current);
+        let address: Int64 := w->active;
+        let p: &![Pane, Static] := pane(address);
+        var qAddress: Int64 := next(address);
+        var best: Int64 := address;
+        var distance: Int64 := 9223372036854775807;
+        if key = 111 then best := qAddress;
+        else
+            while qAddress /= address do
+                let q: &![Pane, Static] := pane(qAddress);
+                var d: Int64 := -1;
+                if key = 1114115 or key = 1114116 then
+                    let overlap: Bool := q->y < p->y + p->height and p->y < q->y + q->height;
+                    if overlap and key = 1114115 and q->x < p->x then d := p->x - q->x - q->width; end if;
+                    if overlap and key = 1114116 and q->x > p->x then d := q->x - p->x - p->width; end if;
+                else
+                    let overlap: Bool := q->x < p->x + p->width and p->x < q->x + q->width;
+                    if overlap and key = 1114113 and q->y < p->y then d := p->y - q->y - q->height; end if;
+                    if overlap and key = 1114114 and q->y > p->y then d := q->y - p->y - p->height; end if;
+                end if;
+                if d >= 0 and d < distance then distance := d; best := qAddress; end if;
+                qAddress := next(qAddress);
+            end while;
+        end if;
+        w->active := best; focus(s);
+        return nil;
+    end;
+    function windowMove(s: Int64, delta: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        var n: Int64 := state->current;
+        for index from 0 to 7 do
+            let i: Int64 := @embed(Int64, "$1", index);
+            n := rem(n + delta + 8, 8);
+            let w: &![Window, Static] := window(s, n);
+            if w->root /= 0 then state->current := n; focus(s); return nil; end if;
+        end for;
+        return nil;
+    end;
+    -- Stop/release the opaque terminal, splice its sibling over the split node.
+    function closePane(s: Int64, index: Int64, address: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, index);
+        let p: &![Pane, Static] := pane(address);
+        let parentAddress: Int64 := p->parent;
+        let shown: Bool := index = state->current;
+        let active: Bool := w->active = address;
+        if shown and active then VTermFocus(0); end if;
+        VTermStopRelease(p->terminal);
+        state->panes := state->panes - 1;
+        if parentAddress /= 0 then
+            let parent: &![Pane, Static] := pane(parentAddress);
+            let siblingAddress: Int64 := if parent->a = address then parent->b else parent->a;
+            let sibling: &![Pane, Static] := pane(siblingAddress);
+            let grandAddress: Int64 := parent->parent;
+            sibling->parent := grandAddress;
+            if grandAddress = 0 then w->root := siblingAddress;
+            else
+                let grand: &![Pane, Static] := pane(grandAddress);
+                if grand->a = parentAddress then grand->a := siblingAddress;
+                else grand->b := siblingAddress; end if;
+            end if;
+            if active then w->active := leaf(siblingAddress); end if;
+            deallocate(@embed(Pointer[Pane], "$1", parentAddress));
+            layout(w->root, 0, 0, state->cols, state->rows - 1);
+            if shown then focus(s); end if;
+        else
+            w->root := 0; w->active := 0;
+            if shown then windowMove(s, 1); end if;
+        end if;
+        deallocate(@embed(Pointer[Pane], "$1", address));
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmClose");
+    function close(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, state->current);
+        closePane(s, state->current, w->active);
+        return nil;
+    end;
+    function dead(address: Int64): Int64 is
+        let p: &![Pane, Static] := pane(address);
+        if p->a = 0 then
+            if VTermAlive(p->terminal) then return 0; end if;
+            return address;
+        end if;
+        let found: Int64 := dead(p->a);
+        if found /= 0 then return found; end if;
+        return dead(p->b);
+    end;
+    function reap(s: Int64): Unit is
+        for index from 0 to 7 do
+            let i: Int64 := @embed(Int64, "$1", index);
+            let w: &![Window, Static] := window(s, i);
+            var walking: Bool := w->root /= 0;
+            while walking do
+                let found: Int64 := dead(w->root);
+                if found = 0 then walking := false;
+                else
+                    closePane(s, i, found);
+                    walking := w->root /= 0;
+                end if;
+            end while;
+        end for;
+        return nil;
+    end;
+    function dirty(address: Int64): Bool is
+        let p: &![Pane, Static] := pane(address);
+        if p->a = 0 then return VTermDirty(p->terminal); end if;
+        return dirty(p->a) or dirty(p->b);
+    end;
+    function draw(address: Int64): Unit is
+        let p: &![Pane, Static] := pane(address);
+        if p->a = 0 then VTermDraw(p->terminal, p->x, p->y);
+        else
+            draw(p->a); draw(p->b);
+            let second: &![Pane, Static] := pane(p->b);
+            if p->vertical then
+                var i: Int64 := 0;
+                while i < p->height do
+                    AnsiCursor(p->y + i + 1, second->x); ConsPut(124); i := i + 1;
+                end while;
+            else
+                AnsiCursor(second->y, p->x + 1);
+                var i: Int64 := 0;
+                while i < p->width do ConsPut(45); i := i + 1; end while;
+            end if;
+        end if;
+        return nil;
+    end;
+    function render(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, state->current);
+        let p: &![Pane, Static] := pane(w->active);
+        if not state->redraw and not dirty(w->root) then return nil; end if;
+        AnsiCursorHide(); draw(w->root);
+        StrCpy(state->status, literal(" tmux"));
+        for index from 0 to 7 do
+            let i: Int64 := @embed(Int64, "$1", index);
+            let other: &![Window, Static] := window(s, i);
+            if other->root /= 0 then
+                let format: Int64 := if i = state->current then literal(" [%d*]") else literal(" %d");
+                EditorFormat(state->temporary, format, i + 1, 0, 0, 0);
+                StrCat(state->status, state->temporary);
+            end if;
+        end for;
+        StrCat(state->status, literal("  ^B %/\" split o/arrows move c:new n/p:window x:close d:detach"));
+        let length: Int64 := StrLen(state->status);
+        let n: Int64 := if length < state->cols then length else state->cols;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", state->status + n), 0: Nat8);
+        AnsiCursor(state->rows, 1); AnsiSet(7, 4); AnsiClearEol();
+        ConsPutS(state->status); AnsiReset();
+        let cursorX: Int64 := VTermCursorX(p->terminal);
+        let x: Int64 := if cursorX < p->width - 1 then cursorX else p->width - 1;
+        AnsiCursor(p->y + VTermCursorY(p->terminal) + 1, p->x + x + 1);
+        if not VTermCursorHidden(p->terminal) then AnsiCursorShow(); end if;
+        state->redraw := false;
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmCreate");
+    function create(): Int64 is
+        let address: Address[Session] := allocate();
+        case nullCheck(address) of
+            when None do return 0;
+            when Some(value as ptr: Pointer[Session]) do
+                store(ptr, Session(windows => 0, current => 0, panes => 0, cols => 0, rows => 0, redraw => false, attached => false, oldFocus => 0, status => 0, temporary => 0));
+                let s: Int64 := @embed(Int64, "$1", ptr);
+                let state: &![Session, Static] := session(s);
+                state->windows := CAlloc(64, 0);
+                state->status := CAlloc(256, 0);
+                state->temporary := CAlloc(32, 0);
+                if state->windows = 0 or state->status = 0 or state->temporary = 0 then destroy(s); return 0; end if;
+                for index from 0 to 7 do
+                    let i: Int64 := @embed(Int64, "$1", index);
+                    let w: Int64 := newWindow();
+                    if w = 0 then destroy(s); return 0; end if;
+                    @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", state->windows + i * 8), w);
+                end for;
+                return s;
+        end case;
+    end;
+    pragma Foreign_Export(External_Name => "WtmDetach");
+    function detach(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        if state->attached then
+            VTermFocus(state->oldFocus); AnsiCursorShow(); AnsiAltScreen(0);
+            state->attached := false;
+        end if;
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmEmpty");
+    function empty(s: Int64): Bool is
+        let state: &![Session, Static] := session(s);
+        return state->panes = 0;
+    end;
+    -- Called only for an empty session (or partially initialized creation).
+    pragma Foreign_Export(External_Name => "WtmDestroy");
+    function destroy(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        detach(s);
+        if state->windows /= 0 then
+            for index from 0 to 7 do
+                let i: Int64 := @embed(Int64, "$1", index);
+                let w: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", state->windows + i * 8));
+                if w /= 0 then deallocate(@embed(Pointer[Window], "$1", w)); end if;
+            end for;
+        end if;
+        freeMemory(state->windows); freeMemory(state->status); freeMemory(state->temporary);
+        deallocate(@embed(Pointer[Session], "$1", s));
+        return nil;
+    end;
+    function input(s: Int64, key: Int64): Unit is
+        if key = 37 then split(s, true);
+        else if key = 34 then split(s, false);
+        else if key = 99 then windowNew(s);
+        else if key = 110 then windowMove(s, 1);
+        else if key = 112 then windowMove(s, -1);
+        else if key = 120 then close(s);
+        else if key = 111 or (key >= 1114113 and key <= 1114116) then move(s, key);
+        else if key = 33554530 then push(s, key);
+        end if;
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmPush");
+    function push(s: Int64, key: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        let w: &![Window, Static] := window(s, state->current);
+        let p: &![Pane, Static] := pane(w->active);
+        VTermPushKey(p->terminal, key);
+        return nil;
+    end;
+    -- The shell entry point and performance probes share the same attach path.
+    pragma Foreign_Export(External_Name => "WtmPrepare");
+    function prepare(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        var rows: Int64 := 0;
+        var cols: Int64 := 0;
+        state->oldFocus := VTermGetFocus();
+        state->attached := true;
+        if state->panes = 0 then
+            AnsiTermSize(@embed(Int64, "$1", &!rows), @embed(Int64, "$1", &!cols));
+            state->cols := cols; state->rows := rows;
+            windowNew(s);
+        end if;
+        AnsiAltScreen(1); focus(s);
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmPaint");
+    function paint(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        state->redraw := true;
+        render(s);
+        return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WtmRun");
+    function run(s: Int64): Unit is
+        let state: &![Session, Static] := session(s);
+        var rows: Int64 := 0;
+        var cols: Int64 := 0;
+        prepare(s);
+        var prefix: Bool := false;
+        var paintAt: Int64 := 0;
+        var running: Bool := true;
+        while running and state->panes /= 0 do
+            AnsiTermSize(@embed(Int64, "$1", &!rows), @embed(Int64, "$1", &!cols));
+            if cols /= state->cols or rows /= state->rows then
+                state->cols := cols; state->rows := rows;
+                for index from 0 to 7 do
+                    let i: Int64 := @embed(Int64, "$1", index);
+                    let w: &![Window, Static] := window(s, i);
+                    if w->root /= 0 then layout(w->root, 0, 0, cols, rows - 1); end if;
+                end for;
+                state->redraw := true;
+            end if;
+            reap(s);
+            if state->panes = 0 then running := false;
+            else
+                -- Preserve the Cool compositor's 30 Hz batching and dirty-cell draws.
+                if state->redraw or VTermTime() >= paintAt then
+                    render(s); paintAt := VTermTime() + VTermFrameTicks();
+                end if;
+                let key: Int64 := VTermReadPhysical();
+                if key = 0 then VTermWait();
+                else if key /= 1114123 then
+                    if prefix then
+                        prefix := false;
+                        if key = 100 then running := false;
+                        else input(s, key); end if;
+                    else if key = 33554530 then prefix := true;
+                    else push(s, key); end if;
+                    VTermYield();
+                end if;
+            end if;
+        end while;
+        detach(s);
+        return nil;
+    end;
+    function main(): ExitCode is return ExitSuccess(); end;
+end module body.
