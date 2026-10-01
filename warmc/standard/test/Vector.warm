@@ -1,0 +1,49 @@
+import Standard.Vector (Vector, Cursor, make, push, pop, insert, remove, replace, get, set, slice, length, reverse, map, filter, cursor, next, destroyFree, destroyEmpty);
+import Standard.String (String, fromLiteral, destroyString, length as stringLength);
+import Standard.Test.GeneralSupport (check);
+module body Standard.Test.Vector is
+    private function twice(value: Index): Index is return value * 2; end;
+    private function even(value: Index): Bool is return value % 2 = 0; end;
+    private function freeText(value: String): Index is
+        let n: Index := stringLength(&value); destroyString(value); return n;
+    end;
+    function vectorTestSuite(): Unit is
+        var v: Vector[Index] := make();
+        case pop(&!v) of when None do skip; when Some(value: Index) do abort("empty pop"); end case;
+        check(spanLength(slice(&v, 0, 0)) = 0);
+        for i from 0 until 1025 do push(&!v, i); end for;
+        for i from 0 until 1025 do check(get(&v, i) = i); end for;
+        insert(&!v, 0, 9000); insert(&!v, 513, 9001); let finalAt: Index := length(&v); insert(&!v, finalAt, 9002);
+        check(remove(&!v, 513) = 9001); check(remove(&!v, 0) = 9000);
+        case pop(&!v) of when Some(value: Index) do check(value = 9002); when None do abort("pop"); end case;
+        set(&!v, 10, 99); check(replace(&!v, 10, 10) = 99);
+        check(spanLength(slice(&v, length(&v), length(&v))) = 0);
+        reverse(&!v); check(get(&v, 0) = 1024); reverse(&!v);
+        var it: Cursor := cursor();
+        var count: Index := 0;
+        borrow read: &[Vector[Index], R] := &v do
+            while true do
+                case next(read, &!it) of
+                    when Some(value: &[Index, R]) do check(!value = count); count := count + 1;
+                    when None do break;
+                end case;
+            end while;
+        end borrow;
+        check(count = length(&v));
+        let selected: Vector[Index] := filter(&v, even);
+        check(length(&selected) = 513); destroyFree(selected);
+        let doubled: Vector[Index] := map(v, twice);
+        check(get(&doubled, 1024) = 2048); destroyFree(doubled);
+        var texts: Vector[String] := make();
+        push(&!texts, fromLiteral("one")); push(&!texts, fromLiteral("two"));
+        let old: String := replace(&!texts, 0, fromLiteral("four")); destroyString(old);
+        reverse(&!texts);
+        let lengths: Vector[Index] := map(texts, freeText);
+        check(get(&lengths, 0) = 3); check(get(&lengths, 1) = 4); destroyFree(lengths);
+        var drained: Vector[String] := make(); push(&!drained, fromLiteral("last"));
+        case pop(&!drained) of when Some(value: String) do destroyString(value); when None do abort("linear pop"); end case;
+        destroyEmpty(drained);
+        printLn("STDLIB VECTOR PASS");
+        return nil;
+    end;
+end module body.

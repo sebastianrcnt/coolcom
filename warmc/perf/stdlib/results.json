@@ -1,0 +1,98 @@
+{
+  "cpu": "Apple M6",
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "backend": "Warm host native (coolc arm64)",
+  "timer": "OS.Time.monotonicMs; whole milliseconds",
+  "repetitions": 5,
+  "note": "Allocation/growth included for push/insert; construction and validation excluded for sort; no process startup time.",
+  "benchmarks": {
+    "vector_push:1000000": {
+      "samples_ms": [
+        8,
+        7,
+        6,
+        7,
+        7
+      ],
+      "median_ms": 7,
+      "checksum": 499999500000
+    },
+    "vector_get:1000000": {
+      "samples_ms": [
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "median_ms": 1,
+      "checksum": 499999500000
+    },
+    "hashmap_insert:100000": {
+      "samples_ms": [
+        14,
+        13,
+        13,
+        13,
+        12
+      ],
+      "median_ms": 13,
+      "checksum": 4999950000
+    },
+    "hashmap_lookup:100000": {
+      "samples_ms": [
+        2,
+        1,
+        2,
+        1,
+        2
+      ],
+      "median_ms": 2,
+      "checksum": 4999950000
+    },
+    "sort_reverse:100000": {
+      "samples_ms": [
+        9,
+        9,
+        10,
+        9,
+        9
+      ],
+      "median_ms": 9,
+      "checksum": 5000050000
+    },
+    "sort_random:100000": {
+      "samples_ms": [
+        10,
+        10,
+        9,
+        10,
+        10
+      ],
+      "median_ms": 10,
+      "checksum": 98471909480502
+    },
+    "sort_reverse:1000000": {
+      "samples_ms": [
+        107,
+        109,
+        108,
+        109,
+        110
+      ],
+      "median_ms": 109,
+      "checksum": 500000500000
+    },
+    "sort_random:1000000": {
+      "samples_ms": [
+        122,
+        123,
+        122,
+        123,
+        140
+      ],
+      "median_ms": 123,
+      "checksum": 1061824934406618
+    }
+  }
+}

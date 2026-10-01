@@ -1,0 +1,28 @@
+import Standard.String (String, slice, length);
+
+module Standard.Ord is
+    union Ordering: Free is
+        case Less;
+        case Equal;
+        case Greater;
+    end;
+    typeclass Ord(T: Type) is
+        generic [R: Region, S: Region]
+        method compare(a: &[T, R], b: &[T, S]): Ordering;
+    end;
+    instance Ord(Nat8);
+    instance Ord(Nat16);
+    instance Ord(Nat32);
+    instance Ord(Nat64);
+    instance Ord(Int8);
+    instance Ord(Int16);
+    instance Ord(Int32);
+    instance Ord(Int64);
+    instance Ord(Index);
+    instance Ord(ByteSize);
+    instance Ord(Bool);
+    instance Ord(Unit);
+    instance Ord(String);
+    generic [T: Type(Ord), P: Region]
+    instance Ord(Span[T, P]);
+end module.

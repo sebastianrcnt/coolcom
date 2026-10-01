@@ -1,0 +1,131 @@
+import Standard.String (String, slice, length);
+
+module body Standard.Ord is
+    instance Ord(Nat8) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Nat8, R], b: &[Nat8, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Nat16) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Nat16, R], b: &[Nat16, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Nat32) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Nat32, R], b: &[Nat32, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Nat64) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Nat64, R], b: &[Nat64, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Int8) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Int8, R], b: &[Int8, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Int16) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Int16, R], b: &[Int16, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Int32) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Int32, R], b: &[Int32, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Int64) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Int64, R], b: &[Int64, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Index) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Index, R], b: &[Index, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(ByteSize) is
+        generic [R: Region, S: Region]
+        method compare(a: &[ByteSize, R], b: &[ByteSize, S]): Ordering is
+            if !a < !b then return Less(); end if;
+            if !a > !b then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    instance Ord(Bool) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Bool, R], b: &[Bool, S]): Ordering is
+            if !a = !b then return Equal(); end if;
+            if !a then return Greater(); else return Less(); end if;
+        end;
+    end;
+    instance Ord(Unit) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Unit, R], b: &[Unit, S]): Ordering is
+            return Equal();
+        end;
+    end;
+    instance Ord(String) is
+        generic [R: Region, S: Region]
+        method compare(a: &[String, R], b: &[String, S]): Ordering is
+            let av: Span[Nat8, R] := slice(a, 0, length(a));
+            let bv: Span[Nat8, S] := slice(b, 0, length(b));
+            let n: Index := if length(a) < length(b) then length(a) else length(b);
+            for i from 0 until n do
+                if av[i] < bv[i] then return Less(); end if;
+                if av[i] > bv[i] then return Greater(); end if;
+            end for;
+            if length(a) < length(b) then return Less(); end if;
+            if length(a) > length(b) then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+    generic [T: Type(Ord), P: Region]
+    instance Ord(Span[T, P]) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Span[T, P], R], b: &[Span[T, P], S]): Ordering is
+            let av: Span[T, P] := !a;
+            let bv: Span[T, P] := !b;
+            let n: Index := if spanLength(av) < spanLength(bv) then spanLength(av) else spanLength(bv);
+            for i from 0 until n do
+                case compare(&(av[i]), &(bv[i])) of
+                    when Less do return Less();
+                    when Greater do return Greater();
+                    when Equal do skip;
+                end case;
+            end for;
+            if spanLength(av) < spanLength(bv) then return Less(); end if;
+            if spanLength(av) > spanLength(bv) then return Greater(); end if;
+            return Equal();
+        end;
+    end;
+end module body.

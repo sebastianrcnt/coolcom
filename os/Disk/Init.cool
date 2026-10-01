@@ -29,6 +29,6 @@ U0 TopClose()
 U0 Top()
 {
     shell_stmt_cleanup = &TopClose;
-    WarmRun("C:/Warm/Standard/Buffer.warmh,C:/Warm/Standard/Buffer.warm,C:/Warm/Standard/String.warmh,C:/Warm/Standard/String.warm,C:/Warm/Standard/StringBuilder.warmh,C:/Warm/Standard/StringBuilder.warm,C:/Warm/Standard/OS/Error.warm,C:/Warm/Standard/OS/Terminal.warmh,C:/Warm/Standard/OS/Terminal.warm,C:/Warm/Standard/OS/CoolOS/System.warmh,C:/Warm/Standard/OS/CoolOS/System.warm,C:/Top.warm", "TopApp:main");
+    WarmRun("C:/Warm/Standard/Buffer.warmh,C:/Warm/Standard/Buffer.warm,C:/Warm/Standard/Vector.warmh,C:/Warm/Standard/Vector.warm,C:/Warm/Standard/String.warmh,C:/Warm/Standard/String.warm,C:/Warm/Standard/Ord.warmh,C:/Warm/Standard/Ord.warm,C:/Warm/Standard/StringBuilder.warmh,C:/Warm/Standard/StringBuilder.warm,C:/Warm/Standard/OS/Error.warm,C:/Warm/Standard/OS/Terminal.warmh,C:/Warm/Standard/OS/Terminal.warm,C:/Warm/Standard/OS/CoolOS/System.warmh,C:/Warm/Standard/OS/CoolOS/System.warm,C:/Top.warm", "TopApp:main");
     TopClose;
 }

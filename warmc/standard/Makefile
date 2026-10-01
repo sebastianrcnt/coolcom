@@ -5,6 +5,13 @@ MODULES := \
 		src/Order.warmh,src/Order.warm \
 		src/Box.warmh,src/Box.warm \
 		src/Buffer.warmh,src/Buffer.warm \
+		src/Vector.warmh,src/Vector.warm \
+		src/Eq.warmh,src/Eq.warm \
+		src/Ord.warmh,src/Ord.warm \
+		src/Hash.warmh,src/Hash.warm \
+		src/HashMap.warmh,src/HashMap.warm \
+		src/HashSet.warmh,src/HashSet.warm \
+		src/Algorithms.warmh,src/Algorithms.warm \
 		src/String.warmh,src/String.warm \
 		src/StringBuilder.warmh,src/StringBuilder.warm \
 		src/Format.warmh,src/Format.warm \
@@ -20,7 +27,15 @@ MODULES := \
 		test/String.warmh,test/String.warm \
 		test/StringBuilder.warmh,test/StringBuilder.warm \
 		test/IO/Terminal.warmh,test/IO/Terminal.warm \
-		test/Main.warmh,test/Main.warm
+		test/Main.warmh,test/Main.warm \
+		test/GeneralSupport.warm \
+		test/Eq.warm \
+		test/Vector.warm \
+		test/HashMap.warm \
+		test/HashSet.warm \
+		test/Algorithms.warm \
+		test/Text.warm \
+		test/General.warm
 TEST_BIN := test_bin
 
 # The Warm compiler in Cool checks the whole library and its tests (`make build/warmc` first).

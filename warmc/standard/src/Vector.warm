@@ -1,0 +1,94 @@
+import Standard.Buffer (Buffer, borrowNth, allocateEmpty, destroyFree as bufDestroyFree, destroyEmpty as bufDestroyEmpty, length as bufLength, nth, storeNth, swapNth, insert as bufInsert, insertBack, remove as bufRemove, removeLast, slice as bufSlice, sliceMut as bufSliceMut, reverse as bufReverse, map as bufMap);
+
+module body Standard.Vector is
+    record Vector[T: Type]: Linear is
+        data: Buffer[T];
+    end;
+    generic [T: Type]
+    function make(): Vector[T] is
+        let data: Buffer[T] := allocateEmpty();
+        return Vector(data => data);
+    end;
+    generic [T: Free]
+    function destroyFree(v: Vector[T]): Unit is
+        let { data: Buffer[T] } := v;
+        return bufDestroyFree(data);
+    end;
+    generic [T: Type]
+    function destroyEmpty(v: Vector[T]): Unit is
+        let { data: Buffer[T] } := v;
+        return bufDestroyEmpty(data);
+    end;
+    generic [T: Type, R: Region]
+    function length(v: &[Vector[T], R]): Index is
+        return bufLength(&(v->data));
+    end;
+    generic [T: Free, R: Region]
+    function get(v: &[Vector[T], R], at: Index): T is
+        return nth(&(v->data), at);
+    end;
+    generic [T: Free, R: Region]
+    function set(v: &![Vector[T], R], at: Index, value: T): Unit is
+        return storeNth(&(v->data), at, value);
+    end;
+    generic [T: Type, R: Region]
+    function replace(v: &![Vector[T], R], at: Index, value: T): T is
+        return swapNth(&(v->data), at, value);
+    end;
+    generic [T: Type, R: Region]
+    function push(v: &![Vector[T], R], value: T): Unit is
+        return insertBack(&(v->data), value);
+    end;
+    generic [T: Type, R: Region]
+    function pop(v: &![Vector[T], R]): Option[T] is
+        if bufLength(&(v->data): &[Buffer[T], R]) = 0 then return None(); end if;
+        return Some(value => removeLast(&(v->data)));
+    end;
+    generic [T: Type, R: Region]
+    function insert(v: &![Vector[T], R], at: Index, value: T): Unit is
+        return bufInsert(&(v->data), at, value);
+    end;
+    generic [T: Type, R: Region]
+    function remove(v: &![Vector[T], R], at: Index): T is
+        return bufRemove(&(v->data), at);
+    end;
+    generic [T: Type, R: Region]
+    function slice(v: &[Vector[T], R], start: Index, endExclusive: Index): Span[T, R] is
+        return bufSlice(&(v->data), start, endExclusive);
+    end;
+    generic [T: Type, R: Region]
+    function sliceMut(v: &![Vector[T], R], start: Index, endExclusive: Index): Span![T, R] is
+        return bufSliceMut(&(v->data), start, endExclusive);
+    end;
+    generic [T: Type, R: Region]
+    function reverse(v: &![Vector[T], R]): Unit is
+        return bufReverse(&(v->data));
+    end;
+    generic [T: Type, U: Type]
+    function map(v: Vector[T], callback: Fn[T, U]): Vector[U] is
+        let { data: Buffer[T] } := v;
+        let out: Buffer[U] := bufMap(data, callback);
+        return Vector(data => out);
+    end;
+    generic [T: Free, R: Region]
+    function filter(v: &[Vector[T], R], predicate: Fn[T, Bool]): Vector[T] is
+        var out: Vector[T] := make();
+        for i from 0 until length(v) do
+            let value: T := get(v, i);
+            if predicate(value) then push(&!out, value); end if;
+        end for;
+        return out;
+    end;
+    generic [T: Type, R: Region]
+    function borrowGet(v: &[Vector[T], R], at: Index): &[T, R] is
+        return borrowNth(&(v->data), at);
+    end;
+    function cursor(): Cursor is return Cursor(position => 0); end;
+    generic [T: Type, R: Region, S: Region]
+    function next(v: &[Vector[T], R], it: &![Cursor, S]): Option[&[T, R]] is
+        if it->position >= length(v) then return None(); end if;
+        let at: Index := it->position;
+        it->position := at + 1;
+        return Some(value => borrowGet(v, at));
+    end;
+end module body.

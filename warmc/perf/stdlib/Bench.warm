@@ -1,0 +1,65 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import Standard.Ord (Ord);
+import Standard.Vector (Vector, make, push, get, sliceMut, destroyFree);
+import Standard.HashMap (HashMap, make as mapMake, insert, get as lookup, destroyFree as mapDestroy);
+import Standard.Algorithms (sort);
+import OS.Time (monotonicMs);
+module body StdlibBench is
+    private function report(name: Span[Nat8, Static], n: Index, elapsed: Int64, checksum: Index): Unit is
+        print(name); print(","); print(n); print(","); print(elapsed); print(","); printLn(checksum);
+        return nil;
+    end;
+    private function vectorBench(n: Index): Unit is
+        var values: Vector[Index] := make();
+        let started: Int64 := monotonicMs();
+        for i from 0 until n do push(&!values, i); end for;
+        let pushed: Int64 := monotonicMs();
+        var checksum: Index := 0;
+        for i from 0 until n do checksum := checksum + get(&values, i); end for;
+        let fetched: Int64 := monotonicMs();
+        report("vector_push", n, pushed - started, checksum);
+        report("vector_get", n, fetched - pushed, checksum);
+        destroyFree(values);
+        return nil;
+    end;
+    private function mapBench(n: Index): Unit is
+        var values: HashMap[Index, Index] := mapMake();
+        let started: Int64 := monotonicMs();
+        for i from 0 until n do let previous: Option[Index] := insert(&!values, i, i); end for;
+        let inserted: Int64 := monotonicMs();
+        var checksum: Index := 0;
+        for i from 0 until n do
+            case lookup(&values, i) of when Some(value: Index) do checksum := checksum + value; when None do abort("benchmark missing key"); end case;
+        end for;
+        let fetched: Int64 := monotonicMs();
+        report("hashmap_insert", n, inserted - started, checksum);
+        report("hashmap_lookup", n, fetched - inserted, checksum);
+        mapDestroy(values);
+        return nil;
+    end;
+    private function sortBench(n: Index, random: Bool): Unit is
+        var values: Vector[Index] := make();
+        for i from 0 until n do push(&!values, if random then (i * 48271) % 2147483647 else n - i); end for;
+        let started: Int64 := monotonicMs();
+        sort(sliceMut(&!values, 0, n));
+        let elapsed: Int64 := monotonicMs() - started;
+        var checksum: Index := 0;
+        for i from 0 until n do
+            let value: Index := get(&values, i);
+            if i > 0 then if get(&values, i - 1) > value then abort("benchmark sort failed"); end if; end if;
+            checksum := checksum + value;
+        end for;
+        report(if random then "sort_random" else "sort_reverse", n, elapsed, checksum);
+        destroyFree(values);
+        return nil;
+    end;
+    function main(): ExitCode is
+        for sample from 0 until 5 do
+            vectorBench(1000000); mapBench(100000);
+            sortBench(100000, false); sortBench(100000, true);
+            sortBench(1000000, false); sortBench(1000000, true);
+        end for;
+        return ExitSuccess();
+    end;
+end module body.

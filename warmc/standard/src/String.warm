@@ -1,3 +1,4 @@
+import Standard.Vector (Vector, make as vectorMake, push as vectorPush);
 --
 -- Part of the Austral project, under the Apache License v2.0 with LLVM Exceptions.
 -- See LICENSE file for details.
@@ -7,6 +8,7 @@
 import Standard.Buffer (
     Buffer,
     allocateEmpty,
+    insertBack,
     initialize,
     destroyFree,
     length as bufLength,
@@ -109,4 +111,224 @@ module body Standard.String is
         return bufferSliceMut(&(string->buf), start, endExclusive);
     end;
 
+    generic [R: Region]
+    function fromSpan(text: Span[Nat8, R]): String is
+        var out: String := makeString(spanLength(text), 0);
+        for i from 0 until spanLength(text) do storeNth(&!out, i, text[i]); end for;
+        return out;
+    end;
+    generic [R: Region, S: Region]
+    function equals(a: Span[Nat8, R], b: Span[Nat8, S]): Bool is
+        if spanLength(a) /= spanLength(b) then return false; end if;
+        for i from 0 until spanLength(a) do if a[i] /= b[i] then return false; end if; end for;
+        return true;
+    end;
+    generic [R: Region, S: Region]
+    function startsWith(text: Span[Nat8, R], prefix: Span[Nat8, S]): Bool is
+        if spanLength(prefix) > spanLength(text) then return false; end if;
+        return equals(sliceSpan(text, 0, spanLength(prefix)), prefix);
+    end;
+    generic [R: Region, S: Region]
+    function endsWith(text: Span[Nat8, R], suffix: Span[Nat8, S]): Bool is
+        if spanLength(suffix) > spanLength(text) then return false; end if;
+        return equals(sliceSpan(text, spanLength(text) - spanLength(suffix), spanLength(text)), suffix);
+    end;
+    generic [R: Region, S: Region]
+    function find(text: Span[Nat8, R], needle: Span[Nat8, S]): Option[Index] is return findFrom(text, needle, 0); end;
+    generic [R: Region, S: Region]
+    function findFrom(text: Span[Nat8, R], needle: Span[Nat8, S], start: Index): Option[Index] is
+        let n: Index := spanLength(text);
+        let m: Index := spanLength(needle);
+        if start > n then return None(); end if;
+        if m > n - start then return None(); end if;
+        var at: Index := start;
+        while at <= n - m do
+            if equals(sliceSpan(text, at, at + m), needle) then return Some(value => at); end if;
+            if at = n - m then break; end if;
+            at := at + 1;
+        end while;
+        return None();
+    end;
+    generic [R: Region, S: Region]
+    function contains(text: Span[Nat8, R], needle: Span[Nat8, S]): Bool is
+        case find(text, needle) of when Some(value: Index) do return true; when None do return false; end case;
+    end;
+    private function whitespace(byte: Nat8): Bool is return byte = 32 or (byte >= 9 and byte <= 13); end;
+    generic [R: Region]
+    function trim(text: Span[Nat8, R]): Span[Nat8, R] is
+        var lo: Index := 0;
+        var hi: Index := spanLength(text);
+        while lo < hi do if not whitespace(text[lo]) then break; end if; lo := lo + 1; end while;
+        while hi > lo do if not whitespace(text[hi - 1]) then break; end if; hi := hi - 1; end while;
+        return sliceSpan(text, lo, hi);
+    end;
+    generic [R: Region, S: Region]
+    function split(text: Span[Nat8, R], separator: Span[Nat8, S]): Vector[String] is
+        var out: Vector[String] := vectorMake();
+        let n: Index := spanLength(text);
+        let m: Index := spanLength(separator);
+        if m = 0 then
+            for i from 0 until n do vectorPush(&!out, fromSpan(sliceSpan(text, i, i + 1))); end for;
+            return out;
+        end if;
+        var start: Index := 0;
+        while true do
+            case findFrom(text, separator, start) of
+                when Some(value as at: Index) do
+                    vectorPush(&!out, fromSpan(sliceSpan(text, start, at))); start := at + m;
+                when None do
+                    vectorPush(&!out, fromSpan(sliceSpan(text, start, n))); return out;
+            end case;
+        end while;
+        abort("String: unreachable");
+    end;
+    private generic [R: Region, S: Region]
+    function appendBytes(buffer: &![Buffer[Nat8], R], text: Span[Nat8, S]): Unit is
+        for i from 0 until spanLength(text) do insertBack(&~buffer, text[i]); end for;
+        return nil;
+    end;
+    generic [R: Region, S: Region]
+    function join(parts: Span[String, R], separator: Span[Nat8, S]): String is
+        var out: Buffer[Nat8] := allocateEmpty();
+        for i from 0 until spanLength(parts) do
+            if i > 0 then appendBytes(&!out, separator); end if;
+            let part: &[String, R] := &(parts[i]);
+            appendBytes(&!out, slice(part, 0, length(part)));
+        end for;
+        return fromByteBuffer(out);
+    end;
+    generic [R: Region, S: Region, P: Region]
+    function replace(text: Span[Nat8, R], needle: Span[Nat8, S], replacement: Span[Nat8, P]): String is
+        var out: Buffer[Nat8] := allocateEmpty();
+        let n: Index := spanLength(text);
+        let m: Index := spanLength(needle);
+        if m = 0 then
+            appendBytes(&!out, replacement);
+            for i from 0 until n do insertBack(&!out, text[i]); appendBytes(&!out, replacement); end for;
+            return fromByteBuffer(out);
+        end if;
+        var start: Index := 0;
+        while true do
+            case findFrom(text, needle, start) of
+                when Some(value as at: Index) do
+                    appendBytes(&!out, sliceSpan(text, start, at)); appendBytes(&!out, replacement); start := at + m;
+                when None do appendBytes(&!out, sliceSpan(text, start, n)); return fromByteBuffer(out);
+            end case;
+        end while;
+        abort("String: unreachable");
+    end;
+    generic [R: Region]
+    function toLowerAscii(text: Span[Nat8, R]): String is
+        var out: String := fromSpan(text);
+        for i from 0 until spanLength(text) do
+            let byte: Nat8 := text[i];
+            if byte >= 'A' and byte <= 'Z' then storeNth(&!out, i, byte + 32); end if;
+        end for;
+        return out;
+    end;
+    generic [R: Region]
+    function toUpperAscii(text: Span[Nat8, R]): String is
+        var out: String := fromSpan(text);
+        for i from 0 until spanLength(text) do
+            let byte: Nat8 := text[i];
+            if byte >= 'a' and byte <= 'z' then storeNth(&!out, i, byte - 32); end if;
+        end for;
+        return out;
+    end;
+    private generic [R: Region]
+    function magnitude(text: Span[Nat8, R], start: Index, radix: Nat64, limit: Nat64): Result[Nat64, ParseError] is
+        if radix < 2 or radix > 36 then return Err(error => InvalidRadix()); end if;
+        if start = spanLength(text) then return Err(error => EmptyNumber()); end if;
+        var value: Nat64 := 0;
+        for i from start until spanLength(text) do
+            let byte: Nat8 := text[i];
+            var digit: Nat64 := 36;
+            if byte >= '0' and byte <= '9' then digit := widenToNat64(byte - '0'); end if;
+            if byte >= 'a' and byte <= 'z' then digit := widenToNat64(byte - 'a') + 10; end if;
+            if byte >= 'A' and byte <= 'Z' then digit := widenToNat64(byte - 'A') + 10; end if;
+            if digit >= radix then return Err(error => InvalidDigit(position => i)); end if;
+            if value > (limit - digit) / radix then return Err(error => Overflow()); end if;
+            value := value * radix + digit;
+        end for;
+        return Ok(value => value);
+    end;
+    generic [R: Region]
+    function parseInt(text: Span[Nat8, R]): Result[Int64, ParseError] is return parseIntRadix(text, 10); end;
+    generic [R: Region]
+    function parseNat(text: Span[Nat8, R]): Result[Nat64, ParseError] is return parseNatRadix(text, 10); end;
+    generic [R: Region]
+    function parseNatRadix(text: Span[Nat8, R], radix: Nat64): Result[Nat64, ParseError] is
+        var start: Index := 0;
+        if spanLength(text) > 0 then if text[0] = '+' then start := 1; end if; end if;
+        return magnitude(text, start, radix, maximum_nat64);
+    end;
+    generic [R: Region]
+    function parseIntRadix(text: Span[Nat8, R], radix: Nat64): Result[Int64, ParseError] is
+        var start: Index := 0;
+        var negative: Bool := false;
+        if spanLength(text) > 0 then
+            negative := text[0] = '-';
+            if negative or text[0] = '+' then start := 1; end if;
+        end if;
+        let limit: Nat64 := if negative then 9223372036854775808 else 9223372036854775807;
+        case magnitude(text, start, radix, limit) of
+            when Err(error: ParseError) do return Err(error => error);
+            when Ok(value: Nat64) do
+                if negative and value = 9223372036854775808 then return Ok(value => minimum_int64); end if;
+                case toInt64(value) of
+                    when Some(value as signed: Int64) do return Ok(value => if negative then -signed else signed);
+                    when None do return Err(error => Overflow());
+                end case;
+        end case;
+    end;
+    private function byteToNat32(byte: Nat8): Nat32 is
+        case toNat32(byte) of
+            when Some(value: Nat32) do return value;
+            when None do abort("UTF-8: byte conversion");
+        end case;
+    end;
+    generic [R: Region]
+    function decodeUtf8(text: Span[Nat8, R], at: Index): Result[Decoded, Utf8Error] is
+        let n: Index := spanLength(text);
+        if at >= n then return Err(error => UnexpectedEnd()); end if;
+        let first: Nat8 := text[at];
+        if first < 128 then return Ok(value => Decoded(codepoint => byteToNat32(first), width => 1)); end if;
+        var width: Index := 0;
+        var cp: Nat32 := 0;
+        var minimum: Nat32 := 0;
+        if first >= 194 and first <= 223 then width := 2; cp := byteToNat32(first & 31); minimum := 128; end if;
+        if first >= 224 and first <= 239 then width := 3; cp := byteToNat32(first & 15); minimum := 2048; end if;
+        if first >= 240 and first <= 244 then width := 4; cp := byteToNat32(first & 7); minimum := 65536; end if;
+        if width = 0 then return Err(error => InvalidUtf8()); end if;
+        if width > n - at then return Err(error => UnexpectedEnd()); end if;
+        for i from 1 until width do
+            let byte: Nat8 := text[at + i];
+            if byte < 128 or byte > 191 then return Err(error => InvalidUtf8()); end if;
+            cp := cp * 64 + byteToNat32(byte & 63);
+        end for;
+        if cp < minimum or cp > 1114111 or (cp >= 55296 and cp <= 57343) then return Err(error => InvalidUtf8()); end if;
+        return Ok(value => Decoded(codepoint => cp, width => width));
+    end;
+    generic [R: Region]
+    function utf8Iterator(text: Span[Nat8, R]): Utf8Iterator[R] is return Utf8Iterator(bytes => text, position => 0); end;
+    generic [R: Region, S: Region]
+    function utf8Next(iterator: &![Utf8Iterator[R], S]): Option[Nat32] is
+        if iterator->position >= spanLength(iterator->bytes) then return None(); end if;
+        case decodeUtf8(iterator->bytes, iterator->position) of
+            when Ok(value: Decoded) do iterator->position := iterator->position + value.width; return Some(value => value.codepoint);
+            when Err(error: Utf8Error) do iterator->position := iterator->position + 1; return Some(value => 65533);
+        end case;
+    end;
+    generic [R: Region]
+    function utf8Length(text: Span[Nat8, R]): Index is
+        var iterator: Utf8Iterator[R] := utf8Iterator(text);
+        var count: Index := 0;
+        while true do
+            case utf8Next(&!iterator) of
+                when None do return count;
+                when Some(value: Nat32) do count := count + 1;
+            end case;
+        end while;
+        abort("String: unreachable");
+    end;
 end module body.

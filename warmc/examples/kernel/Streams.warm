@@ -1,7 +1,7 @@
 import OS.File (Filesystem, acquireFilesystem, releaseFilesystem, File, open, Read, Write, Append, ReadWrite, read, write, seek, size, close, makeDir, writeAll);
 import OS.Dir (Dir, Entries, Entry, openRoot, openDir, closeDir, entries, next, closeEntries);
 import OS.Error (IoError, Denied, ioErrorCode);
-import Standard.String (String, makeString, destroyString, getSpanMut, nthByte);
+import Standard.String (String, makeString, destroyString, getSpanMut, nthByte, slice, equals);
 module body Streams is
     private function expect(ok: Bool): Unit is
         if not ok then abort("Stream assertion failed"); end if;
@@ -35,12 +35,12 @@ module body Streams is
         var f: File := file;
         var text: String := makeString(2, 0);
         count(read(&!f, getSpanMut(&!text, 0, 1)), 2);
-        expect(nthByte(&text, 0) = 97 and nthByte(&text, 1) = 98);
+        expect(equals(slice(&text, 0, 2), "ab"));
         command(seek(&!f, 3));
         count(read(&!f, getSpanMut(&!text, 0, 1)), 2);
         expect(nthByte(&text, 0) = 0 and nthByte(&text, 1) = 0);
         count(read(&!f, getSpanMut(&!text, 0, 1)), 2);
-        expect(nthByte(&text, 0) = 122 and nthByte(&text, 1) = 33);
+        expect(equals(slice(&text, 0, 2), "z!"));
         count(read(&!f, getSpanMut(&!text, 0, 1)), 0);
         case write(&!f, "forbidden") of
             when Ok(value as n: Index) do abort("Read stream allowed write");

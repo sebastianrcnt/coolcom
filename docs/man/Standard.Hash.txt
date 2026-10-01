@@ -1,0 +1,5 @@
+Deterministic Nat64 hashes through read-only borrows. Equal keys must hash
+identically. Integer, Bool, Unit, String and generic span instances are
+provided. Hashes are not cryptographic, randomized or a serialization format.
+Import this module where generic hash maps/sets are used.
+See Man("Standard.Eq"), Man("Standard.HashMap").

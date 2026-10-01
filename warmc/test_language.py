@@ -5,13 +5,13 @@ import json
 import os
 import random
 import subprocess
-from os_modules import os_modules
+from stdlib_modules import library_modules
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/warmcool/language-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 ENV = dict(os.environ, COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
-LIBRARY = os_modules(ROOT)[:4]
+LIBRARY = library_modules(ROOT)
 checks = []
 
 

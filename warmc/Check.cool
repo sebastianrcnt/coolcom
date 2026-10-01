@@ -271,8 +271,8 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
     Bool cmp;
     if (u->error_kind) return NULL;
     if (WEq(tag, "literal")) {
-        if (WEq(name, "nil")) ty = WTypeNamed(u, scope, "Unit");
-        else if (WEq(name, "true") || WEq(name, "false")) ty = WTypeNamed(u, scope, "Bool");
+        if (n->token->kind != 5 && n->token->kind != 6 && WEq(name, "nil")) ty = WTypeNamed(u, scope, "Unit");
+        else if (n->token->kind != 5 && n->token->kind != 6 && (WEq(name, "true") || WEq(name, "false"))) ty = WTypeNamed(u, scope, "Bool");
         else if (n->token->kind == 3) {
             ty = expected; if (!ty) ty = WTypeNamed(u, scope, "Int32"); WIntLiteral(u, n, ty);
         } else if (n->token->kind == 4) {
@@ -317,7 +317,7 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
         if ((WEq(name, "-") || WEq(name, "~")) && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
     } else if (WEq(tag, "cast")) {
         ty = WChild(n, "type"); WValidateType(u, ty); v = WChild(n, "value");
-        if (WEq(ty->name, "&") && (WEq(v->tag, "variable") || WEq(v->tag, "path"))) a = WInfer(u, v, NULL, fun);
+        if (WEq(ty->name, "&") && (WEq(v->tag, "variable") || WEq(v->tag, "path") || WEq(v->tag, "ref-path"))) a = WInfer(u, v, NULL, fun);
         else a = WInfer(u, v, ty, fun);
         if (a && WEq(a->name, "&!") && WEq(ty->name, "&") && WTypeEq(a->first, ty->first) && WTypeEq(a->first->next, ty->first->next)) a = ty;
         // Literal/asserted-type casts are checked by the operand; explicit numeric

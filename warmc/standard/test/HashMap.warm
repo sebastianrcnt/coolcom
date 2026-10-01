@@ -1,0 +1,75 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import Standard.HashMap (HashMap, make, insert, get, contains, borrowGet, remove, rehash, length, nextKey, drainOne, destroyFree, destroyEmpty);
+import Standard.String (String, fromLiteral, destroyString, length as stringLength);
+import Standard.Vector (Vector, make as vectorMake, push, slice as vectorSlice, destroyFree as vectorDestroy);
+import Standard.Test.GeneralSupport (check);
+module body Standard.Test.HashMap is
+    record Collision: Free is id: Index; end;
+    instance Eq(Collision) is
+        generic [R: Region, S: Region]
+        method eq(a: &[Collision, R], b: &[Collision, S]): Bool is return a->id = b->id; end;
+    end;
+    instance Hash(Collision) is
+        generic [R: Region]
+        method hash(a: &[Collision, R]): Nat64 is return 0; end;
+    end;
+    private function key(id: Index): Collision is return Collision(id => id); end;
+    function hashMapTestSuite(): Unit is
+        var m: HashMap[Collision, Index] := make();
+        for i from 0 until 100 do
+            case insert(&!m, key(i), i * 2) of when None do skip; when Some(value: Index) do abort("new key"); end case;
+        end for;
+        check(length(&m) = 100);
+        for i from 0 until 100 do
+            case get(&m, key(i)) of when Some(value: Index) do check(value = i * 2); when None do abort("collision lookup"); end case;
+        end for;
+        for i from 0 until 50 do
+            case remove(&!m, key(i * 2)) of when Some(value: Index) do check(value = i * 4); when None do abort("remove"); end case;
+        end for;
+        check(not contains(&m, key(0))); check(contains(&m, key(99)));
+        case remove(&!m, key(0)) of when None do skip; when Some(value: Index) do abort("absent remove"); end case;
+        case insert(&!m, key(99), 1234) of when Some(value: Index) do check(value = 198); when None do abort("replacement"); end case;
+        for i from 0 until 50 do let old: Option[Index] := insert(&!m, key(i * 2), i); end for;
+        rehash(&!m); check(length(&m) = 100);
+        for i from 0 until 100 do
+            let expected: Index := if i = 99 then 1234 else (if i % 2 = 0 then i / 2 else i * 2);
+            case get(&m, key(i)) of when Some(value: Index) do check(value = expected); when None do abort("rehash lost key"); end case;
+        end for;
+        var at: Index := 0; var count: Index := 0;
+        while true do
+            case nextKey(&m, &!at) of when Some(value: Collision) do check(contains(&m, value)); count := count + 1; when None do break; end case;
+        end while;
+        check(count = 100); destroyFree(m);
+        var text: HashMap[Index, String] := make();
+        for i from 0 until 40 do
+            case insert(&!text, i, fromLiteral("owned")) of when None do skip; when Some(value: String) do destroyString(value); abort("unexpected previous"); end case;
+        end for;
+        borrow read: &[HashMap[Index, String], R] := &text do
+            case borrowGet(read, 10) of when Some(value: &[String, R]) do check(stringLength(value) = 5); when None do abort("linear lookup"); end case;
+        end borrow;
+        case insert(&!text, 10, fromLiteral("new")) of when Some(value: String) do destroyString(value); when None do abort("linear replacement"); end case;
+        rehash(&!text);
+        var drained: Index := 0;
+        while true do case drainOne(&!text) of when Some(value: String) do destroyString(value); drained := drained + 1; when None do break; end case; end while;
+        check(drained = 40); check(length(&text) = 0);
+        case insert(&!text, 1, fromLiteral("after drain")) of when None do skip; when Some(value: String) do destroyString(value); abort("drain reinsertion"); end case;
+        case drainOne(&!text) of when Some(value: String) do check(stringLength(&value) = 11); destroyString(value); when None do abort("drain cursor reset"); end case;
+        destroyEmpty(text);
+        var churn: HashMap[Index, Index] := make();
+        for i from 0 until 1000 do let old: Option[Index] := insert(&!churn, i, i); let gone: Option[Index] := remove(&!churn, i); end for;
+        check(length(&churn) = 0); rehash(&!churn); destroyEmpty(churn);
+        var keys: Vector[Collision] := vectorMake(); push(&!keys, key(1)); push(&!keys, key(2)); push(&!keys, key(1)); push(&!keys, key(2));
+        borrow read: &[Vector[Collision], R] := &keys do
+            let first: Span[Collision, R] := vectorSlice(read, 0, 2);
+            let second: Span[Collision, R] := vectorSlice(read, 2, 4);
+            var nested: HashMap[Span[Collision, R], Index] := make();
+            let old: Option[Index] := insert(&!nested, first, 1);
+            case insert(&!nested, second, 2) of when Some(value: Index) do check(value = 1); when None do abort("nested evidence"); end case;
+            check(length(&nested) = 1); destroyFree(nested);
+        end borrow;
+        vectorDestroy(keys);
+        printLn("STDLIB HASHMAP PASS");
+        return nil;
+    end;
+end module body.

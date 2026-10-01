@@ -525,4 +525,10 @@ module body Standard.Buffer is
         return @embed(Span![T, R], "au_make_span($1, $2)", p, endExclusive - start);
     end;
 
+    generic [T: Type, R: Region]
+    function borrowNth(buf: &[Buffer[T], R], pos: Index): &[T, R] is
+        if pos >= buf->size then abort("borrowNth: index out of range"); end if;
+        let ptr: Pointer[T] := positiveOffset(buf->array, pos);
+        return @embed(&[T, R], "$1", ptr);
+    end;
 end module body.

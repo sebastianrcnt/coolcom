@@ -1,0 +1,9 @@
+An owning growable array built on Standard.Buffer.
+push/insert consume any Type. pop/remove/replace return ownership; empty pop
+returns None. get/set/filter require Free elements. borrowGet/slice/next can
+borrow linear elements. Bounds are half-open; [length,length) is empty.
+A Cursor visits borrowed elements in index order. Restart it after mutation.
+map consumes the array, moving elements once into a named Fn callback.
+destroyFree accepts Free elements; drain and destroy linear elements before
+destroyEmpty. End all borrows before mutation/growth/destruction.
+See Man("Standard.Algorithms"), Man("Standard.String").

@@ -1,0 +1,49 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import Standard.HashMap (HashMap, make as mapMake, length as mapLength, contains as mapContains, insert as mapInsert, remove as mapRemove, rehash as mapRehash, nextKey, destroyFree as mapDestroy);
+
+module body Standard.HashSet is
+    record HashSet[T: Free(Eq, Hash)]: Linear is
+        data: HashMap[T, Unit];
+    end;
+    generic [T: Free(Eq, Hash)]
+    function make(): HashSet[T] is
+        let data: HashMap[T, Unit] := mapMake();
+        return HashSet(data => data);
+    end;
+    generic [T: Free(Eq, Hash)]
+    function destroy(s: HashSet[T]): Unit is
+        let { data: HashMap[T, Unit] } := s;
+        return mapDestroy(data);
+    end;
+    generic [T: Free(Eq, Hash), R: Region]
+    function length(s: &[HashSet[T], R]): Index is
+        return mapLength(&(s->data));
+    end;
+    generic [T: Free(Eq, Hash), R: Region]
+    function contains(s: &[HashSet[T], R], value: T): Bool is
+        return mapContains(&(s->data), value);
+    end;
+    generic [T: Free(Eq, Hash), R: Region]
+    function insert(s: &![HashSet[T], R], value: T): Bool is
+        case mapInsert(&(s->data), value, nil) of
+            when Some(value: Unit) do return false;
+            when None do return true;
+        end case;
+    end;
+    generic [T: Free(Eq, Hash), R: Region]
+    function remove(s: &![HashSet[T], R], value: T): Bool is
+        case mapRemove(&(s->data), value) of
+            when Some(value: Unit) do return true;
+            when None do return false;
+        end case;
+    end;
+    generic [T: Free(Eq, Hash), R: Region]
+    function rehash(s: &![HashSet[T], R]): Unit is
+        return mapRehash(&(s->data));
+    end;
+    generic [T: Free(Eq, Hash), R: Region, C: Region]
+    function next(s: &[HashSet[T], R], cursor: &![Index, C]): Option[T] is
+        return nextKey(&(s->data), cursor);
+    end;
+end module body.

@@ -3,6 +3,7 @@ import OS.Terminal (Output, Input, Size, Key, Char, Escape, Up, Down, PageUp, Pa
 import OS.CoolOS.System (System, Snapshot, TaskInfo, HeapInfo, DriveInfo, Clock, acquireSystem, releaseSystem, snapshotTasks, snapshotCount, snapshotTask, snapshotName, releaseSnapshot, heapStats, driveFree, killTask, clock);
 import Standard.Buffer (Buffer, initialize, nth, storeNth, destroyFree);
 import Standard.String (String, length, nthByte, getSpan, destroyString);
+import Standard.Ord (Ord, Ordering, Less, Equal, Greater, compare);
 module body TopApp is
     record Row: Free is info: TaskInfo; delta: Int64; index: Index; end;
     function signed(value: Index): Int64 is
@@ -118,14 +119,12 @@ module body TopApp is
                 case snapshotName(snapshot, b) of
                     when Err(error as e: IoError) do destroyString(left); return false;
                     when Ok(value as right: String) do
-                        var result: Bool := length(&left) < length(&right);
-                        var i: Index := 0;
-                        var done: Bool := false;
-                        while i < length(&left) and i < length(&right) and not done do
-                            let l: Nat8 := nthByte(&left, i); let r: Nat8 := nthByte(&right, i);
-                            if l /= r then result := l < r; done := true; end if;
-                            i := i + 1;
-                        end while;
+                        var result: Bool := false;
+                        case compare(&left, &right) of
+                            when Less do result := true;
+                            when Equal do skip;
+                            when Greater do skip;
+                        end case;
                         destroyString(left); destroyString(right); return result;
                 end case;
         end case;

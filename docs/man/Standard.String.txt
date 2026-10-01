@@ -1,0 +1,13 @@
+An owning linear byte string, valid UTF-8 by convention. destroyString releases
+it. New text operations borrow byte spans; use slice(&string,0,length(&string)).
+Search/prefix/suffix/equals include embedded NUL. Empty needle matches boundaries.
+split keeps empty fields; empty separator splits bytes. Destroy every String in
+the returned Vector, then destroyEmpty. join borrows Strings and returns ownership.
+replace handles non-overlapping matches; empty needle inserts at each byte boundary.
+trim returns a borrowed view removing ASCII whitespace (09-0D and 20). ASCII case
+conversion returns an owned copy. decodeUtf8 strictly validates scalar encodings.
+utf8Next/utf8Length replace each invalid byte with U+FFFD and progress one byte.
+parseInt/parseNat return Result, check complete decimal input and overflow; radix
+variants accept bases 2-36. Int allows +/-; Nat allows +. Whitespace is an error.
+String.slice works with FormatArg.Text. See Man("Standard.Format"),
+Man("Standard.Vector"), Man("Standard.Algorithms").

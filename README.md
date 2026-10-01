@@ -49,6 +49,30 @@ warm fmt
 
 `warm test tests/`는 `Test.warm` 또는 `*Test.warm` 테스트 프로그램을 실행합니다.
 
+범용 라이브러리는 `Standard.Vector`, `HashMap`, `HashSet`, `Algorithms`,
+`String`을 제공합니다. 예를 들어 늘어나는 배열을 안정 정렬할 수 있습니다:
+
+```warm
+import Standard.Ord (Ord);
+import Standard.Vector (Vector, make, push, get, sliceMut, destroyFree);
+import Standard.Algorithms (sort);
+module body Sorted is
+    function main(): ExitCode is
+        var values: Vector[Int64] := make();
+        push(&!values, 5); push(&!values, 2);
+        sort(sliceMut(&!values, 0, 2));
+        printLn(get(&values, 0)); -- 2
+        destroyFree(values);
+        return ExitSuccess();
+    end;
+end module body.
+```
+
+`import Standard.String (parseInt);`로 가져오는 숫자 파싱 함수는
+`Result[Int64, ParseError]`를 반환합니다. API와 소유권 규칙은
+[Stage 8 설계](docs/warm-stdlib.md#stage-8-general-purpose-library)와
+CoolOS의 `Man("Standard.Vector")`, `Man("Standard.String")`에서 확인할 수 있습니다.
+
 가져오는 모듈은 소스 디렉터리 아래와 표준 라이브러리에서 자동 탐색합니다.
 추가 디렉터리는 `-I lib/`로 지정하며 `warm.toml`은 필요하지 않습니다.
 `build` 결과는 레포 없이도 실행할 수 있는 macOS 실행 파일입니다.

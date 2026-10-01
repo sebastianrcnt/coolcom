@@ -1,0 +1,114 @@
+import Standard.Ord (Ord, Ordering, compare);
+import Standard.Vector (Vector, make, push);
+import Standard.Buffer (Buffer, allocateEmpty, insertBack, nth, storeNth, destroyFree);
+module body Standard.Algorithms is
+    private generic [T: Free(Ord)]
+    function compareValues(a: T, b: T): Ordering is return compare(&a, &b); end;
+    generic [T: Free(Ord), R: Region]
+    function sort(values: Span![T, R]): Unit is
+        let comparator: Fn[T, T, Ordering] := compareValues;
+        return sortBy(values, comparator);
+    end;
+    generic [T: Free, R: Region]
+    function sortBy(values: Span![T, R], comparator: Fn[T, T, Ordering]): Unit is
+        let n: Index := spanWriteLength(values);
+        if n < 2 then return nil; end if;
+        var scratch: Buffer[T] := allocateEmpty();
+        for i from 0 until n do insertBack(&!scratch, values[i]); end for;
+        var width: Index := 1;
+        while width < n do
+            var start: Index := 0;
+            while start < n do
+                let middle: Index := start + (if width < n - start then width else n - start);
+                let finish: Index := middle + (if width < n - middle then width else n - middle);
+                var left: Index := start;
+                var right: Index := middle;
+                for out from start until finish do
+                    var takeLeft: Bool := right = finish;
+                    if left < middle and right < finish then
+                        case comparator(values[left], values[right]) of
+                            when Greater do takeLeft := false;
+                            when Less do takeLeft := true;
+                            when Equal do takeLeft := true;
+                        end case;
+                    end if;
+                    if takeLeft then
+                        storeNth(&!scratch, out, values[left]); left := left + 1;
+                    else
+                        storeNth(&!scratch, out, values[right]); right := right + 1;
+                    end if;
+                end for;
+                start := finish;
+            end while;
+            for i from 0 until n do values[i] := nth(&scratch, i); end for;
+            if width > n / 2 then break; end if;
+            width := width * 2;
+        end while;
+        destroyFree(scratch);
+        return nil;
+    end;
+    generic [T: Free(Ord), R: Region]
+    function binarySearch(values: Span[T, R], needle: T): Option[Index] is
+        let comparator: Fn[T, T, Ordering] := compareValues;
+        return binarySearchBy(values, needle, comparator);
+    end;
+    generic [T: Free, R: Region]
+    function binarySearchBy(values: Span[T, R], needle: T, comparator: Fn[T, T, Ordering]): Option[Index] is
+        var lo: Index := 0;
+        var hi: Index := spanLength(values);
+        while lo < hi do
+            let middle: Index := lo + (hi - lo) / 2;
+            case comparator(values[middle], needle) of
+                when Less do lo := middle + 1;
+                when Equal do hi := middle;
+                when Greater do hi := middle;
+            end case;
+        end while;
+        if lo < spanLength(values) then
+            case comparator(values[lo], needle) of
+                when Equal do return Some(value => lo);
+                when Less do skip;
+                when Greater do skip;
+            end case;
+        end if;
+        return None();
+    end;
+    generic [T: Free, R: Region]
+    function reverse(values: Span![T, R]): Unit is
+        let n: Index := spanWriteLength(values);
+        for i from 0 until n / 2 do
+            let a: T := values[i]; values[i] := values[n - 1 - i]; values[n - 1 - i] := a;
+        end for;
+        return nil;
+    end;
+    generic [T: Free(Ord)]
+    function min(a: T, b: T): T is
+        case compare(&a, &b) of
+            when Greater do return b;
+            when Less do return a;
+            when Equal do return a;
+        end case;
+    end;
+    generic [T: Free(Ord)]
+    function max(a: T, b: T): T is
+        case compare(&a, &b) of
+            when Less do return b;
+            when Greater do return a;
+            when Equal do return a;
+        end case;
+    end;
+    generic [T: Free, U: Type, R: Region]
+    function map(values: Span[T, R], callback: Fn[T, U]): Vector[U] is
+        var out: Vector[U] := make();
+        for i from 0 until spanLength(values) do push(&!out, callback(values[i])); end for;
+        return out;
+    end;
+    generic [T: Free, R: Region]
+    function filter(values: Span[T, R], predicate: Fn[T, Bool]): Vector[T] is
+        var out: Vector[T] := make();
+        for i from 0 until spanLength(values) do
+            if predicate(values[i]) then push(&!out, values[i]); end if;
+        end for;
+        return out;
+    end;
+end module body.

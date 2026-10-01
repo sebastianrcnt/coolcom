@@ -49,7 +49,7 @@ def stdin_test(OUT):
     testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     install(disk)
     files = []
-    for name in ("Buffer", "String", "StringBuilder", "OS/Terminal"):
+    for name in ("Buffer", "Vector", "String", "StringBuilder", "OS/Terminal"):
         files += [std / (name + ".warmh"), std / (name + ".warm")]
     files += [std / "OS/Error.warm",
               ROOT / "warmc/examples/greet/Greet.warmh", ROOT / "warmc/examples/greet/Greet.warm"]
@@ -128,9 +128,51 @@ def fmt_test(OUT):
     assert data == (ROOT / "warmc/fmt-tests/basic.exp.warm").read_bytes(), data.decode(errors="replace")
     print("warm-kernel: Fmt (WarmFmt in the shell) PASS", flush=True)
 
+def stdlib_test(OUT):
+    """Run every pure-library suite as generated Cool and through guest WarmRun."""
+    sys.path.insert(0, str(ROOT / 'warmc'))
+    from stdlib_modules import library_modules, test_modules
+    disk = OUT / 'stdlib.img'
+    testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
+    install(disk)
+    code = OUT / 'Stdlib.cool'
+    run(ROOT / 'tools/warm', 'compile', *library_modules(ROOT), *test_modules(ROOT),
+        '--entrypoint=Standard.Test.General:main', '--target-type=hc', '--output=' + str(code))
+    code.write_text('#include "C:/Adapter.cool"\n' + code.read_text())
+    run('mcopy', '-o', '-i', disk, OUT / 'Adapter.cool', '::Adapter.cool')
+    run('mcopy', '-o', '-i', disk, code, '::Stdlib.cool')
+    run('mmd', '-i', disk, '::WarmTests')
+    paths = [disk_path(p) for pair in library_modules(ROOT) for p in pair.split(',')]
+    for source in test_modules(ROOT):
+        guest = 'C:/WarmTests/' + Path(source).name
+        run('mcopy', '-o', '-i', disk, source, '::WarmTests/' + Path(source).name)
+        paths.append(guest)
+    for name, commands in [
+        ('StdlibKernel', testvm.typed_line('#include "C:/Stdlib.cool"')),
+        ('StdlibWarmRun', testvm.typed_line('#include "C:/Warm/Warm.cool"') +
+         testvm.typed_line('Print("WLOAD%d\\n", 1);') + 'wait WLOAD1\n' +
+         warm_run(','.join(paths), 'Standard.Test.General:main')),
+    ]:
+        script = OUT / (name + '.input')
+        script.write_text('wait Cool shell\nwait > \n' + commands +
+                          'wait WARM STDLIB PASS\ndelay 200\nquit\n')
+        log = OUT / (name + '.log')
+        proc = testvm.run_vm(testvm.vm_command(str(ROOT / 'build/kernel.Image'),
+            executable=ROOT / 'build/coolvm', no_venus=True, timeout=35,
+            disk=disk, input_script=script, host_timeout=40), log,
+            cwd=ROOT, stdin=subprocess.DEVNULL)
+        output = log.read_text(errors='replace')
+        assert proc.returncode == 0, output[-6000:]
+        shell_output = output.split('Cool shell:', 1)[-1]
+        assert 'ERROR:' not in shell_output and 'heap overflow' not in shell_output, output[-6000:]
+        assert 'WARM STDLIB PASS' in output.splitlines(), output[-6000:]
+        for marker in ('EQ HASH ORD', 'VECTOR', 'HASHMAP', 'HASHSET', 'ALGORITHMS', 'TEXT UTF8 PARSE FORMAT'):
+            assert 'STDLIB ' + marker + ' PASS' in output.splitlines(), output[-6000:]
+        print('warm-kernel: ' + name + ' (all six suites) PASS', flush=True)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "System", "Stdin", "Fmt"))
+    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "System", "Stdin", "Fmt", "Stdlib"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:
@@ -215,6 +257,8 @@ def main():
     for name in ("Streams", "Sockets", "Tasks", "Capabilities", "System"):
         if not args.filter or args.filter == name:
             portable_test(OUT, name)
+    if not args.filter or args.filter == "Stdlib":
+        stdlib_test(OUT)
     if not args.filter or args.filter == "Stdin":
         stdin_test(OUT)
     if not args.filter or args.filter == "Fmt":

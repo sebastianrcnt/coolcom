@@ -1,0 +1,94 @@
+import Standard.String (String, ParseError, EmptyNumber, InvalidDigit, Overflow, InvalidRadix, Utf8Error, UnexpectedEnd, InvalidUtf8, Decoded, Utf8Iterator, fromSpan, equals, startsWith, endsWith, contains, find, findFrom, trim, split, join, replace, toLowerAscii, toUpperAscii, parseInt, parseNat, parseIntRadix, parseNatRadix, decodeUtf8, utf8Iterator, utf8Next, utf8Length, slice, length, storeNth, destroyString);
+import Standard.Vector (Vector, pop, slice as vectorSlice, length as vectorLength, destroyEmpty);
+import Standard.Format (FormatArg, Signed, Text, format);
+import Standard.Buffer (Buffer, allocateEmpty, insertBack, slice as bufSlice, destroyFree);
+import Standard.Test.GeneralSupport (check);
+module body Standard.Test.Text is
+    private function expect(text: String, expected: Span[Nat8, Static]): Unit is
+        check(equals(slice(&text, 0, length(&text)), expected)); destroyString(text); return nil;
+    end;
+    private function drain(parts: Vector[String]): Unit is
+        var owned: Vector[String] := parts;
+        while true do case pop(&!owned) of when Some(value: String) do destroyString(value); when None do break; end case; end while;
+        return destroyEmpty(owned);
+    end;
+    private function integer(text: Span[Nat8, Static], expected: Int64): Unit is
+        case parseInt(text) of when Ok(value: Int64) do check(value = expected); when Err(error: ParseError) do abort("parseInt valid"); end case;
+        return nil;
+    end;
+    private generic [R: Region]
+    function findNul(text: Span[Nat8, R]): Index is
+        case find(text, sliceSpan(text, 0, 1)) of when Some(value: Index) do return value; when None do abort("NUL search"); end case;
+    end;
+    function textTestSuite(): Unit is
+        expect(fromSpan("true"), "true"); expect(fromSpan("false"), "false"); expect(fromSpan("nil"), "nil");
+        expect(fromSpan("not"), "not"); expect(fromSpan(")"), ")"); expect(fromSpan("("), "(");
+        check(startsWith("abc", "")); check(endsWith("abc", "bc")); check(not startsWith("a", "ab"));
+        check(contains("ababc", "abc")); check(contains("", "")); check(not contains("ab", "abc"));
+        case find("ababc", "abc") of when Some(value: Index) do check(value = 2); when None do abort("find"); end case;
+        case findFrom("abc", "", 3) of when Some(value: Index) do check(value = 3); when None do abort("empty find"); end case;
+        case findFrom("abc", "", 4) of when None do skip; when Some(value: Index) do abort("findFrom out of range"); end case;
+        check(equals(trim(" \t\nabc\r "), "abc")); check(spanLength(trim(" \n\t")) = 0); check(spanLength(trim("")) = 0);
+        let parts: Vector[String] := split(",a,,b,", ","); check(vectorLength(&parts) = 5);
+        expect(join(vectorSlice(&parts, 0, vectorLength(&parts)), "|"), "|a||b|"); drain(parts);
+        let noParts: Vector[String] := split("", ""); check(vectorLength(&noParts) = 0); expect(join(vectorSlice(&noParts, 0, 0), ","), ""); drain(noParts);
+        let one: Vector[String] := split("", ","); check(vectorLength(&one) = 1); drain(one);
+        let bytes: Vector[String] := split("abc", ""); check(vectorLength(&bytes) = 3); expect(join(vectorSlice(&bytes, 0, 3), "-"), "a-b-c"); drain(bytes);
+        expect(replace("aaaaa", "aa", "b"), "bba"); expect(replace("ab", "", "-"), "-a-b-"); expect(replace("abc", "z", "x"), "abc");
+        expect(toLowerAscii("AbC!"), "abc!"); expect(toUpperAscii("aBc!"), "ABC!");
+        case parseInt("") of when Err(error: ParseError) do skip; when Ok(value: Int64) do abort("empty number"); end case;
+        case parseInt("-") of when Err(error: ParseError) do skip; when Ok(value: Int64) do abort("minus only"); end case;
+        case parseNat("+42") of when Ok(value: Nat64) do check(value = 42); when Err(error: ParseError) do abort("Nat plus"); end case;
+        integer("0", 0); integer("-0", 0); integer("+42", 42); integer("9223372036854775807", maximum_int64); integer("-9223372036854775808", minimum_int64);
+        case parseNat("18446744073709551615") of when Ok(value: Nat64) do check(value = maximum_nat64); when Err(error: ParseError) do abort("parseNat max"); end case;
+        case parseNat("18446744073709551616") of when Err(error: ParseError) do case error of when Overflow do skip; when EmptyNumber do abort("overflow kind"); when InvalidDigit(position: Index) do abort("overflow kind"); when InvalidRadix do abort("overflow kind"); end case; when Ok(value: Nat64) do abort("Nat overflow"); end case;
+        case parseInt("9223372036854775808") of when Err(error: ParseError) do skip; when Ok(value: Int64) do abort("Int overflow"); end case;
+        case parseInt("-9223372036854775809") of when Err(error: ParseError) do skip; when Ok(value: Int64) do abort("negative overflow"); end case;
+        case parseInt("+") of when Err(error: ParseError) do skip; when Ok(value: Int64) do abort("sign only"); end case;
+        case parseInt(" 1") of when Err(error: ParseError) do skip; when Ok(value: Int64) do abort("whitespace"); end case;
+        case parseInt("12x") of when Err(error: ParseError) do case error of when InvalidDigit(position: Index) do check(position = 2); when Overflow do abort("digit kind"); when EmptyNumber do abort("digit kind"); when InvalidRadix do abort("digit kind"); end case; when Ok(value: Int64) do abort("trailing garbage"); end case;
+        case parseNat("-1") of when Err(error: ParseError) do skip; when Ok(value: Nat64) do abort("negative Nat"); end case;
+        case parseIntRadix("-7f", 16) of when Ok(value: Int64) do check(value = -127); when Err(error: ParseError) do abort("hex"); end case;
+        case parseNatRadix("Z", 36) of when Ok(value: Nat64) do check(value = 35); when Err(error: ParseError) do abort("radix36"); end case;
+        case parseNatRadix("1", 1) of when Err(error: ParseError) do skip; when Ok(value: Nat64) do abort("bad radix"); end case;
+        case parseNatRadix("2", 2) of when Err(error: ParseError) do skip; when Ok(value: Nat64) do abort("bad binary"); end case;
+        var args: Buffer[FormatArg[Static]] := allocateEmpty();
+        insertBack(&!args, Signed(value => minimum_int64));
+        let formatted: String := format("{}", bufSlice(&args, 0, 1));
+        destroyFree(args);
+        borrow read: &[String, R] := &formatted do
+            case parseInt(slice(read, 0, length(read))) of when Ok(value: Int64) do check(value = minimum_int64); when Err(error: ParseError) do abort("format roundtrip"); end case;
+        end borrow;
+        destroyString(formatted);
+        check(utf8Length("a한😀") = 3);
+        case decodeUtf8("한", 0) of when Ok(value: Decoded) do check(value.codepoint = 54620); check(value.width = 3); when Err(error: Utf8Error) do abort("UTF-8 Korean"); end case;
+        case decodeUtf8("😀", 0) of when Ok(value: Decoded) do check(value.codepoint = 128512); check(value.width = 4); when Err(error: Utf8Error) do abort("UTF-8 astral"); end case;
+        case decodeUtf8("", 0) of when Err(error: Utf8Error) do skip; when Ok(value: Decoded) do abort("EOF decode"); end case;
+        var bad: String := fromSpan("abc"); storeNth(&!bad, 0, 224); storeNth(&!bad, 1, 128); storeNth(&!bad, 2, 128);
+        borrow read: &[String, R] := &bad do
+            let badBytes: Span[Nat8, R] := slice(read, 0, 3);
+            case decodeUtf8(badBytes, 0) of when Err(error: Utf8Error) do skip; when Ok(value: Decoded) do abort("overlong"); end case;
+            check(utf8Length(badBytes) = 3);
+            var it: Utf8Iterator[R] := utf8Iterator(badBytes);
+            case utf8Next(&!it) of when Some(value: Nat32) do check(value = 65533); when None do abort("replacement"); end case;
+        end borrow;
+        storeNth(&!bad, 0, 237); storeNth(&!bad, 1, 160); storeNth(&!bad, 2, 128);
+        case decodeUtf8(slice(&bad, 0, 3), 0) of when Err(error: Utf8Error) do skip; when Ok(value: Decoded) do abort("surrogate"); end case;
+        storeNth(&!bad, 0, 240);
+        case decodeUtf8(slice(&bad, 0, 3), 0) of when Err(error: Utf8Error) do skip; when Ok(value: Decoded) do abort("truncation"); end case;
+        destroyString(bad);
+        var scalar: String := fromSpan("abcd");
+        storeNth(&!scalar, 0, 244); storeNth(&!scalar, 1, 143); storeNth(&!scalar, 2, 191); storeNth(&!scalar, 3, 191);
+        case decodeUtf8(slice(&scalar, 0, 4), 0) of when Ok(value: Decoded) do check(value.codepoint = 1114111); when Err(error: Utf8Error) do abort("max scalar"); end case;
+        storeNth(&!scalar, 1, 144);
+        case decodeUtf8(slice(&scalar, 0, 4), 0) of when Err(error: Utf8Error) do skip; when Ok(value: Decoded) do abort("above max scalar"); end case;
+        storeNth(&!scalar, 0, 0); storeNth(&!scalar, 1, 'A'); storeNth(&!scalar, 2, 0); storeNth(&!scalar, 3, 'b');
+        check(findNul(slice(&scalar, 0, 4)) = 0);
+        check(utf8Length(slice(&scalar, 0, 4)) = 4);
+        let nulFields: Vector[String] := split(slice(&scalar, 0, 4), slice(&scalar, 0, 1));
+        check(vectorLength(&nulFields) = 3); drain(nulFields);
+        destroyString(scalar);
+        printLn("STDLIB TEXT UTF8 PARSE FORMAT PASS");
+        return nil;
+    end;
+end module body.

@@ -1,0 +1,23 @@
+import Standard.String (String, slice, length);
+
+module Standard.Hash is
+    typeclass Hash(T: Type) is
+        generic [R: Region]
+        method hash(a: &[T, R]): Nat64;
+    end;
+    instance Hash(Nat8);
+    instance Hash(Nat16);
+    instance Hash(Nat32);
+    instance Hash(Nat64);
+    instance Hash(Int8);
+    instance Hash(Int16);
+    instance Hash(Int32);
+    instance Hash(Int64);
+    instance Hash(Index);
+    instance Hash(ByteSize);
+    instance Hash(Bool);
+    instance Hash(Unit);
+    instance Hash(String);
+    generic [T: Type(Hash), P: Region]
+    instance Hash(Span[T, P]);
+end module.

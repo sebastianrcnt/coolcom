@@ -12,6 +12,8 @@ import Standard.Buffer (
     Buffer
 );
 
+import Standard.Vector (Vector);
+
 module Standard.String is
     type String: Linear;
 
@@ -92,4 +94,73 @@ module Standard.String is
     generic [R: Region]
     function sliceMut(string: &![String, R], start: Index, endExclusive: Index): Span![Nat8, R];
 
+    """Copy arbitrary borrowed bytes. Strings are byte strings; invalid UTF-8 is allowed."""
+    generic [R: Region]
+    function fromSpan(text: Span[Nat8, R]): String;
+    generic [R: Region, S: Region]
+    function equals(a: Span[Nat8, R], b: Span[Nat8, S]): Bool;
+    generic [R: Region, S: Region]
+    function startsWith(text: Span[Nat8, R], prefix: Span[Nat8, S]): Bool;
+    generic [R: Region, S: Region]
+    function endsWith(text: Span[Nat8, R], suffix: Span[Nat8, S]): Bool;
+    generic [R: Region, S: Region]
+    function find(text: Span[Nat8, R], needle: Span[Nat8, S]): Option[Index];
+    generic [R: Region, S: Region]
+    function findFrom(text: Span[Nat8, R], needle: Span[Nat8, S], start: Index): Option[Index];
+    generic [R: Region, S: Region]
+    function contains(text: Span[Nat8, R], needle: Span[Nat8, S]): Bool;
+    """Borrow a view with ASCII whitespace (09-0D and 20) removed at both ends."""
+    generic [R: Region]
+    function trim(text: Span[Nat8, R]): Span[Nat8, R];
+    """Keep empty fields, including a trailing field. Empty separator splits bytes;
+    empty input with empty separator yields an empty vector. Caller drains/destroys
+    each owned String and then destroys the empty Vector."""
+    generic [R: Region, S: Region]
+    function split(text: Span[Nat8, R], separator: Span[Nat8, S]): Vector[String];
+    generic [R: Region, S: Region]
+    function join(parts: Span[String, R], separator: Span[Nat8, S]): String;
+    """Replace non-overlapping matches. Empty needle inserts at every byte boundary."""
+    generic [R: Region, S: Region, P: Region]
+    function replace(text: Span[Nat8, R], needle: Span[Nat8, S], replacement: Span[Nat8, P]): String;
+    generic [R: Region]
+    function toLowerAscii(text: Span[Nat8, R]): String;
+    generic [R: Region]
+    function toUpperAscii(text: Span[Nat8, R]): String;
+    union ParseError: Free is
+        case EmptyNumber;
+        case InvalidDigit is position: Index;
+        case Overflow;
+        case InvalidRadix;
+    end;
+    """Strict decimal parsing, optional leading sign, no whitespace or separators."""
+    generic [R: Region]
+    function parseInt(text: Span[Nat8, R]): Result[Int64, ParseError];
+    generic [R: Region]
+    function parseNat(text: Span[Nat8, R]): Result[Nat64, ParseError];
+    generic [R: Region]
+    function parseIntRadix(text: Span[Nat8, R], radix: Nat64): Result[Int64, ParseError];
+    generic [R: Region]
+    function parseNatRadix(text: Span[Nat8, R], radix: Nat64): Result[Nat64, ParseError];
+    union Utf8Error: Free is
+        case UnexpectedEnd;
+        case InvalidUtf8;
+    end;
+    record Decoded: Free is
+        codepoint: Nat32;
+        width: Index;
+    end;
+    record Utf8Iterator[R: Region]: Free is
+        bytes: Span[Nat8, R];
+        position: Index;
+    end;
+    """Strict decode rejects overlong encodings, surrogates and values above U+10FFFF."""
+    generic [R: Region]
+    function decodeUtf8(text: Span[Nat8, R], at: Index): Result[Decoded, Utf8Error];
+    generic [R: Region]
+    function utf8Iterator(text: Span[Nat8, R]): Utf8Iterator[R];
+    """Malformed input yields U+FFFD and advances one byte. None at EOF."""
+    generic [R: Region, S: Region]
+    function utf8Next(iterator: &![Utf8Iterator[R], S]): Option[Nat32];
+    generic [R: Region]
+    function utf8Length(text: Span[Nat8, R]): Index;
 end module.

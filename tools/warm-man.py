@@ -15,6 +15,8 @@ OS = ROOT / 'warmc/standard/src/OS'
 NOTES = ROOT / 'docs/man'
 sys.path.insert(0, str(ROOT / 'os/Warm'))
 from modules import os_modules, disk_path
+sys.path.insert(0, str(ROOT / 'warmc'))
+from stdlib_modules import LIBRARY
 
 
 def body_interface(source):
@@ -38,7 +40,8 @@ def body_interface(source):
 
 
 def module_sources():
-    for body in sorted([*OS.rglob('*.warm'), *(ROOT / 'os/Warm/standard/src/OS').rglob('*.warm'), OS.parent / 'Format.warm']):
+    for body in sorted({*OS.rglob('*.warm'), *(ROOT / 'os/Warm/standard/src/OS').rglob('*.warm'),
+                        *(OS.parent / (name + '.warm') for name in LIBRARY)}):
         header = body.with_suffix('.warmh')
         yield header if header.exists() else body
 

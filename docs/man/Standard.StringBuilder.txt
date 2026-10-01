@@ -1,0 +1,3 @@
+An owning byte-string builder. writeByte/writeString append data; finalize
+consumes the builder and returns an owned String. Destroy that String once.
+See Man("Standard.String"), Man("Standard.Format").

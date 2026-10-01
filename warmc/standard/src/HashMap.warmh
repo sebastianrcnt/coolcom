@@ -1,0 +1,36 @@
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+
+module Standard.HashMap is
+    """Keys are Free and immutable while stored. Equal keys must have equal hashes.
+    Values may be linear: insert returns the replaced value; remove/drain move values.
+    destroyEmpty requires draining linear values; destroyFree accepts only Free values.
+    Iteration visits occupied buckets in unspecified order. Mutation invalidates cursors.
+    Deterministic hashing is not hardened against adversarial keys."""
+    type HashMap[K: Free(Eq, Hash), V: Type]: Linear;
+    generic [K: Free(Eq, Hash), V: Type]
+    function make(): HashMap[K, V];
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function length(m: &[HashMap[K, V], R]): Index;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function contains(m: &[HashMap[K, V], R], key: K): Bool;
+    generic [K: Free(Eq, Hash), V: Free, R: Region]
+    function get(m: &[HashMap[K, V], R], key: K): Option[V];
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function borrowGet(m: &[HashMap[K, V], R], key: K): Option[&[V, R]];
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function insert(m: &![HashMap[K, V], R], key: K, value: V): Option[V];
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function remove(m: &![HashMap[K, V], R], key: K): Option[V];
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function rehash(m: &![HashMap[K, V], R]): Unit;
+    generic [K: Free(Eq, Hash), V: Type, R: Region, C: Region]
+    function nextKey(m: &[HashMap[K, V], R], cursor: &![Index, C]): Option[K];
+    """Repeated draining scans buckets once until the next insert/rehash (O(capacity) total)."""
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function drainOne(m: &![HashMap[K, V], R]): Option[V];
+    generic [K: Free(Eq, Hash), V: Free]
+    function destroyFree(m: HashMap[K, V]): Unit;
+    generic [K: Free(Eq, Hash), V: Type]
+    function destroyEmpty(m: HashMap[K, V]): Unit;
+end module.

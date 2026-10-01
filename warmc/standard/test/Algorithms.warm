@@ -1,0 +1,52 @@
+import Standard.Ord (Ord, Ordering, Less, Equal, Greater);
+import Standard.Algorithms (sort, sortBy, binarySearch, reverse, min, max, map, filter);
+import Standard.Vector (Vector, make, push, get, length, slice, sliceMut, destroyFree);
+import Standard.Test.GeneralSupport (check);
+module body Standard.Test.Algorithms is
+    record Item: Free is key: Index; sequence: Index; end;
+    private function byKey(a: Item, b: Item): Ordering is
+        if a.key < b.key then return Less(); end if;
+        if a.key > b.key then return Greater(); end if;
+        return Equal();
+    end;
+    instance Ord(Item) is
+        generic [R: Region, S: Region]
+        method compare(a: &[Item, R], b: &[Item, S]): Ordering is return byKey(!a, !b); end;
+    end;
+    private function square(value: Index): Index is return value * value; end;
+    private function odd(value: Index): Bool is return value % 2 = 1; end;
+    function algorithmsTestSuite(): Unit is
+        var empty: Vector[Index] := make(); sort(sliceMut(&!empty, 0, 0)); reverse(sliceMut(&!empty, 0, 0));
+        case binarySearch(slice(&empty, 0, 0), 1) of when None do skip; when Some(value: Index) do abort("empty search"); end case;
+        destroyFree(empty);
+        var v: Vector[Index] := make();
+        for i from 0 until 1001 do push(&!v, (1000 - i) / 2); end for;
+        sort(sliceMut(&!v, 0, 1001));
+        for i from 0 until 1001 do check(get(&v, i) = i / 2); end for;
+        case binarySearch(slice(&v, 0, length(&v)), 50) of when Some(value: Index) do check(value = 100); when None do abort("first duplicate"); end case;
+        case binarySearch(slice(&v, 0, length(&v)), 501) of when None do skip; when Some(value: Index) do abort("absent search"); end case;
+        let squares: Vector[Index] := map(slice(&v, 0, 4), square);
+        check(get(&squares, 3) = 1); destroyFree(squares);
+        let odds: Vector[Index] := filter(slice(&v, 0, 4), odd);
+        check(length(&odds) = 2); destroyFree(odds);
+        reverse(sliceMut(&!v, 0, 1001)); check(get(&v, 0) = 500); destroyFree(v);
+        check(min(5: Index, 2: Index) = 2); check(max(-3: Int64, -9: Int64) = -3);
+        var items: Vector[Item] := make();
+        for i from 0 until 257 do push(&!items, Item(key => (256 - i) % 7, sequence => i)); end for;
+        sortBy(sliceMut(&!items, 0, 257), byKey);
+        for i from 1 until length(&items) do
+            let a: Item := get(&items, i - 1); let b: Item := get(&items, i);
+            check(a.key <= b.key); if a.key = b.key then check(a.sequence < b.sequence); end if;
+        end for;
+        reverse(sliceMut(&!items, 0, 257));
+        sort(sliceMut(&!items, 0, 257));
+        for i from 1 until length(&items) do
+            let a: Item := get(&items, i - 1); let b: Item := get(&items, i);
+            check(a.key <= b.key); if a.key = b.key then check(a.sequence > b.sequence); end if;
+        end for;
+        destroyFree(items);
+        var single: Vector[Index] := make(); push(&!single, 9); sort(sliceMut(&!single, 0, 1)); check(get(&single, 0) = 9); destroyFree(single);
+        printLn("STDLIB ALGORITHMS PASS");
+        return nil;
+    end;
+end module body.
