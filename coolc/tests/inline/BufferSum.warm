@@ -1,0 +1,20 @@
+import Standard.Buffer (Buffer, initialize, nth, storeNth, destroyFree, length);
+
+module body Bench.BufferSum is
+    function main(): ExitCode is
+        let n: Index := 1000000;
+        var b: Buffer[Int64] := initialize(n, 1);
+        for i from 0 to n - 1 do
+            storeNth(&!b, i, 3);
+        end for;
+        var total: Int64 := 0;
+        for r from 1 to 200 do
+            for i from 0 to n - 1 do
+                total := total + nth(&b, i);
+            end for;
+        end for;
+        printLn(total);
+        destroyFree(b);
+        return ExitSuccess();
+    end;
+end module body.

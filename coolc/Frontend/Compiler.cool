@@ -14,6 +14,7 @@ CmpFillTables;
 CMiscInit;
 #include "AIWNIOS_PrsExp.cool"
 #include "AIWNIOS_CodeGen.cool"
+#include "Inline.cool"
 #include "PrsStmt.cool";
 #include "AsmResolve.cool"
 #include "CMain.cool"

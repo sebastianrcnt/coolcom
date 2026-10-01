@@ -201,6 +201,16 @@ CWNode *WGRequest(CWGen *g, CWNode *decl, CWNode *env)
         }
     if (g->last_function) g->last_function->next = f; else g->functions = f; g->last_function = f; return f;
 }
+// A direct call from the function being emitted: WGWriteFunction writes callees first,
+// since coolc only inlines a small function whose definition it has already compiled.
+// The edges hang off the caller's specialization node (lowered is unused there).
+U0 WGCallEdge(CWGen *g, CWNode *callee, CWNode *at)
+{
+    CWNode *edge;
+    if (!g->current || callee == g->current) return;
+    edge = WNode(g->unit, "call", at->token); edge->pair = callee;
+    edge->next = g->current->lowered; g->current->lowered = edge;
+}
 extern U8 *WGExpr(CWGen *g, CWNode *n);
 extern U0 WGStmt(CWGen *g, CWNode *n);
 U8 *WGInteger(CWUnit *u, U8 *s)
@@ -726,7 +736,7 @@ U8 *WGCallExpr(CWGen *g, CWNode *n)
             WGPut(u, call, ");"); WGLine(g, call->data); return "0";
         }
     } else {
-        f = WGRequest(g, d, env); WGPut(u, call, WGCat(u, f->name, "("));
+        f = WGRequest(g, d, env); WGCallEdge(g, f, n); WGPut(u, call, WGCat(u, f->name, "("));
         tmp = NULL;
         if (WGAggregate(ty)) {tmp = WGTemp(g, ty); WGPut(u, call, WGCat(u, "&", tmp));}
         comma = tmp != NULL;
@@ -963,6 +973,7 @@ U0 WGWriteFunction(CWGen *g, CWBuffer *out, CWNode *f) {
     // The kernel JIT requires a definition before taking a function's address.
     for (edge = g->address_dependencies; edge; edge = edge->next)
         if (edge->resolved == f && edge->pair != f) WGWriteFunction(g, out, edge->pair);
+    for (edge = f->lowered; edge; edge = edge->next) WGWriteFunction(g, out, edge->pair); // callees first (WGCallEdge)
     WGPut(g->unit, out, f->role);
 }
 U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)

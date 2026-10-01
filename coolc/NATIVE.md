@@ -56,3 +56,8 @@ and the remaining arguments; an out-of-range index returns NULL.
 `NativeErrPutS(text)` writes a string to stderr without adding a newline, and
 `NativeExit(status)` terminates the host process. These imports are used by
 Warm's native Cool runtime; they are not kernel shell services.
+
+The compiler inlines small functions of the same unit into their callers
+(`coolc/Frontend/Inline.cool`; rules, controls such as `noinline` and
+`#define COOLC_NO_INLINE`, and measurements in
+[docs/coolc-inline.md](../docs/coolc-inline.md)).

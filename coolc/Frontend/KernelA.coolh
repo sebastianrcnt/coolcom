@@ -2229,6 +2229,8 @@ public class CCmpCtrl
     I64 aot_depth, pmt_line;
     //Added by nroot,used for @@labels
     I64 asm_local_scope;
+    //Added for coolc: bodies of this unit's small functions (Inline.cool)
+    U8 *inline_tab;
 };
 
 public class CCmpGlbls
@@ -7216,6 +7218,7 @@ COLORS_NUM * sizeof(CBGR48) + sizeof(CArcCtrl) + GR_WIDTH * GR_HEIGHT)
 #define KW_HASERRCODE	45
 #define KW_ARGPOP	46
 #define KW_NOARGPOP	47
+#define KW_NOINLINE	52 //coolc: never inline this function (Inline.cool)
 
 #define AKW_ALIGN	64
 #define AKW_ORG		65
@@ -7296,8 +7299,9 @@ COLORS_NUM * sizeof(CBGR48) + sizeof(CArcCtrl) + GR_WIDTH * GR_HEIGHT)
 #define FSF_HASERRCODE		(1<<Ff_HASERRCODE)
 #define FSF_ARGPOP		(1<<Ff_ARGPOP)
 #define FSF_NOARGPOP		(1<<Ff_NOARGPOP)
+#define FSF_NOINLINE		0x10 //coolc: noinline
 #define FSG_FUN_FLAGS1 (FSF_INTERRUPT|FSF_HASERRCODE|FSF_ARGPOP|FSF_NOARGPOP)
-#define FSG_FUN_FLAGS2 (FSG_FUN_FLAGS1|FSF_PUBLIC)
+#define FSG_FUN_FLAGS2 (FSG_FUN_FLAGS1|FSF_PUBLIC|FSF_NOINLINE)
 
         //Byte 0
 #define PRS0_NULL		0x000000

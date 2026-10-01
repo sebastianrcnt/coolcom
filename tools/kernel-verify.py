@@ -74,7 +74,11 @@ SHELL = ['I64 Sq(I64 x) { return x * x; }', r'Print("%d\n", Sq(7));',
          ("text", r'Print("%d\n", 7);'), ("key", KEY_LEFT), ("key", KEY_LEFT), ("key", KEY_BACKSPACE),
          ("text", "42"), ("key", ENTER),
          ("key", KEY_UP), ("key", KEY_UP), ("key", ENTER),
-         '#include "Test.cool"', r'Print("%d\n", Tripled(21));', r"""Print("%s%d\n", "\101", '\101' + '\e');""", 'I64 bad = ;']  # a compile error prints ERROR, the line and a caret
+         '#include "Test.cool"', r'Print("%d\n", Tripled(21));',
+         # Test.cool's Tripled has Doubled inlined (JIT, one unit). A later line is another
+         # unit: redefining Doubled leaves Tripled calling the first one, inlined or not: 63.
+         'I64 Doubled(I64 x) { return 0; }', r'Print("%d\n", Tripled(21));',
+         r"""Print("%s%d\n", "\101", '\101' + '\e');""", 'I64 bad = ;']  # a compile error prints ERROR, the line and a caret
 
 # One shell regression exercises all three protections and prompt recovery.
 SHELL += [
@@ -98,7 +102,8 @@ def sector(s):
 
 FAT_SECTORS = 81920
 HOST_NOTE = b"Hello from the host\n"
-TEST_HC = b"// #include'd by the shell test\nI64 Tripled(I64 x)\n{\n    return 3 * x;\n}\n"
+TEST_HC = (b"// #include'd by the shell test\n#define COOLC_INLINE_TRACE 1\n"
+           b"I64 Doubled(I64 x) {return x + x;}\nI64 Tripled(I64 x)\n{\n    return Doubled(x) + x;\n}\n")
 TEST_HC += (b"I64 Deep(I64 n) { U8 pad[1024]; MemSet(pad, n, 1024); return Deep(n+1)+pad[0]; }\n"
             b"U0 MaskDeep() { ArchIrqOff; Deep(0); }\n")
 
