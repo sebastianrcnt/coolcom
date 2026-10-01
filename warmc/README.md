@@ -34,6 +34,8 @@ the implementation boundaries.
 | `fmt-tests/` | the formatter's fixtures (`NAME.in.warm` formats to `NAME.exp.warm`) |
 | `compare.py` `test_*.py` | the tests |
 
+For editor support, use the [Cool/Warm Zed extension](../tools/zed-coolcom/README.md).
+
 ## Use on the Mac
 
 From the repository root:

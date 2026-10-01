@@ -329,14 +329,6 @@ fmt-check:
 hooks:
 	git config core.hooksPath tools/git-hooks
 
-# Apple Virtualization.framework UEFI probe (boot/uefi-probe, tools/vzrun).
-# Needs: brew install mtools gptfdisk llvm@21 lld@21
-.PHONY: vzprobe vzprobe-gui
-vzprobe:
-	tools/vzprobe.sh
-vzprobe-gui:
-	tools/vzprobe.sh --gui --cfg "wait=9 postwait=8"
-
 # coolvm: VM monitor on macOS Hypervisor.framework emulating a subset of the Apple M1 (t8103)
 # for developing the M1 drivers (tools/coolvm). Guests run under a timeout.
 .PHONY: coolvm coolvm-test
@@ -390,12 +382,12 @@ gpu-pixel-test: build/kernel.Image coolvm
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/gpu-resize-test.py $<
 
-# Host-only Venus spike; opt-in and independent of the default test suite.
+# Host-only Venus GPU transport test; opt-in and independent of the default suite.
 .PHONY: vendor-venus venus-host-test
 vendor-venus:
 	tools/vendor-venus.sh --host
 venus-host-test:
-	tools/coolvm/test/venus-spike.sh
+	tools/coolvm/test/venus-host.sh
 
 # Kernel Venus wire flow with a deliberately fake, opt-in host backend.
 .PHONY: venus-transport-test
