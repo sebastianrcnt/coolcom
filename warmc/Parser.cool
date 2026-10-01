@@ -162,7 +162,7 @@ CWNode *WAtom(CWUnit *u)
     } else if (WAccept(u, "@embed")) {
         n->tag = "embed"; WExpect(u, "("); WAdd(n, WType(u), "type"); WExpect(u, ",");
         if (u->cursor->kind != 5) WFail(u, u->cursor, "Parse Error", "Expected embed string");
-        n->name = WTake(u)->text;
+        n->name = WEmbedText(u, WTake(u)->text);
         if (WAccept(u, ",")) {
             if (!WAt(u, ")")) {
                 WAdd(n, WExpr(u), "argument");
@@ -184,11 +184,16 @@ CWNode *WAtom(CWUnit *u)
         if (WAt(u, "(")) {n->tag = "call"; WArgs(u, n);}
         else while (!u->error_kind && WPathRest(u, n)) n->tag = "path";
     } else WFail(u, t, "Parse Error", "Expected expression");
+    if (!u->error_kind && (WEq(n->tag, "call") || (n->flags & 8192)) && (WAt(u, ".") || WAt(u, "->") || WAt(u, "["))) {
+        CWNode *base = n;
+        n = WNode(u, "value-path", t); WAdd(n, base, "base");
+        while (!u->error_kind && WPathRest(u, n)) {}
+    }
     u->depth--; n->finish = u->cursor; return n;
 }
 // Binary operators by precedence, loosest first (Warm's addition to Austral, which allowed one
 // operator per expression): and/or (never mixed without parentheses), comparisons (no
-// chains), |, ^, &, << >>, + -, * /. All but comparisons associate to the left.
+// chains), |, ^, &, << >>, + -, * / %. All but comparisons associate to the left.
 U0 WSplitToken(CWUnit *u, CWToken *t, I64 n)
 {//Split t after its first n characters (an operator glued to what follows it).
     CWToken *rest = WAlloc(u, sizeof(CWToken));
@@ -209,7 +214,7 @@ I64 WOpLevel(CWUnit *u)
     if (WAt(u, "&")) return 5;
     if (WAt(u, "<<") || WAt(u, ">>")) return 6;
     if (WAt(u, "+") || WAt(u, "-")) return 7;
-    if (WAt(u, "*") || WAt(u, "/")) return 8;
+    if (WAt(u, "*") || WAt(u, "/") || WAt(u, "%")) return 8;
     return 0;
 }
 CWNode *WOperand(CWUnit *u)
@@ -293,12 +298,17 @@ CWNode *WStatement(CWUnit *u)
             WExpect(u, "do"); WAdd(c, WBlock(u, FALSE), "body"); WAdd(n, c, "when");
         }
         WExpect(u, "end"); WExpect(u, "case"); WExpect(u, ";");
+    } else if (WAccept(u, "break") || WAccept(u, "continue")) {
+        if (u->cursor->kind == 2) n->name = WIdent(u)->text;
+        WExpect(u, ";");
     } else if (WAccept(u, "while")) {
+        if (u->cursor->kind == 2 && WEq(u->cursor->next->text, ":")) {WAdd(n, WNamed(u, "label"), "label"); WExpect(u, ":");}
         WAdd(n, WExpr(u), "condition"); WExpect(u, "do"); WAdd(n, WBlock(u, FALSE), "body");
         WExpect(u, "end"); WExpect(u, "while"); WExpect(u, ";");
     } else if (WAccept(u, "for")) {
+        if (u->cursor->kind == 2 && WEq(u->cursor->next->text, ":")) {WAdd(n, WNamed(u, "label"), "label"); WExpect(u, ":");}
         n->name = WIdent(u)->text; WExpect(u, "from"); WAdd(n, WExpr(u), "from");
-        WExpect(u, "to"); WAdd(n, WExpr(u), "to"); WExpect(u, "do"); WAdd(n, WBlock(u, FALSE), "body");
+        if (WAccept(u, "until")) n->flags |= 16384; else WExpect(u, "to"); WAdd(n, WExpr(u), "to"); WExpect(u, "do"); WAdd(n, WBlock(u, FALSE), "body");
         WExpect(u, "end"); WExpect(u, "for"); WExpect(u, ";");
     } else if (WAccept(u, "borrow")) {
         n->name = WIdent(u)->text; WExpect(u, ":");

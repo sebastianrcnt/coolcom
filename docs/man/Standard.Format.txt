@@ -1,0 +1,20 @@
+Standard.Format - portable typed string formatting
+
+format(template, args) returns an owned String; destroyString it after use.
+The template is borrowed bytes and args is a borrowed span of FormatArg[R].
+Construct arguments with Text(value => span), Signed(value => Int64) or
+Unsigned(value => Nat64). Numeric-only constructors may need an asserted
+FormatArg[Static] type when no surrounding type determines their region.
+
+Sequential placeholders: {} chooses text or decimal automatically; {:s} is
+text, {:d} decimal, {:x} lowercase hexadecimal, {:X} uppercase hexadecimal.
+A decimal minimum width pads on the left: {:6d}, {:4s}. A leading zero pads
+numbers after the sign: {:06d} formats -42 as -00042. Hexadecimal signed
+arguments also use sign and magnitude. Width never truncates. {{ and }} emit
+literal braces. Invalid placeholders, types or argument counts abort.
+
+Use Standard.Buffer to build the argument list, slice(&args, 0, length(&args))
+to borrow it, and destroyFree(args) after formatting. The formatter needs no
+terminal capability and works on host and CoolOS. Strings and text arguments
+are bytes, so text width counts bytes, including UTF-8 and embedded NUL.
+See Man("WarmSyntax"), Man("OS.Terminal").

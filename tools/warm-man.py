@@ -38,7 +38,7 @@ def body_interface(source):
 
 
 def module_sources():
-    for body in sorted([*OS.rglob('*.warm'), *(ROOT / 'os/Warm/standard/src/OS').rglob('*.warm')]):
+    for body in sorted([*OS.rglob('*.warm'), *(ROOT / 'os/Warm/standard/src/OS').rglob('*.warm'), OS.parent / 'Format.warm']):
         header = body.with_suffix('.warmh')
         yield header if header.exists() else body
 
@@ -88,7 +88,7 @@ def pages():
              'Warm language and tools:']
     for name in sorted(n for n in result if n.startswith('Warm')):
         index.append(f'    Man("{name}");')
-    index += ['', 'Warm OS modules:', '    Man("OS.CoolOS");']
+    index += ['', 'Warm standard library modules:', '    Man("OS.CoolOS");']
     index += [f'    Man("{name}");' for name in modules]
     index += ['', 'Source help: Man("StrLen"); Man("CTask"); Man("jiffies");', '',
               'Pages: C:/Man/*.txt (generated at disk installation).',

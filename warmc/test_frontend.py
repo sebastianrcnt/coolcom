@@ -16,6 +16,7 @@ def run(path, dump=False):
 
 
 sources = sorted((ROOT / 'warmc/test-programs').rglob('*.warm*'))
+sources += sorted((ROOT / 'warmc/language-tests').glob('*.warm'))
 sources += sorted((ROOT / 'warmc/builtin').glob('*.warm*'))
 sources += sorted((ROOT / 'warmc/standard').rglob('*.warm*'))
 failures = []

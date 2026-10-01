@@ -507,4 +507,22 @@ module body Standard.Buffer is
         -- Make a span.
         return spanWrite(&(buf->array), start, final);
     end;
+    generic [T: Type, R: Region]
+    function slice(buf: &[Buffer[T], R], start: Index, endExclusive: Index): Span[T, R] is
+        if start > endExclusive or endExclusive > buf->size then
+            abort("slice: invalid half-open bounds");
+        end if;
+        let p: Pointer[T] := positiveOffset(buf->array, start);
+        return @embed(Span[T, R], "au_make_span($1, $2)", p, endExclusive - start);
+    end;
+
+    generic [T: Type, R: Region]
+    function sliceMut(buf: &![Buffer[T], R], start: Index, endExclusive: Index): Span![T, R] is
+        if start > endExclusive or endExclusive > buf->size then
+            abort("sliceMut: invalid half-open bounds");
+        end if;
+        let p: Pointer[T] := positiveOffset(buf->array, start);
+        return @embed(Span![T, R], "au_make_span($1, $2)", p, endExclusive - start);
+    end;
+
 end module body.

@@ -6,6 +6,16 @@
 --
 module body Austral.Pervasive is
     generic [T: Type, R: Region]
+    function sliceSpan(sp: Span[T, R], start: Index, endExclusive: Index): Span[T, R] is
+        return @embed(Span[T, R], "au_slice_span($1, $2, $3, $4)", sp, start, endExclusive, sizeof(T));
+    end;
+
+    generic [T: Type, R: Region]
+    function sliceSpanMut(sp: Span![T, R], start: Index, endExclusive: Index): Span![T, R] is
+        return @embed(Span![T, R], "au_slice_span($1, $2, $3, $4)", sp, start, endExclusive, sizeof(T));
+    end;
+
+    generic [T: Type, R: Region]
     function spanLength(sp: Span[T, R]): Index is
         return @embed(Index, "$1.size", sp);
     end;

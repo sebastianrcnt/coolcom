@@ -185,6 +185,14 @@ make -j warm-integration-test          # explicit CoolOS module discovery
 make -j test                          # complete repository/OS regression suite
 ```
 
+Stage 6 language regressions are part of `warm test` and the independent
+`warm-test` target (`warmc/test_language.py`). They exercise loop exits, `%`,
+string escapes, computed fields, half-open slices, `Standard.Format`, and signed
+arithmetic checks through the host CLI. `Standard.Format` and its dependencies
+are discovered automatically, just like other portable standard modules.
+Real Top/Vim/Tmux compatibility checks live in `os/Warm/test_host_integration.py`;
+they use `warm check --coolos` and do not enter the independent host suite.
+
 The host CLI regression suite creates projects outside the repository, checks
 recursive module/interface discovery, search paths, ambiguity, entrypoints,
 formatting, test failures, argument forwarding, and copies a built executable

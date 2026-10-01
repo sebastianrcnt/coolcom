@@ -207,6 +207,7 @@ CWNode *WArithmetic(CWUnit *u, CWNode *n, CWNode *type, CWNode *fun)
     if (WEq(n->name, "-")) name = "trappingSubtract";
     if (WEq(n->name, "*")) name = "trappingMultiply";
     if (WEq(n->name, "/")) name = "trappingDivide";
+    if (WEq(n->name, "%")) name = "rem";
     if (WEq(n->name, "&")) name = "bitwiseAnd";
     if (WEq(n->name, "|")) name = "bitwiseOr";
     if (WEq(n->name, "^")) name = "bitwiseXor";
@@ -279,6 +280,11 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
             if (!WEq(ty->name, "Float32") && !WEq(ty->name, "Float64")) WFail(u, n->token, "Type Error", "Floating literal requires floating type");
         } else ty = WRefType(u, "Span", WTypeNamed(u, scope, "Nat8"), WTypeNamed(u, scope, "Static"));
     } else if (WEq(tag, "call")) ty = WCall(u, n, expected, fun);
+    else if (WEq(tag, "value-path")) {
+        a = WInfer(u, WChild(n, "base"), NULL, fun);
+        if (a && WUniverseOf(a) != 0) WFail(u, n->token, "Linearity Error", "Computed path base must be Free");
+        ty = WPathType(u, n, a, fun);
+    }
     else if (WEq(tag, "variable") || WEq(tag, "path") || WEq(tag, "ref-path")) {
         d = n->resolved; ty = WDeclType(d);
         if (d && WEq(d->tag, "function")) {
@@ -299,8 +305,8 @@ CWNode *WInfer(CWUnit *u, CWNode *n, CWNode *expected, CWNode *fun)
         else {a = WInfer(u, left, a, fun); b = WInfer(u, right, a, fun);}
         WRequire(u, n, b, a); ty = a;
         if (!cmp && !WEq(name, "and") && !WEq(name, "or") && !WNumber(a)) WFail(u, n->token, "Type Error", "Arithmetic requires numeric operands");
-        else if ((WEq(name, "&") || WEq(name, "|") || WEq(name, "^") || WEq(name, "<<") || WEq(name, ">>")) && !WIntBits(a->name))
-            WFail(u, n->token, "Type Error", "Bitwise operators require integer operands");
+        else if ((WEq(name, "%") || WEq(name, "&") || WEq(name, "|") || WEq(name, "^") || WEq(name, "<<") || WEq(name, ">>")) && !WIntBits(a->name))
+            WFail(u, n->token, "Type Error", "Bitwise operators and remainder require integer operands");
         if (cmp) ty = WTypeNamed(u, scope, "Bool");
         else if (!WEq(name, "and") && !WEq(name, "or") && !u->error_kind) ty = WArithmetic(u, n, ty, fun);
     } else if (WEq(tag, "unary")) {
@@ -427,7 +433,7 @@ U0 WCheckStmt(CWUnit *u, CWNode *n, CWNode *fun)
                 for (c = n->first; c; c = c->next) if (WEq(c->role, "when") && WEq(c->name, cons->name)) break;
                 if (!c) WFail(u, n->token, "Type Error", "Non-exhaustive case statement");
             }
-    } else if (!WEq(tag, "skip")) WFail(u, n->token, "Unsupported Feature", "Statement typing not implemented");
+    } else if (!WEq(tag, "skip") && !WEq(tag, "break") && !WEq(tag, "continue")) WFail(u, n->token, "Unsupported Feature", "Statement typing not implemented");
 }
 U0 WCheckBlock(CWUnit *u, CWNode *block, CWNode *fun)
 {
@@ -441,6 +447,13 @@ I64 WVarOccurrences(CWNode *t, CWNode *var)
     for (c = t->first; c; c = c->next) count += WVarOccurrences(c, var);
     return count;
 }
+Bool WLoopBreak(CWNode *n, CWNode *loop)
+{
+    CWNode *c;
+    if (WEq(n->tag, "break") && n->resolved == loop) return TRUE;
+    for (c = n->first; c; c = c->next) if (WLoopBreak(c, loop)) return TRUE;
+    return FALSE;
+}
 Bool WReturn(CWNode *n)
 {
     CWNode *c;
@@ -448,7 +461,8 @@ Bool WReturn(CWNode *n)
     if (WEq(n->tag, "return")) return TRUE;
     if (WEq(n->tag, "block")) return WReturn(n->last);
     if (WEq(n->tag, "if")) return WReturn(WChild(n, "then")) && WReturn(WChild(n, "else"));
-    if (WEq(n->tag, "while") || WEq(n->tag, "for") || WEq(n->tag, "borrow")) return WReturn(WChild(n, "body"));
+    if ((WEq(n->tag, "while") || WEq(n->tag, "for")) && !WLoopBreak(n, n)) return WReturn(WChild(n, "body"));
+    if (WEq(n->tag, "borrow")) return WReturn(WChild(n, "body"));
     if (WEq(n->tag, "case")) {
         for (c = n->first; c; c = c->next) if (WEq(c->role, "when") && !WReturn(WChild(c, "body"))) return FALSE;
         return TRUE;

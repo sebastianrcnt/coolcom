@@ -202,4 +202,10 @@ module Standard.Buffer is
     """
     generic [T: Type, R: Region]
     function getSpanMut(buf: &![Buffer[T], R], start: Index, final: Index): Span![T, R];
+    generic [T: Type, R: Region]
+    function slice(buf: &[Buffer[T], R], start: Index, endExclusive: Index): Span[T, R];
+
+    generic [T: Type, R: Region]
+    function sliceMut(buf: &![Buffer[T], R], start: Index, endExclusive: Index): Span![T, R];
+
 end module.

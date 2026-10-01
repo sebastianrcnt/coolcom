@@ -13,7 +13,9 @@ import Standard.Buffer (
     nth as bufNth,
     storeNth as bufStoreNth,
     getSpan as bufferGetSpan,
-    getSpanMut as bufferGetSpanMut
+    getSpanMut as bufferGetSpanMut,
+    slice as bufferSlice,
+    sliceMut as bufferSliceMut
 );
 
 module body Standard.String is
@@ -42,11 +44,9 @@ module body Standard.String is
     function fromLiteral(arr: Span[Nat8, Static]): String is
         let size: Index := spanLength(arr);
         var str: String := makeString(size, ' ');
-        if size > 0 then
-            for i from 0 to size - 1 do
-                storeNth(&!str, i, arr[i]);
-            end for;
-        end if;
+        for i from 0 until size do
+            storeNth(&!str, i, arr[i]);
+        end for;
         return str;
     end;
 
@@ -99,4 +99,14 @@ module body Standard.String is
     function getSpanMut(string: &![String, R], start: Index, final: Index): Span![Nat8, R] is
         return bufferGetSpanMut(&(string->buf), start, final);
     end;
+    generic [R: Region]
+    function slice(string: &[String, R], start: Index, endExclusive: Index): Span[Nat8, R] is
+        return bufferSlice(&(string->buf), start, endExclusive);
+    end;
+
+    generic [R: Region]
+    function sliceMut(string: &![String, R], start: Index, endExclusive: Index): Span![Nat8, R] is
+        return bufferSliceMut(&(string->buf), start, endExclusive);
+    end;
+
 end module body.

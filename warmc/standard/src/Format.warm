@@ -1,0 +1,118 @@
+import Standard.String (String, makeString, storeNth, nthByte, destroyString);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+
+module body Standard.Format is
+    private function asNat(value: Int64): Nat64 is
+        case toNat64(value) of
+            when Some(value as n: Nat64) do return n;
+            when None do abort("format: invalid integer magnitude");
+        end case;
+    end;
+
+    private function padding(builder: &![StringBuilder], count: Index, byte: Nat8): Unit is
+        for i from 0 until count do
+            writeByte(&~builder, byte);
+        end for;
+        return nil;
+    end;
+
+    private function number(builder: &![StringBuilder], value: Nat64, negative: Bool,
+        spec: Nat8, width: Index, zero: Bool): Unit is
+        var digits: String := makeString(64, '0');
+        var at: Index := 64;
+        var remaining: Nat64 := value;
+        let base: Nat64 := if spec = 'x' or spec = 'X' then 16 else 10;
+        let alphabet: Span[Nat8, Static] := if spec = 'X' then "0123456789ABCDEF" else "0123456789abcdef";
+        while true do
+            at := at - 1;
+            storeNth(&!digits, at, alphabet[widenToIndex(remaining % base)]);
+            remaining := remaining / base;
+            if remaining = 0 then break; end if;
+        end while;
+        let size: Index := 64 - at + (if negative then 1 else 0);
+        let pad: Index := if width > size then width - size else 0;
+        if not zero then padding(&~builder, pad, ' '); end if;
+        if negative then writeByte(&~builder, '-'); end if;
+        if zero then padding(&~builder, pad, '0'); end if;
+        for i from at until 64 do
+            writeByte(&~builder, nthByte(&digits, i));
+        end for;
+        destroyString(digits);
+        return nil;
+    end;
+
+    private function signedNumber(builder: &![StringBuilder], value: Int64, spec: Nat8, width: Index, zero: Bool): Unit is
+        let negative: Bool := value < 0;
+        let magnitude: Nat64 := if negative then asNat(-(value + 1)) + 1 else asNat(value);
+        return number(&~builder, magnitude, negative, spec, width, zero);
+    end;
+
+    generic [T: Region, A: Region, R: Region]
+    function format(template: Span[Nat8, T], args: Span[FormatArg[R], A]): String is
+        var builder: StringBuilder := makeStringBuilder();
+        var at: Index := 0;
+        var arg: Index := 0;
+        let size: Index := spanLength(template);
+        while at < size do
+            let byte: Nat8 := template[at];
+            at := at + 1;
+            if byte = '{' then
+                if at < size then
+                    if template[at] = '{' then
+                        writeByte(&!builder, '{');
+                        at := at + 1;
+                        continue;
+                    end if;
+                end if;
+                var spec: Nat8 := 0;
+                var width: Index := 0;
+                var zero: Bool := false;
+                if at < size then
+                    if template[at] = ':' then
+                        at := at + 1;
+                        if at < size then zero := template[at] = '0'; end if;
+                        while at < size do
+                            let digit: Nat8 := template[at];
+                            if digit < '0' or digit > '9' then break; end if;
+                            width := width * 10 + widenToIndex(digit - '0');
+                            at := at + 1;
+                        end while;
+                        if at >= size then abort("format: missing specifier"); end if;
+                        spec := template[at];
+                        at := at + 1;
+                        if spec /= 's' and spec /= 'd' and spec /= 'x' and spec /= 'X' then
+                            abort("format: unknown specifier");
+                        end if;
+                    end if;
+                end if;
+                if at >= size then abort("format: unclosed placeholder"); end if;
+                if template[at] /= '}' then abort("format: bad placeholder"); end if;
+                if arg >= spanLength(args) then abort("format: missing argument"); end if;
+                case args[arg] of
+                    when Text(value as text: Span[Nat8, R]) do
+                        if (spec /= 0 and spec /= 's') or zero then abort("format: text specifier mismatch"); end if;
+                        let textSize: Index := spanLength(text);
+                        if width > textSize then padding(&!builder, width - textSize, ' '); end if;
+                        for i from 0 until textSize do writeByte(&!builder, text[i]); end for;
+                    when Signed(value as signed: Int64) do
+                        if spec = 's' then abort("format: numeric specifier mismatch"); end if;
+                        signedNumber(&!builder, signed, spec, width, zero);
+                    when Unsigned(value as unsigned: Nat64) do
+                        if spec = 's' then abort("format: numeric specifier mismatch"); end if;
+                        number(&!builder, unsigned, false, spec, width, zero);
+                end case;
+                arg := arg + 1;
+                at := at + 1;
+            else if byte = '}' then
+                if at >= size then abort("format: unmatched closing brace"); end if;
+                if template[at] /= '}' then abort("format: unmatched closing brace"); end if;
+                writeByte(&!builder, '}');
+                at := at + 1;
+            else
+                writeByte(&!builder, byte);
+            end if;
+        end while;
+        if arg /= spanLength(args) then abort("format: unused argument"); end if;
+        return finalize(builder);
+    end;
+end module body.

@@ -17,8 +17,10 @@ A path starts with a named value and has one or more elements:
   (`&!`) to a record.
 - `[i]` selects a `Span` or `Span!` element; `i` has type `Index`.
 
-The parser attaches paths to names, rather than arbitrary expressions:
-`pos.lat` is supported, while `f().lat` is not. Record fields must be visible
+Paths also attach to call results and parenthesized expressions:
+`f().lat`, `(pos).lat`, and `f().info.value` are supported. Computed bases
+must be Free, are evaluated once, and only support reads; references to temporary
+owners and assignment to computed paths are rejected. Record fields must be visible
 to the current module; opaque payloads cannot be inspected from outside it.
 Indexing operates on spans, not the fixed arrays described by the older document.
 Generated code checks the span bounds and byte-offset multiplication.

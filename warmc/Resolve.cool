@@ -202,12 +202,32 @@ U0 WResolveTree(CWUnit *u, CWNode *n, CWNode *scope)
             }
         }
     }
+    if (WEq(n->tag, "break") || WEq(n->tag, "continue")) {
+        for (d = u->loop; d; d = d->owner) {
+            t = WChild(d, "label");
+            if (!*n->name || (t && WEq(t->name, n->name))) break;
+        }
+        n->resolved = d;
+        if (!d) WFail(u, n->token, "Generic Error", "Loop exit has no enclosing target");
+        return;
+    }
+    Bool loop = WEq(n->tag, "while") || WEq(n->tag, "for");
+    CWNode *saved_loop = u->loop;
+    if (loop) {
+        t = WChild(n, "label");
+        for (d = saved_loop; t && d; d = d->owner) {
+            b = WChild(d, "label");
+            if (b && WEq(t->name, b->name)) WFail(u, t->token, "Generic Error", "Duplicate enclosing loop label");
+        }
+        n->owner = saved_loop; u->loop = n;
+    }
     for (c = n->first; c && !u->error_kind; c = c->next) {
-        if (WEq(c->tag, "doc") || WEq(c->tag, "mode") || WEq(c->tag, "rename") || WEq(c->tag, "alias")) {}
+        if (WEq(c->tag, "label") || WEq(c->tag, "doc") || WEq(c->tag, "mode") || WEq(c->tag, "rename") || WEq(c->tag, "alias")) {}
         else if (WEq(n->tag, "borrow") && WEq(c->role, "type")) {}
         else if (WEq(c->role, "body")) WResolveTree(u, c, s);
         else WResolveTree(u, c, scope);
     }
+    if (loop) u->loop = saved_loop;
 }
 U0 WResolveDecl(CWUnit *u, CWNode *d, CWNode *outer)
 {

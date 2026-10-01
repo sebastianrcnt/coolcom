@@ -59,7 +59,7 @@ Bool WFmWordy(CWToken *t)
 }
 Bool WFmControl(CWToken *t)
 {//A word that a parenthesized expression may follow (`if (a) then`); other words are `Free(X)`, `sizeof(T)`.
-    U8 *w = " and or not if then else else if return while when of is do to from let var case for borrow as ";
+    U8 *w = " and or not if then else else if return while when of is do to until from break continue let var case for borrow as ";
     I64 n = StrLen(t->text), i, j;
     if (t->kind != 1 || n > 8) return FALSE;
     for (i = 0; w[i]; i++) {
