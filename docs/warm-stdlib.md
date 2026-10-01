@@ -531,3 +531,154 @@ that test passed in isolation on both CPU and Venus, and the second full
 `make -j test` passed. Logs are `build/stage6-test-first.log`,
 `build/stage6-gui-draw-retry.log`, and `build/stage6-test.log`. GUI implementation
 files and vendor sources were not edited by this change.
+
+
+## Stage 7: generated code
+
+Implemented 2026-10-01 in `warmc/Emit.cool`; the Cool compiler, GUI sources and
+vendor sources are unchanged.
+
+Simple library access is emitted directly after generic and named-argument
+resolution. `Standard.Buffer.length` reads the concrete size field; `nth` and
+`storeNth` use the concrete typed array pointer as `ptr[index]`. They retain
+`index >= size` followed by `wh_abort` and the original messages unless the
+range rule below applies. Pervasive `spanLength`/`spanWriteLength` read
+`wh_size`. Span element indexing already emits memory expressions directly.
+Builtin `Austral.Memory` load/store, reference loads, positive/negative offsets,
+pointer/reference casts and span-to-pointer conversions now emit the equivalent
+Cool expressions instead of requesting wrapper functions. Unsafe pointer
+operations retain their existing unchecked semantics. Aggregate element loads
+still materialize a value copy, and stores still use the existing typed copy
+lowering (including narrow integer normalization).
+
+Recognition requires the library module and its source identity: the builtin
+Pervasive/Memory paths, or the standard Buffer source paths on the host or
+`C:/Warm/Standard` in CoolOS. Application functions called `nth`, `length` or
+`store` are ordinary calls. Function values and user-defined wrappers also
+remain calls. No general function-body inliner is involved.
+
+The conservative range proof is local to each loop:
+
+- The upper bound must be exactly `length(buffer)`, `spanLength(span)` or
+  `spanWriteLength(span)` for `until`, or that query minus the literal `1` for
+  inclusive `to`. The subtraction keeps its underflow check, so an empty
+  inclusive range still aborts. `to length(buffer)` keeps its access checks.
+  Cached lengths, arbitrary smaller bounds, branch inequalities and computed
+  indexes such as `i + 1` or `row * width + col` are not inferred.
+- The access must use the same declaration for the descriptor and exactly that
+  loop's immutable Index binding. Borrow expressions and reference casts may
+  identify the same root; different buffers, spans and index aliases do not.
+  The proof is pushed while emitting the loop body and popped afterwards.
+  Nested span indexing uses it only for the first dimension; later dimensions
+  must prove their own bounds.
+- A body scan permits the descriptor only as the direct receiver of the known
+  length/nth/store accessor, or the base of span element indexing. Descriptor
+  replacement, size changes, alias creation, borrowed-descriptor escapes and
+  unknown calls receiving it disable the proof, even in unreachable branches.
+  Any embed in the body also disables it. Element writes through `storeNth` or
+  a mutable span preserve descriptor length. Checked linear ownership and
+  borrowing prevent safe aliases from resizing an owned Buffer or mutating an
+  immutable Buffer loan. Mutable Buffer reference roots are excluded for now;
+  unsafe modules are excluded entirely because they can hide pointer aliases.
+- A successful proof removes only the access's bounds comparison. Span
+  byte-offset multiplication overflow checks remain, even when its index is
+  proven less than the advertised length. Ordinary arithmetic checks remain.
+  The tests pass a forged huge span from an unsafe module into a safe proven
+  loop and verify that multiplication still aborts before memory is touched.
+
+A safe `until` loop enters with `index < snapshotted_bound <= INDEX_MAX`, and
+its Index binding is immutable. Incrementing an entered iteration cannot
+therefore overflow. Its per-iteration `index == INDEX_MAX` branch is omitted;
+`to` and unsafe-module loops retain it. Both bounds of `until` are still
+snapshotted once, and empty/reversed ranges, labelled exits and `continue`
+retain their existing behavior. No endpoint evaluation policy changed.
+
+Unsigned primitive operands already held in variables of the required type
+avoid a second operand copy when the other operand is a simple variable or
+literal. Constants still become typed temporaries where Cool's constant
+arithmetic could otherwise use signed semantics. Nested/side-effecting
+expressions retain their operand snapshots, and signed arithmetic scratch
+storage is unchanged.
+
+### Measurements
+
+`warmc/perf/Access.warm` supplies three new kernels. The runner expands its byte
+fixture to 16 KiB, compiles the same source with saved before/after Warm BINs,
+and uses the same checked-in Cool seed for both. Each kernel processes
+16,777,216 elements, verifies its sum, and reports timed loop execution
+(excluding compilation, loading and allocation). Host monotonic timing has
+1 ms resolution; these are three-trial medians, not hardware guarantees:
+
+| Workload | Before, ms | After, ms | Speedup |
+| --- | ---: | ---: | ---: |
+| Buffer sum | 44 | 11 | 4.00× |
+| Byte scan | 18 | 15 | 1.20× |
+| Flat 128×128 array, row/column indexing | 56 | 26 | 2.15× |
+
+The 2D kernel deliberately retains its computed-index bounds check and checked
+row/column arithmetic. Generated source (including the runtime and literal)
+shrinks from 118,408 to 116,218 bytes. Reproduce with:
+
+```sh
+python3 tools/warm-access-perf.py build/stage7-before-Warm.BIN build/warmcool/Warm.BIN --repeat 3
+python3 tools/warm-inline-perf.py build/kernel.Image --repeat 3 --baseline-package build/stage7-before-Kernel.cool --output build/stage7-package-perf
+python3 tools/program-perf.py build/kernel.Image 90b47e3
+```
+
+Save the baseline Warm BIN and generated Kernel.cool before editing the
+emitter. The new optional `--baseline-package` compares that package against the
+current one; without it the existing signed-call/inline comparison is preserved.
+For this run the baseline package was reconstructed by substituting
+`68c3d1a:warmc/Emit.cool` into the generated package. Both packages keep Stage 6
+signed arithmetic enabled, use the same current kernel, unchanged Vim/Tmux
+sources and 640×480 framebuffer. Compilation finishes before timed operations.
+Each VM trial checks saved edits, the 330 KB jump and restored terminal focus.
+Three-trial medians:
+
+| Workload | Stage 7 before | Stage 7 after |
+| --- | ---: | ---: |
+| Vim navigation, µs/key | 0.22781 | 0.22429 |
+| Vim insertion, µs/key | 0.05840 | 0.07042 |
+| Vim repaint, ms | 3.99726 | 4.09713 |
+| Vim 330 KB jump + repaint, ms | 7.04467 | 7.20475 |
+| Tmux forwarding, µs/key | 0.08958 | 0.02798 |
+| Tmux forced repaint, ms | 12.86903 | 13.43213 |
+
+The same `tools/program-perf.py` command was also run once with each Warm
+package installed temporarily (and restored afterwards). Its Warm results:
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Vim navigation, µs/key | 0.21950 | 0.21681 |
+| Vim insertion, µs/key | 0.06225 | 0.06508 |
+| Vim repaint, ms | 4.19733 | 4.03472 |
+| Vim 330 KB jump + repaint, ms | 7.60575 | 7.12913 |
+| Tmux forwarding, µs/key | 0.12640 | 0.10731 |
+| Tmux forced repaint, ms | 13.30527 | 12.93710 |
+
+Vim insertion's three-trial median increased by about 21% (0.012 µs/key),
+and Vim repaint/jump by about 2–3%; this change does not demonstrate an editor
+speedup. Tmux forwarding improved in the repeated run, but its separate
+single-run result varies substantially, so the measured median is not a
+stable 3× claim. Forced repaint is dominated by rendering. The microbenchmarks
+isolate the access savings; application timings include VM scheduling/noise.
+Full trials, hashes and logs are in `build/stage7-access-perf/`,
+`build/stage7-package-perf/` and `build/stage7-final-{before,after}-program.json`.
+The fixed kernel SHA-256 is `45644e6f2641c639764339781f6d548745372fe306f729a1b805962f8c4c1010`; the Cool seed SHA-256
+is `18677c698bdcd69ee118252db98d6fc77900721f95d62bbdc9d4c70692107488`.
+
+### Validation
+
+`warmc/test_generated.py` adds 28 runtime and emitted-code checks and is part
+of `warm-test` / `make -j test`. It covers direct/named accessors, both proven
+range forms, mutable span writes, out-of-range reads/stores (including maximum Index literals), inclusive length,
+other buffers, changed descriptors, unknown calls, cached bounds, offset
+indexes, aliasing, nested dimensions, proof scope, unsafe modules, empty and
+reversed ranges, maximum Index with continue, subtraction/addition overflow,
+and the independent span multiplication trap.
+
+The complete `make -j test` passed with exit code **0**; the final log is
+`build/stage7-test-complete.log`. This includes the unchanged upstream, number,
+language, host/standard-library, real Vim/Tmux VM, kernel and GUI tests. An
+initial run failed on the new mutable-loan fixture's invalid region cast; the
+fixture was corrected without changing the language or borrow checker.

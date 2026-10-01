@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare signed Pervasive calls/inlining with the same kernel and Vim.warm.
+"""Compare generated Warm packages (or signed Pervasive calls/inlining) with Vim.warm.
 
 Build the kernel, VM and Warm package first, then run:
     python3 tools/warm-inline-perf.py build/kernel.Image --repeat 3
@@ -25,6 +25,7 @@ def main():
     parser.add_argument('kernel', type=Path)
     parser.add_argument('--repeat', type=int, default=3)
     parser.add_argument('--output', type=Path, default=ROOT / 'build/warm-inline-perf')
+    parser.add_argument('--baseline-package', type=Path, help='compare this saved generated package with the current package; both retain their signed dispatch')
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error('--repeat must be positive')
@@ -33,9 +34,9 @@ def main():
     original = package.read_bytes()
     enabled = b'if (WPrefix(ty->name, "Int")) return WGOpenSigned(g, d, vals[0], vals[1], ty);'
     assert original.count(enabled) == 1, 'build the current Warm kernel package first'
-    disabled = original.replace(enabled, b'if (WPrefix(ty->name, "Int")) return NULL;')
+    disabled = args.baseline_package.read_bytes() if args.baseline_package else original.replace(enabled, b'if (WPrefix(ty->name, "Int")) return NULL;')
     kernel_digest = hashlib.sha256(args.kernel.read_bytes()).hexdigest()
-    result = dict(kernel_sha256=kernel_digest, repeat=args.repeat, workload='unchanged Vim.warm; tools/program-perf.py warm variant; 640x480')
+    result = dict(kernel_sha256=kernel_digest, repeat=args.repeat, comparison='saved package' if args.baseline_package else 'signed dispatch', workload='unchanged Vim.warm; tools/program-perf.py warm variant; 640x480')
     try:
         for name, source in [('before', disabled), ('after', original)]:
             package.write_bytes(source)
