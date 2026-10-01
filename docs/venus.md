@@ -336,11 +336,10 @@ build database. The script supports rerunning from its cached sources.
 
 ### Step 2: guestless C mapping spike
 
-Run `make venus-host-test` after vendoring (Mako 1.3.10 and MarkupSafe 3.0.3
-are also checksummed source downloads, used without installation for the upstream
-C wire generator).
-The test builds/codesigns `build/venus-spike/spike`, creates an HV VM with **no
-vCPU or guest**, and performs real Venus calls using generated upstream codecs:
+The retired guestless mapping spike created an HV VM with **no vCPU or guest**
+and performed real Venus calls using generated upstream codecs. Its measured
+results are retained here; `make venus-host-test` now runs the GPU transport
+regression described in step 3.
 
 1. Initialize the renderer with VENUS, NO_VIRGL, THREAD_SYNC and ASYNC_FENCE_CB;
    create context 1 with capset 4 (156 bytes, capset version 0).
@@ -419,13 +418,15 @@ the optional build is requested; renderer initialization failure falls back to 2
   teardown stops context/ring work before freeing guest iovec storage. The
   guest must also unmap/unref a Vulkan blob before `vkFreeMemory`.
 
-`make venus-host-test` now additionally drives actual MMIO split queues through
+`make venus-host-test` (`tools/coolvm/test/venus-host.sh`) drives actual MMIO split queues through
 `gpu.c` and the real renderer, with no vCPU: capsets, context lifecycle, a fenced
 Venus reply (`vkEnumerateInstanceVersion`), blob creation/attachment/mapping,
 invalid headers/ids, unshareable attachment, wrapping/out-of-range/overlapping
-mappings, repeated unmap, and reset cleanup. **PASS**. The guestless Vulkan
-allocation spike also remains **PASS**. Mako (MIT) and MarkupSafe (BSD-3-Clause)
-are now pinned/checksummed source dependencies for generating these test codecs.
+mappings, repeated unmap, and reset cleanup. **PASS**. The earlier guestless Vulkan
+allocation spike passed before its retirement. Mako (MIT) and MarkupSafe (BSD-3-Clause)
+are pinned/checksummed source dependencies for generating these test codecs.
+Run after `make vendor-venus`; the script builds/codesigns
+`build/venus-host-test/gpu-test` and generates codecs under that build directory.
 
 Validation: **`make -j test` exited 0**, and the optional `build/coolvm-venus`
 passed `tools/coolvm/test/run.sh` (existing assembly guests, devices, GPU 2D

@@ -1,6 +1,6 @@
-/* Minimal bounded client stream for the host spike, using upstream codecs. */
-#ifndef COOLVM_SPIKE_VN_CS_H
-#define COOLVM_SPIKE_VN_CS_H
+/* Minimal bounded client stream for the host transport test, using upstream codecs. */
+#ifndef COOLVM_VN_CS_H
+#define COOLVM_VN_CS_H
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
