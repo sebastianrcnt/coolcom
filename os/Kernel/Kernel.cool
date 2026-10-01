@@ -75,6 +75,7 @@
 #include "../../coolc/Fmt/HCTok.cool"
 #include "Shell.cool"
 #include "ShellCmp.cool"
+#include "Gui.cool"
 #include "NetShell.cool"
 #include "NetHttp.cool"
 #include "KLink.cool"

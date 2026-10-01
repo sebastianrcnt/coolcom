@@ -2,6 +2,7 @@ extern class CVTerm;
 extern U0 VtBind(CTask *t, CVTerm *v);
 extern U0 VtTaskGone(CTask *t);
 extern U0 ShellTaskGone(CTask *t);
+extern U0 GuiTaskGone(CTask *t);
 // Tasks and cooperative scheduling, TempleOS style: every core has its own
 // ring of tasks and switches only when the running task calls Yield.
 // Tasks are TempleOS CTasks (KernelA.coolh): next_task/last_task link this core's
@@ -94,6 +95,7 @@ Bool TaskStackFault(CTask *t, CExceptFrame *f)
 U0 TaskFree(CTask *t)
 {
     if (t->exit_hook) {U0 (*hook)(U8 *payload); hook = t->exit_hook; t->exit_hook = NULL; hook(t->exit_data); t->exit_data = NULL;}
+    GuiTaskGone(t);
     ShellTaskGone(t);
     t->addr = NULL;
     t->task_signature = 0;

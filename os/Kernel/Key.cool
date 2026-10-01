@@ -38,9 +38,13 @@
 I64 key_buf[KEY_BUF];
 I64 key_head, key_tail, key_lock;
 Bool key_overflow;
+U8 *gui_key_hook; // Bool (*)(I64): GUI focus routing, including UART keys
 
 U0 KeyPush(I64 ev)
 {//Queue an event (from the input IRQ or the UART decoder).
+    Bool (*route)(I64);
+    route = gui_key_hook;
+    if (route && (*route)(ev)) return;
     I64 daif = SpinLockIrq(&key_lock), next = (key_tail + 1) % KEY_BUF;
     if (next != key_head) {
         key_buf[key_tail] = ev;

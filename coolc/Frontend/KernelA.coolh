@@ -3333,6 +3333,7 @@ public class CTask //The Fs segment reg points to current CTask.
     I64 user_data, user_data2, is_single_step;
 #ifdef COOLCOM_KERNEL
     U8 *terminal, *shell_ctx, *key_history, *bin_module;
+    U8 *gui_window; // task-owned surface (Gui.cool), never inherited implicitly
     U8 *stack_alloc, *stack_guard, *stack_end;
     I64 term_size_seq; // last resize observed by this task
     U0 (*exit_hook)(U8 *payload);

@@ -455,7 +455,11 @@ build/venus/terminal.vert.spv: tools/venus/shaders/terminal.vert
 build/venus/terminal.frag.spv: tools/venus/shaders/terminal.frag
 	@mkdir -p $(@D)
 	glslang -V --target-env vulkan1.2 $< -o $@
-venus-terminal: build/venus/Vulkan.cool build/venus/terminal.vert.spv build/venus/terminal.frag.spv
+build/venus/gui.frag.spv: tools/venus/shaders/gui.frag
+	mkdir -p build/venus
+	glslang -V --target-env vulkan1.2 $< -o $@
+
+venus-terminal: build/venus/gui.frag.spv build/venus/Vulkan.cool build/venus/terminal.vert.spv build/venus/terminal.frag.spv
 venus-term-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal
 	python3 tools/venus-term-test.py $<
 
@@ -483,3 +487,9 @@ cube-run: build/kernel.Image build/coolvm-venus venus-terminal cube-shaders
 	python3 tools/venus/cube_demo.py --run
 cube-test: build/kernel.Image build/coolvm-venus venus-terminal cube-shaders
 	python3 tools/venus/cube_demo.py
+
+.PHONY: gui-test
+gui-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-test

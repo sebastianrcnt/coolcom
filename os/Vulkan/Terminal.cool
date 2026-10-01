@@ -364,6 +364,7 @@ U0 VenusSetInit() {
         GfxResult(vn_decode_vkAllocateDescriptorSets_reply(&gfx.reply, gfx.device, &allocate, &vterm.slot[i].set), "descriptor set");
     }
 }
+#include "C:/Vulkan/Gui.cool"
 U0 VenusSetup() {
     I64 daif;
     gfx.no_sleep = TRUE; gfx.soft_fail = TRUE; vterm.direct = fdt_venus_metal;
@@ -377,6 +378,7 @@ U0 VenusSetup() {
     daif = FbRenderLock; vterm.install_daif = daif; vterm.installing = TRUE;
     VenusGrid(fb.w, fb.h);
     FbVenusHooks(&VenusFrame, &VenusFill, &VenusFinish);
+    gui_start_hook = &GuiGpuStart;
     fb.venus = TRUE; fb.redraw_all = TRUE; FbRenderLocked;
     FbRenderUnlock(daif); vterm.installing = FALSE; gfx.soft_fail = FALSE;
     Print("VENUS TERMINAL READY\n");
