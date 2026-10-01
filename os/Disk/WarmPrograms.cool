@@ -1,0 +1,35 @@
+// Compile once per shell; Warm owns all editor state and behavior.
+// The shell preserves its familiar API and registers its statement-recovery callback.
+Bool warm_vim_ready = WarmRun("C:/Warm/Standard/OS/CoolOS/Editor.warmh,C:/Warm/Standard/OS/CoolOS/Editor.warm,C:/Vim.warm", "VimApp:main");
+I64 vim_state, vim_active, vim_pos, vim_top, vim_left;
+U0 VimClose()
+{
+    if (vim_state) {
+        WvimClose(vim_state);
+        vim_pos = WvimPos(vim_state); vim_top = WvimTop(vim_state); vim_left = WvimLeft(vim_state);
+        WvimDestroy(vim_state);
+        vim_state = 0;
+    }
+    vim_active = FALSE;
+    shell_stmt_cleanup = NULL;
+}
+Bool VimOpen(U8 *name)
+{
+    if (vim_active) {Print("Vim is already active\n"); return FALSE;}
+    if (!warm_vim_ready) {Print("Vim: Warm loading failed\n"); return FALSE;}
+    vim_state = WvimCreate;
+    if (!vim_state) {Print("Vim: out of memory\n"); return FALSE;}
+    if (!WvimOpen(vim_state, name)) {VimClose; return FALSE;}
+    vim_active = TRUE;
+    shell_stmt_cleanup = &VimClose;
+    return TRUE;
+}
+U0 Vim(U8 *name, I64 line = 0)
+{
+    if (!VimOpen(name)) return;
+    WvimRun(vim_state, name, line);
+    VimClose;
+}
+
+Bool VimKey(I64 event) {if (!vim_active) return FALSE; return WvimKey(vim_state, event);}
+U0 VimDraw() {if (vim_active) WvimPaint(vim_state);}

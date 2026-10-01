@@ -80,6 +80,7 @@
 #include "KLink.cool"
 #include "MakeKernel.cool"
 #include "Syntax.cool"
+#include "Editor.cool"
 #include "UAsmARM64.cool"
 #include "KDbg.cool"
 #include "TermTest.cool"

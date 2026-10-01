@@ -4,7 +4,7 @@
 
 | File | What |
 |---|---|
-| `Vim.cool` | `Vim("name", line)`: modal UTF-8 editor on the alternate ANSI screen, whole file in memory (a gap buffer, no size limit), syntax highlighting by file extension (`Syntax.cool` in the kernel; `:set ft=cool\|warm\|text`, `:hi group color`). `:q` refuses a modified buffer, `:q!` discards. See `Vim.md`. |
+| `Vim.warm` | `Vim("name", line)`: modal UTF-8 editor on the alternate ANSI screen, whole file in memory (a gap buffer, no size limit), syntax highlighting by file extension (`Syntax.cool` in the kernel; `:set ft=cool\|warm\|text`, `:hi group color`). `:q` refuses a modified buffer, `:q!` discards. See `Vim.md`. |
 | `Tmux.cool` | `Tmux;`: independent shells in virtual terminals (Ctrl-B `%` `"` `o` arrows `c` `n` `p` `x` `d`). |
 | `Nyan.cool` | `Nyan;`: animation, any key stops it. |
 | `Find.cool` | `Find("text", "*.cool")`: search files recursively, print `file,line: text` (third argument TRUE: ignore case). |
@@ -17,7 +17,7 @@
 | `Text.cool` | helpers the tools share. |
 | `Init.cool` | includes the above; defines `Cls`. |
 
-At the prompt a line such as `vim a.cool`, `find foo *.cool`, `less C:/Vim.cool`, `man StrLen`, `top` runs the tool (the shell turns command lines into calls; Tab completes function and file names).
+At the prompt a line such as `vim a.cool`, `find foo *.cool`, `less C:/Vim.warm`, `man StrLen`, `top` runs the tool (the shell turns command lines into calls; Tab completes function and file names).
 
 `tools/warm-man.py` generates the Warm manual during each disk installation from
 `docs/man/*.txt` and `warmc/standard/src/OS/**/*.warmh`. Body-only modules

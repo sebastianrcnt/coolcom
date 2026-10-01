@@ -1,0 +1,4 @@
+Low-level editor services for Warm programs. Syntax handles are opaque and
+must be released with EditorSynFree. EditorDefinition copies a source path
+and line number into caller-owned storage. Raw byte buffers and addresses
+belong to the caller; kernel objects are never exposed.

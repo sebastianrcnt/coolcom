@@ -1,0 +1,3924 @@
+-- Modal UTF-8 editor. The gap buffer, undo journal, jumps and all edit logic
+-- belong to this module. Only opaque syntax state and terminal/file services
+-- cross the kernel boundary. Raw offsets below refer to editor-owned memory.
+pragma Unsafe_Module;
+import OS.CoolOS.Editor (MemCpy, MemCmp, MAlloc, freeMemory, ReAlloc, Utf8Len, Utf8Width, StrLen, FileFind, FileRead, CAlloc, SynLang, StrCpy, StrCmp, EditorSynNew, EditorSynStart, EditorSynLine, HCTIsId, HCTStrEq, HCTIsKwSp, HCTIsKw2, EditorDefinition, FileWrite, EditorFileSize, StrNCmp, SynGroupName, Str2I64, EditorSetColor, Utf8Enc, AnsiTermSize, Utf8Cp, ConsPut, EditorSynCopy, EditorSynFast, AnsiCursorHide, AnsiCursor, AnsiReset, AnsiClearEol, SynColor, AnsiFg, EditorFormat, ConsPutS, AnsiSet, LineWidth, StrCat, EditorIme, AnsiCursorShow, EditorSynFree, AnsiAltScreen, EditorPrint, GetKey, KeyPending, LinePrev);
+import Austral.Memory (Address, Pointer, allocate, nullCheck, store, deallocate);
+module body VimApp is
+    record State: Free is
+        scratch_VimGotoDefinition: Int64;
+        scratch_VimNormal: Int64;
+        scratch_VimKey: Int64;
+        scratch_VimDraw: Int64;
+        scratch_VimDispatch: Int64;
+        memoryMessage: Int64;
+        historyMessage: Int64;
+        nameMessage: Int64;
+        readMessage: Int64;
+        noSearchMessage: Int64;
+        patternMessage: Int64;
+        noJumpMessage: Int64;
+        unsavedEditMessage: Int64;
+        publicToken: Int64;
+        privateToken: Int64;
+        functionToken: Int64;
+        typeToken: Int64;
+        recordToken: Int64;
+        defineToken: Int64;
+        classToken: Int64;
+        unionToken: Int64;
+        identifierMessage: Int64;
+        longIdentifierMessage: Int64;
+        definitionMessage: Int64;
+        writeCommand: Int64;
+        writeQuitCommand: Int64;
+        writeErrorMessage: Int64;
+        writtenMessage: Int64;
+        forceQuitCommand: Int64;
+        quitCommand: Int64;
+        unsavedQuitMessage: Int64;
+        filetypePrefix: Int64;
+        coolType: Int64;
+        warmType: Int64;
+        asmType: Int64;
+        textType: Int64;
+        filetypeErrorMessage: Int64;
+        filetypeMessage: Int64;
+        setPrefix: Int64;
+        numberOption: Int64;
+        nuOption: Int64;
+        noNumberOption: Int64;
+        noNuOption: Int64;
+        relativeNumberOption: Int64;
+        rnuOption: Int64;
+        noRelativeNumberOption: Int64;
+        noRnuOption: Int64;
+        optionMessage: Int64;
+        highlightPrefix: Int64;
+        highlightMessage: Int64;
+        editPrefix: Int64;
+        commandMessage: Int64;
+        emptyText: Int64;
+        numberFormat: Int64;
+        insertLabel: Int64;
+        visualLabel: Int64;
+        visualLineLabel: Int64;
+        normalLabel: Int64;
+        spaceText: Int64;
+        dirtyLabel: Int64;
+        imeLabel: Int64;
+        doubleSpaceText: Int64;
+        activeMessage: Int64;
+        allocationMessage: Int64;
+        errorFormat: Int64;
+
+        vim_buf: Int64;
+        vim_yank: Int64;
+        vim_saved: Int64;
+        vim_line: Int64;
+        vim_grp: Int64;
+        vim_ea: Int64;
+        vim_orig: Int64;
+        vim_el: Int64;
+        vim_name: Int64;
+        vim_cmd: Int64;
+        vim_search: Int64;
+        vim_msg: Int64;
+        vim_pos: Int64;
+        vim_top: Int64;
+        vim_left: Int64;
+        vim_mode: Int64;
+        vim_anchor: Int64;
+        vim_dirty: Int64;
+        vim_saved_len: Int64;
+        vim_yank_len: Int64;
+        vim_yank_line: Int64;
+        vim_count: Int64;
+        vim_op: Int64;
+        vim_opcount: Int64;
+        vim_pending: Int64;
+        vim_cmd_n: Int64;
+        vim_prompt: Int64;
+        vim_search_dir: Int64;
+        vim_goal: Int64;
+        vim_active: Int64;
+        vim_transaction: Int64;
+        vim_keys: Int64;
+        vim_dot: Int64;
+        vim_kn: Int64;
+        vim_dn: Int64;
+        vim_replay: Int64;
+        vim_changed: Int64;
+        vim_record: Int64;
+        vim_overflow: Int64;
+        vim_cap: Int64;
+        vim_gs: Int64;
+        vim_ge: Int64;
+        vim_ycap: Int64;
+        vim_lcap: Int64;
+        vim_ecap: Int64;
+        vim_en: Int64;
+        vim_acap: Int64;
+        vim_an: Int64;
+        vim_hpos: Int64;
+        vim_hent: Int64;
+        vim_har: Int64;
+        vim_hn: Int64;
+        vim_hi: Int64;
+        vim_tx_e: Int64;
+        vim_tx_a: Int64;
+        vim_win: Int64;
+        vim_wl: Int64;
+        vim_wr: Int64;
+        vim_ol: Int64;
+        vim_ocap: Int64;
+        vim_wbad: Int64;
+        vim_number: Int64;
+        vim_rnu: Int64;
+        vim_lang: Int64;
+        vim_syn_ok: Int64;
+        vim_syn_off: Int64;
+        vim_syn_lang: Int64;
+        vim_syn_cp: Int64;
+        vim_jfile: Int64;
+        vim_jpos: Int64;
+        vim_jtop: Int64;
+        vim_jleft: Int64;
+        vim_jn: Int64;
+    end;
+    function literal(value: Span[Nat8, Static]): Int64 is return @embed(Int64, "($1).data", value); end;
+    function VimLen(s: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        let gap: Int64 := @embed(Int64, "$1 - $2", state->vim_ge, state->vim_gs);
+        return @embed(Int64, "$1 - $2", state->vim_cap, gap);
+    end;
+    -- Offsets are bounded by the gap-buffer capacity before the byte load.
+    function VimAt(s: Int64, i: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        if i < 0 then return 0; end if;
+        var offset: Int64 := i;
+        if i >= state->vim_gs then
+            let gap: Int64 := @embed(Int64, "$1 - $2", state->vim_ge, state->vim_gs);
+            offset := @embed(Int64, "$1 + $2", i, gap);
+        end if;
+        if offset >= state->vim_cap then return 0; end if;
+        let address: Int64 := @embed(Int64, "$1 + $2", state->vim_buf, offset);
+        return @embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", address));
+    end;
+    -- Copy logical bytes across the gap without flattening the file.
+    function VimCopy(s: Int64, input_dst: Int64, input_a: Int64, input_n: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var dst: Int64 := input_dst;
+        var a: Int64 := input_a;
+        var n: Int64 := input_n;
+        var k: Int64 := 0;
+        k := 0;
+        if (a < state->vim_gs) then
+            let temp1: Int64 := (state->vim_gs - a);
+            k := temp1;
+            if (k > n) then
+                let temp2: Int64 := n;
+                k := temp2;
+            end if;
+            MemCpy(dst, (state->vim_buf + (a * 1)), k);
+            let temp3: Int64 := (dst + k);
+            dst := temp3;
+            let temp4: Int64 := (a + k);
+            a := temp4;
+            let temp5: Int64 := (n - k);
+            n := temp5;
+        end if;
+        if (n > 0) then
+            MemCpy(dst, (((state->vim_buf + (a * 1)) + (state->vim_ge * 1)) - (state->vim_gs * 1)), n);
+        end if;
+        return nil;
+    end;
+    function VimSame(s: Int64, input_arg_s: Int64, input_n: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_s: Int64 := input_arg_s;
+        var n: Int64 := input_n;
+        if (n /= VimLen(s)) then
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        if (MemCmp(state->vim_buf, arg_s, state->vim_gs) /= 0) then
+            let temp2: Int64 := 0;
+            return temp2;
+        end if;
+        let temp3: Int64 := (if (not (MemCmp((state->vim_buf + (state->vim_ge * 1)), (arg_s + (state->vim_gs * 1)), (n - state->vim_gs)) /= 0)) then 1 else 0);
+        return temp3;
+    end;
+    -- Count line separators on each side of the gap.
+    function VimNewlines(s: Int64, input_a: Int64, b: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var a: Int64 := input_a;
+        var e: Int64 := b;
+        var count: Int64 := 0;
+        if e > state->vim_gs then e := state->vim_gs; end if;
+        var cursor: Int64 := @embed(Int64, "$1 + $2", state->vim_buf, a);
+        var limit: Int64 := @embed(Int64, "$1 + $2", state->vim_buf, e);
+        while cursor < limit do
+            if @embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", cursor)) = 10 then
+                count := @embed(Int64, "$1 + $2", count, 1);
+            end if;
+            cursor := @embed(Int64, "$1 + $2", cursor, 1);
+        end while;
+        if a < state->vim_gs then a := state->vim_gs; end if;
+        let gap: Int64 := @embed(Int64, "$1 - $2", state->vim_ge, state->vim_gs);
+        let base: Int64 := @embed(Int64, "$1 + $2", state->vim_buf, gap);
+        cursor := @embed(Int64, "$1 + $2", base, a);
+        limit := @embed(Int64, "$1 + $2", base, b);
+        while cursor < limit do
+            if @embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", cursor)) = 10 then
+                count := @embed(Int64, "$1 + $2", count, 1);
+            end if;
+            cursor := @embed(Int64, "$1 + $2", cursor, 1);
+        end while;
+        return count;
+    end;
+    function VimTouch(s: Int64, input_p: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        if (p < state->vim_syn_off) then
+            let temp1: Int64 := 0;
+            state->vim_syn_ok := temp1;
+        end if;
+        return nil;
+    end;
+    function VimRoom(s: Int64, input_n: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var n: Int64 := input_n;
+        var tail: Int64 := 0;
+        var cap: Int64 := 0;
+        var nb: Int64 := 0;
+        tail := (state->vim_cap - state->vim_ge);
+        cap := 0;
+        nb := 0;
+        if ((state->vim_ge - state->vim_gs) >= n) then
+            let temp1: Int64 := 1;
+            return temp1;
+        end if;
+        let temp2: Int64 := ((((VimLen(s) + n) * 3) / 2) + 4096);
+        cap := temp2;
+        let temp3: Int64 := MAlloc(cap, 0);
+        nb := temp3;
+        if (not (nb /= 0)) then
+            let temp4: Int64 := ((VimLen(s) + n) + 64);
+            cap := temp4;
+            let temp5: Int64 := MAlloc(cap, 0);
+            nb := temp5;
+        end if;
+        if (not (nb /= 0)) then
+            let temp6: Int64 := 0;
+            return temp6;
+        end if;
+        MemCpy(nb, state->vim_buf, state->vim_gs);
+        MemCpy(((nb + (cap * 1)) - (tail * 1)), (state->vim_buf + (state->vim_ge * 1)), tail);
+        freeMemory(state->vim_buf);
+        let temp7: Int64 := nb;
+        state->vim_buf := temp7;
+        let temp8: Int64 := (cap - tail);
+        state->vim_ge := temp8;
+        let temp9: Int64 := cap;
+        state->vim_cap := temp9;
+        let temp10: Int64 := 1;
+        return temp10;
+    end;
+    function VimGapAt(s: Int64, input_p: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var g: Int64 := 0;
+        g := (state->vim_ge - state->vim_gs);
+        if (p < state->vim_gs) then
+            MemCpy(((state->vim_buf + (p * 1)) + (g * 1)), (state->vim_buf + (p * 1)), (state->vim_gs - p));
+        else
+            if (p > state->vim_gs) then
+                MemCpy((state->vim_buf + (state->vim_gs * 1)), (state->vim_buf + (state->vim_ge * 1)), (p - state->vim_gs));
+            end if;
+        end if;
+        let temp1: Int64 := p;
+        state->vim_gs := temp1;
+        let temp2: Int64 := (p + g);
+        state->vim_ge := temp2;
+        return nil;
+    end;
+    function VimRawInsert(s: Int64, input_p: Int64, input_arg_s: Int64, input_n: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var arg_s: Int64 := input_arg_s;
+        var n: Int64 := input_n;
+        VimGapAt(s, p);
+        MemCpy((state->vim_buf + (state->vim_gs * 1)), arg_s, n);
+        let temp1: Int64 := (state->vim_gs + n);
+        state->vim_gs := temp1;
+        VimTouch(s, p);
+        return nil;
+    end;
+    function VimRawDelete(s: Int64, input_p: Int64, input_n: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var n: Int64 := input_n;
+        VimGapAt(s, p);
+        let temp1: Int64 := (state->vim_ge + n);
+        state->vim_ge := temp1;
+        VimTouch(s, p);
+        return nil;
+    end;
+    -- Undo records keep offsets into the append-only edit arena.
+    function VimLogRoom(s: Int64, input_bytes: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var bytes: Int64 := input_bytes;
+        var cap: Int64 := 0;
+        var ne: Int64 := 0;
+        var na: Int64 := 0;
+        cap := 0;
+        ne := 0;
+        na := 0;
+        if (state->vim_en >= state->vim_ecap) then
+            let temp1: Int64 := ((state->vim_ecap * 2) + 64);
+            cap := temp1;
+            let temp2: Int64 := ReAlloc(state->vim_el, ((cap * 4) * 8));
+            ne := temp2;
+            if (not (ne /= 0)) then
+                let temp3: Int64 := 0;
+                return temp3;
+            end if;
+            let temp4: Int64 := ne;
+            state->vim_el := temp4;
+            let temp5: Int64 := cap;
+            state->vim_ecap := temp5;
+        end if;
+        if ((state->vim_an + bytes) > state->vim_acap) then
+            let temp6: Int64 := (((state->vim_an + bytes) * 2) + 256);
+            cap := temp6;
+            let temp7: Int64 := ReAlloc(state->vim_ea, cap);
+            na := temp7;
+            if (not (na /= 0)) then
+                let temp8: Int64 := 0;
+                return temp8;
+            end if;
+            let temp9: Int64 := na;
+            state->vim_ea := temp9;
+            let temp10: Int64 := cap;
+            state->vim_acap := temp10;
+        end if;
+        let temp11: Int64 := 1;
+        return temp11;
+    end;
+    function VimLogInsert(s: Int64, input_p: Int64, input_arg_s: Int64, input_n: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var arg_s: Int64 := input_arg_s;
+        var n: Int64 := input_n;
+        var e: Int64 := 0;
+        e := 0;
+        if (not (VimLogRoom(s, n) /= 0)) then
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        if (state->vim_en > state->vim_tx_e) then
+            let temp2: Int64 := (state->vim_el + (((state->vim_en - 1) * 4) * 8));
+            e := temp2;
+            if ((not (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))) /= 0)) and ((@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))) + @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 2 * 8)))) = p)) then
+                MemCpy((state->vim_ea + (state->vim_an * 1)), arg_s, n);
+                let temp3: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 2 * 8))) + n);
+                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 2 * 8)), temp3);
+                let temp4: Int64 := (state->vim_an + n);
+                state->vim_an := temp4;
+                let temp5: Int64 := 1;
+                return temp5;
+            end if;
+        end if;
+        let temp6: Int64 := (state->vim_el + ((state->vim_en * 4) * 8));
+        e := temp6;
+        let temp7: Int64 := p;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 0 * 8)), temp7);
+        let temp8: Int64 := 0;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 1 * 8)), temp8);
+        let temp9: Int64 := n;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 2 * 8)), temp9);
+        let temp10: Int64 := state->vim_an;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 3 * 8)), temp10);
+        MemCpy((state->vim_ea + (state->vim_an * 1)), arg_s, n);
+        let temp11: Int64 := (state->vim_an + n);
+        state->vim_an := temp11;
+        let temp12: Int64 := state->vim_en;
+        state->vim_en := temp12 + 1;
+        let temp13: Int64 := 1;
+        return temp13;
+    end;
+    function VimLogDelete(s: Int64, input_a: Int64, input_n: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var a: Int64 := input_a;
+        var n: Int64 := input_n;
+        var e: Int64 := 0;
+        e := 0;
+        if (not (VimLogRoom(s, n) /= 0)) then
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        if (state->vim_en > state->vim_tx_e) then
+            let temp2: Int64 := (state->vim_el + (((state->vim_en - 1) * 4) * 8));
+            e := temp2;
+            if ((not (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 2 * 8))) /= 0)) and (a = @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))))) then
+                VimCopy(s, (state->vim_ea + (state->vim_an * 1)), a, n);
+                let temp3: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))) + n);
+                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 1 * 8)), temp3);
+                let temp4: Int64 := (state->vim_an + n);
+                state->vim_an := temp4;
+                let temp5: Int64 := 1;
+                return temp5;
+            end if;
+            if ((not (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 2 * 8))) /= 0)) and ((a + n) = @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))))) then
+                MemCpy(((state->vim_ea + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 3 * 8))) * 1)) + (n * 1)), (state->vim_ea + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 3 * 8))) * 1)), @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))));
+                VimCopy(s, (state->vim_ea + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 3 * 8))) * 1)), a, n);
+                let temp6: Int64 := a;
+                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 0 * 8)), temp6);
+                let temp7: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))) + n);
+                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 1 * 8)), temp7);
+                let temp8: Int64 := (state->vim_an + n);
+                state->vim_an := temp8;
+                let temp9: Int64 := 1;
+                return temp9;
+            end if;
+        end if;
+        let temp10: Int64 := (state->vim_el + ((state->vim_en * 4) * 8));
+        e := temp10;
+        let temp11: Int64 := a;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 0 * 8)), temp11);
+        let temp12: Int64 := n;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 1 * 8)), temp12);
+        let temp13: Int64 := 0;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 2 * 8)), temp13);
+        let temp14: Int64 := state->vim_an;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (e + 3 * 8)), temp14);
+        VimCopy(s, (state->vim_ea + (state->vim_an * 1)), a, n);
+        let temp15: Int64 := (state->vim_an + n);
+        state->vim_an := temp15;
+        let temp16: Int64 := state->vim_en;
+        state->vim_en := temp16 + 1;
+        let temp17: Int64 := 1;
+        return temp17;
+    end;
+    function VimWinGrow(s: Int64, input_room: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var room: Int64 := input_room;
+        var nb: Int64 := 0;
+        var cap: Int64 := 0;
+        nb := 0;
+        cap := 0;
+        if ((state->vim_wbad /= 0) or ((state->vim_ol + room) <= state->vim_ocap)) then
+            return nil;
+        end if;
+        let temp1: Int64 := (((state->vim_ol + room) * 2) + 64);
+        cap := temp1;
+        let temp2: Int64 := ReAlloc(state->vim_orig, cap);
+        nb := temp2;
+        if (not (nb /= 0)) then
+            let temp3: Int64 := 1;
+            state->vim_wbad := temp3;
+            return nil;
+        end if;
+        let temp4: Int64 := nb;
+        state->vim_orig := temp4;
+        let temp5: Int64 := cap;
+        state->vim_ocap := temp5;
+        return nil;
+    end;
+    function VimWinNote(s: Int64, input_p: Int64, input_nrem: Int64, input_nins: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var nrem: Int64 := input_nrem;
+        var nins: Int64 := input_nins;
+        var k: Int64 := 0;
+        k := 0;
+        if (not (state->vim_win /= 0)) then
+            let temp1: Int64 := 1;
+            state->vim_win := temp1;
+            let temp2: Int64 := p;
+            state->vim_wr := temp2;
+            let temp3: Int64 := temp2;
+            state->vim_wl := temp3;
+            let temp4: Int64 := 0;
+            state->vim_ol := temp4;
+        end if;
+        if (p < state->vim_wl) then
+            let temp5: Int64 := (state->vim_wl - p);
+            k := temp5;
+            VimWinGrow(s, k);
+            if (not (state->vim_wbad /= 0)) then
+                MemCpy((state->vim_orig + (k * 1)), state->vim_orig, state->vim_ol);
+                VimCopy(s, state->vim_orig, p, k);
+                let temp6: Int64 := (state->vim_ol + k);
+                state->vim_ol := temp6;
+            end if;
+            let temp7: Int64 := p;
+            state->vim_wl := temp7;
+        end if;
+        if ((p + nrem) > state->vim_wr) then
+            let temp8: Int64 := ((p + nrem) - state->vim_wr);
+            k := temp8;
+            VimWinGrow(s, k);
+            if (not (state->vim_wbad /= 0)) then
+                VimCopy(s, (state->vim_orig + (state->vim_ol * 1)), state->vim_wr, k);
+                let temp9: Int64 := (state->vim_ol + k);
+                state->vim_ol := temp9;
+            end if;
+            let temp10: Int64 := (p + nrem);
+            state->vim_wr := temp10;
+        end if;
+        let temp11: Int64 := (state->vim_wr + (nins - nrem));
+        state->vim_wr := temp11;
+        return nil;
+    end;
+    function VimNoop(s: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var i: Int64 := 0;
+        i := 0;
+        if ((state->vim_wbad /= 0) or ((state->vim_wr - state->vim_wl) /= state->vim_ol)) then
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        let temp2: Int64 := 0;
+        i := temp2;
+        var loop3: Bool := true;
+        var loop3step: Bool := true;
+        while loop3 do
+            loop3step := true;
+            if (i < state->vim_ol) then
+                if (VimAt(s, (state->vim_wl + i)) /= @embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_orig + i * 1)))) then
+                    let temp4: Int64 := 0;
+                    return temp4;
+                end if;
+                if loop3 then
+                    let temp5: Int64 := i;
+                    i := temp5 + 1;
+                end if;
+            else loop3 := false; end if;
+        end while;
+        let temp6: Int64 := 1;
+        return temp6;
+    end;
+    function VimInsert(s: Int64, input_arg_s: Int64, input_n: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_s: Int64 := input_arg_s;
+        var n: Int64 := input_n;
+        if (n <= 0) then
+            let temp1: Int64 := 1;
+            return temp1;
+        end if;
+        if ((not (VimRoom(s, n) /= 0)) or (not (VimLogInsert(s, state->vim_pos, arg_s, n) /= 0))) then
+            let temp2: Int64 := state->memoryMessage;
+            state->vim_msg := temp2;
+            let temp3: Int64 := 0;
+            return temp3;
+        end if;
+        VimWinNote(s, state->vim_pos, 0, n);
+        VimRawInsert(s, state->vim_pos, arg_s, n);
+        let temp4: Int64 := (state->vim_pos + n);
+        state->vim_pos := temp4;
+        let temp5: Int64 := 1;
+        state->vim_dirty := temp5;
+        let temp6: Int64 := temp5;
+        state->vim_changed := temp6;
+        let temp7: Int64 := 1;
+        return temp7;
+    end;
+    function VimDelete(s: Int64, input_a: Int64, input_b: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var a: Int64 := input_a;
+        var b: Int64 := input_b;
+        if (((a < 0) or (b > VimLen(s))) or (a >= b)) then
+            return nil;
+        end if;
+        if (not (VimLogDelete(s, a, (b - a)) /= 0)) then
+            let temp1: Int64 := state->memoryMessage;
+            state->vim_msg := temp1;
+            return nil;
+        end if;
+        VimWinNote(s, a, (b - a), 0);
+        VimRawDelete(s, a, (b - a));
+        let temp2: Int64 := a;
+        state->vim_pos := temp2;
+        let temp3: Int64 := 1;
+        state->vim_dirty := temp3;
+        let temp4: Int64 := temp3;
+        state->vim_changed := temp4;
+        return nil;
+    end;
+    function VimStep(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var k: Int64 := 0;
+        var i: Int64 := 0;
+        var len: Int64 := 0;
+        k := 0;
+        i := 0;
+        len := VimLen(s);
+        if (p >= len) then
+            let temp1: Int64 := len;
+            return temp1;
+        end if;
+        let temp2: Int64 := Utf8Len(VimAt(s, p));
+        k := temp2;
+        if ((k < 1) or ((p + k) > len)) then
+            let temp3: Int64 := 1;
+            k := temp3;
+        end if;
+        let temp4: Int64 := 1;
+        i := temp4;
+        var loop5: Bool := true;
+        var loop5step: Bool := true;
+        while loop5 do
+            loop5step := true;
+            if (i < k) then
+                if ((VimAt(s, (p + i)) & 192) /= 128) then
+                    let temp6: Int64 := 1;
+                    k := temp6;
+                    loop5 := false; loop5step := false;
+                end if;
+                if loop5 then
+                    let temp7: Int64 := i;
+                    i := temp7 + 1;
+                end if;
+            else loop5 := false; end if;
+        end while;
+        let temp8: Int64 := (p + k);
+        return temp8;
+    end;
+    function VimPrev(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var q: Int64 := 0;
+        var n: Int64 := 0;
+        q := (p - 1);
+        n := 0;
+        if (p <= 0) then
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            let temp3: Int64 := n;
+            n := temp3 + 1;
+            if (((q > 0) and ((VimAt(s, q) & 192) = 128)) and (temp3 < 3)) then
+                let temp4: Int64 := q;
+                q := temp4 - 1;
+            else loop2 := false; end if;
+        end while;
+        if (VimStep(s, q) /= p) then
+            let temp5: Int64 := (p - 1);
+            return temp5;
+        end if;
+        let temp6: Int64 := q;
+        return temp6;
+    end;
+    function VimLine(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var loop1: Bool := true;
+        var loop1step: Bool := true;
+        while loop1 do
+            loop1step := true;
+            if ((p > 0) and (VimAt(s, (p - 1)) /= 10)) then
+                let temp2: Int64 := p;
+                p := @embed(Int64, "$1 - $2", temp2, 1);
+            else loop1 := false; end if;
+        end while;
+        let temp3: Int64 := p;
+        return temp3;
+    end;
+    function VimEnd(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var len: Int64 := 0;
+        len := VimLen(s);
+        var loop1: Bool := true;
+        var loop1step: Bool := true;
+        while loop1 do
+            loop1step := true;
+            if ((p < len) and (VimAt(s, p) /= 10)) then
+                let temp2: Int64 := p;
+                p := @embed(Int64, "$1 + $2", temp2, 1);
+            else loop1 := false; end if;
+        end while;
+        let temp3: Int64 := p;
+        return temp3;
+    end;
+    function VimNextLine(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        let temp1: Int64 := VimEnd(s, p);
+        p := temp1;
+        if (p < VimLen(s)) then
+            let temp2: Int64 := p;
+            p := temp2 + 1;
+        end if;
+        let temp3: Int64 := p;
+        return temp3;
+    end;
+    function VimLastLine(s: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := 0;
+        p := VimLen(s);
+        if ((p /= 0) and (VimAt(s, (p - 1)) = 10)) then
+            let temp1: Int64 := p;
+            p := temp1 - 1;
+        end if;
+        let temp2: Int64 := VimLine(s, p);
+        return temp2;
+    end;
+    function VimCp(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var k: Int64 := 0;
+        var a: Int64 := 0;
+        k := (VimStep(s, p) - p);
+        a := VimAt(s, p);
+        if (k = 1) then
+            let temp1: Int64 := a;
+            return temp1;
+        end if;
+        if (k = 2) then
+            let temp2: Int64 := (((a & 31) << 6) | (VimAt(s, (p + 1)) & 63));
+            return temp2;
+        end if;
+        if (k = 3) then
+            let temp3: Int64 := ((((a & 15) << 12) | ((VimAt(s, (p + 1)) & 63) << 6)) | (VimAt(s, (p + 2)) & 63));
+            return temp3;
+        end if;
+        if (k = 4) then
+            let temp4: Int64 := (((((a & 7) << 18) | ((VimAt(s, (p + 1)) & 63) << 12)) | ((VimAt(s, (p + 2)) & 63) << 6)) | (VimAt(s, (p + 3)) & 63));
+            return temp4;
+        end if;
+        let temp5: Int64 := 0;
+        return temp5;
+    end;
+    function VimWidth(s: Int64, input_p: Int64, input_col: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var col: Int64 := input_col;
+        var cp: Int64 := 0;
+        cp := 0;
+        if (VimAt(s, p) = 9) then
+            let temp1: Int64 := (4 - rem(col, 4));
+            return temp1;
+        end if;
+        let temp2: Int64 := VimCp(s, p);
+        cp := temp2;
+        if ((cp < 32) or (cp = 127)) then
+            let temp3: Int64 := 1;
+            return temp3;
+        end if;
+        let temp4: Int64 := Utf8Width(cp);
+        return temp4;
+    end;
+    function VimCol(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var a: Int64 := 0;
+        var w: Int64 := 0;
+        a := VimLine(s, p);
+        w := 0;
+        var loop1: Bool := true;
+        var loop1step: Bool := true;
+        while loop1 do
+            loop1step := true;
+            if (a < p) then
+                let temp2: Int64 := (w + VimWidth(s, a, w));
+                w := temp2;
+                let temp3: Int64 := VimStep(s, a);
+                a := temp3;
+            else loop1 := false; end if;
+        end while;
+        let temp4: Int64 := w;
+        return temp4;
+    end;
+    function VimAtCol(s: Int64, input_p: Int64, input_col: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var col: Int64 := input_col;
+        var arg_end: Int64 := 0;
+        var w: Int64 := 0;
+        var cw: Int64 := 0;
+        arg_end := VimEnd(s, p);
+        w := 0;
+        cw := 0;
+        var loop1: Bool := true;
+        var loop1step: Bool := true;
+        while loop1 do
+            loop1step := true;
+            if (p < arg_end) then
+                let temp2: Int64 := VimWidth(s, p, w);
+                cw := temp2;
+                if ((w + cw) > col) then
+                    loop1 := false; loop1step := false;
+                end if;
+                if loop1step then
+                    let temp3: Int64 := (w + cw);
+                    w := temp3;
+                end if;
+                if loop1step then
+                    let temp4: Int64 := VimStep(s, p);
+                    p := temp4;
+                end if;
+            else loop1 := false; end if;
+        end while;
+        let temp5: Int64 := p;
+        return temp5;
+    end;
+    function VimClamp(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_end: Int64 := 0;
+        var len: Int64 := 0;
+        arg_end := 0;
+        len := VimLen(s);
+        if (state->vim_pos < 0) then
+            let temp1: Int64 := 0;
+            state->vim_pos := temp1;
+        end if;
+        if (state->vim_pos > len) then
+            let temp2: Int64 := len;
+            state->vim_pos := temp2;
+        end if;
+        if (state->vim_mode /= 1) then
+            if ((((state->vim_pos > VimLastLine(s)) and (state->vim_pos = len)) and (len /= 0)) and (VimAt(s, (len - 1)) = 10)) then
+                let temp3: Int64 := (len - 1);
+                state->vim_pos := temp3;
+            end if;
+            let temp4: Int64 := VimEnd(s, state->vim_pos);
+            arg_end := temp4;
+            if ((state->vim_pos = arg_end) and (arg_end > VimLine(s, arg_end))) then
+                let temp5: Int64 := VimPrev(s, arg_end);
+                state->vim_pos := temp5;
+            end if;
+        end if;
+        return nil;
+    end;
+    function VimDirty(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        let temp1: Int64 := (if (not (VimSame(s, state->vim_saved, state->vim_saved_len) /= 0)) then 1 else 0);
+        state->vim_dirty := temp1;
+        return nil;
+    end;
+    -- Start one undo transaction; key replay shares the same transaction.
+    function VimBegin(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        if (state->vim_transaction /= 0) then
+            return nil;
+        end if;
+        let temp1: Int64 := state->vim_pos;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hpos + state->vim_hi * 8)), temp1);
+        let temp2: Int64 := state->vim_en;
+        state->vim_tx_e := temp2;
+        let temp3: Int64 := state->vim_an;
+        state->vim_tx_a := temp3;
+        let temp4: Int64 := 0;
+        state->vim_wbad := temp4;
+        let temp5: Int64 := temp4;
+        state->vim_win := temp5;
+        let temp6: Int64 := 0;
+        state->vim_ol := temp6;
+        let temp7: Int64 := 1;
+        state->vim_transaction := temp7;
+        let temp8: Int64 := 0;
+        state->vim_changed := temp8;
+        return nil;
+    end;
+    function VimLogMove(s: Int64, input_arg_from: Int64, input_arg_to: Int64, input_da: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_from: Int64 := input_arg_from;
+        var arg_to: Int64 := input_arg_to;
+        var da: Int64 := input_da;
+        var i: Int64 := 0;
+        var j: Int64 := 0;
+        var e: Int64 := 0;
+        var f: Int64 := 0;
+        i := 0;
+        j := 0;
+        e := 0;
+        f := 0;
+        let temp1: Int64 := arg_from;
+        i := temp1;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            if (i < state->vim_en) then
+                let temp3: Int64 := (state->vim_el + ((i * 4) * 8));
+                e := temp3;
+                let temp4: Int64 := (state->vim_el + ((((arg_to + i) - arg_from) * 4) * 8));
+                f := temp4;
+                let temp5: Int64 := 0;
+                j := temp5;
+                var loop6: Bool := true;
+                var loop6step: Bool := true;
+                while loop6 do
+                    loop6step := true;
+                    if (j < 4) then
+                        let temp7: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + j * 8)));
+                        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (f + j * 8)), temp7);
+                        if loop6 then
+                            let temp8: Int64 := j;
+                            j := temp8 + 1;
+                        end if;
+                    else loop6 := false; end if;
+                end while;
+                let temp9: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (f + 3 * 8))) - da);
+                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (f + 3 * 8)), temp9);
+                if loop2 then
+                    let temp10: Int64 := i;
+                    i := temp10 + 1;
+                end if;
+            else loop2 := false; end if;
+        end while;
+        return nil;
+    end;
+    function VimFinish(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var i: Int64 := 0;
+        var de: Int64 := 0;
+        var da: Int64 := 0;
+        i := 0;
+        de := 0;
+        da := 0;
+        if (not (state->vim_transaction /= 0)) then
+            return nil;
+        end if;
+        let temp1: Int64 := 0;
+        state->vim_transaction := temp1;
+        if (not (state->vim_changed /= 0)) then
+            return nil;
+        end if;
+        if (VimNoop(s) /= 0) then
+            let temp2: Int64 := state->vim_tx_e;
+            state->vim_en := temp2;
+            let temp3: Int64 := state->vim_tx_a;
+            state->vim_an := temp3;
+            VimDirty(s);
+            return nil;
+        end if;
+        if (state->vim_tx_e > @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + state->vim_hi * 8)))) then
+            let temp4: Int64 := (state->vim_tx_e - @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + state->vim_hi * 8))));
+            de := temp4;
+            let temp5: Int64 := (state->vim_tx_a - @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_har + state->vim_hi * 8))));
+            da := temp5;
+            VimLogMove(s, state->vim_tx_e, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + state->vim_hi * 8))), da);
+            MemCpy((state->vim_ea + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_har + state->vim_hi * 8))) * 1)), (state->vim_ea + (state->vim_tx_a * 1)), (state->vim_an - state->vim_tx_a));
+            let temp6: Int64 := (state->vim_en - de);
+            state->vim_en := temp6;
+            let temp7: Int64 := (state->vim_an - da);
+            state->vim_an := temp7;
+        end if;
+        if (state->vim_hi = (33 - 1)) then
+            let temp8: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + 1 * 8)));
+            de := temp8;
+            let temp9: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_har + 1 * 8)));
+            da := temp9;
+            VimLogMove(s, de, 0, da);
+            MemCpy(state->vim_ea, (state->vim_ea + (da * 1)), (state->vim_an - da));
+            let temp10: Int64 := (state->vim_en - de);
+            state->vim_en := temp10;
+            let temp11: Int64 := (state->vim_an - da);
+            state->vim_an := temp11;
+            let temp12: Int64 := 1;
+            i := temp12;
+            var loop13: Bool := true;
+            var loop13step: Bool := true;
+            while loop13 do
+                loop13step := true;
+                if (i < 33) then
+                    let temp14: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hpos + i * 8)));
+                    @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hpos + (i - 1) * 8)), temp14);
+                    let temp15: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + i * 8))) - de);
+                    @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hent + (i - 1) * 8)), temp15);
+                    let temp16: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_har + i * 8))) - da);
+                    @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_har + (i - 1) * 8)), temp16);
+                    if loop13 then
+                        let temp17: Int64 := i;
+                        i := temp17 + 1;
+                    end if;
+                else loop13 := false; end if;
+            end while;
+            let temp18: Int64 := state->vim_hi;
+            state->vim_hi := temp18 - 1;
+        end if;
+        let temp19: Int64 := state->vim_hi;
+        state->vim_hi := temp19 + 1;
+        let temp20: Int64 := (state->vim_hi + 1);
+        state->vim_hn := temp20;
+        let temp21: Int64 := state->vim_pos;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hpos + state->vim_hi * 8)), temp21);
+        let temp22: Int64 := state->vim_en;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hent + state->vim_hi * 8)), temp22);
+        let temp23: Int64 := state->vim_an;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_har + state->vim_hi * 8)), temp23);
+        if (((not (state->vim_replay /= 0)) and (state->vim_record /= 0)) and (not (state->vim_overflow /= 0))) then
+            MemCpy(state->vim_dot, state->vim_keys, (state->vim_kn * 8));
+            let temp24: Int64 := state->vim_kn;
+            state->vim_dn := temp24;
+        end if;
+        VimDirty(s);
+        return nil;
+    end;
+    -- Reverse journal entries in reverse order, or replay them forward.
+    function VimUndo(s: Int64, input_dir: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var dir: Int64 := input_dir;
+        var next: Int64 := 0;
+        var i: Int64 := 0;
+        var e: Int64 := 0;
+        next := (state->vim_hi + dir);
+        i := 0;
+        e := 0;
+        if ((next < 0) or (next >= state->vim_hn)) then
+            let temp1: Int64 := state->historyMessage;
+            state->vim_msg := temp1;
+            return nil;
+        end if;
+        if (dir < 0) then
+            let temp2: Int64 := (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + state->vim_hi * 8))) - 1);
+            i := temp2;
+            var loop3: Bool := true;
+            var loop3step: Bool := true;
+            while loop3 do
+                loop3step := true;
+                if (i >= @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + next * 8)))) then
+                    let temp4: Int64 := (state->vim_el + ((i * 4) * 8));
+                    e := temp4;
+                    VimRawDelete(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))), @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 2 * 8))));
+                    VimRawInsert(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))), (state->vim_ea + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 3 * 8))) * 1)), @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))));
+                    if loop3 then
+                        let temp5: Int64 := i;
+                        i := temp5 - 1;
+                    end if;
+                else loop3 := false; end if;
+            end while;
+        else
+            let temp6: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + state->vim_hi * 8)));
+            i := temp6;
+            var loop7: Bool := true;
+            var loop7step: Bool := true;
+            while loop7 do
+                loop7step := true;
+                if (i < @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hent + next * 8)))) then
+                    let temp8: Int64 := (state->vim_el + ((i * 4) * 8));
+                    e := temp8;
+                    VimRawDelete(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))), @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))));
+                    VimRawInsert(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 0 * 8))), ((state->vim_ea + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 3 * 8))) * 1)) + (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 1 * 8))) * 1)), @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (e + 2 * 8))));
+                    if loop7 then
+                        let temp9: Int64 := i;
+                        i := temp9 + 1;
+                    end if;
+                else loop7 := false; end if;
+            end while;
+        end if;
+        let temp10: Int64 := next;
+        state->vim_hi := temp10;
+        let temp11: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_hpos + next * 8)));
+        state->vim_pos := temp11;
+        VimClamp(s);
+        VimDirty(s);
+        return nil;
+    end;
+    function VimClass(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var c: Int64 := 0;
+        c := 0;
+        if (p >= VimLen(s)) then
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        let temp2: Int64 := VimAt(s, p);
+        c := temp2;
+        if ((((c = 32) or (c = 9)) or (c = 10)) or (c = 13)) then
+            let temp3: Int64 := 0;
+            return temp3;
+        end if;
+        if (((((c >= 128) or (c = 95)) or ((c >= 97) and (c <= 122))) or ((c >= 65) and (c <= 90))) or ((c >= 48) and (c <= 57))) then
+            let temp4: Int64 := 1;
+            return temp4;
+        end if;
+        let temp5: Int64 := 2;
+        return temp5;
+    end;
+    function VimWord(s: Int64, input_p: Int64, input_motion: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var motion: Int64 := input_motion;
+        var cl: Int64 := 0;
+        cl := 0;
+        if (motion = 98) then
+            if (p /= 0) then
+                let temp1: Int64 := VimPrev(s, p);
+                p := temp1;
+            end if;
+            var loop2: Bool := true;
+            var loop2step: Bool := true;
+            while loop2 do
+                loop2step := true;
+                if ((p /= 0) and (not (VimClass(s, p) /= 0))) then
+                    let temp3: Int64 := VimPrev(s, p);
+                    p := temp3;
+                else loop2 := false; end if;
+            end while;
+            let temp4: Int64 := VimClass(s, p);
+            cl := temp4;
+            var loop5: Bool := true;
+            var loop5step: Bool := true;
+            while loop5 do
+                loop5step := true;
+                if ((p /= 0) and (VimClass(s, VimPrev(s, p)) = cl)) then
+                    let temp6: Int64 := VimPrev(s, p);
+                    p := temp6;
+                else loop5 := false; end if;
+            end while;
+        else
+            if (motion = 101) then
+                if (p < VimLen(s)) then
+                    let temp7: Int64 := VimStep(s, p);
+                    p := temp7;
+                end if;
+                var loop8: Bool := true;
+                var loop8step: Bool := true;
+                while loop8 do
+                    loop8step := true;
+                    if ((p < VimLen(s)) and (not (VimClass(s, p) /= 0))) then
+                        let temp9: Int64 := VimStep(s, p);
+                        p := temp9;
+                    else loop8 := false; end if;
+                end while;
+                let temp10: Int64 := VimClass(s, p);
+                cl := temp10;
+                var loop11: Bool := true;
+                var loop11step: Bool := true;
+                while loop11 do
+                    loop11step := true;
+                    if (((p < VimLen(s)) and (VimClass(s, VimStep(s, p)) = cl)) and (VimStep(s, p) < VimLen(s))) then
+                        let temp12: Int64 := VimStep(s, p);
+                        p := temp12;
+                    else loop11 := false; end if;
+                end while;
+            else
+                let temp13: Int64 := VimClass(s, p);
+                cl := temp13;
+                var loop14: Bool := true;
+                var loop14step: Bool := true;
+                while loop14 do
+                    loop14step := true;
+                    if ((p < VimLen(s)) and (VimClass(s, p) = cl)) then
+                        let temp15: Int64 := VimStep(s, p);
+                        p := temp15;
+                    else loop14 := false; end if;
+                end while;
+                var loop16: Bool := true;
+                var loop16step: Bool := true;
+                while loop16 do
+                    loop16step := true;
+                    if ((p < VimLen(s)) and (not (VimClass(s, p) /= 0))) then
+                        let temp17: Int64 := VimStep(s, p);
+                        p := temp17;
+                    else loop16 := false; end if;
+                end while;
+            end if;
+        end if;
+        let temp18: Int64 := p;
+        return temp18;
+    end;
+    function VimFirst(s: Int64, input_p: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        let temp1: Int64 := VimLine(s, p);
+        p := temp1;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            if ((p < VimLen(s)) and ((VimAt(s, p) = 32) or (VimAt(s, p) = 9))) then
+                let temp3: Int64 := p;
+                p := temp3 + 1;
+            else loop2 := false; end if;
+        end while;
+        let temp4: Int64 := p;
+        return temp4;
+    end;
+    function VimGoto(s: Int64, input_arg_line: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_line: Int64 := input_arg_line;
+        var p: Int64 := 0;
+        var next: Int64 := 0;
+        p := 0;
+        next := 0;
+        var loop1: Bool := true;
+        var loop1step: Bool := true;
+        while loop1 do
+            loop1step := true;
+            let temp2: Int64 := arg_line;
+            arg_line := temp2 - 1;
+            if (arg_line > 0) then
+                let temp3: Int64 := VimNextLine(s, p);
+                next := temp3;
+                if ((next > VimLastLine(s)) or (next = p)) then
+                    loop1 := false; loop1step := false;
+                end if;
+                if loop1step then
+                    let temp4: Int64 := next;
+                    p := temp4;
+                end if;
+            else loop1 := false; end if;
+        end while;
+        let temp5: Int64 := p;
+        return temp5;
+    end;
+    function VimMotion(s: Int64, input_c: Int64, input_count: Int64, input_explicit_count: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var c: Int64 := input_c;
+        var count: Int64 := input_count;
+        var explicit_count: Int64 := input_explicit_count;
+        var i: Int64 := 0;
+        var p: Int64 := 0;
+        i := 0;
+        p := 0;
+        if ((c = 106) or (c = 107)) then
+            if (state->vim_goal < 0) then
+                let temp1: Int64 := VimCol(s, state->vim_pos);
+                state->vim_goal := temp1;
+            end if;
+            let temp2: Int64 := VimLine(s, state->vim_pos);
+            p := temp2;
+            let temp3: Int64 := 0;
+            i := temp3;
+            var loop4: Bool := true;
+            var loop4step: Bool := true;
+            while loop4 do
+                loop4step := true;
+                if (i < count) then
+                    if (c = 107) then
+                        if (p /= 0) then
+                            let temp5: Int64 := VimLine(s, (p - 1));
+                            p := temp5;
+                        end if;
+                    else
+                        if (p < VimLastLine(s)) then
+                            let temp6: Int64 := VimNextLine(s, p);
+                            p := temp6;
+                        end if;
+                    end if;
+                    if loop4 then
+                        let temp7: Int64 := i;
+                        i := temp7 + 1;
+                    end if;
+                else loop4 := false; end if;
+            end while;
+            let temp8: Int64 := VimAtCol(s, p, state->vim_goal);
+            state->vim_pos := temp8;
+            let temp9: Int64 := 1;
+            return temp9;
+        end if;
+        let temp10: Int64 := (-1);
+        state->vim_goal := temp10;
+        if (c = 71) then
+            if (explicit_count /= 0) then
+                let temp11: Int64 := VimGoto(s, count);
+                state->vim_pos := temp11;
+            else
+                let temp12: Int64 := VimLastLine(s);
+                state->vim_pos := temp12;
+            end if;
+        else
+            if (c = 103) then
+                let temp13: Int64 := VimGoto(s, count);
+                state->vim_pos := temp13;
+            else
+                if (c = 48) then
+                    let temp14: Int64 := VimLine(s, state->vim_pos);
+                    state->vim_pos := temp14;
+                else
+                    if (c = 94) then
+                        let temp15: Int64 := VimFirst(s, state->vim_pos);
+                        state->vim_pos := temp15;
+                    else
+                        if (c = 36) then
+                            let temp16: Int64 := 1;
+                            i := temp16;
+                            var loop17: Bool := true;
+                            var loop17step: Bool := true;
+                            while loop17 do
+                                loop17step := true;
+                                if ((i < count) and (state->vim_pos < VimLastLine(s))) then
+                                    let temp18: Int64 := VimNextLine(s, state->vim_pos);
+                                    state->vim_pos := temp18;
+                                    if loop17 then
+                                        let temp19: Int64 := i;
+                                        i := temp19 + 1;
+                                    end if;
+                                else loop17 := false; end if;
+                            end while;
+                            let temp20: Int64 := VimEnd(s, state->vim_pos);
+                            state->vim_pos := temp20;
+                            if (state->vim_pos > VimLine(s, state->vim_pos)) then
+                                let temp21: Int64 := VimPrev(s, state->vim_pos);
+                                state->vim_pos := temp21;
+                            end if;
+                        else
+                            if (((((c = 104) or (c = 108)) or (c = 119)) or (c = 98)) or (c = 101)) then
+                                let temp22: Int64 := 0;
+                                i := temp22;
+                                var loop23: Bool := true;
+                                var loop23step: Bool := true;
+                                while loop23 do
+                                    loop23step := true;
+                                    if (i < count) then
+                                        if (c = 104) then
+                                            if (state->vim_pos > VimLine(s, state->vim_pos)) then
+                                                let temp24: Int64 := VimPrev(s, state->vim_pos);
+                                                state->vim_pos := temp24;
+                                            end if;
+                                        else
+                                            if (c = 108) then
+                                                if (VimStep(s, state->vim_pos) < VimEnd(s, state->vim_pos)) then
+                                                    let temp25: Int64 := VimStep(s, state->vim_pos);
+                                                    state->vim_pos := temp25;
+                                                end if;
+                                            else
+                                                let temp26: Int64 := VimWord(s, state->vim_pos, c);
+                                                state->vim_pos := temp26;
+                                            end if;
+                                        end if;
+                                        if loop23 then
+                                            let temp27: Int64 := i;
+                                            i := temp27 + 1;
+                                        end if;
+                                    else loop23 := false; end if;
+                                end while;
+                            else
+                                let temp28: Int64 := 0;
+                                return temp28;
+                            end if;
+                        end if;
+                    end if;
+                end if;
+            end if;
+        end if;
+        let temp29: Int64 := 1;
+        return temp29;
+    end;
+    function VimYank(s: Int64, input_a: Int64, input_b: Int64, input_arg_line: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var a: Int64 := input_a;
+        var b: Int64 := input_b;
+        var arg_line: Int64 := input_arg_line;
+        var y: Int64 := 0;
+        var n: Int64 := 0;
+        y := 0;
+        n := (b - a);
+        if ((n + 2) > state->vim_ycap) then
+            let temp1: Int64 := MAlloc((n + 258), 0);
+            y := temp1;
+            if (not (y /= 0)) then
+                let temp2: Int64 := 0;
+                state->vim_yank_len := temp2;
+                let temp3: Int64 := state->memoryMessage;
+                state->vim_msg := temp3;
+                return nil;
+            end if;
+            freeMemory(state->vim_yank);
+            let temp4: Int64 := y;
+            state->vim_yank := temp4;
+            let temp5: Int64 := (n + 258);
+            state->vim_ycap := temp5;
+        end if;
+        let temp6: Int64 := n;
+        state->vim_yank_len := temp6;
+        VimCopy(s, state->vim_yank, a, n);
+        let temp7: Int64 := arg_line;
+        state->vim_yank_line := temp7;
+        if ((arg_line /= 0) and ((not (state->vim_yank_len /= 0)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_yank + (state->vim_yank_len - 1) * 1))) /= 10))) then
+            let temp8: Int64 := 10;
+            let temp9: Int64 := state->vim_yank_len;
+            state->vim_yank_len := temp9 + 1;
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_yank + temp9 * 1)), @embed(Nat8, "$1", temp8));
+        end if;
+        return nil;
+    end;
+    function VimOperate(s: Int64, input_op: Int64, input_a: Int64, input_b: Int64, input_arg_line: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var op: Int64 := input_op;
+        var a: Int64 := input_a;
+        var b: Int64 := input_b;
+        var arg_line: Int64 := input_arg_line;
+        var arg_end: Int64 := 0;
+        arg_end := b;
+        VimYank(s, a, b, arg_line);
+        if (op /= 121) then
+            VimBegin(s);
+        end if;
+        let temp1: Int64 := a;
+        state->vim_pos := temp1;
+        if (op = 121) then
+            let temp2: Int64 := 0;
+            state->vim_mode := temp2;
+            return nil;
+        end if;
+        if ((((op = 99) and (arg_line /= 0)) and (b > a)) and (VimAt(s, (b - 1)) = 10)) then
+            let temp3: Int64 := arg_end;
+            arg_end := temp3 - 1;
+        end if;
+        if (((((op = 100) and (arg_line /= 0)) and (b = VimLen(s))) and (a /= 0)) and (VimAt(s, (b - 1)) /= 10)) then
+            let temp4: Int64 := a;
+            a := temp4 - 1;
+        end if;
+        VimDelete(s, a, arg_end);
+        if (op = 99) then
+            let temp5: Int64 := 1;
+            state->vim_mode := temp5;
+        else
+            let temp6: Int64 := 0;
+            state->vim_mode := temp6;
+            if (arg_line /= 0) then
+                if (state->vim_pos >= VimLen(s)) then
+                    let temp7: Int64 := VimLastLine(s);
+                    state->vim_pos := temp7;
+                end if;
+                let temp8: Int64 := VimFirst(s, state->vim_pos);
+                state->vim_pos := temp8;
+            end if;
+        end if;
+        return nil;
+    end;
+    function VimRange(s: Int64, input_a: Int64, input_b: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var a: Int64 := input_a;
+        var b: Int64 := input_b;
+        let temp1: Int64 := state->vim_anchor;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", a), temp1);
+        let temp2: Int64 := state->vim_pos;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", b), temp2);
+        if (@embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", a)) > @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", b))) then
+            let temp3: Int64 := state->vim_pos;
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", a), temp3);
+            let temp4: Int64 := state->vim_anchor;
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", b), temp4);
+        end if;
+        if (state->vim_mode = 4) then
+            let temp5: Int64 := VimLine(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", a)));
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", a), temp5);
+            let temp6: Int64 := VimNextLine(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", b)));
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", b), temp6);
+        else
+            let temp7: Int64 := VimStep(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", b)));
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", b), temp7);
+        end if;
+        return nil;
+    end;
+    -- Load a file into an editor-owned gap buffer and reset syntax checkpoints.
+    function VimLoad(s: Int64, input_name: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var name: Int64 := input_name;
+        var n: Int64 := 0;
+        var cap: Int64 := 0;
+        var file: Int64 := 0;
+        var nb: Int64 := 0;
+        n := 0;
+        cap := 0;
+        file := 0;
+        nb := 0;
+        if ((not (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", name)) /= 0)) or (StrLen(name) >= 256)) then
+            let temp1: Int64 := state->nameMessage;
+            state->vim_msg := temp1;
+            let temp2: Int64 := 0;
+            return temp2;
+        end if;
+        if (FileFind(name) /= 0) then
+            let temp3: Int64 := FileRead(name, @embed(Int64, "$1", &!n), 0);
+            file := temp3;
+            if (not (file /= 0)) then
+                let temp4: Int64 := state->readMessage;
+                state->vim_msg := temp4;
+                let temp5: Int64 := 0;
+                return temp5;
+            end if;
+        else
+            let temp6: Int64 := CAlloc(1, 0);
+            file := temp6;
+        end if;
+        let temp7: Int64 := (n + 4096);
+        cap := temp7;
+        let temp8: Int64 := MAlloc(cap, 0);
+        nb := temp8;
+        if ((not (file /= 0)) or (not (nb /= 0))) then
+            freeMemory(file);
+            freeMemory(nb);
+            let temp9: Int64 := state->memoryMessage;
+            state->vim_msg := temp9;
+            let temp10: Int64 := 0;
+            return temp10;
+        end if;
+        MemCpy(nb, file, n);
+        freeMemory(state->vim_buf);
+        freeMemory(state->vim_saved);
+        let temp11: Int64 := nb;
+        state->vim_buf := temp11;
+        let temp12: Int64 := cap;
+        state->vim_cap := temp12;
+        let temp13: Int64 := n;
+        state->vim_gs := temp13;
+        let temp14: Int64 := cap;
+        state->vim_ge := temp14;
+        let temp15: Int64 := file;
+        state->vim_saved := temp15;
+        let temp16: Int64 := n;
+        state->vim_saved_len := temp16;
+        let temp17: Int64 := 0;
+        state->vim_syn_ok := temp17;
+        let temp18: Int64 := SynLang(name);
+        state->vim_lang := temp18;
+        StrCpy(state->vim_name, name);
+        let temp19: Int64 := 0;
+        state->vim_hi := temp19;
+        let temp20: Int64 := temp19;
+        state->vim_dirty := temp20;
+        let temp21: Int64 := temp20;
+        state->vim_left := temp21;
+        let temp22: Int64 := temp21;
+        state->vim_top := temp22;
+        let temp23: Int64 := temp22;
+        state->vim_pos := temp23;
+        let temp24: Int64 := 1;
+        state->vim_hn := temp24;
+        let temp25: Int64 := 0;
+        state->vim_an := temp25;
+        let temp26: Int64 := temp25;
+        state->vim_en := temp26;
+        let temp27: Int64 := 0;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_har + 0 * 8)), temp27);
+        let temp28: Int64 := temp27;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hent + 0 * 8)), temp28);
+        let temp29: Int64 := temp28;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_hpos + 0 * 8)), temp29);
+        let temp30: Int64 := 1;
+        return temp30;
+    end;
+    function VimMatch(s: Int64, input_p: Int64, input_arg_s: Int64, input_n: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var arg_s: Int64 := input_arg_s;
+        var n: Int64 := input_n;
+        var i: Int64 := 0;
+        i := 0;
+        let temp1: Int64 := 0;
+        i := temp1;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            if (i < n) then
+                if (VimAt(s, (p + i)) /= @embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (arg_s + i * 1)))) then
+                    let temp3: Int64 := 0;
+                    return temp3;
+                end if;
+                if loop2 then
+                    let temp4: Int64 := i;
+                    i := temp4 + 1;
+                end if;
+            else loop2 := false; end if;
+        end while;
+        let temp5: Int64 := 1;
+        return temp5;
+    end;
+    function VimSearch(s: Int64, input_dir: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var dir: Int64 := input_dir;
+        var p: Int64 := 0;
+        var n: Int64 := 0;
+        var i: Int64 := 0;
+        p := state->vim_pos;
+        n := StrLen(state->vim_search);
+        i := 0;
+        if (not (n /= 0)) then
+            let temp1: Int64 := state->noSearchMessage;
+            state->vim_msg := temp1;
+            let temp2: Int64 := 0;
+            return temp2;
+        end if;
+        let temp3: Int64 := 0;
+        i := temp3;
+        var loop4: Bool := true;
+        var loop4step: Bool := true;
+        while loop4 do
+            loop4step := true;
+            if (i < VimLen(s)) then
+                if (dir > 0) then
+                    let temp5: Int64 := VimStep(s, p);
+                    p := temp5;
+                    if (p >= VimLen(s)) then
+                        let temp6: Int64 := 0;
+                        p := temp6;
+                    end if;
+                else
+                    if (not (p /= 0)) then
+                        let temp7: Int64 := VimLen(s);
+                        p := temp7;
+                    end if;
+                    let temp8: Int64 := VimPrev(s, p);
+                    p := temp8;
+                end if;
+                if (((p + n) <= VimLen(s)) and (VimMatch(s, p, state->vim_search, n) /= 0)) then
+                    let temp9: Int64 := p;
+                    state->vim_pos := temp9;
+                    let temp10: Int64 := 1;
+                    return temp10;
+                end if;
+                if loop4 then
+                    let temp11: Int64 := i;
+                    i := temp11 + 1;
+                end if;
+            else loop4 := false; end if;
+        end while;
+        let temp12: Int64 := state->patternMessage;
+        state->vim_msg := temp12;
+        let temp13: Int64 := 0;
+        return temp13;
+    end;
+    function VimJumpPush(s: Int64, input_file: Int64, input_pos: Int64, input_top: Int64, input_left: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var file: Int64 := input_file;
+        var pos: Int64 := input_pos;
+        var top: Int64 := input_top;
+        var left: Int64 := input_left;
+        if (state->vim_jn = 32) then
+            MemCpy(state->vim_jfile, (state->vim_jfile + (1 * 256)), ((32 - 1) * 256));
+            MemCpy(state->vim_jpos, (state->vim_jpos + (1 * 8)), ((32 - 1) * 8));
+            MemCpy(state->vim_jtop, (state->vim_jtop + (1 * 8)), ((32 - 1) * 8));
+            MemCpy(state->vim_jleft, (state->vim_jleft + (1 * 8)), ((32 - 1) * 8));
+            let temp1: Int64 := state->vim_jn;
+            state->vim_jn := temp1 - 1;
+        end if;
+        StrCpy((state->vim_jfile + state->vim_jn * 256), file);
+        let temp2: Int64 := pos;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_jpos + state->vim_jn * 8)), temp2);
+        let temp3: Int64 := top;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_jtop + state->vim_jn * 8)), temp3);
+        let temp4: Int64 := left;
+        let temp5: Int64 := state->vim_jn;
+        state->vim_jn := temp5 + 1;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_jleft + temp5 * 8)), temp4);
+        return nil;
+    end;
+    function VimJumpBack(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var i: Int64 := 0;
+        i := (state->vim_jn - 1);
+        if (i < 0) then
+            let temp1: Int64 := state->noJumpMessage;
+            state->vim_msg := temp1;
+            return nil;
+        end if;
+        if (StrCmp(state->vim_name, (state->vim_jfile + i * 256)) /= 0) then
+            if (state->vim_dirty /= 0) then
+                let temp2: Int64 := state->unsavedEditMessage;
+                state->vim_msg := temp2;
+                return nil;
+            end if;
+            if (not (VimLoad(s, (state->vim_jfile + i * 256)) /= 0)) then
+                return nil;
+            end if;
+        end if;
+        let temp3: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_jpos + i * 8)));
+        state->vim_pos := temp3;
+        let temp4: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_jtop + i * 8)));
+        state->vim_top := temp4;
+        let temp5: Int64 := @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_jleft + i * 8)));
+        state->vim_left := temp5;
+        let temp6: Int64 := state->vim_jn;
+        state->vim_jn := temp6 - 1;
+        let temp7: Int64 := (-1);
+        state->vim_goal := temp7;
+        return nil;
+    end;
+    function VimDefinition(s: Int64, input_name: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var name: Int64 := input_name;
+        var p: Int64 := 0;
+        var q: Int64 := 0;
+        var n: Int64 := 0;
+        var i: Int64 := 0;
+        var j: Int64 := 0;
+        var k: Int64 := 0;
+        var a: Int64 := 0;
+        var nl: Int64 := 0;
+        var st: Int64 := 0;
+        p := 0;
+        q := 0;
+        n := 0;
+        i := 0;
+        j := 0;
+        k := 0;
+        a := 0;
+        nl := StrLen(name);
+        st := EditorSynNew();
+        EditorSynStart(st, state->vim_lang, 1);
+        let temp1: Int64 := 0;
+        p := temp1;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            if (p < VimLen(s)) then
+                let temp3: Int64 := VimEnd(s, p);
+                q := temp3;
+                let temp4: Int64 := VimLineGet(s, p, q);
+                n := temp4;
+                EditorSynLine(st, state->vim_line, n, state->vim_grp);
+
+                let temp5: Int64 := 0;
+                i := temp5;
+                var loop6: Bool := true;
+                var loop6step: Bool := true;
+                while loop6 do
+                    loop6step := true;
+                    if (i < n) then
+                        if ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_grp + i * 1))) = 1) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_grp + i * 1))) = 2)) then
+                            let temp7: Int64 := 32;
+                            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1)), @embed(Nat8, "$1", temp7));
+                        end if;
+                        if loop6 then
+                            let temp8: Int64 := i;
+                            i := temp8 + 1;
+                        end if;
+                    else loop6 := false; end if;
+                end while;
+                let temp9: Int64 := 0;
+                i := temp9;
+                var loop10: Bool := true;
+                var loop10step: Bool := true;
+                while loop10 do
+                    loop10step := true;
+                    if ((i < n) and ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 32) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 9))) then
+                        let temp11: Int64 := i;
+                        i := temp11 + 1;
+                    else loop10 := false; end if;
+                end while;
+                let temp12: Int64 := i;
+                a := temp12;
+                if (state->vim_lang = 2) then
+                    var loop13: Bool := true;
+                    var loop13step: Bool := true;
+                    while loop13 do
+                        loop13step := true;
+                        if ((i < n) and (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1)))) /= 0)) then
+                            let temp14: Int64 := i;
+                            i := temp14 + 1;
+                        else loop13 := false; end if;
+                    end while;
+                    if ((HCTStrEq((state->vim_line + (a * 1)), (i - a), state->publicToken) /= 0) or (HCTStrEq((state->vim_line + (a * 1)), (i - a), state->privateToken) /= 0)) then
+                        var loop15: Bool := true;
+                        var loop15step: Bool := true;
+                        while loop15 do
+                            loop15step := true;
+                            if ((i < n) and ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 32) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 9))) then
+                                let temp16: Int64 := i;
+                                i := temp16 + 1;
+                            else loop15 := false; end if;
+                        end while;
+                        let temp17: Int64 := i;
+                        a := temp17;
+                        var loop18: Bool := true;
+                        var loop18step: Bool := true;
+                        while loop18 do
+                            loop18step := true;
+                            if ((i < n) and (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1)))) /= 0)) then
+                                let temp19: Int64 := i;
+                                i := temp19 + 1;
+                            else loop18 := false; end if;
+                        end while;
+                    end if;
+                    if (((not (HCTStrEq((state->vim_line + (a * 1)), (i - a), state->functionToken) /= 0)) and (not (HCTStrEq((state->vim_line + (a * 1)), (i - a), state->typeToken) /= 0))) and (not (HCTStrEq((state->vim_line + (a * 1)), (i - a), state->recordToken) /= 0))) then
+                        loop2step := false;
+                    end if;
+                    if loop2step then
+                        var loop20: Bool := true;
+                        var loop20step: Bool := true;
+                        while loop20 do
+                            loop20step := true;
+                            if ((i < n) and ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 32) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 9))) then
+                                let temp21: Int64 := i;
+                                i := temp21 + 1;
+                            else loop20 := false; end if;
+                        end while;
+                    end if;
+                    if loop2step then
+                        if ((((i + nl) <= n) and (not (MemCmp((state->vim_line + (i * 1)), name, nl) /= 0))) and (((i + nl) = n) or (not (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + (i + nl) * 1)))) /= 0)))) then
+                            let temp22: Int64 := (p + i);
+                            EditorSynFree(st);
+                            return temp22;
+                        end if;
+                    end if;
+                    if loop2step then
+                        loop2step := false;
+                    end if;
+                end if;
+                if loop2step then
+                    if ((i < n) and (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 35)) then
+                        if (((i + 7) > n) or (MemCmp((state->vim_line + (i * 1)), state->defineToken, 7) /= 0)) then
+                            loop2step := false;
+                        end if;
+                        if loop2step then
+                            let temp23: Int64 := (i + 7);
+                            i := temp23;
+                        end if;
+                        if loop2step then
+                            var loop24: Bool := true;
+                            var loop24step: Bool := true;
+                            while loop24 do
+                                loop24step := true;
+                                if ((i < n) and ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 32) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1))) = 9))) then
+                                    let temp25: Int64 := i;
+                                    i := temp25 + 1;
+                                else loop24 := false; end if;
+                            end while;
+                        end if;
+                        if loop2step then
+                            if ((((i + nl) <= n) and (not (MemCmp((state->vim_line + (i * 1)), name, nl) /= 0))) and (((i + nl) = n) or (not (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + (i + nl) * 1)))) /= 0)))) then
+                                let temp26: Int64 := (p + i);
+                                EditorSynFree(st);
+                                return temp26;
+                            end if;
+                        end if;
+                        if loop2step then
+                            loop2step := false;
+                        end if;
+                    end if;
+                end if;
+                if loop2step then
+                    var loop27: Bool := true;
+                    var loop27step: Bool := true;
+                    while loop27 do
+                        loop27step := true;
+                        if ((i < n) and (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + i * 1)))) /= 0)) then
+                            let temp28: Int64 := i;
+                            i := temp28 + 1;
+                        else loop27 := false; end if;
+                    end while;
+                end if;
+                if loop2step then
+                    if (((i = a) or (HCTIsKwSp((state->vim_line + (a * 1)), (i - a)) /= 0)) or (HCTIsKw2((state->vim_line + (a * 1)), (i - a)) /= 0)) then
+                        if ((not (HCTStrEq((state->vim_line + (a * 1)), (i - a), state->classToken) /= 0)) and (not (HCTStrEq((state->vim_line + (a * 1)), (i - a), state->unionToken) /= 0))) then
+                            loop2step := false;
+                        end if;
+                    end if;
+                end if;
+                if loop2step then
+                    let temp29: Int64 := i;
+                    j := temp29;
+                    var loop30: Bool := true;
+                    var loop30step: Bool := true;
+                    while loop30 do
+                        loop30step := true;
+                        if ((j + nl) <= n) then
+                            if ((((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + j * 1))) = 40) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + j * 1))) = 61)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + j * 1))) = 59)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + j * 1))) = 123)) then
+                                loop30 := false; loop30step := false;
+                            end if;
+                            if loop30step then
+                                if ((((j > a) and (not (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + (j - 1) * 1)))) /= 0))) and (not (MemCmp((state->vim_line + (j * 1)), name, nl) /= 0))) and (((j + nl) = n) or (not (HCTIsId(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + (j + nl) * 1)))) /= 0)))) then
+                                    let temp31: Int64 := (j + nl);
+                                    k := temp31;
+                                    var loop32: Bool := true;
+                                    var loop32step: Bool := true;
+                                    while loop32 do
+                                        loop32step := true;
+                                        if ((k < n) and ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 32) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 9))) then
+                                            let temp33: Int64 := k;
+                                            k := temp33 + 1;
+                                        else loop32 := false; end if;
+                                    end while;
+                                    if ((((((((k = n) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 40)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 61)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 59)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 91)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 44)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 123)) or (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_line + k * 1))) = 58)) then
+                                        let temp34: Int64 := (p + j);
+                                        EditorSynFree(st);
+                                        return temp34;
+                                    end if;
+                                end if;
+                            end if;
+                            if loop30 then
+                                let temp35: Int64 := j;
+                                j := temp35 + 1;
+                            end if;
+                        else loop30 := false; end if;
+                    end while;
+                end if;
+                if loop2 then
+                    let temp36: Int64 := (q + 1);
+                    p := temp36;
+                end if;
+            else loop2 := false; end if;
+        end while;
+        let temp37: Int64 := (-1);
+        EditorSynFree(st);
+        return temp37;
+    end;
+    -- Find a local declaration first, then ask the kernel to copy a source location.
+    function VimGotoDefinition(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        let frame: Int64 := state->scratch_VimGotoDefinition;
+        var name: Int64 := frame + 0;
+        var file: Int64 := frame + 256;
+        var oldfile: Int64 := frame + 512;
+        var a: Int64 := 0;
+        var b: Int64 := 0;
+        var dest: Int64 := 0;
+        var arg_line: Int64 := 0;
+        var kind: Int64 := 0;
+        var pos: Int64 := 0;
+        var top: Int64 := 0;
+        var left: Int64 := 0;
+        a := state->vim_pos;
+        b := 0;
+        dest := 0;
+        arg_line := 0;
+        kind := 0;
+        pos := state->vim_pos;
+        top := state->vim_top;
+        left := state->vim_left;
+        if (not (HCTIsId(VimAt(s, a)) /= 0)) then
+            let temp1: Int64 := state->identifierMessage;
+            state->vim_msg := temp1;
+            return nil;
+        end if;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            if ((a /= 0) and (HCTIsId(VimAt(s, (a - 1))) /= 0)) then
+                let temp3: Int64 := a;
+                a := temp3 - 1;
+            else loop2 := false; end if;
+        end while;
+        let temp4: Int64 := a;
+        b := temp4;
+        var loop5: Bool := true;
+        var loop5step: Bool := true;
+        while loop5 do
+            loop5step := true;
+            if ((b < VimLen(s)) and (HCTIsId(VimAt(s, b)) /= 0)) then
+                let temp6: Int64 := b;
+                b := temp6 + 1;
+            else loop5 := false; end if;
+        end while;
+        if ((b - a) > 255) then
+            let temp7: Int64 := state->longIdentifierMessage;
+            state->vim_msg := temp7;
+            return nil;
+        end if;
+        VimCopy(s, name, a, (b - a));
+        let temp8: Int64 := 0;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (name + (b - a) * 1)), @embed(Nat8, "$1", temp8));
+        let temp9: Int64 := VimDefinition(s, name);
+        dest := temp9;
+        if (dest >= 0) then
+            if (dest /= state->vim_pos) then
+                VimJumpPush(s, state->vim_name, pos, top, left);
+            end if;
+            let temp10: Int64 := dest;
+            state->vim_pos := temp10;
+            let temp11: Int64 := (-1);
+            state->vim_goal := temp11;
+            return nil;
+        end if;
+        if (not (EditorDefinition(name, file, @embed(Int64, "$1", &!arg_line)) /= 0)) then
+            let temp12: Int64 := state->definitionMessage;
+            state->vim_msg := temp12;
+            return nil;
+        end if;
+        if (state->vim_dirty /= 0) then
+            let temp13: Int64 := state->unsavedEditMessage;
+            state->vim_msg := temp13;
+            return nil;
+        end if;
+        StrCpy(oldfile, state->vim_name);
+        if ((StrCmp(file, state->vim_name) /= 0) and (not (VimLoad(s, file) /= 0))) then
+            return nil;
+        end if;
+        VimJumpPush(s, oldfile, pos, top, left);
+        let temp14: Int64 := VimGoto(s, arg_line);
+        state->vim_pos := temp14;
+        let temp15: Int64 := (-1);
+        state->vim_goal := temp15;
+        return nil;
+    end;
+    function VimCommand(s: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var i: Int64 := 0;
+        var n: Int64 := 0;
+        var result: Int64 := 0;
+        var cmd: Int64 := 0;
+        var file: Int64 := 0;
+        i := 0;
+        n := 0;
+        result := 0;
+        cmd := state->vim_cmd;
+        file := 0;
+        if ((not (StrCmp(cmd, state->writeCommand) /= 0)) or (not (StrCmp(cmd, state->writeQuitCommand) /= 0))) then
+            let temp1: Int64 := VimLen(s);
+            n := temp1;
+            let temp2: Int64 := MAlloc((n + 1), 0);
+            file := temp2;
+            if (not (file /= 0)) then
+                let temp3: Int64 := state->memoryMessage;
+                state->vim_msg := temp3;
+                let temp4: Int64 := 0;
+                return temp4;
+            end if;
+            VimCopy(s, file, 0, n);
+            let temp5: Int64 := 0;
+            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (file + n * 1)), @embed(Nat8, "$1", temp5));
+            let temp6: Int64 := FileWrite(state->vim_name, file, n);
+            result := temp6;
+            if ((((result = -1) or ((not (result /= 0)) and (n /= 0))) or (not (FileFind(state->vim_name) /= 0))) or (EditorFileSize(state->vim_name) /= n)) then
+                freeMemory(file);
+                let temp7: Int64 := state->writeErrorMessage;
+                state->vim_msg := temp7;
+                let temp8: Int64 := 0;
+                return temp8;
+            end if;
+            freeMemory(state->vim_saved);
+            let temp9: Int64 := file;
+            state->vim_saved := temp9;
+            let temp10: Int64 := n;
+            state->vim_saved_len := temp10;
+            let temp11: Int64 := 0;
+            state->vim_dirty := temp11;
+            let temp12: Int64 := state->writtenMessage;
+            state->vim_msg := temp12;
+            let temp13: Int64 := (if (not (StrCmp(cmd, state->writeQuitCommand) /= 0)) then 1 else 0);
+            return temp13;
+        end if;
+        if (not (StrCmp(cmd, state->forceQuitCommand) /= 0)) then
+            let temp14: Int64 := 1;
+            return temp14;
+        end if;
+        if (not (StrCmp(cmd, state->quitCommand) /= 0)) then
+            if (not (state->vim_dirty /= 0)) then
+                let temp15: Int64 := 1;
+                return temp15;
+            end if;
+            let temp16: Int64 := state->unsavedQuitMessage;
+            state->vim_msg := temp16;
+            let temp17: Int64 := 0;
+            return temp17;
+        end if;
+        if (not (StrNCmp(cmd, state->filetypePrefix, 7) /= 0)) then
+            if (not (StrCmp((cmd + (7 * 1)), state->coolType) /= 0)) then
+                let temp18: Int64 := 1;
+                state->vim_lang := temp18;
+            else
+                if (not (StrCmp((cmd + (7 * 1)), state->warmType) /= 0)) then
+                    let temp19: Int64 := 2;
+                    state->vim_lang := temp19;
+                else
+                    if (not (StrCmp((cmd + (7 * 1)), state->asmType) /= 0)) then
+                        let temp20: Int64 := 3;
+                        state->vim_lang := temp20;
+                    else
+                        if (not (StrCmp((cmd + (7 * 1)), state->textType) /= 0)) then
+                            let temp21: Int64 := 0;
+                            state->vim_lang := temp21;
+                        else
+                            let temp22: Int64 := state->filetypeErrorMessage;
+                            state->vim_msg := temp22;
+                            let temp23: Int64 := 0;
+                            return temp23;
+                        end if;
+                    end if;
+                end if;
+            end if;
+            let temp24: Int64 := state->filetypeMessage;
+            state->vim_msg := temp24;
+            let temp25: Int64 := 0;
+            return temp25;
+        end if;
+        if (not (StrNCmp(cmd, state->setPrefix, 4) /= 0)) then
+            let temp26: Int64 := (cmd + (4 * 1));
+            file := temp26;
+            var loop27: Bool := true;
+            var loop27step: Bool := true;
+            while loop27 do
+                loop27step := true;
+                if (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", file)) /= 0) then
+                    var loop28: Bool := true;
+                    var loop28step: Bool := true;
+                    while loop28 do
+                        loop28step := true;
+                        if (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", file)) = 32) then
+                            let temp29: Int64 := file;
+                            file := temp29 + 1;
+                        else loop28 := false; end if;
+                    end while;
+                    if (not (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", file)) /= 0)) then
+                        loop27 := false; loop27step := false;
+                    end if;
+                    if loop27step then
+                        let temp30: Int64 := 0;
+                        i := temp30;
+                        var loop31: Bool := true;
+                        var loop31step: Bool := true;
+                        while loop31 do
+                            loop31step := true;
+                            if ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (file + i * 1))) /= 0) and (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (file + i * 1))) /= 32)) then
+                                skip;
+                                if loop31 then
+                                    let temp32: Int64 := i;
+                                    i := temp32 + 1;
+                                end if;
+                            else loop31 := false; end if;
+                        end while;
+                    end if;
+                    if loop27step then
+                        if ((HCTStrEq(file, i, state->numberOption) /= 0) or (HCTStrEq(file, i, state->nuOption) /= 0)) then
+                            let temp33: Int64 := 1;
+                            state->vim_number := temp33;
+                        else
+                            if ((HCTStrEq(file, i, state->noNumberOption) /= 0) or (HCTStrEq(file, i, state->noNuOption) /= 0)) then
+                                let temp34: Int64 := 0;
+                                state->vim_number := temp34;
+                            else
+                                if ((HCTStrEq(file, i, state->relativeNumberOption) /= 0) or (HCTStrEq(file, i, state->rnuOption) /= 0)) then
+                                    let temp35: Int64 := 1;
+                                    state->vim_rnu := temp35;
+                                else
+                                    if ((HCTStrEq(file, i, state->noRelativeNumberOption) /= 0) or (HCTStrEq(file, i, state->noRnuOption) /= 0)) then
+                                        let temp36: Int64 := 0;
+                                        state->vim_rnu := temp36;
+                                    else
+                                        let temp37: Int64 := state->optionMessage;
+                                        state->vim_msg := temp37;
+                                        let temp38: Int64 := 0;
+                                        return temp38;
+                                    end if;
+                                end if;
+                            end if;
+                        end if;
+                    end if;
+                    if loop27step then
+                        let temp39: Int64 := (file + i);
+                        file := temp39;
+                    end if;
+                else loop27 := false; end if;
+            end while;
+            let temp40: Int64 := 0;
+            return temp40;
+        end if;
+        if (not (StrNCmp(cmd, state->highlightPrefix, 3) /= 0)) then
+            let temp41: Int64 := 0;
+            i := temp41;
+            var loop42: Bool := true;
+            var loop42step: Bool := true;
+            while loop42 do
+                loop42step := true;
+                if (i < 14) then
+                    if ((not (StrNCmp((cmd + (3 * 1)), SynGroupName(i), StrLen(SynGroupName(i))) /= 0)) and (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (cmd + (3 + StrLen(SynGroupName(i))) * 1))) = 32)) then
+                        loop42 := false; loop42step := false;
+                    end if;
+                    if loop42 then
+                        let temp43: Int64 := i;
+                        i := temp43 + 1;
+                    end if;
+                else loop42 := false; end if;
+            end while;
+            if (i = 14) then
+                let temp44: Int64 := state->highlightMessage;
+                state->vim_msg := temp44;
+                let temp45: Int64 := 0;
+                return temp45;
+            end if;
+            EditorSetColor(i, Str2I64(((cmd + (4 * 1)) + (StrLen(SynGroupName(i)) * 1))));
+            let temp46: Int64 := 0;
+            return temp46;
+        end if;
+        if (not (StrNCmp(cmd, state->editPrefix, 2) /= 0)) then
+            if (state->vim_dirty /= 0) then
+                let temp47: Int64 := state->unsavedEditMessage;
+                state->vim_msg := temp47;
+            else
+                VimLoad(s, (cmd + (2 * 1)));
+            end if;
+            let temp48: Int64 := 0;
+            return temp48;
+        end if;
+        let temp49: Int64 := 0;
+        i := temp49;
+        var loop50: Bool := true;
+        var loop50step: Bool := true;
+        while loop50 do
+            loop50step := true;
+            if ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (cmd + i * 1))) >= 48) and (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (cmd + i * 1))) <= 57)) then
+                let temp51: Int64 := (((n * 10) + @embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (cmd + i * 1)))) - 48);
+                n := temp51;
+                if (n > (VimLen(s) + 1)) then
+                    let temp52: Int64 := (VimLen(s) + 1);
+                    n := temp52;
+                end if;
+                if loop50 then
+                    let temp53: Int64 := i;
+                    i := temp53 + 1;
+                end if;
+            else loop50 := false; end if;
+        end while;
+        if ((i /= 0) and (not (@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (cmd + i * 1))) /= 0))) then
+            let temp54: Int64 := VimGoto(s, n);
+            state->vim_pos := temp54;
+            let temp55: Int64 := 0;
+            return temp55;
+        end if;
+        let temp56: Int64 := state->commandMessage;
+        state->vim_msg := temp56;
+        let temp57: Int64 := 0;
+        return temp57;
+    end;
+    -- Normal-mode counts, operators, visual ranges and repeat commands.
+    function VimNormal(s: Int64, input_c: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var c: Int64 := input_c;
+        let frame: Int64 := state->scratch_VimNormal;
+        var n: Int64 := 0;
+        var op: Int64 := 0;
+        var a: Int64 := 0;
+        var b: Int64 := 0;
+        var i: Int64 := 0;
+        var p: Int64 := 0;
+        var k: Int64 := 0;
+        var explicit_count: Int64 := 0;
+        var ub: Int64 := frame + 0;
+        var ch: Int64 := 0;
+        n := state->vim_count;
+        op := 0;
+        a := 0;
+        b := 0;
+        i := 0;
+        p := 0;
+        k := 0;
+        explicit_count := (if (n /= 0) then 1 else 0);
+        ch := 10;
+        if (not (n /= 0)) then
+            let temp1: Int64 := 1;
+            n := temp1;
+        end if;
+        if (state->vim_pending /= 0) then
+            let temp2: Int64 := state->vim_pending;
+            p := temp2;
+            let temp3: Int64 := 0;
+            state->vim_pending := temp3;
+            if (p = 103) then
+                if (((c = 100) and (not (state->vim_op /= 0))) and (state->vim_mode = 0)) then
+                    VimGotoDefinition(s);
+                    let temp4: Int64 := 0;
+                    state->vim_count := temp4;
+                    let temp5: Int64 := 0;
+                    return temp5;
+                end if;
+                if (c /= 103) then
+                    let temp6: Int64 := 0;
+                    state->vim_count := temp6;
+                    let temp7: Int64 := temp6;
+                    state->vim_op := temp7;
+                    let temp8: Int64 := 0;
+                    return temp8;
+                end if;
+                let temp9: Int64 := 103;
+                c := temp9;
+            else
+                if (p = 114) then
+                    if ((c < 32) or (c >= 1114112)) then
+                        let temp10: Int64 := 0;
+                        state->vim_count := temp10;
+                        let temp11: Int64 := 0;
+                        return temp11;
+                    end if;
+                    let temp12: Int64 := state->vim_pos;
+                    b := temp12;
+                    let temp13: Int64 := 0;
+                    i := temp13;
+                    var loop14: Bool := true;
+                    var loop14step: Bool := true;
+                    while loop14 do
+                        loop14step := true;
+                        if ((i < n) and (b < VimEnd(s, state->vim_pos))) then
+                            let temp15: Int64 := VimStep(s, b);
+                            b := temp15;
+                            if loop14 then
+                                let temp16: Int64 := i;
+                                i := temp16 + 1;
+                            end if;
+                        else loop14 := false; end if;
+                    end while;
+                    if (i = n) then
+                        VimBegin(s);
+                        let temp17: Int64 := state->vim_pos;
+                        a := temp17;
+                        VimDelete(s, a, b);
+                        let temp18: Int64 := Utf8Enc(ub, c);
+                        k := temp18;
+                        let temp19: Int64 := 0;
+                        i := temp19;
+                        var loop20: Bool := true;
+                        var loop20step: Bool := true;
+                        while loop20 do
+                            loop20step := true;
+                            if (i < n) then
+                                VimInsert(s, ub, k);
+                                if loop20 then
+                                    let temp21: Int64 := i;
+                                    i := temp21 + 1;
+                                end if;
+                            else loop20 := false; end if;
+                        end while;
+                        let temp22: Int64 := VimPrev(s, state->vim_pos);
+                        state->vim_pos := temp22;
+                    end if;
+                    let temp23: Int64 := 0;
+                    state->vim_count := temp23;
+                    let temp24: Int64 := 0;
+                    return temp24;
+                else
+                    let temp25: Int64 := state->vim_pos;
+                    a := temp25;
+                    let temp26: Int64 := state->vim_pos;
+                    b := temp26;
+                    let temp27: Int64 := n;
+                    k := temp27;
+                    if (state->vim_op /= 0) then
+                        let temp28: Int64 := (k * state->vim_opcount);
+                        k := temp28;
+                    end if;
+                    let temp29: Int64 := 0;
+                    i := temp29;
+                    var loop30: Bool := true;
+                    var loop30step: Bool := true;
+                    while loop30 do
+                        loop30step := true;
+                        if (i < k) then
+                            let temp31: Int64 := VimStep(s, b);
+                            b := temp31;
+                            var loop32: Bool := true;
+                            var loop32step: Bool := true;
+                            while loop32 do
+                                loop32step := true;
+                                if ((b < VimEnd(s, a)) and (VimCp(s, b) /= c)) then
+                                    let temp33: Int64 := VimStep(s, b);
+                                    b := temp33;
+                                else loop32 := false; end if;
+                            end while;
+                            if (b >= VimEnd(s, a)) then
+                                let temp34: Int64 := 0;
+                                state->vim_count := temp34;
+                                let temp35: Int64 := temp34;
+                                state->vim_op := temp35;
+                                let temp36: Int64 := 0;
+                                return temp36;
+                            end if;
+                            if loop30 then
+                                let temp37: Int64 := i;
+                                i := temp37 + 1;
+                            end if;
+                        else loop30 := false; end if;
+                    end while;
+                    if (p = 116) then
+                        let temp38: Int64 := VimPrev(s, b);
+                        b := temp38;
+                    end if;
+                    let temp39: Int64 := b;
+                    state->vim_pos := temp39;
+                    if (state->vim_op /= 0) then
+                        let temp40: Int64 := state->vim_op;
+                        op := temp40;
+                        let temp41: Int64 := 0;
+                        state->vim_op := temp41;
+                        VimOperate(s, op, a, VimStep(s, b), 0);
+                    end if;
+                    let temp42: Int64 := 0;
+                    state->vim_count := temp42;
+                    let temp43: Int64 := 0;
+                    return temp43;
+                end if;
+            end if;
+        else
+            if (((c >= 48) and (c <= 57)) and ((c /= 48) or (state->vim_count /= 0))) then
+                let temp44: Int64 := (((state->vim_count * 10) + c) - 48);
+                state->vim_count := temp44;
+                if (state->vim_count > 10000) then
+                    let temp45: Int64 := 10000;
+                    state->vim_count := temp45;
+                end if;
+                let temp46: Int64 := 0;
+                return temp46;
+            end if;
+            if ((((c = 103) or (c = 102)) or (c = 116)) or (((c = 114) and (not (state->vim_op /= 0))) and (state->vim_mode = 0))) then
+                let temp47: Int64 := c;
+                state->vim_pending := temp47;
+                let temp48: Int64 := 0;
+                return temp48;
+            end if;
+        end if;
+        let temp49: Int64 := 0;
+        state->vim_count := temp49;
+        if ((state->vim_mode >= 3) and ((((c = 100) or (c = 120)) or (c = 99)) or (c = 121))) then
+            VimRange(s, @embed(Int64, "$1", &!a), @embed(Int64, "$1", &!b));
+            if (c = 120) then
+                let temp50: Int64 := 100;
+                c := temp50;
+            end if;
+            VimOperate(s, c, a, b, (if (state->vim_mode = 4) then 1 else 0));
+            let temp51: Int64 := 0;
+            return temp51;
+        end if;
+        if (state->vim_op /= 0) then
+            let temp52: Int64 := state->vim_op;
+            op := temp52;
+            let temp53: Int64 := 0;
+            state->vim_op := temp53;
+            let temp54: Int64 := (n * state->vim_opcount);
+            n := temp54;
+            if (n > (VimLen(s) + 1)) then
+                let temp55: Int64 := (VimLen(s) + 1);
+                n := temp55;
+            end if;
+            let temp56: Int64 := state->vim_pos;
+            a := temp56;
+            if (c = op) then
+                let temp57: Int64 := VimLine(s, a);
+                a := temp57;
+                let temp58: Int64 := a;
+                b := temp58;
+                let temp59: Int64 := 0;
+                i := temp59;
+                var loop60: Bool := true;
+                var loop60step: Bool := true;
+                while loop60 do
+                    loop60step := true;
+                    if (i < n) then
+                        let temp61: Int64 := VimNextLine(s, b);
+                        b := temp61;
+                        if loop60 then
+                            let temp62: Int64 := i;
+                            i := temp62 + 1;
+                        end if;
+                    else loop60 := false; end if;
+                end while;
+                VimOperate(s, op, a, b, 1);
+            else
+                if (((c = 119) and (op = 99)) and (VimClass(s, a) /= 0)) then
+                    let temp63: Int64 := a;
+                    b := temp63;
+                    let temp64: Int64 := 0;
+                    i := temp64;
+                    var loop65: Bool := true;
+                    var loop65step: Bool := true;
+                    while loop65 do
+                        loop65step := true;
+                        if (i < n) then
+                            let temp66: Int64 := VimClass(s, b);
+                            k := temp66;
+                            var loop67: Bool := true;
+                            var loop67step: Bool := true;
+                            while loop67 do
+                                loop67step := true;
+                                if ((b < VimLen(s)) and (VimClass(s, b) = k)) then
+                                    let temp68: Int64 := VimStep(s, b);
+                                    b := temp68;
+                                else loop67 := false; end if;
+                            end while;
+                            if ((i + 1) < n) then
+                                var loop69: Bool := true;
+                                var loop69step: Bool := true;
+                                while loop69 do
+                                    loop69step := true;
+                                    if ((b < VimLen(s)) and (not (VimClass(s, b) /= 0))) then
+                                        let temp70: Int64 := VimStep(s, b);
+                                        b := temp70;
+                                    else loop69 := false; end if;
+                                end while;
+                            end if;
+                            if loop65 then
+                                let temp71: Int64 := i;
+                                i := temp71 + 1;
+                            end if;
+                        else loop65 := false; end if;
+                    end while;
+                    VimOperate(s, op, a, b, 0);
+                else
+                    if (VimMotion(s, c, n, explicit_count) /= 0) then
+                        let temp72: Int64 := state->vim_pos;
+                        b := temp72;
+                        let temp73: Int64 := a;
+                        state->vim_pos := temp73;
+                        if ((((c = 106) or (c = 107)) or (c = 71)) or (c = 103)) then
+                            if (b < a) then
+                                let temp74: Int64 := a;
+                                p := temp74;
+                                let temp75: Int64 := b;
+                                a := temp75;
+                                let temp76: Int64 := p;
+                                b := temp76;
+                            end if;
+                            VimOperate(s, op, VimLine(s, a), VimNextLine(s, b), 1);
+                        else
+                            if ((c = 101) or (c = 36)) then
+                                let temp77: Int64 := VimStep(s, b);
+                                b := temp77;
+                            end if;
+                            if (b < a) then
+                                let temp78: Int64 := a;
+                                p := temp78;
+                                let temp79: Int64 := b;
+                                a := temp79;
+                                let temp80: Int64 := p;
+                                b := temp80;
+                            end if;
+                            VimOperate(s, op, a, b, 0);
+                        end if;
+                    end if;
+                end if;
+            end if;
+            let temp81: Int64 := 0;
+            return temp81;
+        end if;
+        if (VimMotion(s, c, n, explicit_count) /= 0) then
+            let temp82: Int64 := 0;
+            return temp82;
+        end if;
+        if ((c = 118) or (c = 86)) then
+            let temp83: Int64 := 3;
+            p := temp83;
+            if (c = 86) then
+                let temp84: Int64 := 4;
+                p := temp84;
+            end if;
+            if (state->vim_mode = p) then
+                let temp85: Int64 := 0;
+                state->vim_mode := temp85;
+            else
+                if (state->vim_mode = 0) then
+                    let temp86: Int64 := state->vim_pos;
+                    state->vim_anchor := temp86;
+                end if;
+                let temp87: Int64 := p;
+                state->vim_mode := temp87;
+            end if;
+        else
+            if (state->vim_mode >= 3) then
+                let temp88: Int64 := 0;
+                return temp88;
+            else
+                if (((c = 100) or (c = 99)) or (c = 121)) then
+                    let temp89: Int64 := c;
+                    state->vim_op := temp89;
+                    let temp90: Int64 := n;
+                    state->vim_opcount := temp90;
+                else
+                    if (c = 117) then
+                        let temp91: Int64 := 0;
+                        i := temp91;
+                        var loop92: Bool := true;
+                        var loop92step: Bool := true;
+                        while loop92 do
+                            loop92step := true;
+                            if (i < n) then
+                                VimUndo(s, (-1));
+                                if loop92 then
+                                    let temp93: Int64 := i;
+                                    i := temp93 + 1;
+                                end if;
+                            else loop92 := false; end if;
+                        end while;
+                    else
+                        if ((((((c = 105) or (c = 97)) or (c = 73)) or (c = 65)) or (c = 111)) or (c = 79)) then
+                            VimBegin(s);
+                            let temp94: Int64 := 1;
+                            state->vim_mode := temp94;
+                            if ((c = 97) and (state->vim_pos < VimEnd(s, state->vim_pos))) then
+                                let temp95: Int64 := VimStep(s, state->vim_pos);
+                                state->vim_pos := temp95;
+                            end if;
+                            if (c = 73) then
+                                let temp96: Int64 := VimFirst(s, state->vim_pos);
+                                state->vim_pos := temp96;
+                            end if;
+                            if (c = 65) then
+                                let temp97: Int64 := VimEnd(s, state->vim_pos);
+                                state->vim_pos := temp97;
+                            end if;
+                            if (c = 111) then
+                                let temp98: Int64 := VimEnd(s, state->vim_pos);
+                                state->vim_pos := temp98;
+                                VimInsert(s, @embed(Int64, "$1", &!ch), 1);
+                            end if;
+                            if (c = 79) then
+                                let temp99: Int64 := VimLine(s, state->vim_pos);
+                                state->vim_pos := temp99;
+                                if (VimInsert(s, @embed(Int64, "$1", &!ch), 1) /= 0) then
+                                    let temp100: Int64 := state->vim_pos;
+                                    state->vim_pos := temp100 - 1;
+                                end if;
+                            end if;
+                        else
+                            if (c = 120) then
+                                let temp101: Int64 := state->vim_pos;
+                                b := temp101;
+                                let temp102: Int64 := temp101;
+                                a := temp102;
+                                let temp103: Int64 := 0;
+                                i := temp103;
+                                var loop104: Bool := true;
+                                var loop104step: Bool := true;
+                                while loop104 do
+                                    loop104step := true;
+                                    if ((i < n) and (b < VimEnd(s, a))) then
+                                        let temp105: Int64 := VimStep(s, b);
+                                        b := temp105;
+                                        if loop104 then
+                                            let temp106: Int64 := i;
+                                            i := temp106 + 1;
+                                        end if;
+                                    else loop104 := false; end if;
+                                end while;
+                                if (b > a) then
+                                    VimOperate(s, 100, a, b, 0);
+                                end if;
+                            else
+                                if ((c = 112) or (c = 80)) then
+                                    if (state->vim_yank_len /= 0) then
+                                        VimBegin(s);
+                                        if (state->vim_yank_line /= 0) then
+                                            if (c = 80) then
+                                                let temp107: Int64 := VimLine(s, state->vim_pos);
+                                                state->vim_pos := temp107;
+                                            else
+                                                let temp108: Int64 := VimNextLine(s, state->vim_pos);
+                                                state->vim_pos := temp108;
+                                                if ((state->vim_pos /= 0) and (VimAt(s, (state->vim_pos - 1)) /= 10)) then
+                                                    VimInsert(s, @embed(Int64, "$1", &!ch), 1);
+                                                end if;
+                                            end if;
+                                        else
+                                            if ((c = 112) and (state->vim_pos < VimEnd(s, state->vim_pos))) then
+                                                let temp109: Int64 := VimStep(s, state->vim_pos);
+                                                state->vim_pos := temp109;
+                                            end if;
+                                        end if;
+                                        let temp110: Int64 := state->vim_pos;
+                                        a := temp110;
+                                        let temp111: Int64 := 0;
+                                        i := temp111;
+                                        var loop112: Bool := true;
+                                        var loop112step: Bool := true;
+                                        while loop112 do
+                                            loop112step := true;
+                                            if (i < n) then
+                                                if (not (VimInsert(s, state->vim_yank, state->vim_yank_len) /= 0)) then
+                                                    loop112 := false; loop112step := false;
+                                                end if;
+                                                if loop112 then
+                                                    let temp113: Int64 := i;
+                                                    i := temp113 + 1;
+                                                end if;
+                                            else loop112 := false; end if;
+                                        end while;
+                                        if (state->vim_yank_line /= 0) then
+                                            let temp114: Int64 := VimFirst(s, a);
+                                            state->vim_pos := temp114;
+                                        else
+                                            let temp115: Int64 := VimPrev(s, state->vim_pos);
+                                            state->vim_pos := temp115;
+                                        end if;
+                                    end if;
+                                else
+                                    if (c = 74) then
+                                        VimBegin(s);
+                                        if (n < 2) then
+                                            let temp116: Int64 := 2;
+                                            n := temp116;
+                                        end if;
+                                        let temp117: Int64 := 1;
+                                        i := temp117;
+                                        var loop118: Bool := true;
+                                        var loop118step: Bool := true;
+                                        while loop118 do
+                                            loop118step := true;
+                                            if (i < n) then
+                                                let temp119: Int64 := VimEnd(s, state->vim_pos);
+                                                a := temp119;
+                                                if ((a < VimLen(s)) and ((a + 1) < VimLen(s))) then
+                                                    let temp120: Int64 := VimFirst(s, (a + 1));
+                                                    b := temp120;
+                                                    VimDelete(s, a, b);
+                                                    let temp121: Int64 := 32;
+                                                    ch := temp121;
+                                                    if (((a /= 0) and (VimAt(s, (a - 1)) /= 32)) and (VimAt(s, (a - 1)) /= 9)) then
+                                                        VimInsert(s, @embed(Int64, "$1", &!ch), 1);
+                                                    end if;
+                                                    let temp122: Int64 := a;
+                                                    state->vim_pos := temp122;
+                                                end if;
+                                                if loop118 then
+                                                    let temp123: Int64 := i;
+                                                    i := temp123 + 1;
+                                                end if;
+                                            else loop118 := false; end if;
+                                        end while;
+                                    else
+                                        if (((c = 58) or (c = 47)) or (c = 63)) then
+                                            let temp124: Int64 := 2;
+                                            state->vim_mode := temp124;
+                                            let temp125: Int64 := c;
+                                            state->vim_prompt := temp125;
+                                            let temp126: Int64 := 0;
+                                            state->vim_cmd_n := temp126;
+                                            let temp127: Int64 := 0;
+                                            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_cmd + 0 * 1)), @embed(Nat8, "$1", temp127));
+                                        else
+                                            if ((c = 110) or (c = 78)) then
+                                                let temp128: Int64 := state->vim_search_dir;
+                                                p := temp128;
+                                                if (c = 78) then
+                                                    let temp129: Int64 := (-p);
+                                                    p := temp129;
+                                                end if;
+                                                let temp130: Int64 := 0;
+                                                i := temp130;
+                                                var loop131: Bool := true;
+                                                var loop131step: Bool := true;
+                                                while loop131 do
+                                                    loop131step := true;
+                                                    if (i < n) then
+                                                        if (not (VimSearch(s, p) /= 0)) then
+                                                            loop131 := false; loop131step := false;
+                                                        end if;
+                                                        if loop131 then
+                                                            let temp132: Int64 := i;
+                                                            i := temp132 + 1;
+                                                        end if;
+                                                    else loop131 := false; end if;
+                                                end while;
+                                            else
+                                                if (((c = 46) and (state->vim_dn /= 0)) and (not (state->vim_replay /= 0))) then
+                                                    let temp133: Int64 := 1;
+                                                    state->vim_replay := temp133;
+                                                    let temp134: Int64 := 0;
+                                                    i := temp134;
+                                                    var loop135: Bool := true;
+                                                    var loop135step: Bool := true;
+                                                    while loop135 do
+                                                        loop135step := true;
+                                                        if (i < n) then
+                                                            let temp136: Int64 := 0;
+                                                            p := temp136;
+                                                            var loop137: Bool := true;
+                                                            var loop137step: Bool := true;
+                                                            while loop137 do
+                                                                loop137step := true;
+                                                                if (p < state->vim_dn) then
+                                                                    VimKey(s, @embed(Int64, "*($1)", @embed(Pointer[Int64], "$1", (state->vim_dot + p * 8))));
+                                                                    if loop137 then
+                                                                        let temp138: Int64 := p;
+                                                                        p := temp138 + 1;
+                                                                    end if;
+                                                                else loop137 := false; end if;
+                                                            end while;
+                                                            if loop135 then
+                                                                let temp139: Int64 := i;
+                                                                i := temp139 + 1;
+                                                            end if;
+                                                        else loop135 := false; end if;
+                                                    end while;
+                                                    let temp140: Int64 := 0;
+                                                    state->vim_replay := temp140;
+                                                end if;
+                                            end if;
+                                        end if;
+                                    end if;
+                                end if;
+                            end if;
+                        end if;
+                    end if;
+                end if;
+            end if;
+        end if;
+        let temp141: Int64 := 0;
+        return temp141;
+    end;
+    function VimPageRows(s: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var rows: Int64 := 0;
+        var cols: Int64 := 0;
+        rows := 0;
+        cols := 0;
+        AnsiTermSize(@embed(Int64, "$1", &!rows), @embed(Int64, "$1", &!cols));
+        let temp1: Int64 := (rows - 1);
+        return temp1;
+    end;
+    function VimPage(s: Int64, input_dir: Int64, input_n: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var dir: Int64 := input_dir;
+        var n: Int64 := input_n;
+        var i: Int64 := 0;
+        i := 0;
+        let temp1: Int64 := 0;
+        i := temp1;
+        var loop2: Bool := true;
+        var loop2step: Bool := true;
+        while loop2 do
+            loop2step := true;
+            if (i < n) then
+                if (dir > 0) then
+                    if (VimNextLine(s, state->vim_top) >= VimLen(s)) then
+                        loop2 := false; loop2step := false;
+                    end if;
+                    if loop2step then
+                        let temp3: Int64 := VimNextLine(s, state->vim_top);
+                        state->vim_top := temp3;
+                    end if;
+                else
+                    if (not (state->vim_top /= 0)) then
+                        loop2 := false; loop2step := false;
+                    end if;
+                    if loop2step then
+                        let temp4: Int64 := VimLine(s, (state->vim_top - 1));
+                        state->vim_top := temp4;
+                    end if;
+                end if;
+                if loop2 then
+                    let temp5: Int64 := i;
+                    i := temp5 + 1;
+                end if;
+            else loop2 := false; end if;
+        end while;
+        if (dir > 0) then
+            VimMotion(s, 106, n, 0);
+        else
+            VimMotion(s, 107, n, 0);
+        end if;
+        return nil;
+    end;
+    function VimKey(s: Int64, input_ev: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var ev: Int64 := input_ev;
+        let frame: Int64 := state->scratch_VimKey;
+        var c: Int64 := 0;
+        var k: Int64 := 0;
+        var i: Int64 := 0;
+        var n: Int64 := 0;
+        var ub: Int64 := frame + 0;
+        var quit: Int64 := 0;
+        c := (ev & 16777215);
+        k := 0;
+        i := 0;
+        n := 0;
+        quit := 0;
+        if (not (state->vim_replay /= 0)) then
+            if (not (state->vim_record /= 0)) then
+                let temp1: Int64 := 0;
+                state->vim_kn := temp1;
+                let temp2: Int64 := 1;
+                state->vim_record := temp2;
+                let temp3: Int64 := 0;
+                state->vim_overflow := temp3;
+            end if;
+            if (state->vim_kn < 4096) then
+                let temp4: Int64 := ev;
+                let temp5: Int64 := state->vim_kn;
+                state->vim_kn := temp5 + 1;
+                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Int64], "$1", (state->vim_keys + temp5 * 8)), temp4);
+            else
+                let temp6: Int64 := 1;
+                state->vim_overflow := temp6;
+            end if;
+        end if;
+        let temp7: Int64 := state->emptyText;
+        state->vim_msg := temp7;
+        let temp8: Int64 := VimDispatch(s, ev);
+        quit := temp8;
+        VimClamp(s);
+        if (state->vim_mode /= 1) then
+            VimFinish(s);
+        end if;
+        if ((((not (state->vim_mode /= 0)) and (not (state->vim_count /= 0))) and (not (state->vim_op /= 0))) and (not (state->vim_pending /= 0))) then
+            let temp9: Int64 := 0;
+            state->vim_record := temp9;
+        end if;
+        let temp10: Int64 := quit;
+        return temp10;
+    end;
+    function VimText(s: Int64, input_arg_s: Int64, input_limit: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_s: Int64 := input_arg_s;
+        var limit: Int64 := input_limit;
+        var p: Int64 := 0;
+        var x: Int64 := 0;
+        var k: Int64 := 0;
+        var cp: Int64 := 0;
+        var w: Int64 := 0;
+        p := 0;
+        x := 0;
+        k := 0;
+        cp := 0;
+        w := 0;
+        var loop1: Bool := true;
+        var loop1step: Bool := true;
+        while loop1 do
+            loop1step := true;
+            if ((@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (arg_s + p * 1))) /= 0) and (x < limit)) then
+                let temp2: Int64 := Utf8Len(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (arg_s + p * 1))));
+                k := temp2;
+                if (k < 1) then
+                    let temp3: Int64 := 1;
+                    k := temp3;
+                end if;
+                if (StrLen((arg_s + (p * 1))) < k) then
+                    let temp4: Int64 := 1;
+                    k := temp4;
+                end if;
+                let temp5: Int64 := Utf8Cp((arg_s + (p * 1)), k);
+                cp := temp5;
+                let temp6: Int64 := Utf8Width(cp);
+                w := temp6;
+                if ((x + w) > limit) then
+                    loop1 := false; loop1step := false;
+                end if;
+                if loop1step then
+                    if ((cp < 32) or (cp = 127)) then
+                        ConsPut(63);
+                    else
+                        var loop7: Bool := true;
+                        var loop7step: Bool := true;
+                        while loop7 do
+                            loop7step := true;
+                            let temp8: Int64 := k;
+                            k := temp8 - 1;
+                            if (temp8 /= 0) then
+                                let temp9: Int64 := p;
+                                p := temp9 + 1;
+                                ConsPut(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (arg_s + temp9 * 1))));
+                            else loop7 := false; end if;
+                        end while;
+                        let temp10: Int64 := p;
+                        p := temp10 - 1;
+                    end if;
+                end if;
+                if loop1step then
+                    let temp11: Int64 := p;
+                    p := temp11 + 1;
+                end if;
+                if loop1step then
+                    let temp12: Int64 := (x + w);
+                    x := temp12;
+                end if;
+            else loop1 := false; end if;
+        end while;
+        return nil;
+    end;
+    function VimLineGet(s: Int64, input_p: Int64, input_q: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var p: Int64 := input_p;
+        var q: Int64 := input_q;
+        var n: Int64 := 0;
+        var a: Int64 := 0;
+        var b: Int64 := 0;
+        n := (q - p);
+        a := 0;
+        b := 0;
+        if ((n + 1) > state->vim_lcap) then
+            let temp1: Int64 := MAlloc((n + 257), 0);
+            a := temp1;
+            let temp2: Int64 := MAlloc((n + 257), 0);
+            b := temp2;
+            if ((a /= 0) and (b /= 0)) then
+                freeMemory(state->vim_line);
+                freeMemory(state->vim_grp);
+                let temp3: Int64 := a;
+                state->vim_line := temp3;
+                let temp4: Int64 := b;
+                state->vim_grp := temp4;
+                let temp5: Int64 := (n + 257);
+                state->vim_lcap := temp5;
+            else
+                freeMemory(a);
+                freeMemory(b);
+            end if;
+        end if;
+        if (n > (state->vim_lcap - 1)) then
+            let temp6: Int64 := (state->vim_lcap - 1);
+            n := temp6;
+        end if;
+        VimCopy(s, state->vim_line, p, n);
+        let temp7: Int64 := 0;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_line + n * 1)), @embed(Nat8, "$1", temp7));
+        let temp8: Int64 := n;
+        return temp8;
+    end;
+    -- Resume incremental syntax scanning from the nearest saved checkpoint.
+    function VimSynState(s: Int64, input_st: Int64, input_target: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var st: Int64 := input_st;
+        var target: Int64 := input_target;
+        var p: Int64 := 0;
+        var q: Int64 := 0;
+        p := 0;
+        q := 0;
+        if (((not (state->vim_syn_ok /= 0)) or (state->vim_syn_lang /= state->vim_lang)) or (state->vim_syn_off > target)) then
+            EditorSynStart(state->vim_syn_cp, state->vim_lang, 1);
+            let temp1: Int64 := 0;
+            state->vim_syn_off := temp1;
+            let temp2: Int64 := 1;
+            state->vim_syn_ok := temp2;
+            let temp3: Int64 := state->vim_lang;
+            state->vim_syn_lang := temp3;
+        end if;
+        EditorSynCopy(st, state->vim_syn_cp);
+        EditorSynFast(st, 1);
+        let temp4: Int64 := state->vim_syn_off;
+        p := temp4;
+        var loop5: Bool := true;
+        var loop5step: Bool := true;
+        while loop5 do
+            loop5step := true;
+            if (p < target) then
+                let temp6: Int64 := VimEnd(s, p);
+                q := temp6;
+                EditorSynLine(st, state->vim_line, VimLineGet(s, p, q), state->vim_grp);
+                if (q >= VimLen(s)) then
+                    loop5 := false; loop5step := false;
+                end if;
+                if loop5 then
+                    let temp7: Int64 := (q + 1);
+                    p := temp7;
+                end if;
+            else loop5 := false; end if;
+        end while;
+        EditorSynCopy(state->vim_syn_cp, st);
+        let temp8: Int64 := target;
+        state->vim_syn_off := temp8;
+        EditorSynFast(st, 0);
+        return nil;
+    end;
+    function VimDisplayNumber(s: Int64, input_arg_line: Int64, input_current: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var arg_line: Int64 := input_arg_line;
+        var current: Int64 := input_current;
+        if ((not (state->vim_rnu /= 0)) or ((state->vim_number /= 0) and (arg_line = current))) then
+            let temp1: Int64 := arg_line;
+            return temp1;
+        end if;
+        if (arg_line < current) then
+            let temp2: Int64 := (current - arg_line);
+            return temp2;
+        end if;
+        let temp3: Int64 := (arg_line - current);
+        return temp3;
+    end;
+    -- Paint the viewport with kernel terminal operations and opaque syntax handles.
+    function VimDraw(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        let frame: Int64 := state->scratch_VimDraw;
+        var rows: Int64 := 0;
+        var cols: Int64 := 0;
+        var p: Int64 := 0;
+        var q: Int64 := 0;
+        var qe: Int64 := 0;
+        var y: Int64 := 0;
+        var x: Int64 := 0;
+        var k: Int64 := 0;
+        var w: Int64 := 0;
+        var col: Int64 := 0;
+        var row: Int64 := 0;
+        var arg_line: Int64 := 0;
+        var a: Int64 := 0;
+        var b: Int64 := 0;
+        var color: Int64 := 0;
+        var cp: Int64 := 0;
+        var i: Int64 := 0;
+        var ls: Int64 := 0;
+        var last_color: Int64 := 0;
+        var last_sel: Int64 := 0;
+        var sel: Int64 := 0;
+        var gutter: Int64 := 0;
+        var current: Int64 := 0;
+        var number: Int64 := frame + 0;
+        var status: Int64 := frame + 32;
+        var st: Int64 := 0;
+        rows := 0;
+        cols := 0;
+        p := 0;
+        q := 0;
+        qe := 0;
+        y := 0;
+        x := 0;
+        k := 0;
+        w := 0;
+        col := 0;
+        row := 1;
+        arg_line := 1;
+        a := (-1);
+        b := (-1);
+        color := 0;
+        cp := 0;
+        i := 0;
+        ls := 0;
+        last_color := 0;
+        last_sel := 0;
+        sel := 0;
+        gutter := 0;
+        current := 0;
+        st := EditorSynNew();
+        AnsiTermSize(@embed(Int64, "$1", &!rows), @embed(Int64, "$1", &!cols));
+        if ((rows < 3) or (cols < 12)) then
+            EditorSynFree(st);
+            return nil;
+        end if;
+        if (state->vim_mode >= 3) then
+            VimRange(s, @embed(Int64, "$1", &!a), @embed(Int64, "$1", &!b));
+        end if;
+        AnsiCursorHide();
+        if (state->vim_top > VimLine(s, state->vim_pos)) then
+            let temp1: Int64 := VimLine(s, state->vim_pos);
+            state->vim_top := temp1;
+        end if;
+        let temp2: Int64 := state->vim_top;
+        p := temp2;
+        let temp3: Int64 := 1;
+        y := temp3;
+        var loop4: Bool := true;
+        var loop4step: Bool := true;
+        while loop4 do
+            loop4step := true;
+            if (y < (rows - 1)) then
+                let temp5: Int64 := VimNextLine(s, p);
+                p := temp5;
+                if loop4 then
+                    let temp6: Int64 := y;
+                    y := temp6 + 1;
+                end if;
+            else loop4 := false; end if;
+        end while;
+        let cursorLine: Int64 := VimLine(s, state->vim_pos);
+        if cursorLine > p then
+            state->vim_top := cursorLine;
+            var remaining: Int64 := rows - 2;
+            while remaining > 0 and state->vim_top > 0 do
+                state->vim_top := VimLine(s, state->vim_top - 1);
+                remaining := remaining - 1;
+            end while;
+        end if;
+        if ((state->vim_number /= 0) or (state->vim_rnu /= 0)) then
+            let temp10: Int64 := 6;
+            gutter := temp10;
+        end if;
+        let temp11: Int64 := (1 + VimNewlines(s, 0, VimLine(s, state->vim_pos)));
+        current := temp11;
+        let temp12: Int64 := VimCol(s, state->vim_pos);
+        col := temp12;
+        if (col < state->vim_left) then
+            let temp13: Int64 := col;
+            state->vim_left := temp13;
+        end if;
+        if (col >= (((state->vim_left + cols) - gutter) - 2)) then
+            let temp14: Int64 := (((col - cols) + gutter) + 3);
+            state->vim_left := temp14;
+        end if;
+        let temp15: Int64 := (arg_line + VimNewlines(s, 0, state->vim_top));
+        arg_line := temp15;
+        let temp16: Int64 := state->vim_top;
+        p := temp16;
+        VimSynState(s, st, p);
+        let temp17: Int64 := 1;
+        y := temp17;
+        var loop18: Bool := true;
+        var loop18step: Bool := true;
+        while loop18 do
+            loop18step := true;
+            if (y < rows) then
+                AnsiCursor(y, 1);
+                AnsiReset();
+                AnsiClearEol();
+                if (p > VimLastLine(s)) then
+                    AnsiFg(SynColor(13));
+                    ConsPut(126);
+                else
+                    if (VimLine(s, state->vim_pos) = p) then
+                        let temp19: Int64 := y;
+                        row := temp19;
+                    end if;
+                    if (gutter /= 0) then
+                        EditorFormat(number, state->numberFormat, VimDisplayNumber(s, arg_line, current), 0, 0, 0);
+                        AnsiFg(SynColor(12));
+                        ConsPutS(number);
+                    end if;
+                    let temp20: Int64 := arg_line;
+                    arg_line := temp20 + 1;
+                    let temp21: Int64 := VimEnd(s, p);
+                    q := temp21;
+                    let temp22: Int64 := 0;
+                    x := temp22;
+                    let temp23: Int64 := p;
+                    ls := temp23;
+                    let temp24: Int64 := q;
+                    qe := temp24;
+                    let temp25: Int64 := (p + VimLineGet(s, p, q));
+                    q := temp25;
+                    EditorSynLine(st, state->vim_line, (q - p), state->vim_grp);
+                    let temp26: Int64 := (-2);
+                    last_sel := temp26;
+                    let temp27: Int64 := temp26;
+                    last_color := temp27;
+                    var loop28: Bool := true;
+                    var loop28step: Bool := true;
+                    while loop28 do
+                        loop28step := true;
+                        if (p < q) then
+                            let temp29: Int64 := (VimStep(s, p) - p);
+                            k := temp29;
+                            let temp30: Int64 := VimWidth(s, p, x);
+                            w := temp30;
+                            let temp31: Int64 := VimCp(s, p);
+                            cp := temp31;
+                            if ((x >= state->vim_left) and ((x + w) <= (((state->vim_left + cols) - gutter) - 1))) then
+                                let temp32: Int64 := SynColor(@embed(Int64, "*($1)", @embed(Pointer[Nat8], "$1", (state->vim_grp + (p - ls) * 1))));
+                                color := temp32;
+                                let temp33: Int64 := (if ((p >= a) and (p < b)) then 1 else 0);
+                                sel := temp33;
+                                if ((color /= last_color) or (sel /= last_sel)) then
+                                    if (sel /= 0) then
+                                        AnsiSet(color, 4);
+                                    else
+                                        AnsiSet(color, (-1));
+                                    end if;
+                                    let temp34: Int64 := color;
+                                    last_color := temp34;
+                                    let temp35: Int64 := sel;
+                                    last_sel := temp35;
+                                end if;
+                                if (cp = 9) then
+                                    let temp36: Int64 := 0;
+                                    i := temp36;
+                                    var loop37: Bool := true;
+                                    var loop37step: Bool := true;
+                                    while loop37 do
+                                        loop37step := true;
+                                        if (i < w) then
+                                            ConsPut(32);
+                                            if loop37 then
+                                                let temp38: Int64 := i;
+                                                i := temp38 + 1;
+                                            end if;
+                                        else loop37 := false; end if;
+                                    end while;
+                                else
+                                    if ((cp < 32) or (cp = 127)) then
+                                        ConsPut(63);
+                                    else
+                                        let temp39: Int64 := 0;
+                                        i := temp39;
+                                        var loop40: Bool := true;
+                                        var loop40step: Bool := true;
+                                        while loop40 do
+                                            loop40step := true;
+                                            if (i < k) then
+                                                ConsPut(VimAt(s, (p + i)));
+                                                if loop40 then
+                                                    let temp41: Int64 := i;
+                                                    i := temp41 + 1;
+                                                end if;
+                                            else loop40 := false; end if;
+                                        end while;
+                                    end if;
+                                end if;
+                            else
+                                if ((x < state->vim_left) and ((x + w) > state->vim_left)) then
+                                    ConsPut(32);
+                                end if;
+                            end if;
+                            let temp42: Int64 := (p + k);
+                            p := temp42;
+                            let temp43: Int64 := (x + w);
+                            x := temp43;
+                        else loop28 := false; end if;
+                    end while;
+                    let temp44: Int64 := (qe + 1);
+                    p := temp44;
+                end if;
+                if loop18 then
+                    let temp45: Int64 := y;
+                    y := temp45 + 1;
+                end if;
+            else loop18 := false; end if;
+        end while;
+        AnsiCursor(rows, 1);
+        AnsiSet(0, 7);
+        AnsiClearEol();
+        if (state->vim_mode = 2) then
+            ConsPut(state->vim_prompt);
+            VimText(s, state->vim_cmd, (cols - 2));
+            AnsiCursor(rows, (2 + LineWidth(state->vim_cmd, 0, state->vim_cmd_n)));
+        else
+            if (state->vim_mode = 1) then
+                StrCpy(status, state->insertLabel);
+            else
+                if (state->vim_mode = 3) then
+                    StrCpy(status, state->visualLabel);
+                else
+                    if (state->vim_mode = 4) then
+                        StrCpy(status, state->visualLineLabel);
+                    else
+                        StrCpy(status, state->normalLabel);
+                    end if;
+                end if;
+            end if;
+            StrCat(status, state->spaceText);
+            StrCat(status, state->vim_name);
+            if (state->vim_dirty /= 0) then
+                StrCat(status, state->dirtyLabel);
+            end if;
+            if (EditorIme() /= 0) then
+                StrCat(status, state->imeLabel);
+            end if;
+            StrCat(status, state->doubleSpaceText);
+            StrCat(status, state->vim_msg);
+            VimText(s, status, (cols - 1));
+            AnsiCursor(row, (((1 + gutter) + col) - state->vim_left));
+        end if;
+        AnsiReset();
+        AnsiCursorShow();
+        EditorSynFree(st);
+        return nil;
+    end;
+    function VimClose(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        if (not (state->vim_active /= 0)) then
+            return nil;
+        end if;
+        let temp1: Int64 := 0;
+        state->vim_active := temp1;
+        EditorSynFree(state->vim_syn_cp);
+        AnsiReset();
+        AnsiCursorShow();
+        AnsiAltScreen(0);
+        freeMemory(state->vim_buf);
+        freeMemory(state->vim_saved);
+        freeMemory(state->vim_yank);
+        freeMemory(state->vim_el);
+        freeMemory(state->vim_ea);
+        freeMemory(state->vim_orig);
+        freeMemory(state->vim_line);
+        freeMemory(state->vim_grp);
+        let temp2: Int64 := 0;
+        state->vim_grp := temp2;
+        let temp3: Int64 := temp2;
+        state->vim_line := temp3;
+        let temp4: Int64 := temp3;
+        state->vim_orig := temp4;
+        let temp5: Int64 := temp4;
+        state->vim_ea := temp5;
+        let temp6: Int64 := temp5;
+        state->vim_el := temp6;
+        let temp7: Int64 := temp6;
+        state->vim_yank := temp7;
+        let temp8: Int64 := temp7;
+        state->vim_saved := temp8;
+        let temp9: Int64 := temp8;
+        state->vim_buf := temp9;
+        return nil;
+    end;
+    function VimOpen(s: Int64, input_name: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var name: Int64 := input_name;
+        if (state->vim_active /= 0) then
+            EditorPrint(state->activeMessage, 0);
+            let temp1: Int64 := 0;
+            return temp1;
+        end if;
+        let temp2: Int64 := 1;
+        state->vim_active := temp2;
+        let temp3: Int64 := EditorSynNew();
+        state->vim_syn_cp := temp3;
+        let temp4: Int64 := 0;
+        state->vim_ocap := temp4;
+        let temp5: Int64 := temp4;
+        state->vim_an := temp5;
+        let temp6: Int64 := temp5;
+        state->vim_acap := temp6;
+        let temp7: Int64 := temp6;
+        state->vim_en := temp7;
+        let temp8: Int64 := temp7;
+        state->vim_ecap := temp8;
+        let temp9: Int64 := temp8;
+        state->vim_ycap := temp9;
+        let temp10: Int64 := temp9;
+        state->vim_ge := temp10;
+        let temp11: Int64 := temp10;
+        state->vim_gs := temp11;
+        let temp12: Int64 := temp11;
+        state->vim_cap := temp12;
+        let temp13: Int64 := 512;
+        state->vim_lcap := temp13;
+        let temp14: Int64 := MAlloc(state->vim_lcap, 0);
+        state->vim_line := temp14;
+        let temp15: Int64 := MAlloc(state->vim_lcap, 0);
+        state->vim_grp := temp15;
+        if ((not (state->vim_line /= 0)) or (not (state->vim_grp /= 0))) then
+            VimClose(s);
+            EditorPrint(state->allocationMessage, 0);
+            let temp16: Int64 := 0;
+            return temp16;
+        end if;
+        let temp17: Int64 := 0;
+        state->vim_transaction := temp17;
+        let temp18: Int64 := temp17;
+        state->vim_pending := temp18;
+        let temp19: Int64 := temp18;
+        state->vim_op := temp19;
+        let temp20: Int64 := temp19;
+        state->vim_count := temp20;
+        let temp21: Int64 := temp20;
+        state->vim_mode := temp21;
+        let temp22: Int64 := 0;
+        state->vim_yank_len := temp22;
+        let temp23: Int64 := temp22;
+        state->vim_replay := temp23;
+        let temp24: Int64 := temp23;
+        state->vim_dn := temp24;
+        let temp25: Int64 := temp24;
+        state->vim_kn := temp25;
+        let temp26: Int64 := temp25;
+        state->vim_record := temp26;
+        let temp27: Int64 := 1;
+        state->vim_number := temp27;
+        let temp28: Int64 := 0;
+        state->vim_rnu := temp28;
+        let temp29: Int64 := 0;
+        state->vim_jn := temp29;
+        let temp30: Int64 := 0;
+        @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_search + 0 * 1)), @embed(Nat8, "$1", temp30));
+        let temp31: Int64 := 1;
+        state->vim_search_dir := temp31;
+        let temp32: Int64 := (-1);
+        state->vim_goal := temp32;
+        let temp33: Int64 := state->emptyText;
+        state->vim_msg := temp33;
+        if (not (VimLoad(s, name) /= 0)) then
+            EditorPrint(state->errorFormat, state->vim_msg);
+            VimClose(s);
+            let temp34: Int64 := 0;
+            return temp34;
+        end if;
+        AnsiAltScreen(1);
+        AnsiCursorShow();
+        let temp35: Int64 := 1;
+        return temp35;
+    end;
+    function Vim(s: Int64, input_name: Int64, input_arg_line: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var name: Int64 := input_name;
+        var arg_line: Int64 := input_arg_line;
+        var rows: Int64 := 0;
+        var cols: Int64 := 0;
+        var p: Int64 := 0;
+        var q: Int64 := 0;
+        var i: Int64 := 0;
+        var ev: Int64 := 0;
+        rows := 0;
+        cols := 0;
+        p := 0;
+        q := 0;
+        i := 0;
+        ev := 0;
+        if (arg_line > 1) then
+            let temp1: Int64 := 0;
+            p := temp1;
+            let temp2: Int64 := 1;
+            i := temp2;
+            var loop3: Bool := true;
+            var loop3step: Bool := true;
+            while loop3 do
+                loop3step := true;
+                if (i < arg_line) then
+                    let temp4: Int64 := VimNextLine(s, p);
+                    q := temp4;
+                    if (q >= VimLen(s)) then
+                        loop3 := false; loop3step := false;
+                    end if;
+                    if loop3step then
+                        let temp5: Int64 := q;
+                        p := temp5;
+                    end if;
+                    if loop3 then
+                        let temp6: Int64 := i;
+                        i := temp6 + 1;
+                    end if;
+                else loop3 := false; end if;
+            end while;
+            AnsiTermSize(@embed(Int64, "$1", &!rows), @embed(Int64, "$1", &!cols));
+            let temp7: Int64 := p;
+            q := temp7;
+            let temp8: Int64 := 0;
+            i := temp8;
+            temp8;
+            var loop9: Bool := true;
+            var loop9step: Bool := true;
+            while loop9 do
+                loop9step := true;
+                if ((i < ((rows - 1) / 3)) and (q > 0)) then
+                    let temp10: Int64 := VimLine(s, (q - 1));
+                    q := temp10;
+                    if loop9 then
+                        let temp11: Int64 := i;
+                        i := temp11 + 1;
+                    end if;
+                else loop9 := false; end if;
+            end while;
+            let temp12: Int64 := p;
+            state->vim_pos := temp12;
+            let temp13: Int64 := q;
+            state->vim_top := temp13;
+            VimClamp(s);
+        end if;
+        VimDraw(s);
+        var loop14: Bool := true;
+        var loop14step: Bool := true;
+        while loop14 do
+            loop14step := true;
+            if (1 /= 0) then
+                let temp15: Int64 := GetKey(0);
+                ev := temp15;
+                if ((ev /= 1114123) and (VimKey(s, ev) /= 0)) then
+                    loop14 := false; loop14step := false;
+                end if;
+                if loop14step then
+                    if ((ev = 1114123) or (not (KeyPending() /= 0))) then
+                        VimDraw(s);
+                    end if;
+                end if;
+            else loop14 := false; end if;
+        end while;
+        VimDraw(s);
+        VimClose(s);
+        return nil;
+    end;
+    -- Dispatch a key; VimKey handles recording and transaction completion.
+    function VimDispatch(s: Int64, input_ev: Int64): Int64 is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        var ev: Int64 := input_ev;
+        let frame: Int64 := state->scratch_VimDispatch;
+        var c: Int64 := 0;
+        var k: Int64 := 0;
+        var i: Int64 := 0;
+        var n: Int64 := 0;
+        var ub: Int64 := frame + 0;
+        var quit: Int64 := 0;
+        c := (ev & 16777215);
+        k := 0;
+        i := 0;
+        n := 0;
+        quit := 0;
+        if ((ev & 67108864) /= 0) then
+            let temp1: Int64 := quit;
+            return temp1;
+        end if;
+        if ((state->vim_mode /= 2) and ((c = 1114120) or (c = 1114119))) then
+            let temp2: Int64 := VimPageRows(s);
+            n := temp2;
+            if (c = 1114120) then
+                VimPage(s, 1, n);
+            else
+                VimPage(s, (-1), n);
+            end if;
+            let temp3: Int64 := 0;
+            state->vim_count := temp3;
+            let temp4: Int64 := quit;
+            return temp4;
+        end if;
+        if ((ev & 33554432) /= 0) then
+            if ((c = 111) and (state->vim_mode = 0)) then
+                VimJumpBack(s);
+                let temp5: Int64 := 0;
+                state->vim_count := temp5;
+            end if;
+            if ((state->vim_mode = 0) and ((((c = 102) or (c = 98)) or (c = 100)) or (c = 117))) then
+                let temp6: Int64 := VimPageRows(s);
+                n := temp6;
+                if ((c = 100) or (c = 117)) then
+                    let temp7: Int64 := (n / 2);
+                    n := temp7;
+                end if;
+                if ((c = 102) or (c = 100)) then
+                    VimPage(s, 1, n);
+                else
+                    VimPage(s, (-1), n);
+                end if;
+                let temp8: Int64 := 0;
+                state->vim_count := temp8;
+            end if;
+            if ((c = 114) and (state->vim_mode = 0)) then
+                let temp9: Int64 := state->vim_count;
+                n := temp9;
+                if (not (n /= 0)) then
+                    let temp10: Int64 := 1;
+                    n := temp10;
+                end if;
+                let temp11: Int64 := 0;
+                i := temp11;
+                var loop12: Bool := true;
+                var loop12step: Bool := true;
+                while loop12 do
+                    loop12step := true;
+                    if (i < n) then
+                        VimUndo(s, 1);
+                        if loop12 then
+                            let temp13: Int64 := i;
+                            i := temp13 + 1;
+                        end if;
+                    else loop12 := false; end if;
+                end while;
+                let temp14: Int64 := 0;
+                state->vim_count := temp14;
+            end if;
+            let temp15: Int64 := quit;
+            return temp15;
+        end if;
+        if (c = 27) then
+            if ((state->vim_mode = 1) and (state->vim_pos > VimLine(s, state->vim_pos))) then
+                let temp16: Int64 := VimPrev(s, state->vim_pos);
+                state->vim_pos := temp16;
+            end if;
+            let temp17: Int64 := 0;
+            state->vim_count := temp17;
+            let temp18: Int64 := temp17;
+            state->vim_op := temp18;
+            let temp19: Int64 := temp18;
+            state->vim_pending := temp19;
+            let temp20: Int64 := temp19;
+            state->vim_mode := temp20;
+        else
+            if (state->vim_mode = 2) then
+                if (c = 10) then
+                    let temp21: Int64 := 0;
+                    state->vim_mode := temp21;
+                    if (state->vim_prompt = 58) then
+                        let temp22: Int64 := VimCommand(s);
+                        quit := temp22;
+                    else
+                        if (state->vim_cmd_n /= 0) then
+                            StrCpy(state->vim_search, state->vim_cmd);
+                        end if;
+                        let temp23: Int64 := 1;
+                        state->vim_search_dir := temp23;
+                        if (state->vim_prompt = 63) then
+                            let temp24: Int64 := (-1);
+                            state->vim_search_dir := temp24;
+                        end if;
+                        VimSearch(s, state->vim_search_dir);
+                    end if;
+                else
+                    if (c = 8) then
+                        if (state->vim_cmd_n /= 0) then
+                            let temp25: Int64 := LinePrev(state->vim_cmd, state->vim_cmd_n);
+                            state->vim_cmd_n := temp25;
+                            let temp26: Int64 := 0;
+                            @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_cmd + state->vim_cmd_n * 1)), @embed(Nat8, "$1", temp26));
+                        else
+                            let temp27: Int64 := 0;
+                            state->vim_mode := temp27;
+                        end if;
+                    else
+                        if ((c >= 32) and (c < 1114112)) then
+                            let temp28: Int64 := Utf8Enc(ub, c);
+                            k := temp28;
+                            if ((state->vim_cmd_n + k) < 256) then
+                                MemCpy((state->vim_cmd + (state->vim_cmd_n * 1)), ub, k);
+                                let temp29: Int64 := (state->vim_cmd_n + k);
+                                state->vim_cmd_n := temp29;
+                                let temp30: Int64 := 0;
+                                @embed(Unit, "AU_STORE($1, $2)", @embed(Pointer[Nat8], "$1", (state->vim_cmd + state->vim_cmd_n * 1)), @embed(Nat8, "$1", temp30));
+                            end if;
+                        end if;
+                    end if;
+                end if;
+            else
+                if (state->vim_mode = 1) then
+                    if (c = 8) then
+                        if (state->vim_pos /= 0) then
+                            VimDelete(s, VimPrev(s, state->vim_pos), state->vim_pos);
+                        end if;
+                    else
+                        if (c = 1114122) then
+                            VimDelete(s, state->vim_pos, VimStep(s, state->vim_pos));
+                        else
+                            if (c = 1114115) then
+                                if (state->vim_pos > VimLine(s, state->vim_pos)) then
+                                    let temp31: Int64 := VimPrev(s, state->vim_pos);
+                                    state->vim_pos := temp31;
+                                end if;
+                            else
+                                if (c = 1114116) then
+                                    if (state->vim_pos < VimEnd(s, state->vim_pos)) then
+                                        let temp32: Int64 := VimStep(s, state->vim_pos);
+                                        state->vim_pos := temp32;
+                                    end if;
+                                else
+                                    if (c = 1114113) then
+                                        VimMotion(s, 107, 1, 0);
+                                    else
+                                        if (c = 1114114) then
+                                            VimMotion(s, 106, 1, 0);
+                                        else
+                                            if (c = 1114117) then
+                                                let temp33: Int64 := VimLine(s, state->vim_pos);
+                                                state->vim_pos := temp33;
+                                            else
+                                                if (c = 1114118) then
+                                                    let temp34: Int64 := VimEnd(s, state->vim_pos);
+                                                    state->vim_pos := temp34;
+                                                else
+                                                    if (((c = 10) or (c = 9)) or ((c >= 32) and (c < 1114112))) then
+                                                        VimInsert(s, ub, Utf8Enc(ub, c));
+                                                    end if;
+                                                end if;
+                                            end if;
+                                        end if;
+                                    end if;
+                                end if;
+                            end if;
+                        end if;
+                    end if;
+                else
+                    if (c = 1114115) then
+                        let temp35: Int64 := 104;
+                        c := temp35;
+                    end if;
+                    if (c = 1114116) then
+                        let temp36: Int64 := 108;
+                        c := temp36;
+                    end if;
+                    if (c = 1114113) then
+                        let temp37: Int64 := 107;
+                        c := temp37;
+                    end if;
+                    if (c = 1114114) then
+                        let temp38: Int64 := 106;
+                        c := temp38;
+                    end if;
+                    if (c = 1114117) then
+                        let temp39: Int64 := 48;
+                        c := temp39;
+                    end if;
+                    if (c = 1114118) then
+                        let temp40: Int64 := 36;
+                        c := temp40;
+                    end if;
+                    let temp41: Int64 := VimNormal(s, c);
+                    quit := temp41;
+                end if;
+            end if;
+        end if;
+        let temp42: Int64 := quit;
+        return temp42;
+    end;
+    pragma Foreign_Export(External_Name => "WvimCreate");
+    function create(): Int64 is
+        let address: Address[State] := allocate();
+        case nullCheck(address) of
+            when None do return 0;
+            when Some(value as ptr: Pointer[State]) do
+                store(ptr, State(scratch_VimGotoDefinition => 0, scratch_VimNormal => 0, scratch_VimKey => 0, scratch_VimDraw => 0, scratch_VimDispatch => 0, memoryMessage => 0, historyMessage => 0, nameMessage => 0, readMessage => 0, noSearchMessage => 0, patternMessage => 0, noJumpMessage => 0, unsavedEditMessage => 0, publicToken => 0, privateToken => 0, functionToken => 0, typeToken => 0, recordToken => 0, defineToken => 0, classToken => 0, unionToken => 0, identifierMessage => 0, longIdentifierMessage => 0, definitionMessage => 0, writeCommand => 0, writeQuitCommand => 0, writeErrorMessage => 0, writtenMessage => 0, forceQuitCommand => 0, quitCommand => 0, unsavedQuitMessage => 0, filetypePrefix => 0, coolType => 0, warmType => 0, asmType => 0, textType => 0, filetypeErrorMessage => 0, filetypeMessage => 0, setPrefix => 0, numberOption => 0, nuOption => 0, noNumberOption => 0, noNuOption => 0, relativeNumberOption => 0, rnuOption => 0, noRelativeNumberOption => 0, noRnuOption => 0, optionMessage => 0, highlightPrefix => 0, highlightMessage => 0, editPrefix => 0, commandMessage => 0, emptyText => 0, numberFormat => 0, insertLabel => 0, visualLabel => 0, visualLineLabel => 0, normalLabel => 0, spaceText => 0, dirtyLabel => 0, imeLabel => 0, doubleSpaceText => 0, activeMessage => 0, allocationMessage => 0, errorFormat => 0, vim_buf => 0, vim_yank => 0, vim_saved => 0, vim_line => 0, vim_grp => 0, vim_ea => 0, vim_orig => 0, vim_el => 0, vim_name => 0, vim_cmd => 0, vim_search => 0, vim_msg => 0, vim_pos => 0, vim_top => 0, vim_left => 0, vim_mode => 0, vim_anchor => 0, vim_dirty => 0, vim_saved_len => 0, vim_yank_len => 0, vim_yank_line => 0, vim_count => 0, vim_op => 0, vim_opcount => 0, vim_pending => 0, vim_cmd_n => 0, vim_prompt => 0, vim_search_dir => 0, vim_goal => 0, vim_active => 0, vim_transaction => 0, vim_keys => 0, vim_dot => 0, vim_kn => 0, vim_dn => 0, vim_replay => 0, vim_changed => 0, vim_record => 0, vim_overflow => 0, vim_cap => 0, vim_gs => 0, vim_ge => 0, vim_ycap => 0, vim_lcap => 0, vim_ecap => 0, vim_en => 0, vim_acap => 0, vim_an => 0, vim_hpos => 0, vim_hent => 0, vim_har => 0, vim_hn => 0, vim_hi => 0, vim_tx_e => 0, vim_tx_a => 0, vim_win => 0, vim_wl => 0, vim_wr => 0, vim_ol => 0, vim_ocap => 0, vim_wbad => 0, vim_number => 0, vim_rnu => 0, vim_lang => 0, vim_syn_ok => 0, vim_syn_off => 0, vim_syn_lang => 0, vim_syn_cp => 0, vim_jfile => 0, vim_jpos => 0, vim_jtop => 0, vim_jleft => 0, vim_jn => 0));
+                let s: Int64 := @embed(Int64, "$1", ptr);
+                let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+                state->memoryMessage := literal("Out of memory");
+                state->historyMessage := literal("No more history");
+                state->nameMessage := literal("Invalid file name");
+                state->readMessage := literal("Read failed");
+                state->noSearchMessage := literal("No previous search");
+                state->patternMessage := literal("Pattern not found");
+                state->noJumpMessage := literal("No older jump");
+                state->unsavedEditMessage := literal("Unsaved changes: use :w first");
+                state->publicToken := literal("public");
+                state->privateToken := literal("private");
+                state->functionToken := literal("function");
+                state->typeToken := literal("type");
+                state->recordToken := literal("record");
+                state->defineToken := literal("#define");
+                state->classToken := literal("class");
+                state->unionToken := literal("union");
+                state->identifierMessage := literal("No identifier under cursor");
+                state->longIdentifierMessage := literal("Identifier too long");
+                state->definitionMessage := literal("Definition not found");
+                state->writeCommand := literal("w");
+                state->writeQuitCommand := literal("wq");
+                state->writeErrorMessage := literal("Write failed");
+                state->writtenMessage := literal("Written");
+                state->forceQuitCommand := literal("q!");
+                state->quitCommand := literal("q");
+                state->unsavedQuitMessage := literal("Unsaved changes: use :w or :q!");
+                state->filetypePrefix := literal("set ft=");
+                state->coolType := literal("cool");
+                state->warmType := literal("warm");
+                state->asmType := literal("asm");
+                state->textType := literal("text");
+                state->filetypeErrorMessage := literal("Unknown filetype (cool, warm, asm, text)");
+                state->filetypeMessage := literal("Filetype set");
+                state->setPrefix := literal("set ");
+                state->numberOption := literal("number");
+                state->nuOption := literal("nu");
+                state->noNumberOption := literal("nonumber");
+                state->noNuOption := literal("nonu");
+                state->relativeNumberOption := literal("relativenumber");
+                state->rnuOption := literal("rnu");
+                state->noRelativeNumberOption := literal("norelativenumber");
+                state->noRnuOption := literal("nornu");
+                state->optionMessage := literal("Unknown option");
+                state->highlightPrefix := literal("hi ");
+                state->highlightMessage := literal("Unknown highlight group");
+                state->editPrefix := literal("e ");
+                state->commandMessage := literal("Unknown command");
+                state->emptyText := literal("");
+                state->numberFormat := literal("%5d ");
+                state->insertLabel := literal("INSERT");
+                state->visualLabel := literal("VISUAL");
+                state->visualLineLabel := literal("VISUAL LINE");
+                state->normalLabel := literal("NORMAL");
+                state->spaceText := literal(" ");
+                state->dirtyLabel := literal(" [+]");
+                state->imeLabel := literal(" [한]");
+                state->doubleSpaceText := literal("  ");
+                state->activeMessage := literal("Vim is already active\n");
+                state->allocationMessage := literal("Vim: out of memory\n");
+                state->errorFormat := literal("Vim: %s\n");
+
+                state->vim_name := CAlloc(256, 0);
+                state->vim_cmd := CAlloc(256, 0);
+                state->vim_search := CAlloc(256, 0);
+                state->vim_keys := CAlloc(32768, 0);
+                state->vim_dot := CAlloc(32768, 0);
+                state->vim_hpos := CAlloc(264, 0);
+                state->vim_hent := CAlloc(264, 0);
+                state->vim_har := CAlloc(264, 0);
+                state->vim_jfile := CAlloc(8192, 0);
+                state->vim_jpos := CAlloc(256, 0);
+                state->vim_jtop := CAlloc(256, 0);
+                state->vim_jleft := CAlloc(256, 0);
+                state->scratch_VimGotoDefinition := CAlloc(768, 0);
+                state->scratch_VimNormal := CAlloc(4, 0);
+                state->scratch_VimKey := CAlloc(4, 0);
+                state->scratch_VimDraw := CAlloc(544, 0);
+                state->scratch_VimDispatch := CAlloc(4, 0);
+                if state->vim_name = 0 or state->vim_cmd = 0 or state->vim_search = 0 or state->vim_keys = 0 or state->vim_dot = 0 or state->vim_hpos = 0 or state->vim_hent = 0 or state->vim_har = 0 or state->vim_jfile = 0 or state->vim_jpos = 0 or state->vim_jtop = 0 or state->vim_jleft = 0 or state->scratch_VimGotoDefinition = 0 or state->scratch_VimNormal = 0 or state->scratch_VimKey = 0 or state->scratch_VimDraw = 0 or state->scratch_VimDispatch = 0 then
+                    destroy(s); return 0;
+                end if;
+                return s;
+        end case;
+    end;
+    pragma Foreign_Export(External_Name => "WvimDestroy");
+    function destroy(s: Int64): Unit is
+        let state: &![State, Static] := @embed(&![State, Static], "$1", s);
+        freeMemory(state->scratch_VimGotoDefinition);
+        freeMemory(state->scratch_VimNormal);
+        freeMemory(state->scratch_VimKey);
+        freeMemory(state->scratch_VimDraw);
+        freeMemory(state->scratch_VimDispatch);
+        freeMemory(state->vim_name);
+        freeMemory(state->vim_cmd);
+        freeMemory(state->vim_search);
+        freeMemory(state->vim_keys);
+        freeMemory(state->vim_dot);
+        freeMemory(state->vim_hpos);
+        freeMemory(state->vim_hent);
+        freeMemory(state->vim_har);
+        freeMemory(state->vim_jfile);
+        freeMemory(state->vim_jpos);
+        freeMemory(state->vim_jtop);
+        freeMemory(state->vim_jleft);
+        deallocate(@embed(Pointer[State], "$1", s)); return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WvimOpen");
+    function exportedOpen(s: Int64, arg_name: Int64): Int64 is
+        return VimOpen(s, arg_name);
+    end;
+    pragma Foreign_Export(External_Name => "WvimClose");
+    function exportedClose(s: Int64): Unit is
+        VimClose(s); return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WvimRun");
+    function exportedRun(s: Int64, arg_name: Int64, arg_line: Int64): Unit is
+        Vim(s, arg_name, arg_line); return nil;
+    end;
+    pragma Foreign_Export(External_Name => "WvimPos");
+    function getpos(s: Int64): Int64 is let state: &![State, Static] := @embed(&![State, Static], "$1", s); return state->vim_pos; end;
+    pragma Foreign_Export(External_Name => "WvimTop");
+    function gettop(s: Int64): Int64 is let state: &![State, Static] := @embed(&![State, Static], "$1", s); return state->vim_top; end;
+    pragma Foreign_Export(External_Name => "WvimLeft");
+    function getleft(s: Int64): Int64 is let state: &![State, Static] := @embed(&![State, Static], "$1", s); return state->vim_left; end;
+    pragma Foreign_Export(External_Name => "WvimKey");
+    function exportedKey(s: Int64, event: Int64): Int64 is return VimKey(s, event); end;
+    pragma Foreign_Export(External_Name => "WvimPaint");
+    function exportedPaint(s: Int64): Unit is VimDraw(s); return nil; end;
+    function main(): ExitCode is return ExitSuccess(); end;
+end module body.

@@ -7467,3 +7467,19 @@ extern U0 BCDel(U8 *bc);
 #define BDT_VIRTIO 7 // coolvm virtio-blk (Blk.cool)
 #define BDT_TYPES_NUM 8
 #endif
+
+#ifdef COOLCOM_KERNEL
+// Editor support for Warm: syntax handles are opaque and symbol locations are copied.
+extern I64 EditorDefinition(U8 *name, U8 *file, I64 *line);
+extern I64 EditorSynNew();
+extern U0 EditorSynFree(I64 handle);
+extern U0 EditorSynStart(I64 handle, I64 lang, I64 fast);
+extern U0 EditorSynLine(I64 handle, U8 *text, I64 n, U8 *groups);
+extern U0 EditorSynCopy(I64 into, I64 from);
+extern U0 EditorSynFast(I64 handle, I64 fast);
+extern U0 EditorSetColor(I64 group, I64 color);
+extern I64 EditorIme();
+extern I64 EditorFileSize(U8 *name);
+extern U0 EditorFormat(U8 *into, U8 *format, I64 a, I64 b, I64 c, I64 d);
+extern U0 EditorPrint(U8 *format, I64 a);
+#endif

@@ -341,3 +341,36 @@ and intermediate symlinks whose outside target remains untouched.
   for `clock(...).ticks` and `nth(...).info`.
 - Updating a Buffer from one of its own elements needs a temporary before the
   mutable borrow; this makes the evaluation and borrow lifetime explicit.
+
+### Vim
+
+- Warm parameters are immutable, so modal command dispatch needs separate mutable
+  cursor/count locals. Warm has no `break`, `continue` or `goto`; the dispatch
+  epilogue is a separate function and journal/search loops use explicit stop flags.
+- Terminal byte output, UTF-8 helpers, incremental syntax state, palette changes
+  and source-location lookup were missing from the Warm boundary.
+  `OS.CoolOS.Editor` supplies them; syntax and compiler hash structures stay
+  behind opaque kernel functions. The low-level module uses addresses of
+  caller-owned buffers, so it is deliberately unsafe rather than a safe IO API.
+- Stack byte arrays and C-string interop are awkward. Editor-owned reusable scratch
+  buffers avoid allocating on every key/paint and are also freed on shell recovery.
+  Austral.Memory allocations carry a runtime header and must use `deallocate`,
+  whereas buffers allocated by kernel `MAlloc`/`CAlloc` must use kernel `Free`.
+- Signed trapping arithmetic currently emits function calls. Byte access in the
+  checked gap-buffer accessor uses explicit embeds; large cursor jumps reposition
+  the viewport by walking backward from the cursor instead of scanning every
+  intervening line. A trial broad arithmetic inliner failed the real editor
+  workload despite passing the number suite, and was discarded.
+- Static C-string pointers are cached at editor creation. Repeated aggregate span
+  temporaries in the large command dispatch produced a null literal pointer in
+  the Cool backend; caching also reduces per-command temporary work.
+- File buffers use ordinary virtual allocations. They are never passed to DMA;
+  the merged large heap may back files above 256 KiB with noncontiguous pages.
+- VM comparison (`tools/program-perf.py build/kernel.Image 90b47e3`, the same
+  kernel and 640x480 framebuffer): Cool/Warm key navigation averaged 0.10/0.35
+  microseconds, insertion 0.02/0.98 microseconds, repaint 3.97/4.40 ms, and a jump
+  in a 330 KB file plus repaint 8.33/8.29 ms. Input work remains below a
+  microsecond and paint remains below one 60 Hz frame in this run. The initial
+  port took about 21 ms for the large jump versus 8 ms in Cool; the gap-byte and
+  newline scans and viewport positioning above removed that visible-risk
+  regression. These are VM measurements, not a hardware latency guarantee.

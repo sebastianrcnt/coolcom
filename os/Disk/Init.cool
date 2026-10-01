@@ -1,5 +1,6 @@
 // Startup commands for each independent shell/compiler task.
-#include "C:/Vim.cool"
+#include "C:/Warm/Warm.cool"
+#include "C:/WarmPrograms.cool"
 #include "C:/Nyan.cool"
 #include "C:/Tmux.cool"
 #include "C:/Text.cool"
@@ -8,7 +9,6 @@
 #include "C:/Less.cool"
 #include "C:/Man.cool"
 #include "C:/Diff.cool"
-#include "C:/Warm/Warm.cool"
 #include "C:/Lua.cool"
 
 // The console font (docs/fonts.md): Sarasa Mono K when make disk-install found it on the
