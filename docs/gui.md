@@ -322,3 +322,59 @@ keys without overflow and satisfied both the 100 ms event-age and burst bounds.
 | `build/post-g5-test-1.log` | 67 / 13 ms | 48 / 8 ms |
 | `build/post-g5-test-2.log` | 58 / 15 ms | 52 / 11 ms |
 | `build/post-g5-test-3.log` | 77 / 13 ms | 64 / 10 ms |
+
+### Atomic pixel-window frames
+
+Pixel windows now have a committed front buffer (`CGuiWindow.pixels`) and a
+producer back buffer. `GrRect`, `GrLine`, `GrText`, `GrBlit`, `GrDither`, direct
+`GrPixels` writes and the `OS.Gui` widgets all draw into the back buffer.
+Drawing accumulates a clipped logical dirty bounding rectangle without changing
+compositor damage or the front revision. `GuiPresent()` / `OS.Gui.present`
+copies only that rectangle's scaled rows into the front, then increments the
+revision and adds desktop damage. An unchanged present is a no-op. Present
+commits a frame; it does not wait for display scanout.
+
+For existing applications, `GuiPoll` (including `OS.Gui.poll` and the examples'
+`nextEvent`) automatically presents before returning an event or Idle. Finish
+all drawing before the next poll, or call present explicitly before sleeping.
+Sleeping between clear and repaint does not publish the unfinished scene.
+`GrPixels` returns physical BGRA back-buffer storage with a byte stride; call
+`GrDirty` for every directly modified region, then present. A resize/scale change
+replaces both buffers, discards pending drawing and invalidates old pixel
+pointers; handle Resize by repainting. Both buffers use ordinary `MAlloc`, so
+large windows can use the virtually contiguous large-allocation region without
+requiring physically contiguous memory. Both are released on resize and close.
+
+Pixel drawing/present are owner-task operations on core 0. Its scheduler is
+cooperative, and the dirty copy never yields, so front publication cannot
+interleave with composition. CPU composition and Venus window-texture uploads
+read only the committed front. Chrome remains compositor-owned.
+`GuiVulkanPresent` also commits the staged BGRA overlay together with the
+fence-completed sampled image and optional CPU mirror.
+
+Files, Top, Settings and Widgets present completed paints explicitly and query
+`buttonNeedsRedraw`, `listNeedsRedraw` and `textInputNeedsRedraw` before painting.
+These detect activation, selection/scrolling, focus/caret/editing and pressed
+state changes; passive pointer motion and an unchanged held button do not
+repaint. List selection is resolved before drawing rows, so the previous
+selection is erased in the same frame without needing a release-event repaint.
+The current widgets have no separate hover artwork. Top retains its
+periodic sample refresh; Files caches its item count between content changes.
+
+`make gui-present-test` captures every submitted framebuffer via
+`COOLVM_FRAMES`, including Venus scanout snapshots. It deliberately yields eight
+times after clearing, forces composition during the delay and checks that every
+visible client remains a complete scene with text and Open/Up buttons. CPU and
+Venus run at 1x and 2x, covering explicit and automatic poll present, unchanged
+present and clipped sparse direct-pixel damage. `make gui-redraw-test` checks all
+four examples: pointer traffic leaves the front revision unchanged, press and
+release repaint, and held motion without a state change does not. Artifacts
+are under `build/gui-present-test/` and `build/gui-redraw-test/`.
+
+Validation: `make -j test` exited 0 on 2026-10-01, including the existing GUI,
+Vulkan, cursor, scale, Warm, kernel and QEMU tests. Full log:
+`build/gui-buffer-full-test-2.log`. The first full run hit the existing G2
+100 ms key-burst ceiling (134 ms); the final run passed unchanged limits
+(CPU 63/12 ms and Venus 54/13 ms for the host/queued bursts). Each new
+1x/2x CPU/Venus frame run inspected 57 complete client frames with no cleared
+intermediate scene.

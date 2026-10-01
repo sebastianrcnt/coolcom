@@ -15,7 +15,7 @@ U0 GuiDrawPresent()
 {// Startup and painting markers acknowledge an actual completed frame.
     CGuiWindow *w = GrWindow; I64 revision;
     if (!w) return;
-    revision = w->revision;
+    GuiPresent; revision = w->revision;
     while (gui_active && !w->closed && w->presented < revision) Sleep(1);
 }
 U0 GuiDrawTask(U8 *data)

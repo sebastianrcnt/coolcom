@@ -23,6 +23,8 @@ module OS.Gui is
     function open(gui: &![Gui], title: Span[Nat8], width: Int64, height: Int64): Result[Window, IoError];
     function close(window: Window): Unit;
     function size(window: &[Window]): Result[Size, IoError];
+    -- Commit the completed back-buffer frame; poll also commits before reading events.
+    function present(window: &![Window]): Result[Unit, IoError];
     function poll(window: &![Window]): Result[Event, IoError];
     function fill(window: &![Window], rect: Rect, color: Int64): Result[Unit, IoError];
     function line(window: &![Window], x0: Int64, y0: Int64, x1: Int64, y1: Int64, color: Int64): Result[Unit, IoError];
@@ -42,6 +44,12 @@ module OS.Gui is
     function inputText(input: &[TextInput, R]): Span[Nat8, R];
     generic [R: Region]
     function textInput(window: &![Window], input: &![TextInput, R], rect: Rect, event: Event): Result[Bool, IoError];
+    -- Detect widget state changes or activation before repainting an event.
+    function buttonNeedsRedraw(state: &[Button], rect: Rect, event: Event, defaultButton: Bool): Bool;
+    -- Resolve selection before painting rows so the old selection is erased in the same frame.
+    function listSelection(state: &[List], rect: Rect, count: Int64, rowWidth: Int64, event: Event): Int64;
+    function listNeedsRedraw(state: &[List], rect: Rect, count: Int64, rowWidth: Int64, event: Event): Bool;
+    function textInputNeedsRedraw(input: &[TextInput], rect: Rect, event: Event): Bool;
     function addMenu(window: &![Window], title: Span[Nat8]): Result[Int64, IoError];
     function addMenuItem(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8]): Result[Unit, IoError];
     -- Desktop authority changes terminal fonts; chrome remains bitmap art.

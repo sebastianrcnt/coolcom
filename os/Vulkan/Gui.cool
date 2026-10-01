@@ -103,6 +103,7 @@ U0 GuiGpuFrame()
         if (!t) for (j = 1; j <= GUI_WINDOWS; j++) if (!ggui.textures[j].window) {t = &ggui.textures[j]; t->window = w; t->window_id = w->id; t->revision = -1; break;}
         GfxCheck(t != NULL, "GUI texture slots");
         if (w->vk_view) GuiGpuApp(t, w);
+        // The committed front is stable even while the app repaints its back buffer.
         if (t->revision != w->revision) {GuiGpuTexture(t, w->pixels, w->pw, w->ph); t->revision = w->revision;}
     }
     MemSet(&attachment, 0, sizeof(attachment)); attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;

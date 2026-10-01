@@ -6,6 +6,7 @@ I64 WgLine(I64 handle, I64 x0, I64 y0, I64 x1, I64 y1, I64 color) {return -1;}
 I64 WgText(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color) {return -1;}
 I64 WgMeasure(U8 *text, U64 size) {return size * 8;}
 I64 WgDither(I64 handle, I64 x, I64 y, I64 width, I64 height) {return -1;}
+I64 WgPresent(I64 handle) {return -1;}
 I64 WgPoll(I64 handle) {return -1;}
 I64 WgField(I64 handle, I64 field) {return -1;}
 I64 WgMenu(I64 handle, U8 *title, U64 size) {return -1;}

@@ -494,3 +494,15 @@ gui-vulkan-test: build/kernel.Image build/coolvm-venus venus-terminal cube-shade
 	python3 tools/gui-vulkan-test.py $<
 
 test: $(if $(RUN_VENUS),gui-vulkan-test)
+
+.PHONY: gui-present-test
+gui-present-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-present-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-present-test
+
+.PHONY: gui-redraw-test
+gui-redraw-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-redraw-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-redraw-test

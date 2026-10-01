@@ -39,6 +39,9 @@ module body OS.Gui is
     function size(window: &[Window]): Result[Size, IoError] is
         let w: Int64 := rawField(window->handle, 5); let h: Int64 := rawField(window->handle, 6);
         if w < 0 then return Err(error => fromCode(w)); end if; return Ok(value => Size(width => w, height => h)); end;
+    pragma Foreign_Import(External_Name => "WgPresent");
+    private function rawPresent(handle: Int64): Int64 is end;
+    function present(window: &![Window]): Result[Unit, IoError] is return status(rawPresent(window->handle)); end;
     function poll(window: &![Window]): Result[Event, IoError] is
         let h: Int64 := window->handle; let kind: Int64 := rawPoll(h);
         if kind < 0 then return Err(error => fromCode(kind)); end if;
@@ -92,7 +95,7 @@ module body OS.Gui is
         roundFill(&~window, Rect(x => rect.x + inset, y => rect.y + inset, width => rect.width - 2 * inset, height => rect.height - 2 * inset), bg);
         textClipped(&~window, rect.x + (rect.width - measure(value)) / 2, rect.y + (rect.height - 16) / 2, value, fg, rect);
         return Ok(value => clicked); end;
-    function scrollBar(window: &![Window], rect: Rect, first: Int64, count: Int64, page: Int64, event: Event): Result[Int64, IoError] is
+    private function scrollValue(rect: Rect, first: Int64, count: Int64, page: Int64, event: Event): Int64 is
         var maximum: Int64 := count - page; if maximum < 0 then maximum := 0; end if;
         var value: Int64 := first;
         case event of
@@ -107,6 +110,10 @@ module body OS.Gui is
             when Close do skip; when Menu(id as id: Int64) do skip;
         end case;
         if value < 0 then value := 0; end if; if value > maximum then value := maximum; end if;
+        return value; end;
+    function scrollBar(window: &![Window], rect: Rect, first: Int64, count: Int64, page: Int64, event: Event): Result[Int64, IoError] is
+        var maximum: Int64 := count - page; if maximum < 0 then maximum := 0; end if;
+        let value: Int64 := scrollValue(rect, first, count, page, event);
         fill(&~window, rect, 16777215); box(&~window, rect);
         if rect.height > 32 then
             rawDither(window->handle, rect.x + 1, rect.y + 16, rect.width - 2, rect.height - 32);
@@ -213,6 +220,49 @@ module body OS.Gui is
             let caret: Int64 := rect.x + 4 + cursorWidth - prefixWidth(input, start);
             line(&~window, caret, rect.y + 3, caret, rect.y + rect.height - 4, 0);
         end if; return nil; end;
+    -- Query before an immediate-mode repaint. Include activation as well as
+    -- visible state changes; passive pointer motion has no hover art to repaint.
+    function buttonNeedsRedraw(state: &[Button], rect: Rect, event: Event, defaultButton: Bool): Bool is
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                if (buttons & 1) /= 0 then return not state->pressed and contains(rect, x, y); end if;
+                return state->pressed;
+            when Key(code as code: Int64) do return defaultButton and code = 10;
+            when Resize(width as w: Int64, height as h: Int64) do return true;
+            when Idle do skip; when Close do skip; when Menu(id as id: Int64) do skip;
+        end case; return false; end;
+    function listSelection(state: &[List], rect: Rect, count: Int64, rowWidth: Int64, event: Event): Int64 is
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                let index: Int64 := state->first + (y - rect.y - 1) / 20;
+                if (buttons & 1) /= 0 and x > rect.x and x < rect.x + 1 + rowWidth and y > rect.y and y < rect.y + 1 + (rect.height / 20) * 20 and index < count then return index; end if;
+            when Idle do skip; when Key(code as code: Int64) do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
+            when Close do skip; when Menu(id as id: Int64) do skip;
+        end case; return state->selected; end;
+    function listNeedsRedraw(state: &[List], rect: Rect, count: Int64, rowWidth: Int64, event: Event): Bool is
+        if scrollValue(Rect(x => rect.x + rect.width - 16, y => rect.y, width => 16, height => rect.height), state->first, count, rect.height / 20, event) /= state->first
+            or listSelection(state, rect, count, rowWidth, event) /= state->selected then return true; end if;
+        case event of
+            when Resize(width as w: Int64, height as h: Int64) do return true;
+            when Idle do skip; when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do skip;
+            when Key(code as code: Int64) do skip; when Close do skip; when Menu(id as id: Int64) do skip;
+        end case; return false; end;
+    function textInputNeedsRedraw(input: &[TextInput], rect: Rect, event: Event): Bool is
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                let focus: Bool := contains(rect, x, y);
+                return (buttons & 1) /= 0 and (focus /= input->focused or (focus and input->cursor /= input->length));
+            when Key(code as code: Int64) do
+                if not input->focused then return false; end if;
+                if code = 8 or code = 1114115 or code = 1114117 then return input->cursor > 0;
+                else if code = 1114122 or code = 1114116 or code = 1114118 then return input->cursor < input->length;
+                else if code >= 32 and code < 1114112 then
+                    var bytes: Index := 1; if code >= 65536 then bytes := 4; else if code >= 2048 then bytes := 3; else if code >= 128 then bytes := 2; end if;
+                    return input->length + bytes <= 256;
+                end if;
+            when Resize(width as w: Int64, height as h: Int64) do return true;
+            when Idle do skip; when Close do skip; when Menu(id as id: Int64) do skip;
+        end case; return false; end;
     function addMenu(window: &![Window], title: Span[Nat8]): Result[Int64, IoError] is
         let menu: Int64 := rawMenu(window->handle, spanToPointer(title), spanLength(title));
         if menu < 0 then return Err(error => fromCode(menu)); end if; return Ok(value => menu); end;
