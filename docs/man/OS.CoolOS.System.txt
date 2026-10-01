@@ -1,0 +1,19 @@
+Structured CoolOS monitoring and task termination. acquireSystem borrows
+RootCapability; releaseSystem consumes the linear System token.
+snapshotTasks copies at most maxCount task rows (0..4096). If snapshotCount
+equals the requested limit, resample with larger capacity if possible.
+snapshotTask gives a copied TaskInfo; snapshotName returns an owned String
+(destroyString after use). Copied rows/names survive task exit. Consume the
+Snapshot once with releaseSnapshot.
+
+States: 0 running, 1 ready, 2 sleeping, 3 stopped, 4 being killed. idle is 0/1.
+TaskInfo includes taskNum, core, ticks, idle, stackSize and switches.
+heapStats returns used/total bytes and free/used block counts, largestFree.
+driveFree takes an ASCII drive letter; freeBytes = -1 means unknown FSInfo count.
+killTask requests asynchronous termination by number: stale numbers return
+NotFound; idle and calling tasks return Denied.
+clock returns counter ticks/frequency, uptime jiffies/frequency, cores and
+currentTask. Divide TaskInfo.ticks and Clock.ticks by ticksPerSecond; divide
+uptimeJiffies by jiffiesPerSecond. Do not mix these clock units.
+Unsupported host operations return Other.
+Example: C:/Warm/Examples/kernel/System.warm.

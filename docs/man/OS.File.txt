@@ -1,0 +1,18 @@
+File IO is confined by an OS.Dir.Dir. acquireFilesystem derives authority
+from RootCapability; openRoot(&!fs) creates the root directory handle.
+Paths are relative: no drive prefixes, absolute paths, dot components or
+backslashes; host symlinks are denied. Narrow Dir rights before passing it on.
+
+readAll returns owned Bytes, a detached whole-file snapshot. byteSize/nth
+borrow it; closeBytes consumes it. nth out of bounds aborts. A failed read
+returns Err with no Bytes to close. writeAll borrows its data; exists, delete
+and makeDir return Result. write/create/delete operations need those Dir rights.
+
+open returns a linear File in Read, Write, Append or ReadWrite mode.
+read/write return transferred byte counts; read borrows mutable destination
+storage. seek sets an absolute byte position; size queries buffered size.
+Streams buffer the file and persist writes on close. close consumes the File
+even when persistence returns Err, so check its Result. Whole-file and stream
+operations use OS.Error.IoError for environmental failures.
+Close directory handles and release Filesystem as well as files/Bytes.
+Examples: C:/Warm/Examples/kernel/Files.warm and Streams.warm.

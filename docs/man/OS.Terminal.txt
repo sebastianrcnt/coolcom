@@ -1,0 +1,9 @@
+Typed terminal IO. acquireOutput/acquireInput borrow RootCapability;
+release each linear token once. Helpers can receive only the authority they need.
+write/writeLine borrow UTF-8 bytes; readLine returns an owned Standard.String
+(destroyString after use). Color is named or Rgb(value => 0xRRGGBB).
+readKey returns a typed Key; decodeKey converts a raw event or negative error.
+readKeyTimeout uses milliseconds 0..2147483647: zero polls; expiry is Timeout.
+terminalSize returns rows/columns (CoolOS fallback 24x80 without a screen).
+The host lacks terminalSize/readKeyTimeout and reports Other for them.
+Examples: C:/Warm/Examples/greet/ and C:/Warm/Examples/kernel/System.warm.

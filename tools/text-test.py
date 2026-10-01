@@ -17,6 +17,15 @@ from testvm import ROOT
 A = 'alpha one\nbeta two\nalpha three\n'
 B = 'alpha one\nBETA two\nnew line\nalpha three\ntail\n'
 LESS = '가' * 45 + '\n' + ''.join(f'line {i:03d} of the pager test file\n' for i in range(1, 101))
+PAGES = [('index', 'Man - manual index'), ('Warm', 'Warm - language overview'),
+         ('WarmSyntax', 'WarmSyntax - syntax quick reference'),
+         ('WarmRun', 'WarmRun / WarmCompile'), ('WarmCompile', 'WarmRun / WarmCompile'),
+         ('WarmExamples', 'WarmExamples - where to find working programs'),
+         ('WarmModules', 'WarmModules - OS library inputs for WarmRun'),
+         ('OS.CoolOS', 'OS.CoolOS - platform modules')]
+PAGES += [(name, name + ' - Warm standard library') for name in (
+    'OS.Terminal', 'OS.File', 'OS.Dir', 'OS.Net', 'OS.Task', 'OS.Time', 'OS.Random',
+    'OS.Error', 'OS.CoolOS.Framebuffer', 'OS.CoolOS.Key', 'OS.CoolOS.Task', 'OS.CoolOS.System')]
 
 
 def line(s, wait=500):
@@ -56,12 +65,18 @@ def main():
         script += line(f'Print("\\nSTEP-MAN{i}\\n"); Man("{sym}");', 700)
         if sym not in ('I64', 'NoSuchSymbol'):
             script += keys(':q\n')
+    # Default index and every generated page must be usable in the installed OS.
+    for i, (page, title) in enumerate(PAGES):
+        call = 'Man;' if page == 'index' else f'Man("{page}");'
+        script += line(f'Print("\\nSTEP-DOC{i}\\n"); {call}', 300)
+        script += testvm.wait(f'C:/Man/{page}.txt:1') + keys(':q\n')
+    script += line('Print("\\nSTEP-NOPAGE\\n"); Man("OS.Missing"); Man("../Warm");')
     # Less: paging, search, and (left open for the screenshot) a wide-character line.
     script += line('Print("\\nSTEP-LESS\\n"); Less("C:/L.TXT");', 600)
     script += keys(' ') + keys('/line 090\n') + keys('g', 600) + 'quit\n'
     (d / 'input.txt').write_text(script)
-    testvm.run_vm(testvm.vm_command(sys.argv[1], no_venus=True, timeout=70, input_script=d / 'input.txt', disk=disk,
-        screenshot=d / 'screen.png', size=(640, 480), host_timeout=90), d / 'vm.log')
+    testvm.run_vm(testvm.vm_command(sys.argv[1], no_venus=True, timeout=120, input_script=d / 'input.txt', disk=disk,
+        screenshot=d / 'screen.png', size=(640, 480), host_timeout=140), d / 'vm.log')
     raw = (d / 'vm.log').read_text(errors='replace')
     testvm.check_init_log(raw)
     after = raw.split('Running C:/Init.cool', 1)[-1]
@@ -97,7 +112,7 @@ def main():
     merged = subprocess.run(['mcopy', '-i', str(disk), '::C.TXT', '-'], check=True, capture_output=True).stdout.decode()
     if merged != B:
         failures.append(f'merged C.TXT is {merged!r}, expected {B!r}')
-    man = {i: strip(part(f'MAN{i}', f'MAN{i + 1}' if i < 6 else 'LESS')).replace('\r', '') for i in range(7)}
+    man = {i: strip(part(f'MAN{i}', f'MAN{i + 1}' if i < 6 else 'DOC0')).replace('\r', '') for i in range(7)}
     need(man[0], 'VimOpen: function, C:/Vim.cool:')
     m = re.search(r'VimOpen: function, C:/Vim.cool:(\d+)', man[0])
     if m:
@@ -124,6 +139,13 @@ def main():
     need(man[4], 'class CTask')
     need(man[5], 'I64 is a built-in type')
     need(man[6], 'Man: unknown symbol NoSuchSymbol')
+    for i, (page, title) in enumerate(PAGES):
+        segment = strip(part(f'DOC{i}', f'DOC{i + 1}' if i + 1 < len(PAGES) else 'NOPAGE'))
+        need(segment, f'{page}: manual, C:/Man/{page}.txt:1')
+        need(segment, title)
+    need(strip(part('DOC0', 'DOC1')), 'Man("Warm")')
+    need(strip(part('NOPAGE', 'LESS')), 'Man: unknown symbol OS.Missing')
+    need(strip(part('NOPAGE', 'LESS')), 'Man: unknown symbol ../Warm')
     less = part('LESS')
     need(strip(less), 'line 030 of the pager test file')          # page down
     need(less, '\x1b[7mline 090\x1b[0m')                         # search match in reverse video
@@ -138,7 +160,7 @@ def main():
             failures.append(f'screenshot row {row} is not {text!r}')
     if failures:
         raise SystemExit('\n'.join(failures) + f'\nsee {d}/vm.log and screen.png')
-    print('text-test: Find, HexDump, Diff (report, merge), Man (compiler symbols and kernel sources) and Less '
+    print('text-test: Find, HexDump, Diff (report, merge), Man (symbols, Warm pages and index) and Less '
           '(paging, search, UTF-8 wrap, screenshot) PASS')
 
 
