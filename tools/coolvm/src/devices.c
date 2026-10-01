@@ -4,7 +4,7 @@
 #include <unistd.h>
 
 /* Simple VM-only input FIFO. A record is three 32-bit words: type, code, value.
- * Types/codes use Linux EV_KEY, EV_REL, EV_SYN numbers. DATA pops one word;
+ * Types/codes use Linux EV_KEY, EV_REL, EV_ABS (0..32767), EV_SYN numbers. DATA pops one word;
  * STATUS gives the number of complete records, IRQ is level until drained. */
 #define INPUT_CAP 256
 static struct { uint32_t word[3]; } input_q[INPUT_CAP];

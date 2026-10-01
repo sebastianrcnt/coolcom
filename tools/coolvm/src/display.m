@@ -166,12 +166,23 @@ static const uint16_t keymap[128] = {
     input_push(1, code, (event.modifierFlags & bit) ? 1 : 0);
     input_push(0, 0, 0);
 }
-- (void)mouseDown:(NSEvent *)event { (void)event; input_push(1,272,1); input_push(0,0,0); }
+- (void)mouseDown:(NSEvent *)event { [self mouseMoved:event]; input_push(1,272,1); input_push(0,0,0); }
 - (void)mouseUp:(NSEvent *)event { (void)event; input_push(1,272,0); input_push(0,0,0); }
-- (void)rightMouseDown:(NSEvent *)event { (void)event; input_push(1,273,1); input_push(0,0,0); }
+- (void)rightMouseDown:(NSEvent *)event { [self mouseMoved:event]; input_push(1,273,1); input_push(0,0,0); }
 - (void)rightMouseUp:(NSEvent *)event { (void)event; input_push(1,273,0); input_push(0,0,0); }
-- (void)mouseMoved:(NSEvent *)event { if ((int)event.deltaX) input_push(2,0,(int)event.deltaX); if ((int)event.deltaY) input_push(2,1,(int)-event.deltaY); input_push(0,0,0); }
+/* The pointer goes as an absolute position (EV_ABS, 0..32767 across the view, y from the
+ * top), so the guest's cursor sits under the Mac's and Retina, window size and
+ * acceleration don't matter. Relative deltas drifted, and AppKit's y points up. */
+- (void)mouseMoved:(NSEvent *)event {
+    NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
+    NSRect b = self.bounds;
+    if (b.size.width < 1 || b.size.height < 1) return;
+    double x = (p.x - b.origin.x) / b.size.width, y = 1.0 - (p.y - b.origin.y) / b.size.height;
+    x = x < 0 ? 0 : x > 1 ? 1 : x; y = y < 0 ? 0 : y > 1 ? 1 : y;
+    input_push(3, 0, (int)(x * 32767)); input_push(3, 1, (int)(y * 32767)); input_push(0, 0, 0);
+}
 - (void)mouseDragged:(NSEvent *)event { [self mouseMoved:event]; }
+- (void)rightMouseDragged:(NSEvent *)event { [self mouseMoved:event]; }
 - (void)scrollWheel:(NSEvent *)event { input_push(2,8,(int)event.scrollingDeltaY); input_push(0,0,0); }
 @end
 
