@@ -61,9 +61,20 @@ U0 Reboot(U8 *image = NULL)
             Free(buf);
             return;
         }
+        if (MemPhysRun(buf, size) < size) {  // scattered big-region pages: the VMM reads one physical range
+            U8 *flat = MAllocDma(size);
+            if (!flat) {
+                PrintErr("Reboot: no contiguous memory for %s\n", image);
+                Free(buf);
+                return;
+            }
+            MemCpy(flat, buf, size);
+            Free(buf);
+            buf = flat;
+        }
         "Booting %s (%d bytes).\n", image, size;
-        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_ADDR, buf(I64) & 0xFFFFFFFF);  // RAM is identity mapped
-        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_ADDR + 4, buf(I64) >> 32);
+        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_ADDR, MemPhys(buf) & 0xFFFFFFFF);  // physical: a big block is not identity mapped
+        ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_ADDR + 4, MemPhys(buf) >> 32);
         ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_SIZE, size & 0xFFFFFFFF);
         ArchMmioWrite32(fdt_finisher + FINISHER_BOOT_SIZE + 4, size >> 32);
     }

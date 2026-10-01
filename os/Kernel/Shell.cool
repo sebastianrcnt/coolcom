@@ -57,7 +57,7 @@ I64 shell_state, shell_check; // boot self-test only
 // ---- Runtime services the compiler imports (see coolc/Host/native.c) ----
 
 U8 *RtJitAlloc(I64 size)
-{//NativeJitAlloc: the heap is identity mapped RWX.
+{//NativeJitAlloc: heap and big-region memory are both RWX.
     if (size <= 0)
         size = 1;
     return MAlloc(size);
@@ -78,13 +78,13 @@ U8 *RtWriteProtectMemCpy(U8 *dst, U8 *src, I64 size)
 
 U0 RtFree(U8 *p)
 {//The compiler also frees pointers into module data; ignore what isn't a block.
-    if (p && HeapOwns(&sys_heap, p))
+    if (p && MemOwns(p))
         Free(p);
 }
 
 I64 RtMSize(U8 *p)
 {
-    if (p && HeapOwns(&sys_heap, p))
+    if (p && MemOwns(p))
         return MSize(p);
     return 0;
 }
@@ -568,7 +568,7 @@ U0 ShellTick(CExceptFrame *f)
     //stack across Yield. Other tasks must run with interrupts enabled.
     CShell *sh = ShellCur;
     if (!sh || !sh->in_stmt || jiffies < sh->next_slice) return;
-    if (f->elr < sys_heap.start || f->elr >= sys_heap.end) return;
+    if ((f->elr < sys_heap.start || f->elr >= sys_heap.end) && !BigHas(f->elr)) return;
     sh->next_slice = jiffies + 10;
     ArchIrqOn;
     Yield;

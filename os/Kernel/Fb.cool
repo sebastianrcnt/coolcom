@@ -701,7 +701,7 @@ Bool FbInit()
     if (fb.cols < 1 || fb.rows < 2 || fb.stride < fb.w * 4)
         return FALSE;
     n = fb.cols * fb.rows;
-    fb.back = CAlloc(fb.stride * fb.h * (1 + fb.gpu));
+    fb.back = CAllocDma(fb.stride * fb.h * (1 + fb.gpu));
     if (fb.gpu) {
         gpu.resource = GpuResource(fb.back, fb.w, fb.h * 2, 2);
         if (!gpu.resource) return FALSE;
@@ -829,7 +829,7 @@ Bool FbResize(I64 w, I64 h)
     next.w = w; next.h = h; next.stride = w * 4;
     next.cols = w / font.cw; next.rows = h / font.ch;
     n = next.cols * next.rows;
-    next.back = CAlloc(next.stride * h * 2);
+    next.back = CAllocDma(next.stride * h * 2);
     next.drawn = MAlloc(n * sizeof(CVtCell)); next.snap = MAlloc(n * sizeof(CVtCell));
     next.snap_row = CAlloc(next.rows); next.x0 = MAlloc(next.rows * sizeof(I64)); next.x1 = CAlloc(next.rows * sizeof(I64));
     if (!next.back || !next.drawn || !next.snap || !next.snap_row || !next.x0 || !next.x1) goto fb_resize_fail;

@@ -171,8 +171,8 @@ Bool GpuInit(I64 *w, I64 *h)
         d = &gpu.q[i]; d->base = base;
         VioWr(d, VIO_QSEL, i);
         if (VioRd(d, VIO_QNUM_MAX) < VQ_SIZE) return FALSE;
-        d->qdesc = CAlloc(16 * VQ_SIZE); d->qavail = CAlloc(6 + 2 * VQ_SIZE);
-        d->qused = CAlloc(6 + 8 * VQ_SIZE); d->qreq = CAlloc(GPU_REQ_MAX + GPU_REPLY_MAX);
+        d->qdesc = CAllocDma(16 * VQ_SIZE); d->qavail = CAllocDma(6 + 2 * VQ_SIZE);
+        d->qused = CAllocDma(6 + 8 * VQ_SIZE); d->qreq = CAllocDma(GPU_REQ_MAX + GPU_REPLY_MAX);
         *d->qavail(U16i *) = 1;
         VioWr(d, VIO_QNUM, VQ_SIZE); VioWr64(d, VIO_QDESC, d->qdesc(I64));
         VioWr64(d, VIO_QAVAIL, d->qavail(I64)); VioWr64(d, VIO_QUSED, d->qused(I64));
@@ -180,7 +180,7 @@ Bool GpuInit(I64 *w, I64 *h)
     }
     VioWr(d, VIO_STATUS, 15);
     if (!GpuDisplayInfo(w, h)) return FALSE;
-    gpu.cursor = CAlloc(64 * 64 * 4);
+    gpu.cursor = CAllocDma(64 * 64 * 4);
     gpu.cursor_id = GpuResource(gpu.cursor, 64, 64, 1);
     gpu.active = gpu.cursor_id != 0;
     return gpu.active;
