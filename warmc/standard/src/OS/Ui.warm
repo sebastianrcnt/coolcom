@@ -1,23 +1,28 @@
 import Standard.Vector (Vector, make as vectorMake, push, pop, get, length, replace, borrowGet, destroyFree, destroyEmpty);
-import Standard.String (String, length as stringLength, slice as stringSlice, destroyString);
+import Standard.String (String, length as stringLength, slice as stringSlice, destroyString, fromLiteral, nthByte);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
 import Standard.HashMap (HashMap);
 import Standard.Eq (Eq);
 import Standard.Hash (Hash);
 import OS.Error (IoError);
 import OS.Gui (Gui, Window, Rect, Size, Event, Idle, Mouse, Key, Resize, Close, Menu, open, close as closeWindow, size, poll, present,
-    fill, setClip, clearClip, queued, wait, traceEnabled, traceLevel, micros, copyText, clipboardSerial, clipboardText, clipboardSize, setPointer);
+    fill, pattern, setClip, clearClip, queued, wait, traceEnabled, traceLevel, micros, copyText, clipboardSerial, clipboardText, clipboardSize, setPointer,
+    addMenu, resetMenus, addMenuEntry, popupChoice, popupClear, popupAdd, popupShow);
 import OS.Ui.Text (TextEdit, replaceRange, codepointString);
 import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open as openNode, close as closeNode, add, setText, appendText, appendNumber,
     setExtra, setFlag, setValue, setRange, setAux, setHandler, setHandler2, setSize, setMinSize, setGrow, setAlign, setChildAlign,
     setPadding, setSpacing, setColumns, setKey, keyOf, finishBuild, layout, props, geometry, textBytes, readVector,
-    makeDamage, destroyDamage, clearDamage, damageRects, damageFull, intersect, intersects, visibleRect, visible, within, topOverlay,
+    makeDamage, destroyDamage, clearDamage, damageRects, damageFull, addDamage, intersect, intersects, visibleRect, visible, within, topOverlay,
     toIndex64, toInt, parseKey, bits, mix, readDamage,
     kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindSeparator,
     kindCheckbox, kindRadio, kindSlider, kindProgress, kindImage, kindTextBox,
     kindList, kindTable, kindTreeView, kindTextView, kindScroll, kindListRow, kindHeader, kindCell, setFit,
+    kindMenu, kindMenuItem, kindPopup, kindTabs, kindTabPage, kindDialog, kindToolbar, kindStatus,
+    flagContext, flagChecked, flagDraggable, flagDropTarget, flagSeparator, setPayload, hashBytes, unite, tabIndexOf, selectedTab,
     kindShortcut, kindTimer, flagDisabled, flagDefault, flagCancel, flagWrap, flagPlain, flagHidden, flagCenter, flagOverlay, flagSecure);
 import OS.Ui.Engine (State, Snapshot, Action, makeState, destroyState, makeSnapshot, destroySnapshot, invalidate, compareAndRecord,
-    handle, prune, syncTimers, readState, setNow, pointerShape, current, setEphemeral, Ephemeral, actCopy, ListState, noList, listFix, dueTimer, timeout, splitPositions, focused, ephemeral,
+    handle, prune, syncTimers, readState, setNow, pointerShape, current, setEphemeral, Ephemeral, actCopy, ListState, noList, listFix,
+    actPopup, dragItem, dueTimer, timeout, splitPositions, focused, ephemeral,
     actNone, actRepaint, actRelayout, actFire, actFire2, actClose, actResize, actMenu, dragPress, dragNone);
 import OS.Ui.Draw (paint, Picture, builtinFolder, builtinDocument, builtinNote, builtinCaution, builtinStop);
 module body OS.Ui is
@@ -37,6 +42,20 @@ module body OS.Ui is
         case WithValue is make: Fn[Int64, M];
         case WithEdit is make: Fn[TextEdit, M];
         case WithList is make: Fn[ListState, M];
+        case WithDrop is make: Fn[Drop, M];
+        case ViaFile is wrap: Fn[FileEvent, M]; what: Int64;
+    end;
+    -- A drop: the dragged node's payload and the pointer inside the target.
+    record Drop: Free is payload: Int64; x: Int64; y: Int64; end;
+    -- What happens inside a file dialog (OS.Ui.Files): its list, a row opened,
+    -- Up, Open/Save, Cancel, or an edit of the file name.
+    union FileEvent: Free is
+        case Rows is state: ListState;
+        case Pick is index: Int64;
+        case Up;
+        case Choose;
+        case Cancel;
+        case Name is edit: TextEdit;
     end;
 
     record View[M: Free]: Linear is tree: Tree; handlers: Vector[Handler[M]]; end;
@@ -56,6 +75,8 @@ module body OS.Ui is
         returned: Int64;
         pictures: Vector[Picture];
         pointer: Int64;
+        menus: Nat64;
+        outline: Rect;
     end;
     -- An image registered with the App (or a built-in icon): views refer to it
     -- by this handle and never copy pixels.
@@ -72,14 +93,14 @@ module body OS.Ui is
                 var trees: Vector[Tree] := vectorMake(); push(&!trees, makeTree());
                 let hs: Vector[Handler[M]] := vectorMake();
                 return Ok(value => App(window => window, state => makeState(), trees => trees, handlers => hs,
-                    shown => makeSnapshot(), damage => makeDamage(), width => w, height => h, running => true, frames => 0, trace => traceEnabled(), traced => 0, returned => 0, pictures => noPictures(), pointer => 0));
+                    shown => makeSnapshot(), damage => makeDamage(), width => w, height => h, running => true, frames => 0, trace => traceEnabled(), traced => 0, returned => 0, pictures => noPictures(), pointer => 0, menus => 0, outline => Rect(x => 0, y => 0, width => 0, height => 0)));
             when Err(error as e: IoError) do return Err(error => e);
         end case;
     end;
     generic [M: Free]
     function closeApp(app: App[M]): Unit is
         let { window as w: Window, state as s: State, trees as ts: Vector[Tree], handlers as h: Vector[Handler[M]], shown as sh: Snapshot,
-            damage as d: Damage, width as width: Int64, height as height: Int64, running as r: Bool, frames as f: Int64, trace as t: Bool, traced as tr: Nat64, returned as rt: Int64, pictures as ps: Vector[Picture], pointer as pt: Int64 } := app;
+            damage as d: Damage, width as width: Int64, height as height: Int64, running as r: Bool, frames as f: Int64, trace as t: Bool, traced as tr: Nat64, returned as rt: Int64, pictures as ps: Vector[Picture], pointer as pt: Int64, menus as mn: Nat64, outline as ol: Rect } := app;
         var pictures: Vector[Picture] := ps;
         while length(&pictures) > 0 do
             case pop(&!pictures) of
@@ -122,6 +143,7 @@ module body OS.Ui is
         if app->trace then
             print("UI CYCLE app="); print(entered - app->returned); print(" layout="); printLn(micros() - entered);
         end if;
+        syncMenus(&~app);
         let fix: Action := listFix(geometryProps(&(app->trees)), geometry(treeOf(&(app->trees))), &(app->state));
         if fix.kind = actFire then
             case messageOf(&~app, fix.node, false, 0, noEdit(), fix.list) of
@@ -147,25 +169,35 @@ module body OS.Ui is
             var action: Action := Action(kind => actNone, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
             case event of
                 when Idle do
+                    -- Everything queued is handled: end the latency sample of input that changed nothing.
+                    present(&(app->window));
                     let ms: Int64 := timeout(props(treeOf(&(app->trees))), readState(&(app->state)), micros(), 1000);
                     if ms > 0 then wait(&(app->window), ms); end if;
                 when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wh: Int64) do action := handleEvent(&~app, event);
                 when Key(code as c: Int64) do action := handleEvent(&~app, event);
                 when Resize(width as w: Int64, height as h: Int64) do action := handleEvent(&~app, event);
                 when Close do action := handleEvent(&~app, event);
-                when Menu(id as id: Int64) do action := handleEvent(&~app, event);
+                when Menu(id as id: Int64) do
+                    if app->trace then print("UI MENU "); printLn(id); end if;
+                    action := handleEvent(&~app, event);
             end case;
             if pointerShape(readState(&(app->state))) /= app->pointer then
                 app->pointer := pointerShape(readState(&(app->state)));
                 setPointer(&(app->window), app->pointer);
             end if;
             if action.kind = actCopy then copyRange(&~app, action.node, action.value, action.aux); end if;
+            if action.kind = actPopup then openPopup(&~app, action.node, action.value, action.aux); end if;
+            if action.kind = actMenu then action := menuAction(&~app, action.value); end if;
             if action.kind = actFire and action.aux = 1 then
                 copyRange(&~app, action.node, widenIndex(action.edit.start), widenIndex(action.edit.finish));
             end if;
             if action.kind = actFire and action.edit.paste < 0 then action := withPaste(&~app, action); end if;
             if action.kind = actFire or action.kind = actFire2 then
-                case messageOf(&~app, action.node, action.kind = actFire2, action.value, action.edit, action.list) of
+                var edit: TextEdit := action.edit;
+                if action.aux > 0 and action.edit.codepoint < 0 and dropping(props(treeOf(&(app->trees))), action.node) then
+                    edit := TextEdit(start => 0, finish => 0, codepoint => action.aux, paste => 0);
+                end if;
+                case messageOf(&~app, action.node, action.kind = actFire2, action.value, edit, action.list) of
                     when Some(value as m: M) do app->returned := micros(); return Some(value => m);
                     when None do skip;
                 end case;
@@ -222,6 +254,126 @@ module body OS.Ui is
         return nil;
     end;
     function widenIndex(i: Index): Int64 is return toInt(i); end;
+    function dropping(ps: Span[Node], node: Index): Bool is return (ps[node].flags & flagDropTarget) /= 0; end;
+
+    ------------------------------------------------------------------ menus and pop-ups
+
+    -- The menu bar part of the view (non-context menus and their items), as a hash.
+    function menuSignature(all: Span[Nat8], ps: Span[Node]): Nat64 is
+        var h: Nat64 := 3;
+        for i from 1 until spanLength(ps) do
+            if barItem(ps, i) or (ps[i].kind = kindMenu and (ps[i].flags & flagContext) = 0) then
+                h := hashBytes(mix(h, bits(ps[i].kind)), sliceSpan(all, ps[i].text, ps[i].textEnd));
+                h := hashBytes(mix(h, bits(ps[i].flags)), sliceSpan(all, ps[i].extra, ps[i].extraEnd));
+            end if;
+        end for;
+        return h;
+    end;
+    function barItem(ps: Span[Node], i: Index): Bool is
+        let p: Index := ps[i].parent;
+        return ps[i].kind = kindMenuItem and ps[p].kind = kindMenu and (ps[p].flags & flagContext) = 0;
+    end;
+    function itemFlags(ps: Span[Node], i: Index): Int64 is
+        var f: Int64 := 0;
+        if (ps[i].flags & 1) /= 0 then f := f | 1; end if;
+        if (ps[i].flags & flagChecked) /= 0 then f := f | 2; end if;
+        if (ps[i].flags & flagSeparator) /= 0 then f := f | 4; end if;
+        return f;
+    end;
+    -- Install the view's menus in the window when they change (ids: item ordinals).
+    generic [M: Free]
+    function syncMenus(app: &![App[M]]): Unit is
+        let signature: Nat64 := menuSignature(textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))));
+        if signature = app->menus then return nil; end if;
+        app->menus := signature;
+        resetMenus(&(app->window));
+        installMenus(&(app->window), textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))));
+        return nil;
+    end;
+    function installMenus(w: &![Window], all: Span[Nat8], ps: Span[Node]): Unit is
+        var ordinal: Int64 := 0;
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindMenu and (ps[i].flags & flagContext) = 0 then
+                case addMenu(&~w, sliceSpan(all, ps[i].text, ps[i].textEnd)) of
+                    when Ok(value as menu: Int64) do
+                        var c: Index := ps[i].first;
+                        while c /= 0 do
+                            if ps[c].kind = kindMenuItem then
+                                addMenuEntry(&~w, menu, ordinal, sliceSpan(all, ps[c].text, ps[c].textEnd), sliceSpan(all, ps[c].extra, ps[c].extraEnd), itemFlags(ps, c));
+                                ordinal := ordinal + 1;
+                            end if;
+                            c := ps[c].next;
+                        end while;
+                    when Err(error as e: IoError) do skip;
+                end case;
+            end if;
+        end for;
+        return nil;
+    end;
+    -- The menu-bar item with a given ordinal (0: none).
+    function barItemAt(ps: Span[Node], ordinal: Int64): Index is
+        var n: Int64 := 0;
+        for i from 1 until spanLength(ps) do
+            if barItem(ps, i) then if n = ordinal then return i; end if; n := n + 1; end if;
+        end for;
+        return 0;
+    end;
+    -- The index-th item of a pop-up button or context menu (0: none).
+    function itemAt(ps: Span[Node], node: Index, index: Int64): Index is
+        var n: Int64 := 0; var c: Index := ps[node].first;
+        while c /= 0 do
+            if ps[c].kind = kindMenuItem then if n = index then return c; end if; n := n + 1; end if;
+            c := ps[c].next;
+        end while;
+        return 0;
+    end;
+    generic [M: Free]
+    function openPopup(app: &![App[M]], node: Index, x: Int64, y: Int64): Unit is
+        popupClear(&(app->window));
+        let chosen: Int64 := fillPopup(&(app->window), textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), node);
+        popupShow(&(app->window), x, y, chosen);
+        return nil;
+    end;
+    function fillPopup(w: &![Window], all: Span[Nat8], ps: Span[Node], node: Index): Int64 is
+        var c: Index := ps[node].first;
+        while c /= 0 do
+            if ps[c].kind = kindMenuItem then popupAdd(&~w, sliceSpan(all, ps[c].text, ps[c].textEnd), sliceSpan(all, ps[c].extra, ps[c].extraEnd), itemFlags(ps, c)); end if;
+            c := ps[c].next;
+        end while;
+        if ps[node].kind = kindPopup then return ps[node].value; end if;
+        return -1;
+    end;
+    -- A menu event: a menu-bar item fires its message (not while a dialog is open);
+    -- a pop-up choice fires the pop-up button's handler or the context item's message.
+    generic [M: Free]
+    function menuAction(app: &![App[M]], id: Int64): Action is
+        let none: Action := Action(kind => actNone, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
+        let popupId: Nat64 := app->state.popup;
+        if id < 0 then app->state.popup := 0; return Action(kind => actRepaint, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end if;
+        if id >= popupChoice then
+            app->state.popup := 0;
+            let node: Index := findNode(props(treeOf(&(app->trees))), popupId);
+            return popupFire(props(treeOf(&(app->trees))), node, id - popupChoice);
+        end if;
+        return barFire(props(treeOf(&(app->trees))), id);
+    end;
+    function popupFire(ps: Span[Node], node: Index, index: Int64): Action is
+        if node = 0 then return Action(kind => actRepaint, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end if;
+        if ps[node].kind = kindPopup then return Action(kind => actFire, node => node, value => index, aux => 0, edit => noEdit(), list => noList()); end if;
+        let item: Index := itemAt(ps, node, index);
+        if item = 0 then return Action(kind => actRepaint, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end if;
+        return Action(kind => actFire, node => item, value => 0, aux => 0, edit => noEdit(), list => noList());
+    end;
+    function barFire(ps: Span[Node], ordinal: Int64): Action is
+        let item: Index := barItemAt(ps, ordinal);
+        if item = 0 or topOverlay(ps) /= 0 or (ps[item].flags & 1) /= 0 then return Action(kind => actNone, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end if;
+        return Action(kind => actFire, node => item, value => 0, aux => 0, edit => noEdit(), list => noList());
+    end;
+    function findNode(ps: Span[Node], ident: Nat64): Index is
+        if ident = 0 then return 0; end if;
+        for i from 1 until spanLength(ps) do if ps[i].ident = ident then return i; end if; end for;
+        return 0;
+    end;
     -- Copy bytes [start, finish) of a node's text to the clipboard.
     generic [M: Free]
     function copyRange(app: &![App[M]], node: Index, start: Int64, finish: Int64): Unit is
@@ -267,6 +419,11 @@ module body OS.Ui is
             when WithValue(make as f: Fn[Int64, M]) do return Some(value => f(value));
             when WithEdit(make as f: Fn[TextEdit, M]) do return Some(value => f(edit));
             when WithList(make as f: Fn[ListState, M]) do return Some(value => f(list));
+            when WithDrop(make as f: Fn[Drop, M]) do return Some(value => f(Drop(payload => value, x => edit.codepoint / 65536, y => edit.codepoint % 65536)));
+            when ViaFile(wrap as f: Fn[FileEvent, M], what as what: Int64) do
+                if what = 0 then return Some(value => f(Rows(state => list))); end if;
+                if what = 1 then return Some(value => f(Pick(index => value))); end if;
+                return Some(value => f(Name(edit => edit)));
         end case;
     end;
     -- Compare with what is on screen and repaint only the damaged regions.
@@ -276,9 +433,13 @@ module body OS.Ui is
         clearDamage(&(app->damage));
         compareAndRecord(textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), readState(&(app->state)), &(app->shown), &(app->damage));
         let count: Index := spanLength(props(treeOf(&(app->trees))));
+        dragDamage(&~app);
         let painted: Bool := repaint(&(app->window), textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), readState(&(app->state)), readDamage(&(app->damage)), app->width, app->height, readPictures(&(app->pictures)));
-        -- Present even when nothing changed: it ends the input latency sample.
-        present(&(app->window));
+        if app->outline.width > 0 then grayBoxOver(&(app->window), app->outline); end if;
+        -- An unchanged frame is not presented here: an empty present ends the kernel's
+        -- input latency sample, which next() does only once the input has been handled
+        -- (before it waits), not between an event and the message it produces.
+        if painted or app->outline.width > 0 then present(&(app->window)); end if;
         if painted then
             app->frames := app->frames + 1;
             if app->trace then
@@ -290,6 +451,29 @@ module body OS.Ui is
                 traceFrame(readDamage(&(app->damage)), app->frames, count, elapsed, app->width, app->height);
             end if;
         end if;
+        return nil;
+    end;
+    -- While an item is dragged, a dotted outline of it follows the pointer.
+    generic [M: Free]
+    function dragDamage(app: &![App[M]]): Unit is
+        let old: Rect := app->outline;
+        let now: Rect := outlineOf(props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), readState(&(app->state)));
+        if old.width > 0 then addDamage(&(app->damage), old); end if;
+        if now.width > 0 then addDamage(&(app->damage), now); end if;
+        app->outline := now;
+        return nil;
+    end;
+    function outlineOf(ps: Span[Node], gs: Span[Geom], state: &[State]): Rect is
+        if state->drag /= dragItem or not state->inside then return Rect(x => 0, y => 0, width => 0, height => 0); end if;
+        let i: Index := findNode(ps, state->target);
+        if i = 0 then return Rect(x => 0, y => 0, width => 0, height => 0); end if;
+        return Rect(x => gs[i].x + state->mouseX - state->startX, y => gs[i].y + state->mouseY - state->startY, width => gs[i].width, height => gs[i].height);
+    end;
+    function grayBoxOver(w: &![Window], r: Rect): Unit is
+        pattern(&~w, Rect(x => r.x, y => r.y, width => r.width, height => 1), 12273903644374837845, 0, -1);
+        pattern(&~w, Rect(x => r.x, y => r.y + r.height - 1, width => r.width, height => 1), 12273903644374837845, 0, -1);
+        pattern(&~w, Rect(x => r.x, y => r.y, width => 1, height => r.height), 12273903644374837845, 0, -1);
+        pattern(&~w, Rect(x => r.x + r.width - 1, y => r.y, width => 1, height => r.height), 12273903644374837845, 0, -1);
         return nil;
     end;
     generic [R: Region]
@@ -627,6 +811,125 @@ module body OS.Ui is
     end;
     generic [M: Free]
     function noWrap(v: &![View[M]]): Unit is setFlag(&(v->tree), flagWrap, false); return nil; end;
+    ------------------------------------------------------------------ window parts
+
+    -- "Ctrl+S" shown as the Mac's modifier symbols: control, option, shift.
+    function displayKeys(keys: Span[Nat8]): String is
+        var b: StringBuilder := makeStringBuilder(); var at: Index := 0;
+        while at < spanLength(keys) do
+            if prefixAt(keys, at, "Ctrl+") then putText(&!b, "\u{2303}"); at := at + 5;
+            else if prefixAt(keys, at, "Alt+") then putText(&!b, "\u{2325}"); at := at + 4;
+            else if prefixAt(keys, at, "Shift+") then putText(&!b, "\u{21E7}"); at := at + 6;
+            else
+                var c: Nat8 := keys[at];
+                if at + 1 = spanLength(keys) and c >= 97 and c <= 122 then c := c - 32; end if;
+                writeByte(&!b, c); at := at + 1;
+            end if;
+        end while;
+        return finalize(b);
+    end;
+    function putText(b: &![StringBuilder], value: Span[Nat8]): Unit is
+        for i from 0 until spanLength(value) do writeByte(&~b, value[i]); end for; return nil;
+    end;
+    function prefixAt(value: Span[Nat8], at: Index, prefix: Span[Nat8]): Bool is
+        if spanLength(value) - at < spanLength(prefix) then return false; end if;
+        for i from 0 until spanLength(prefix) do if value[at + i] /= prefix[i] then return false; end if; end for;
+        return true;
+    end;
+    -- A menu in the menu bar: menuItem, menuSeparator ... done.
+    generic [M: Free]
+    function menu(v: &![View[M]], title: Span[Nat8]): Unit is openNode(&(v->tree), kindMenu); setText(&(v->tree), title); return nil; end;
+    -- Items shown when the parent node (or an ancestor) is clicked with the right button.
+    generic [M: Free]
+    function contextMenu(v: &![View[M]]): Unit is openNode(&(v->tree), kindMenu); setFlag(&(v->tree), flagContext, true); return nil; end;
+    -- A menu item with an optional shortcut ("" for none), shown as the Mac's symbols.
+    generic [M: Free]
+    function menuItem(v: &![View[M]], title: Span[Nat8], keys: Span[Nat8], message: M): Unit is
+        add(&(v->tree), kindMenuItem); setText(&(v->tree), title); setValue(&(v->tree), parseKey(keys));
+        let shown: String := displayKeys(keys); setExtra(&(v->tree), stringSlice(&shown, 0, stringLength(&shown))); destroyString(shown);
+        let h: Int64 := handler(&~v, Send(message => message)); setHandler(&(v->tree), h); return nil;
+    end;
+    generic [M: Free]
+    function menuSeparator(v: &![View[M]]): Unit is add(&(v->tree), kindMenuItem); setFlag(&(v->tree), flagSeparator, true); return nil; end;
+    -- A check mark on the most recent menu item.
+    generic [M: Free]
+    function checkMark(v: &![View[M]], on: Bool): Unit is setFlag(&(v->tree), flagChecked, on); return nil; end;
+    -- A classic pop-up menu button showing item selected; popupItem per choice ... done.
+    generic [M: Free]
+    function popupButton(v: &![View[M]], selected: Int64, onChoose: Fn[Int64, M]): Unit is
+        openNode(&(v->tree), kindPopup); setValue(&(v->tree), selected); setFlag(&(v->tree), 8, true);
+        let h: Int64 := handler(&~v, WithValue(make => onChoose)); setHandler(&(v->tree), h); return nil;
+    end;
+    generic [M: Free]
+    function popupItem(v: &![View[M]], title: Span[Nat8]): Unit is add(&(v->tree), kindMenuItem); setText(&(v->tree), title); return nil; end;
+    -- A modal dialog over the window (classic double frame); children follow until done.
+    generic [M: Free]
+    function dialog(v: &![View[M]]): Unit is
+        openNode(&(v->tree), kindDialog); setFlag(&(v->tree), flagOverlay, true); setPadding(&(v->tree), 16); setSpacing(&(v->tree), 12); return nil;
+    end;
+    -- An alert: an icon, a message and one default button.
+    generic [M: Free]
+    function alert(v: &![View[M]], icon: Image, message: Span[Nat8], okTitle: Span[Nat8], ok: M): Unit is
+        dialog(&~v); fixedWidth(&~v, 360);
+        row(&~v); spacing(&~v, 12); alignChildren(&~v, leading);
+        image(&~v, icon); paragraph(&~v, message); grow(&~v, 1);
+        done(&~v);
+        row(&~v); spacer(&~v); button(&~v, okTitle, ok); defaultButton(&~v); done(&~v);
+        done(&~v); return nil;
+    end;
+    -- A question: Cancel (Escape) and a default button (Return).
+    generic [M: Free]
+    function confirm(v: &![View[M]], icon: Image, message: Span[Nat8], cancelTitle: Span[Nat8], cancel: M, okTitle: Span[Nat8], ok: M): Unit is
+        dialog(&~v); fixedWidth(&~v, 380);
+        row(&~v); spacing(&~v, 12); alignChildren(&~v, leading);
+        image(&~v, icon); paragraph(&~v, message); grow(&~v, 1);
+        done(&~v);
+        row(&~v); spacing(&~v, 10); spacer(&~v);
+        button(&~v, cancelTitle, cancel); cancelButton(&~v);
+        button(&~v, okTitle, ok); defaultButton(&~v);
+        done(&~v);
+        done(&~v); return nil;
+    end;
+    -- Tabs: tab(title) pages ... done; only page selected is shown.
+    generic [M: Free]
+    function tabs(v: &![View[M]], selected: Int64, onSelect: Fn[Int64, M]): Unit is
+        openNode(&(v->tree), kindTabs); setValue(&(v->tree), selected); setPadding(&(v->tree), 8); setFlag(&(v->tree), 8, true);
+        let h: Int64 := handler(&~v, WithValue(make => onSelect)); setHandler(&(v->tree), h); return nil;
+    end;
+    generic [M: Free]
+    function tab(v: &![View[M]], title: Span[Nat8]): Unit is
+        let shown: Bool := tabIndexOf(&(v->tree)) = selectedTab(&(v->tree));
+        openNode(&(v->tree), kindTabPage); setText(&(v->tree), title); setGrow(&(v->tree), 1); setSpacing(&(v->tree), 8);
+        setFlag(&(v->tree), flagHidden, not shown); return nil;
+    end;
+    -- A row of tool buttons above the content, with a rule below.
+    generic [M: Free]
+    function toolbar(v: &![View[M]]): Unit is openNode(&(v->tree), kindToolbar); setPadding(&(v->tree), 4); setSpacing(&(v->tree), 4); return nil; end;
+    -- A row of plain status text below the content, with a rule above.
+    generic [M: Free]
+    function statusBar(v: &![View[M]]): Unit is openNode(&(v->tree), kindStatus); setPadding(&(v->tree), 3); setSpacing(&(v->tree), 12); return nil; end;
+    -- The most recent node can be dragged; payload identifies it to the drop target.
+    generic [M: Free]
+    function draggable(v: &![View[M]], payload: Int64): Unit is setFlag(&(v->tree), flagDraggable, true); setPayload(&(v->tree), payload); return nil; end;
+    -- The most recent node accepts drops (its frame thickens while an item is over it).
+    generic [M: Free]
+    function dropTarget(v: &![View[M]], onDrop: Fn[Drop, M]): Unit is
+        setFlag(&(v->tree), flagDropTarget, true);
+        let h: Int64 := handler(&~v, WithDrop(make => onDrop)); setHandler(&(v->tree), h); return nil;
+    end;
+    -- For OS.Ui.Files: a list and a text box whose events go through a file dialog's wrapper.
+    generic [M: Free]
+    function fileList(v: &![View[M]], state: ListState, rowCount: Int64, wrap: Fn[FileEvent, M]): Unit is
+        openNode(&(v->tree), kindList); setValue(&(v->tree), state.first); setRange(&(v->tree), rowCount, state.selected); setFit(&(v->tree), state.fit);
+        setAux(&(v->tree), -1);
+        let h: Int64 := handler(&~v, ViaFile(wrap => wrap, what => 0)); setHandler(&(v->tree), h);
+        let h2: Int64 := handler(&~v, ViaFile(wrap => wrap, what => 1)); setHandler2(&(v->tree), h2); return nil;
+    end;
+    generic [M: Free]
+    function fileName(v: &![View[M]], text: Span[Nat8], wrap: Fn[FileEvent, M]): Unit is
+        add(&(v->tree), kindTextBox); setText(&(v->tree), text);
+        let h: Int64 := handler(&~v, ViaFile(wrap => wrap, what => 2)); setHandler(&(v->tree), h); return nil;
+    end;
     -- A keyboard shortcut such as "Ctrl+S", "Alt+Left", "F5" or "Ctrl+Shift+Z".
     generic [M: Free]
     function shortcut(v: &![View[M]], keys: Span[Nat8], message: M): Unit is

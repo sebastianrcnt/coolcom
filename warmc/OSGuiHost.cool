@@ -43,3 +43,8 @@ I64 WgClipRead(I64 serial, U8 *into, U64 capacity)
     n = wg_clip_size; if (n > capacity) n = capacity; if (n) MemCpy(into, wg_clip_data, n); return n;
 }
 I64 WgPointer(I64 handle, I64 shape) {return -1;}
+I64 WgMenuReset(I64 handle) {return -1;}
+I64 WgMenuEntry(I64 handle, I64 menu, I64 id, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags) {return -1;}
+I64 WgPopupClear(I64 handle) {return -1;}
+I64 WgPopupItem(I64 handle, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags) {return -1;}
+I64 WgPopupShow(I64 handle, I64 x, I64 y, I64 current) {return -1;}

@@ -146,3 +146,28 @@ I64 WgPointer(I64 handle, I64 shape)
     GuiPointerOver(gui.mx, gui.my);
     return 0;
 }
+
+// Menus with shortcuts, separators and states; pop-up lists (GuiMenu.cool).
+I64 WgMenuReset(I64 handle) {CGuiWindow *w = WgWindow(handle); if (!w) return -16; return GuiMenuReset(w);}
+I64 WgMenuEntry(I64 handle, I64 menu, I64 id, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags)
+{
+    CGuiWindow *w = WgWindow(handle); U8 *l, *k; I64 result;
+    if (!w) return -16;
+    l = WkString(label, lsize); k = WkString(keys, ksize); if (!l || !k) {Free(l); Free(k); return -12;}
+    result = GuiAddMenuItem(w, menu, id, l, k, flags); Free(l); Free(k); return result;
+}
+I64 WgPopupClear(I64 handle) {CGuiWindow *w = WgWindow(handle); if (!w) return -16; return GuiPopupClear(w);}
+I64 WgPopupItem(I64 handle, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags)
+{
+    CGuiWindow *w = WgWindow(handle); U8 *l, *k; I64 result;
+    if (!w) return -16;
+    l = WkString(label, lsize); k = WkString(keys, ksize); if (!l || !k) {Free(l); Free(k); return -12;}
+    result = GuiPopupItem(w, l, k, flags); Free(l); Free(k); return result;
+}
+I64 WgPopupShow(I64 handle, I64 x, I64 y, I64 current)
+{
+    CGuiWindow *w = WgWindow(handle);
+    if (!w) return -16;
+    if (!WgCoord(x) || !WgCoord(y)) return -12;
+    return GuiPopupShow(w, x, y, current);
+}

@@ -77,6 +77,26 @@ void input_uart_out(uint8_t ch)
     pthread_mutex_unlock(&wait_lock);
 }
 
+/* Scripted records wait for room instead of overflowing: a loaded host can
+ * deschedule the vCPU (or the guest can mask its IRQs) for longer than the FIFO
+ * lasts at the feeder's pace. Only a guest that drains nothing for 5 s is an
+ * overflow. Interactive input (display.m) never blocks and still overflows. */
+static void input_push_scripted(uint32_t type, uint32_t code, int32_t value)
+{
+    unsigned stalled_ms = 0, seen = ~0u;
+    for (;;) {
+        pthread_mutex_lock(&g.lock);
+        bool full = (input_tail + 1) % INPUT_CAP == input_head;
+        unsigned head = input_head;
+        pthread_mutex_unlock(&g.lock);
+        if (!full || stalled_ms >= 5000) break;
+        if (head != seen) { seen = head; stalled_ms = 0; }
+        nanosleep(&(struct timespec){0, 1000000}, NULL);
+        stalled_ms++;
+    }
+    input_push(type, code, value);
+}
+
 static void *late_main(void *arg)
 {
     unsigned now = 0;
@@ -103,7 +123,7 @@ static void *late_main(void *arg)
             gpu_resize(late_q[i].type, late_q[i].code);
             continue;
         }
-        input_push(late_q[i].type, late_q[i].code, late_q[i].value);
+        input_push_scripted(late_q[i].type, late_q[i].code, late_q[i].value);
         nanosleep(&(struct timespec){0, 200000}, NULL); /* pace them: the guest FIFO holds 255 */
     }
     return NULL;

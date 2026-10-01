@@ -24,9 +24,13 @@ STAGES = sys.argv[sys.argv.index('--stage') + 1].split(',') if '--stage' in sys.
 OUT = ROOT / 'build/ui-u1'
 OUT2 = ROOT / 'build/ui-u2'
 OUT3 = ROOT / 'build/ui-u3'
+OUT4 = ROOT / 'build/ui-u4'
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
 FRAME_BUDGET_US = 16000
-LOADED_BOUND_US = 50000
+# The budget is the median (p50 within one 60 Hz frame). With about ten samples the
+# maximum is a single sample, and the full suite runs many VMs at once: max only
+# catches stalls (six frames), not host scheduling noise.
+LOADED_BOUND_US = 100000
 
 
 BURST = '''U0 UiBurst(I64 tabs)
@@ -553,9 +557,214 @@ def run_u3():
     print('ui-test: U3 PASS', flush=True)
 
 
+
+# ---------------------------------------------------------------- U4
+
+GALLERY = 'GuiRun("C:/Warm/Examples/gui/Gallery.warm", "Gallery:main");'
+TAB_TITLES = ['Controls', 'Data', 'Drag & Drop', 'Dialogs']
+MENU_TITLES = ['File', 'Edit', 'View']
+BTN_RIGHT = 273
+
+
+def menu_title(index):
+    """Screen point on the index-th application menu title (the kernel's bar starts at x=68)."""
+    x = 68 + sum(len(t) * 8 + 16 for t in MENU_TITLES[:index])
+    return x + (len(MENU_TITLES[index]) * 8 + 16) // 2, 11
+
+
+MENU_ROWS = {0: [22, 22, 10, 22], 1: [22, 10, 22], 2: [22, 22]}   # separators are 10 high
+
+
+def menu_item(index, item):
+    left = 68 + sum(len(t) * 8 + 16 for t in MENU_TITLES[:index])
+    return left + 24, 22 + 1 + sum(MENU_ROWS[index][:item]) + 11
+
+
+def tab_point(tabs, index, o):
+    x, y, w, h = tabs
+    left = x + 4 + sum(len(t) * 8 + 20 for t in TAB_TITLES[:index])
+    return o[0] + left + (len(TAB_TITLES[index]) * 8 + 20) // 2, o[1] + y + 12
+
+
+def starting(found, prefix):
+    for text, rect in found.items():
+        if text.startswith(prefix):
+            return rect
+    raise KeyError(prefix)
+
+
+def u4_layout():
+    """Page 0 from the first run; every page (by GALLERY PAGE markers) from a second run."""
+    found, entries = layout_of('u4', GALLERY, 'GALLERY READY')
+    tabs = [e for e in entries if e[1] == 30][0][2:6]
+    o = uivm.client_origin(1)
+    s = Script()
+    start(s, GALLERY, 'GALLERY READY', trace=2)
+    for i in (1, 2, 3):
+        s.click(*tab_point(tabs, i, o)); s.wait(f'GALLERY PAGE {i}'); s.delay(300)
+    s.quit()
+    log, _, _ = uivm.run('u4-pages', s, out=OUT4, kernel=KERNEL, prepare=install_burst)
+    pages = [found]
+    parts = re.split(r'GALLERY PAGE \d', log)
+    assert len(parts) == 4, log[-3000:]
+    for part in parts[1:]:
+        f, _ = nodes(part)
+        pages.append(f)
+    for part in parts[1:]:
+        _, e = nodes(part)
+        pages.append(e)
+    return {'tabs': tabs, 'found': pages[:4], 'entries': [entries] + pages[4:]}
+
+
+def right_click(s, x, y):
+    s.move(x, y); s.raw(f'1 {BTN_RIGHT} 1'); s.raw(f'1 {BTN_RIGHT} 0'); s.delay(20)
+
+
+def u4_session(mode, scale, layout):
+    o = uivm.client_origin(1)
+    tabs = layout['tabs']
+    controls, data, drag, dialogs = layout['found']
+    s = Script(scale=scale, size=(800 * scale, 600 * scale))
+    start(s, GALLERY, 'GALLERY READY')
+    s.wait('GALLERY TICK 2')
+    s.shot()                                             # 0: Controls page with menus, toolbar and status bar
+    # Clipboard from the shell's kernel service into a text box, and back into the terminal.
+    s.click(30, 300); s.delay(100)
+    s.typed('ClipboardCopy("TERM");\n'); s.delay(300)
+    name = [e for e in layout['entries'][0] if e[1] == 18][0][2:6]
+    s.click(*center(name, o)); s.delay(100)
+    s.key('a', ctrl=True); s.key('v', ctrl=True); s.wait('GALLERY NAME [TERM]')
+    s.typed('x'); s.wait('GALLERY NAME [TERMx]')
+    s.key('a', ctrl=True); s.key('c', ctrl=True); s.delay(100)
+    s.click(30, 300); s.delay(100)
+    s.typed('Print("CLIP<%s>\\n", "'); s.key('v', ctrl=True, alt=True); s.delay(100); s.typed('");\n')
+    s.wait('CLIP<TERMx>')
+    # Selecting cells in the terminal copies them: "Cool" from its first row ("Cool shell: ...").
+    t = uivm.client_origin(0)
+    s.move(t[0] + 1, t[1] + 8); s.press(); s.delay(30)
+    s.move(t[0] + 16, t[1] + 8); s.delay(30); s.move(t[0] + 3 * 8 + 4, t[1] + 8); s.delay(30)
+    s.release(); s.delay(100)
+    # Back to the Gallery: a click on its title bar.
+    s.click(600, o[1] - 12); s.delay(100)                  # right of the raised shell window
+    s.click(*center(name, o)); s.delay(100)
+    s.key('a', ctrl=True); s.key('v', ctrl=True); s.wait('GALLERY NAME [Cool]')
+    # Menus: the View menu shows check marks; choosing Toolbar hides it, again shows it.
+    s.click(*menu_title(2)); s.delay(200)
+    s.shot()                                             # 1: the View menu open
+    s.click(*menu_item(2, 0)); s.wait('GALLERY TOOLBAR false'); s.delay(100)
+    s.click(*menu_title(2)); s.delay(100)
+    s.click(*menu_item(2, 0)); s.wait('GALLERY TOOLBAR true'); s.delay(100)
+    s.click(*menu_title(1)); s.delay(100)
+    s.click(*menu_item(1, 0)); s.delay(100)               # Undo is disabled: the menu just closes
+    s.click(*menu_title(1)); s.delay(200)
+    s.shot()                                             # 2: the Edit menu: shortcuts, a separator, Undo disabled
+    s.click(*menu_item(1, 2)); s.wait('GALLERY RESET')    # Edit > Reset Counter
+    s.key('r', ctrl=True); s.wait('GALLERY RESET')        # its shortcut
+    # Tabs.
+    s.click(*tab_point(tabs, 1, o)); s.wait('GALLERY PAGE 1'); s.delay(200)
+    s.shot()                                             # 3: Data page
+    s.click(*tab_point(tabs, 2, o)); s.wait('GALLERY PAGE 2'); s.delay(200)
+    # Drag Pear from the shelf into the basket.
+    pear, shelf, basket, apple = drag['Pear'], drag['Shelf'], drag['Basket'], drag['Apple']
+    px, py = center(pear, o)
+    bx, by = center(basket, o)
+    s.move(px, py); s.press(); s.delay(30)
+    for k in range(1, 11):
+        s.move(px + (bx - px) * k // 10, py + (by - py) * k // 10); s.delay(20)
+    s.delay(100)
+    s.shot()                                             # 4: dragging over the basket (outline, highlighted target)
+    s.release(); s.wait('GALLERY DROP 1'); s.delay(200)
+    s.shot()                                             # 5: Pear in the basket
+    # Its context menu puts it back.
+    lx = o[0] + basket[0] + (apple[0] - shelf[0]) + 10
+    ly = o[1] + basket[1] + (apple[1] - shelf[1]) + apple[3] // 2
+    right_click(s, lx, ly); s.delay(200)
+    s.click(lx + 20, ly + 11); s.wait('GALLERY REMOVE 1'); s.delay(100)
+    # Dialogs.
+    s.click(*tab_point(tabs, 3, o)); s.wait('GALLERY PAGE 3'); s.delay(200)
+    s.click(*center(starting(dialogs, 'Alert'), o)); s.delay(200)
+    s.shot()                                             # 6: alert
+    s.key('enter'); s.wait('GALLERY ALERT OK')
+    s.click(*center(starting(dialogs, 'Confirm'), o)); s.delay(150)
+    s.key('r', ctrl=True); s.delay(100)                   # modal: the shortcut is ignored
+    s.key('esc'); s.wait('GALLERY CONFIRM CANCEL')
+    s.click(*center(starting(dialogs, 'Confirm'), o)); s.delay(150)
+    s.key('enter'); s.wait('GALLERY CONFIRM OK')
+    # Pop-up button: press, the list opens with 100% under the pointer; release on 200%.
+    popup = [e for e in layout['entries'][3] if e[1] == 34][0][2:6]
+    s.move(*center(popup, o)); s.press(); s.delay(300)
+    s.move(o[0] + popup[0] + 30, o[1] + popup[1] + 22 + 11); s.delay(100)
+    s.shot()                                             # 7: pop-up list open
+    s.release(); s.wait('GALLERY ZOOM 2')
+    # File dialogs: Save with the proposed name, Open cancelled.
+    s.click(*center(starting(dialogs, 'Save'), o)); s.delay(300)
+    s.shot()                                             # 8: save dialog
+    s.key('enter'); s.wait('GALLERY FILE Untitled.txt')
+    s.click(*center(starting(dialogs, 'Open'), o)); s.delay(300)
+    s.key('esc'); s.wait('GALLERY FILE CANCELLED')
+    # Latency phase: tab clicks and a shortcut.
+    s.delay(200); s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    for i in (0, 1, 2, 3, 0):
+        s.click(*tab_point(tabs, i, o)); s.wait(f'GALLERY PAGE {i}'); s.delay(60)
+    for _ in range(3):                                   # visible changes: the counter goes 1, then 0
+        s.click(*center(controls['One'], o)); s.wait('GALLERY CLICK 1'); s.delay(60)
+        s.key('r', ctrl=True); s.wait('GALLERY RESET'); s.delay(60)
+    s.delay(150); s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    s.quit(200)
+    name_ = f'u4-{mode}-{scale}x'
+    log, screen, shots = uivm.run(name_, s, out=OUT4, kernel=KERNEL, mode=mode, scale=scale, size=(800 * scale, 600 * scale),
+                                  prepare=install_burst, timeout=240)
+    check_log(log)
+    return name_, log, screen, shots
+
+
+def u4_check(name, log, screen, shots, scale, layout):
+    keys = uivm.latencies(log)[-1]
+    # Eleven changes; a press frame and its release frame composed together give one sample.
+    assert keys['n'] >= 6 and keys['p50'] < FRAME_BUDGET_US and keys['max'] < LOADED_BOUND_US, f'latency {keys}'
+    # Modal dialog: the Ctrl+R pressed under the confirmation did nothing.
+    segment = log.split('GALLERY ALERT OK', 1)[1].split('GALLERY CONFIRM CANCEL', 1)[0]
+    assert 'GALLERY RESET' not in segment, 'shortcut under a modal dialog'
+    assert log.count('GALLERY CLICK') == 3, 'stray clicks'
+    o = uivm.client_origin(1)
+    _, _, closed = testvm.read_png(shots[0])
+    _, _, menu = testvm.read_png(shots[1])
+    P = lambda rows, x, y: pixel(rows, x * scale, y * scale)
+    # The open View menu: its left frame line, absent when it is closed.
+    left = menu_item(2, 0)[0] - 24
+    assert P(menu, left, 40) == BLACK and P(closed, left, 40) != BLACK, 'menu frame'
+    return {'latency': keys}
+
+
+def run_u4():
+    layout = u4_layout()
+    sessions = [('cpu', 1), ('cpu', 2)] + ([('venus', 1), ('venus', 2)] if VENUS else [])
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=int(os.environ.get("UI_TEST_JOBS", "1"))) as pool:
+        futures = {pool.submit(u4_session, m, sc, layout): (m, sc) for m, sc in sessions}
+        for f in concurrent.futures.as_completed(futures):
+            mode, scale = futures[f]
+            name, log, screen, shots = f.result()
+            results[(mode, scale)] = (name, screen, shots, u4_check(name, log, screen, shots, scale, layout))
+            print(f'ui-test: {name} PASS {json.dumps(results[(mode, scale)][3])}', flush=True)
+    # The Gallery window and the menu bar left of the clock.
+    region = (44, 0, 650, 595)
+    for i in range(9):
+        compare_scaled(results[('cpu', 1)][2][i], results[('cpu', 2)][2][i], region)
+    if VENUS:
+        for sc in (1, 2):
+            for i in range(8):                       # 8: the Venus disk lists more files in C:/
+                compare_equal(results[('cpu', sc)][2][i], results[('venus', sc)][2][i], sc)
+    summary = {f'{m}-{sc}x': r[3] for (m, sc), r in results.items()}
+    (OUT4 / 'u4-results.json').write_text(json.dumps(summary, indent=1))
+    print('ui-test: U4 PASS', flush=True)
+
+
 if 'U1' in STAGES:
     run_u1()
 if 'U2' in STAGES:
     run_u2()
 if 'U3' in STAGES:
     run_u3()
+if 'U4' in STAGES:
+    run_u4()

@@ -130,7 +130,9 @@ def resolve(inputs, search, coolos=False):
         if name.startswith('OS.CoolOS.') and not coolos:
             raise ValueError(f'{name} requires --coolos (CoolOS integration)')
         if name in visiting:
-            raise ValueError(f'cyclic module imports involving {name}')
+            # Interfaces may import each other (OS.File and OS.Dir): the compiler
+            # reads every interface before any body, so the cycle is not an error.
+            return
         pair = chosen.get(name, index.get(name))
         if pair is None:
             raise ValueError(f'cannot find module {name}; add its directory with -I')

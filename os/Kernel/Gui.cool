@@ -12,9 +12,9 @@
 #define GUI_EVENT_CLOSE 4
 #define GUI_EVENT_MENU 5
 #define GUI_INPUT 1024
-#define GUI_MENUS 4
-#define GUI_MENU_ITEMS 8
-class CGuiMenuItem {I64 id; U8 label[64];};
+#define GUI_MENUS 8
+#define GUI_MENU_ITEMS 24
+class CGuiMenuItem {I64 id, flags; U8 label[64], keys[24];};
 class CGuiMenu {U8 title[32]; I64 count; CGuiMenuItem items[GUI_MENU_ITEMS];};
 #define GUI_EVENTS GUI_INPUT // one complete compositor input backlog fits a window
 class CGuiEvent {I64 type, key, x, y, buttons, wheel, timestamp, vct;};
@@ -42,6 +42,9 @@ class CGuiWindow
     // since the last present, and of the presented revision awaiting composition.
     I64 input_vct, present_vct;
     I64 pointer_shape; // 0 arrow, 1 I-beam: the pointer over this pixel window's client
+    CGuiMenu popup; I64 popup_x, popup_y; // pop-up list opened by the app (GuiPopupShow)
+    // Terminal windows: a mouse selection of cells (anchor and end, columns and rows).
+    I64 sel_x0, sel_y0, sel_x1, sel_y1; Bool selecting, selected;
 };
 class CGui
 {
@@ -75,6 +78,9 @@ extern I64 GuiMenuCount();
 extern CTask *GuiDraw();
 extern CTask *GuiCubeUnavailable();
 extern I64 GuiLatency(Bool reset = FALSE);
+extern U0 GuiTermPaste(CGuiWindow *w);
+extern I64 GuiTextWidth(U8 *text);
+extern U0 GuiMenuStep(I64 delta);
 U8 *gui_start_hook; // resident Venus renderer, installed by Terminal.cool
 
 U0 GuiDamage(I64 x, I64 y, I64 w, I64 h)
@@ -101,14 +107,18 @@ U0 GuiBox(U32 *p, I64 pw, I64 ph, I64 scale, I64 x, I64 y, I64 w, I64 h)
 }
 U0 GuiText(U32 *p, I64 pw, I64 ph, I64 scale, I64 x, I64 y, U8 *text)
 {//Open-license Unifont for chrome; independent of the terminal's TrueType choice.
-    U8 *glyph; I64 row, col, bits, cells;
+    U8 *glyph; I64 row, col, bits, cells, len, cp, i;
     while (*text && x + 8 <= pw / scale) {
-        glyph = FontGlyph(*text++, &cells);
+        // UTF-8 (menu shortcuts use the Mac's modifier symbols); wide glyphs take 16 pixels.
+        len = Utf8Len(*text); if (!len) len = 1; for (i = 1; i < len; i++) if (!text[i]) {len = 1; break;}
+        cp = Utf8Cp(text, len); text += len;
+        glyph = FontGlyph(cp, &cells);
         if (glyph) for (row = 0; row < 16; row++) {
-                bits = glyph[row]; bits |= bits >> 1; // bitmap bold, no proprietary font
-                for (col = 0; col < 8; col++) if (bits & (128 >> col)) GuiFill(p, pw, ph, scale, x + col, y + row, 1, 1, 0);
+                bits = glyph[row]; if (cells == 2) bits = glyph[row * 2] << 8 | glyph[row * 2 + 1];
+                bits |= bits >> 1; // bitmap bold, no proprietary font
+                for (col = 0; col < cells * 8; col++) if (bits & (1 << (cells * 8 - 1 - col))) GuiFill(p, pw, ph, scale, x + col, y + row, 1, 1, 0);
             }
-        x += 8;
+        x += Utf8Width(cp) * 8;
     }
 }
 U0 GuiDecorate(CGuiWindow *w)
@@ -316,15 +326,6 @@ Bool GuiDispatchKey(I64 ev, I64 timestamp)
 {//Called by the compositor in input order, after preceding mouse focus changes.
     Bool shortcut = TRUE;
     if (!gui_active) return FALSE;
-    if (gui.menu_open) {
-        if (ev == KEY_ESC) GuiMenuDismiss;
-        else if (ev == KEY_UP || ev == KEY_DOWN) {
-            I64 delta = 1; if (ev == KEY_UP) delta = -1;
-            if (GuiMenuCount) gui.menu_hover = (gui.menu_hover + delta + GuiMenuCount) % GuiMenuCount;
-            GuiMenuPaint;
-        } else if (ev == KEY_ENTER) GuiMenuSelect(gui.menu_hover);
-        return TRUE;
-    }
     if ((ev & (KF_CTRL | KF_ALT)) == (KF_CTRL | KF_ALT)) {
         if ((ev & KEY_CODE) == 'n') gui.action = 1;
         else if ((ev & KEY_CODE) == 'q') gui.action = 2;
@@ -334,8 +335,18 @@ Bool GuiDispatchKey(I64 ev, I64 timestamp)
         else if ((ev & KEY_CODE) == KEY_TAB) {if (gui.count) GuiFocus(gui.windows[0]);}
         else if ((ev & KEY_CODE) == 'p') gui.shot_pending = TRUE;
         else if ((ev & KEY_CODE) == 'l') GuiLatency(TRUE);
+        else if ((ev & KEY_CODE) == 'v' && gui.focus && !gui.focus->pixel) GuiTermPaste(gui.focus); // selecting copies
         else shortcut = FALSE;
         if (shortcut) return TRUE;
+    }
+    // An open menu takes the remaining keys (the global keys above still work, e.g. screenshots).
+    if (gui.menu_open) {
+        if (ev == KEY_ESC) GuiMenuDismiss;
+        else if (ev == KEY_UP || ev == KEY_DOWN) {
+            I64 delta = 1; if (ev == KEY_UP) delta = -1;
+            GuiMenuStep(delta);
+        } else if (ev == KEY_ENTER) GuiMenuSelect(gui.menu_hover);
+        return TRUE;
     }
     if (gui.focus && !gui.focus->closed) {
         if (gui.focus->pixel) {
@@ -399,6 +410,70 @@ CGuiWindow *GuiNewPixel(U8 *title, I64 width = 480, I64 height = 256)
     if (w) {w->pixel = TRUE; GuiFill(w->pixels, w->pw, w->ph, w->scale, 1 + GUI_PAD, GUI_TITLE + GUI_PAD, w->w, w->h, GUI_WHITE); GuiDecorate(w);}
     return w;
 }
+Bool GuiTermSelected(CGuiWindow *w, I64 x, I64 y)
+{//Cells from the earlier to the later end, in reading order.
+    I64 a = w->sel_y0 * 4096 + w->sel_x0, b = w->sel_y1 * 4096 + w->sel_x1, c = y * 4096 + x;
+    if (a > b) {I64 t = a; a = b; b = t;}
+    return w->selected && a <= c <= b;
+}
+U0 GuiTermInvertRow(CGuiWindow *w, I64 y)
+{
+    CVTerm *v = w->term; I64 x, j, i, s = w->scale, cw = font.cw, ch = font.ch; U32 *p;
+    for (x = 0; x < v->cols; x++) if (GuiTermSelected(w, x, y))
+            for (j = 0; j < ch; j++) {
+                p = w->pixels + ((GUI_TITLE + GUI_PAD) * s + y * ch + j) * w->pw + (1 + GUI_PAD) * s + x * cw;
+                for (i = 0; i < cw; i++) p[i] ^= 0xFFFFFF;
+            }
+}
+U0 GuiTermCopy(CGuiWindow *w)
+{//The selected cells as UTF-8 text on the clipboard; rows end in newlines, trailing blanks dropped.
+    CVTerm *v = w->term; I64 x, y, n = 0, end, daif; U8 *buf; CVtCell *c;
+    if (!v || !w->selected) return;
+    buf = MAlloc(v->rows * (v->cols * 4 + 1) + 1); if (!buf) return;
+    daif = SpinLockIrq(&v->lock);
+    for (y = 0; y < v->rows; y++) {
+        end = n;
+        for (x = 0; x < v->cols; x++) if (GuiTermSelected(w, x, y)) {
+                c = &v->cells[y * v->cols + x];
+                if (c->width || !x) { // the right half of a wide glyph adds nothing
+                    if (c->cp > 32) {n += Utf8Enc(buf + n, c->cp); end = n;} else buf[n++] = ' ';
+                }
+            }
+        n = end;
+        if (GuiTermSelected(w, v->cols - 1, y) && GuiTermSelected(w, 0, y + 1)) buf[n++] = '\n';
+    }
+    SpinUnlockIrq(&v->lock, daif);
+    ClipboardSet(buf, n); Free(buf);
+}
+U0 GuiTermPaste(CGuiWindow *w)
+{//Type the clipboard into the terminal (up to its key queue: 200 code points).
+    I64 n = ClipboardSize, i = 0, len, typed = 0; U8 *s;
+    if (!w->term || n <= 0) return;
+    s = ClipboardText;
+    while (s[i] && typed < 200) {
+        len = Utf8Len(s[i]); if (!len) len = 1;
+        if (s[i] != '\r') {VtKeyPush(w->term, Utf8Cp(s + i, len)); typed++;}
+        i += len;
+    }
+    Free(s);
+}
+U0 GuiTermMouse(CGuiWindow *w, I64 x, I64 y, I64 buttons)
+{//Drag in a terminal window selects cells; releasing copies them to the clipboard.
+    CVTerm *v = w->term; I64 col, row;
+    Bool down = (buttons & 1) && !(gui.buttons & 1), up = !(buttons & 1) && (gui.buttons & 1);
+    if (!v) return;
+    col = ClampI64((x - w->x - 1 - GUI_PAD) * gui.scale / font.cw, 0, v->cols - 1);
+    row = ClampI64((y - w->y - GUI_TITLE - GUI_PAD) * gui.scale / font.ch, 0, v->rows - 1);
+    if (down) {
+        if (w->selected) w->dirty = TRUE;
+        w->selecting = TRUE; w->selected = FALSE; w->sel_x0 = w->sel_x1 = col; w->sel_y0 = w->sel_y1 = row;
+    } else if (w->selecting && (buttons & 1) && (col != w->sel_x1 || row != w->sel_y1)) {
+        w->sel_x1 = col; w->sel_y1 = row; w->selected = w->sel_x0 != w->sel_x1 || w->sel_y0 != w->sel_y1; w->dirty = TRUE;
+    } else if (up && w->selecting) {
+        w->selecting = FALSE;
+        if (w->selected) GuiTermCopy(w);
+    }
+}
 U0 GuiRaster(CGuiWindow *w)
 {//Only dirty terminal rows are rasterized into this window's BGRA texture backing.
     CVTerm *v = w->term; CVtCell *c; U32 *p;
@@ -413,6 +488,7 @@ U0 GuiRaster(CGuiWindow *w)
                     VtCellColors(c, &fg, &bg); p = w->pixels + ((GUI_TITLE + GUI_PAD) * s + y * ch) * w->pw + (1 + GUI_PAD) * s + x * cw;
                     FbGlyph(p, w->pw * 4, c->cp, n, FbRgb(fg), FbRgb(bg), c->attr & VT_ATTR_BOLD);
                 }
+                if (w->selected) GuiTermInvertRow(w, y);
                 v->row_dirty[y] = 0; gui.raster_rows++;
             }
         if (!v->cursor_off && 0 <= v->cx < v->cols && 0 <= v->cy < v->rows) {
@@ -437,7 +513,7 @@ U0 GuiDesktop()
     GuiFill(gui.desktop, pw, ph, s, 0, 0, gui.w, GUI_MENU, GUI_WHITE);
     GuiFill(gui.desktop, pw, ph, s, 0, GUI_MENU - 1, gui.w, 1, 0);
     GuiText(gui.desktop, pw, ph, s, 8, 3, "System");
-    if (gui.focus) for (i = 0; i < gui.focus->menu_count; i++) {GuiText(gui.desktop, pw, ph, s, left + 8, 3, gui.focus->menus[i].title); left += StrLen(gui.focus->menus[i].title) * 8 + 16;}
+    if (gui.focus) for (i = 0; i < gui.focus->menu_count; i++) {GuiText(gui.desktop, pw, ph, s, left + 8, 3, gui.focus->menus[i].title); left += GuiTextWidth(gui.focus->menus[i].title) + 16;}
     StrPrint(clock, "%T", Now); clock[5] = 0;
     GuiText(gui.desktop, pw, ph, s, gui.w - 52, 3, clock);
     gui.desktop_revision++; gui.clock_minute = Now / (60 * CDATE_FREQ); GuiDamage(0, 0, gui.w, gui.h);
@@ -601,6 +677,7 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
         w = gui.focus;
         if (!(w->x + 1 + GUI_PAD <= x < w->x + 1 + GUI_PAD + w->w && w->y + GUI_TITLE + GUI_PAD <= y < w->y + GUI_TITLE + GUI_PAD + w->h)) w = NULL;
     }
+    if (w && !w->closed && !w->pixel) GuiTermMouse(w, x, y, buttons);
     if (w && !w->closed) {
         CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MOUSE;
         e.x = x - w->x - 1 - GUI_PAD; e.y = y - w->y - GUI_TITLE - GUI_PAD; e.buttons = buttons; e.wheel = wheel - gui.wheel;

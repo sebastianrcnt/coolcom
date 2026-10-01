@@ -1,0 +1,260 @@
+import Standard.Vector (Vector, make as vectorMake, push, pop, get, insert, length, borrowGet, destroyFree, destroyEmpty);
+import Standard.String (String, fromLiteral, length as stringLength, slice as stringSlice, destroyString, nthByte);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+import OS.Error (IoError);
+import OS.Dir (Dir, Entries, Entry, openDir, closeDir, entries, next as nextEntry, closeEntries);
+import OS.Ui (View, ListState, FileEvent, Rows, Pick, Up, Choose, Cancel, Name, TextEdit, dialog, row, column, label, append, plain,
+    button, defaultButton, cancelButton, spacer, done, spacing, grow, fixedWidth, fixedHeight, fileList, fileName, listRow, rowIcon,
+    iconFolder, iconDocument, listState, applyEdit, disabled);
+module body OS.Ui.Files is
+    -- Open and save dialogs for OS.Ui applications. The dialog borrows nothing:
+    -- it owns the directory capability the application gives it (and gives it
+    -- back), its current folder relative to that root, a sorted listing, the
+    -- list state and, when saving, the file name being typed.
+    record FileDialog: Linear is
+        root: Dir;
+        path: String;
+        names: Vector[String];
+        folders: Vector[Bool];
+        list: ListState;
+        name: String;
+        saving: Bool;
+        active: Bool;
+        outcome: Int64;
+    end;
+    constant dialogPending: Int64 := 0;
+    constant dialogChosen: Int64 := 1;
+    constant dialogCancelled: Int64 := 2;
+
+    function makeFileDialog(root: Dir): FileDialog is
+        return FileDialog(root => root, path => fromLiteral(""), names => vectorMake(), folders => vectorMake(), list => listState(),
+            name => fromLiteral(""), saving => false, active => false, outcome => dialogPending);
+    end;
+    -- Give the directory capability back.
+    function closeFileDialog(d: FileDialog): Dir is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        destroyString(path); destroyString(name); clearNames(names); destroyFree(folders);
+        return root;
+    end;
+    function clearNames(names: Vector[String]): Unit is
+        var v: Vector[String] := names;
+        var more: Bool := true;
+        while more do case pop(&!v) of when Some(value as s: String) do destroyString(s); when None do more := false; end case; end while;
+        destroyEmpty(v); return nil;
+    end;
+    -- Show the dialog (for opening, or for saving with a suggested name), listing its current folder.
+    function showFileDialog(d: FileDialog, saving: Bool, suggested: Span[Nat8]): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as wasSaving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        destroyString(name);
+        return reload(FileDialog(root => root, path => path, names => names, folders => folders, list => listState(),
+            name => copyBytes(suggested), saving => saving, active => true, outcome => dialogPending));
+    end;
+    function hideFileDialog(d: FileDialog): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        return FileDialog(root => root, path => path, names => names, folders => folders, list => list, name => name, saving => saving,
+            active => false, outcome => outcome);
+    end;
+    function fileDialogActive(d: &[FileDialog]): Bool is return d->active; end;
+    -- True for a Save dialog (a name field and a Save button).
+    function fileDialogSaving(d: &[FileDialog]): Bool is return d->saving; end;
+    function fileDialogOutcome(d: &[FileDialog]): Int64 is return d->outcome; end;
+    generic [R: Region]
+    function fileDialogRoot(d: &[FileDialog, R]): &[Dir, R] is return &(d->root); end;
+    -- The chosen file relative to the root: "folder/name".
+    function chosenPath(d: &[FileDialog]): String is
+        var b: StringBuilder := makeStringBuilder();
+        appendBytes(&!b, spanOf(&(d->path)));
+        if stringLength(&(d->path)) > 0 then writeByte(&!b, 47); end if;
+        appendBytes(&!b, spanOf(&(d->name)));
+        return finalize(b);
+    end;
+    generic [R: Region]
+    function spanOf(s: &[String, R]): Span[Nat8, R] is return stringSlice(s, 0, stringLength(s)); end;
+    function appendBytes(b: &![StringBuilder], bytes: Span[Nat8]): Unit is
+        for i from 0 until spanLength(bytes) do writeByte(&~b, bytes[i]); end for; return nil;
+    end;
+    function copyBytes(bytes: Span[Nat8]): String is
+        var b: StringBuilder := makeStringBuilder();
+        for i from 0 until spanLength(bytes) do writeByte(&!b, bytes[i]); end for;
+        return finalize(b);
+    end;
+    -- Byte order with folders first.
+    function before(aFolder: Bool, a: Span[Nat8], bFolder: Bool, b: Span[Nat8]): Bool is
+        if aFolder /= bFolder then return aFolder; end if;
+        var i: Index := 0;
+        while i < spanLength(a) and i < spanLength(b) do
+            if a[i] /= b[i] then return a[i] < b[i]; end if;
+            i := i + 1;
+        end while;
+        return spanLength(a) < spanLength(b);
+    end;
+    -- Read the current folder into a sorted listing.
+    function reload(d: FileDialog): FileDialog is
+        let { root as root: Dir, path as path: String, names as oldNames: Vector[String], folders as oldFolders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        clearNames(oldNames); destroyFree(oldFolders);
+        var names: Vector[String] := vectorMake(); var folders: Vector[Bool] := vectorMake();
+        if stringLength(&path) = 0 then
+            case entries(&root) of
+                when Ok(value as listing: Entries) do readEntries(listing, &!names, &!folders);
+                when Err(error as e: IoError) do skip;
+            end case;
+        else
+            case openDir(&root, spanOf(&path)) of
+                when Ok(value as sub: Dir) do
+                    case entries(&sub) of
+                        when Ok(value as listing: Entries) do readEntries(listing, &!names, &!folders);
+                        when Err(error as e: IoError) do skip;
+                    end case;
+                    closeDir(sub);
+                when Err(error as e: IoError) do skip;
+            end case;
+        end if;
+        return FileDialog(root => root, path => path, names => names, folders => folders, list => listState(), name => name,
+            saving => saving, active => active, outcome => outcome);
+    end;
+    function readEntries(listing: Entries, names: &![Vector[String]], folders: &![Vector[Bool]]): Unit is
+        var iterator: Entries := listing; var more: Bool := true;
+        while more do
+            case nextEntry(&!iterator) of
+                when Some(value as entry: Entry) do
+                    let { name as name: String, size as size: Index, isDir as folder: Bool, modified as modified: Int64 } := entry;
+                    let at: Index := position(readStrings(&~names), readBools(&~folders), folder, spanOf(&name));
+                    insert(&~names, at, name); insert(&~folders, at, folder);
+                when None do more := false;
+            end case;
+        end while;
+        closeEntries(iterator); return nil;
+    end;
+    generic [R: Region]
+    function readStrings(v: &![Vector[String], R]): &[Vector[String], R] is return (v: &[Vector[String], R]); end;
+    generic [R: Region]
+    function readBools(v: &![Vector[Bool], R]): &[Vector[Bool], R] is return (v: &[Vector[Bool], R]); end;
+    -- Binary search for the sorted position of a new entry.
+    function position(names: &[Vector[String]], folders: &[Vector[Bool]], folder: Bool, name: Span[Nat8]): Index is
+        var low: Index := 0; var high: Index := length(names);
+        while low < high do
+            let mid: Index := (low + high) / 2;
+            if before(get(folders, mid), spanOf(borrowGet(names, mid)), folder, name) then low := mid + 1;
+            else high := mid; end if;
+        end while;
+        return low;
+    end;
+    -- The dialog's view; wrap turns its events into the application's messages.
+    generic [M: Free]
+    function fileDialogView(v: &![View[M]], d: &[FileDialog], title: Span[Nat8], wrap: Fn[FileEvent, M]): Unit is
+        dialog(&~v); fixedWidth(&~v, 400);
+        label(&~v, title);
+        label(&~v, "C:/"); append(&~v, spanOf(&(d->path))); plain(&~v);
+        row(&~v); spacing(&~v, 10);
+        let count: Int64 := toInt(length(&(d->names)));
+        fileList(&~v, d->list, count, wrap); grow(&~v, 1); fixedHeight(&~v, 164);
+        var r: Int64 := d->list.first;
+        while r < count and r <= d->list.first + d->list.fit do
+            listRow(&~v, r, spanOf(borrowGet(&(d->names), toIdx(r))));
+            if get(&(d->folders), toIdx(r)) then rowIcon(&~v, iconFolder()); else rowIcon(&~v, iconDocument()); end if;
+            r := r + 1;
+        end while;
+        done(&~v);
+        column(&~v); spacing(&~v, 8);
+        var verb: Span[Nat8, Static] := "Open"; if d->saving then verb := "Save"; end if;
+        button(&~v, verb, wrap(Choose())); defaultButton(&~v);
+        button(&~v, "Up", wrap(Up())); disabled(&~v, stringLength(&(d->path)) = 0);
+        button(&~v, "Cancel", wrap(Cancel())); cancelButton(&~v);
+        done(&~v);
+        done(&~v);
+        if d->saving then
+            row(&~v); spacing(&~v, 8);
+            label(&~v, "Name"); fileName(&~v, spanOf(&(d->name)), wrap); grow(&~v, 1);
+            done(&~v);
+        end if;
+        done(&~v); return nil;
+    end;
+    function toInt(i: Index): Int64 is case toInt64(i) of when Some(value as n: Int64) do return n; when None do return 0; end case; end;
+    function toIdx(i: Int64): Index is case toIndex(i) of when Some(value as n: Index) do return n; when None do return 0; end case; end;
+    -- One event: navigate, choose, cancel or edit the name.
+    function updateFileDialog(d: FileDialog, e: FileEvent): FileDialog is
+        case e of
+            when Rows(state as s: ListState) do return withList(d, s);
+            when Pick(index as i: Int64) do return pick(d, i);
+            when Up do return goUp(d);
+            when Choose do return choose(d);
+            when Cancel do return finish(d, dialogCancelled);
+            when Name(edit as t: TextEdit) do return withName(d, t);
+        end case;
+    end;
+    function withList(d: FileDialog, s: ListState): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        -- Selecting a file while saving proposes its name.
+        var n: String := name;
+        if saving and s.selected >= 0 and s.selected /= list.selected and toIdx(s.selected) < length(&names) and not get(&folders, toIdx(s.selected)) then
+            destroyString(n); n := copyBytes(spanOf(borrowGet(&names, toIdx(s.selected))));
+        end if;
+        return FileDialog(root => root, path => path, names => names, folders => folders, list => s, name => n, saving => saving, active => active, outcome => outcome);
+    end;
+    function withName(d: FileDialog, t: TextEdit): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        return FileDialog(root => root, path => path, names => names, folders => folders, list => list, name => applyEdit(name, t), saving => saving,
+            active => active, outcome => outcome);
+    end;
+    function finish(d: FileDialog, how: Int64): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        return FileDialog(root => root, path => path, names => names, folders => folders, list => list, name => name, saving => saving,
+            active => false, outcome => how);
+    end;
+    function entryCount(d: &[FileDialog]): Index is return length(&(d->names)); end;
+    function entryIsFolder(d: &[FileDialog], i: Int64): Bool is return get(&(d->folders), toIdx(i)); end;
+    function entryName(d: &[FileDialog], i: Int64): String is return copyBytes(spanOf(borrowGet(&(d->names), toIdx(i)))); end;
+    function nameLength(d: &[FileDialog]): Index is return stringLength(&(d->name)); end;
+    -- Enter a folder, or choose a file (opening) / take its name (saving).
+    function pick(d: FileDialog, index: Int64): FileDialog is
+        if index < 0 or toIdx(index) >= entryCount(&d) then return d; end if;
+        if entryIsFolder(&d, index) then return enter(d, index); end if;
+        let picked: String := entryName(&d, index);
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        destroyString(name);
+        var how: Int64 := dialogChosen; var stays: Bool := false;
+        if saving then how := dialogPending; stays := true; end if;
+        return FileDialog(root => root, path => path, names => names, folders => folders, list => list, name => picked, saving => saving,
+            active => stays, outcome => how);
+    end;
+    function choose(d: FileDialog): FileDialog is
+        let selected: Int64 := d.list.selected;
+        if selected >= 0 and toIdx(selected) < entryCount(&d) and entryIsFolder(&d, selected) then return enter(d, selected); end if;
+        if d.saving then
+            if nameLength(&d) = 0 then return d; end if;
+            return finish(d, dialogChosen);
+        end if;
+        if selected < 0 then return d; end if;
+        return pick(d, selected);
+    end;
+    function enter(d: FileDialog, index: Int64): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        var b: StringBuilder := makeStringBuilder();
+        appendBytes(&!b, spanOf(&path));
+        if stringLength(&path) > 0 then writeByte(&!b, 47); end if;
+        appendBytes(&!b, spanOf(borrowGet(&names, toIdx(index))));
+        destroyString(path);
+        return reload(FileDialog(root => root, path => finalize(b), names => names, folders => folders, list => list, name => name,
+            saving => saving, active => active, outcome => outcome));
+    end;
+    function goUp(d: FileDialog): FileDialog is
+        let { root as root: Dir, path as path: String, names as names: Vector[String], folders as folders: Vector[Bool], list as list: ListState,
+            name as name: String, saving as saving: Bool, active as active: Bool, outcome as outcome: Int64 } := d;
+        var cut: Index := stringLength(&path);
+        while cut > 0 and nthByte(&path, cut - 1) /= 47 do cut := cut - 1; end while;
+        if cut > 0 then cut := cut - 1; end if;
+        let parent: String := copyBytes(stringSlice(&path, 0, cut));
+        destroyString(path);
+        return reload(FileDialog(root => root, path => parent, names => names, folders => folders, list => list, name => name,
+            saving => saving, active => active, outcome => outcome));
+    end;
+end module body.

@@ -13,7 +13,8 @@ import OS.Ui.Tree (Tree, Node, Geom, Damage, props, geometry, textBytes, textSpa
     flagDisabled, flagDefault, flagCancel, flagFocusable, flagClickFocus, flagSecure,
     keyCodeMask, keyShift, keyCtrl, keyAlt, keyTab, keyEnter, keyEscape, keyInputLost, keyBackspace, keyDelete,
     keyLeft, keyRight, keyUp, keyDown, keyHome, keyEnd, keyPageUp, keyPageDown, splitBar,
-    kindListRow, kindHeader, listLike, listBody, headerHeight, rowsThatFit, listInset, rowHeight, scrollBarWidth, flagWrap);
+    kindListRow, kindHeader, listLike, listBody, headerHeight, rowsThatFit, listInset, rowHeight, scrollBarWidth, flagWrap,
+    kindPopup, kindTabPage, kindMenu, flagDraggable, flagDropTarget, flagContext, flagHidden, tabStrip);
 module body OS.Ui.Engine is
     -- Framework-owned interaction state (focus, the control under the mouse,
     -- drags, per-node state such as carets and split positions), visual
@@ -46,17 +47,19 @@ module body OS.Ui.Engine is
         clickTime: Int64; clickCount: Int64; clickTarget: Nat64;
         now: Int64;
         pointer: Int64;
+        popup: Nat64;     -- the pop-up button or context menu whose list is open
+        dropOver: Nat64;  -- the drop target under a dragged item
     end;
     function makeState(): State is
         return State(store => mapMake(), splits => mapMake(), timers => mapMake(), focus => 0, keyboard => false,
             drag => dragNone, target => 0, inside => false, startX => 0, startY => 0, startValue => 0,
-            mouseX => -1, mouseY => -1, buttons => 0, clickTime => 0, clickCount => 0, clickTarget => 0, now => 0, pointer => 0);
+            mouseX => -1, mouseY => -1, buttons => 0, clickTime => 0, clickCount => 0, clickTarget => 0, now => 0, pointer => 0, popup => 0, dropOver => 0);
     end;
     function destroyState(state: State): Unit is
         let { store as s: HashMap[Nat64, Ephemeral], splits as p: HashMap[Nat64, Int64], timers as t: HashMap[Nat64, Int64],
             focus as f: Nat64, keyboard as k: Bool, drag as d: Int64, target as g: Nat64, inside as i: Bool,
             startX as sx: Int64, startY as sy: Int64, startValue as sv: Int64, mouseX as mx: Int64, mouseY as my: Int64,
-            buttons as b: Int64, clickTime as ct: Int64, clickCount as cc: Int64, clickTarget as cg: Nat64, now as n: Int64, pointer as pt: Int64 } := state;
+            buttons as b: Int64, clickTime as ct: Int64, clickCount as cc: Int64, clickTarget as cg: Nat64, now as n: Int64, pointer as pt: Int64, popup as pu: Nat64, dropOver as dov: Nat64 } := state;
         mapDestroy(s); mapDestroy(p); mapDestroy(t); return nil;
     end;
     generic [K: Free(Eq, Hash), V: Type, R: Region]
@@ -157,6 +160,8 @@ module body OS.Ui.Engine is
         let id: Nat64 := ps[i].ident;
         if state->focus = id then h := mix(h, 5); if state->keyboard then h := mix(h, 6); end if; end if;
         if state->target = id and state->drag /= dragNone then h := mix(h, bits(state->drag)); if state->inside then h := mix(h, 11); end if; end if;
+        if state->popup = id then h := mix(h, 13); end if;
+        if state->dropOver = id then h := mix(h, 17); end if;
         let e: Ephemeral := ephemeral(state, id);
         h := mix(h, bits(e.a)); h := mix(h, bits(e.b)); h := mix(h, bits(e.c)); h := mix(h, bits(e.d));
         return h;
@@ -514,6 +519,60 @@ module body OS.Ui.Engine is
         return a;
     end;
 
+    ------------------------------------------------------------------ menus, tabs, drag and drop
+
+    -- A pop-up button or context menu opens its list (the App asks the kernel).
+    function popupAction(ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, x: Int64, y: Int64): Action is
+        state->popup := ps[i].ident;
+        return Action(kind => actPopup, node => i, value => x, aux => y, edit => noEdit(), list => noList());
+    end;
+    -- The context menu of a node: a context kindMenu child of it or of an ancestor.
+    function contextMenu(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do
+            var c: Index := ps[p].first;
+            while c /= 0 do
+                if ps[c].kind = kindMenu and has(ps[c].flags, flagContext) then return c; end if;
+                c := ps[c].next;
+            end while;
+            p := ps[p].parent;
+        end while;
+        return 0;
+    end;
+    -- The tab under x in a tab strip (-1 none), counting hidden pages too.
+    function tabAt(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, x: Int64): Int64 is
+        var tx: Int64 := gs[i].x + 4; var c: Index := ps[i].first; var index: Int64 := 0;
+        while c /= 0 do
+            if ps[c].kind = kindTabPage then
+                let w: Int64 := textWidth(sliceSpan(all, ps[c].text, ps[c].textEnd)) + 20;
+                if x >= tx and x < tx + w then return index; end if;
+                tx := tx + w; index := index + 1;
+            end if;
+            c := ps[c].next;
+        end while;
+        return -1;
+    end;
+    function tabCount(ps: Span[Node], i: Index): Int64 is
+        var n: Int64 := 0; var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindTabPage then n := n + 1; end if; c := ps[c].next; end while;
+        return n;
+    end;
+    function draggableAt(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do if has(ps[p].flags, flagDraggable) and enabled(ps, p) then return p; end if; p := ps[p].parent; end while;
+        return 0;
+    end;
+    function dropTargetAt(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do if has(ps[p].flags, flagDropTarget) and enabled(ps, p) then return p; end if; p := ps[p].parent; end while;
+        return 0;
+    end;
+    -- A drop: the target's handler with the dragged payload and the pointer relative to the target.
+    function dropAction(ps: Span[Node], gs: Span[Geom], target: Index, payload: Int64, x: Int64, y: Int64): Action is
+        let lx: Int64 := clampInt(x - gs[target].x, 0, 65535); let ly: Int64 := clampInt(y - gs[target].y, 0, 65535);
+        return Action(kind => actFire, node => target, value => payload, aux => lx * 65536 + ly, edit => noEdit(), list => noList());
+    end;
+
     ------------------------------------------------------------------ input
 
     constant actNone: Int64 := 0;      -- nothing changed
@@ -525,6 +584,7 @@ module body OS.Ui.Engine is
     constant actResize: Int64 := 6;    -- new window size in value (width) and aux (height)
     constant actMenu: Int64 := 7;      -- a kernel menu item id in value
     constant actCopy: Int64 := 8;      -- copy bytes [value, aux) of the node's text
+    constant actPopup: Int64 := 9;     -- open the list of a pop-up button / context menu at (value, aux)
 
     -- The model's view of a list, table or tree: first visible row, selected
     -- row (-1: none), rows that fit, sort column (-1: none) and direction.
@@ -735,7 +795,7 @@ module body OS.Ui.Engine is
         var p: Index := i;
         while p /= 0 do
             let k: Int64 := ps[p].kind;
-            if pressable(k) or k = kindSlider or k = kindTextBox or k = kindSplit or k = kindList or k = kindTable
+            if pressable(k) or k = kindSlider or k = kindTextBox or k = kindSplit or k = kindList or k = kindTable or k = kindPopup
                 or k = kindTreeView or k = kindTextView or k = kindTabs or k = kindScroll then
                 if enabled(ps, p) then return p; end if; return 0;
             end if;
@@ -785,6 +845,11 @@ module body OS.Ui.Engine is
             let target: Index := scrollable(ps, hit(ps, gs, x, y));
             if target /= 0 and enabled(ps, target) then return wheelOn(all, ps, gs, &~state, target, wheel); end if;
         end if;
+        let rightDown: Bool := (buttons & 2) /= 0 and (held & 2) = 0;
+        if rightDown and state->drag = dragNone then
+            let menu: Index := contextMenu(ps, hit(ps, gs, x, y));
+            if menu /= 0 and enabled(ps, menu) and ps[menu].first /= 0 then return popupAction(ps, gs, &~state, menu, x, y); end if;
+        end if;
         if down then
             -- Scroll bars of lists, scroll views and text views.
             let over: Index := scrollable(ps, hit(ps, gs, x, y));
@@ -817,7 +882,26 @@ module body OS.Ui.Engine is
             end if;
             let h: Index := hit(ps, gs, x, y);
             let target: Index := interactive(ps, h);
+            -- Drag and drop starts on a draggable node that is not a control (it may sit
+            -- inside one, such as a tab page or a scroll view).
+            if draggableAt(ps, h) /= 0 and (target = 0 or (draggableAt(ps, h) /= target and within(ps, draggableAt(ps, h), target))) then
+                let d: Index := draggableAt(ps, h);
+                state->drag := dragItem; state->target := ps[d].ident; state->inside := false;
+                state->startX := x; state->startY := y; state->dropOver := 0;
+                return act(actNone);
+            end if;
             if target = 0 then return act(actNone); end if;
+            if ps[target].kind = kindPopup then return popupAction(ps, gs, &~state, target, gs[target].x, gs[target].y); end if;
+            if ps[target].kind = kindTabs then
+                if y < gs[target].y + tabStrip then
+                    let index: Int64 := tabAt(all, ps, gs, target, x);
+                    if index >= 0 and index /= ps[target].value then return fire(target, index); end if;
+                end if;
+                if has(ps[target].flags, flagFocusable) and state->focus /= ps[target].ident and y < gs[target].y + tabStrip then
+                    state->focus := ps[target].ident; state->keyboard := false; return act(actRepaint);
+                end if;
+                return act(actNone);
+            end if;
             var changed: Bool := false;
             if has(ps[target].flags, flagClickFocus) and has(ps[target].flags, flagFocusable) and state->focus /= ps[target].ident then
                 state->focus := ps[target].ident; state->keyboard := false; changed := true;
@@ -899,6 +983,23 @@ module body OS.Ui.Engine is
             if inside /= state->inside then state->inside := inside; return act(actRepaint); end if;
             return act(actNone);
         end if;
+        if state->drag = dragItem then
+            if not state->inside then
+                if up then state->drag := dragNone; return act(actNone); end if;
+                let dx: Int64 := x - state->startX; let dy: Int64 := y - state->startY;
+                if dx * dx + dy * dy < 16 then return act(actNone); end if;
+                state->inside := true;
+            end if;
+            let over: Index := dropTargetAt(ps, hit(ps, gs, x, y));
+            var overId: Nat64 := 0; if over /= 0 then overId := ps[over].ident; end if;
+            if up then
+                state->drag := dragNone; state->dropOver := 0;
+                if over /= 0 and ps[over].handler >= 0 then return dropAction(ps, gs, over, ps[t].payload, x, y); end if;
+                return act(actRepaint);
+            end if;
+            state->dropOver := overId;
+            return act(actRepaint);
+        end if;
         if state->drag = dragScroll then
             if up then state->drag := dragNone; end if;
             let b: Bar := barOf(ps, gs, t, readState(&~state), lineCountOf(all, ps, gs, t));
@@ -970,6 +1071,14 @@ module body OS.Ui.Engine is
             return act(actNone);
         end if;
         let f: Index := find(ps, state->focus);
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindPopup and (base = 32 or base = keyEnter or base = keyDown) and (code & (keyCtrl | keyAlt)) = 0 then
+            return popupAction(ps, gs, &~state, f, gs[f].x, gs[f].y);
+        end if;
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindTabs and (base = keyLeft or base = keyRight) and (code & (keyCtrl | keyAlt)) = 0 then
+            var index: Int64 := ps[f].value; if base = keyLeft then index := index - 1; else index := index + 1; end if;
+            if index >= 0 and index < tabCount(ps, f) then return fire(f, index); end if;
+            return act(actNone);
+        end if;
         if f /= 0 and enabled(ps, f) and listLike(ps[f].kind) and (code & (keyCtrl | keyAlt)) = 0 then
             let r: Action := listKey(ps, gs, f, code);
             if r.kind >= 0 then return r; end if;

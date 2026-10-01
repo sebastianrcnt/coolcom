@@ -134,7 +134,8 @@ def run(name, script, *, out, kernel, mode='cpu', scale=1, size=(800, 600), time
     for old in d.glob('shot-*.png'):
         old.unlink()
     disk = d / 'disk.img'
-    testvm.create_disk(disk)
+    # Screenshots at 2x are 7.7 MB each: leave room for a dozen beside the installed files.
+    testvm.create_disk(disk, 192 * 1024 * 1024)
     testvm.install_disk_files(disk, stdout=subprocess.DEVNULL)
     if mode == 'venus':
         subprocess.run([ROOT / 'tools/venus/install.sh', disk], check=True, stdout=subprocess.DEVNULL)

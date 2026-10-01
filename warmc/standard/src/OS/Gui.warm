@@ -393,4 +393,23 @@ module body OS.Gui is
         end case; end;
     function setPointer(window: &![Window], shape: Int64): Result[Unit, IoError] is
         return status(rawPointer(window->handle, shape)); end;
+    constant popupChoice: Int64 := 1073741824;
+    pragma Foreign_Import(External_Name => "WgMenuReset");
+    private function rawMenuReset(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgMenuEntry");
+    private function rawMenuEntry(handle: Int64, menu: Int64, id: Int64, name: Pointer[Nat8], nameSize: Index, keys: Pointer[Nat8], keySize: Index, flags: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPopupClear");
+    private function rawPopupClear(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPopupItem");
+    private function rawPopupItem(handle: Int64, name: Pointer[Nat8], nameSize: Index, keys: Pointer[Nat8], keySize: Index, flags: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPopupShow");
+    private function rawPopupShow(handle: Int64, x: Int64, y: Int64, current: Int64): Int64 is end;
+    function resetMenus(window: &![Window]): Result[Unit, IoError] is return status(rawMenuReset(window->handle)); end;
+    function addMenuEntry(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError] is
+        return status(rawMenuEntry(window->handle, menu, id, spanToPointer(value), spanLength(value), spanToPointer(keys), spanLength(keys), flags)); end;
+    function popupClear(window: &![Window]): Result[Unit, IoError] is return status(rawPopupClear(window->handle)); end;
+    function popupAdd(window: &![Window], value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError] is
+        return status(rawPopupItem(window->handle, spanToPointer(value), spanLength(value), spanToPointer(keys), spanLength(keys), flags)); end;
+    function popupShow(window: &![Window], x: Int64, y: Int64, current: Int64): Result[Unit, IoError] is
+        return status(rawPopupShow(window->handle, x, y, current)); end;
 end module body.

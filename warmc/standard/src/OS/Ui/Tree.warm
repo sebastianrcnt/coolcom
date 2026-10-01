@@ -43,6 +43,7 @@ module body OS.Ui.Tree is
     constant kindMenuBar: Int64 := 35;
     constant kindMenu: Int64 := 36;
     constant kindMenuItem: Int64 := 37;
+    constant kindTabPage: Int64 := 39;
     constant kindShortcut: Int64 := 40;
     constant kindTimer: Int64 := 41;
     constant kindDropTarget: Int64 := 42;
@@ -62,6 +63,9 @@ module body OS.Ui.Tree is
     constant flagCenter: Int64 := 2048;
     constant flagDraggable: Int64 := 4096;
     constant flagSeparator: Int64 := 8192;
+    constant flagDropTarget: Int64 := 16384;
+    constant flagContext: Int64 := 32768;
+    constant flagChecked: Int64 := 65536;
 
     -- Alignment on a parent's cross axis.
     constant alignInherit: Int64 := -1;
@@ -112,6 +116,7 @@ module body OS.Ui.Tree is
         fixedWidth: Int64; fixedHeight: Int64; minWidth: Int64; minHeight: Int64;
         grow: Int64; align: Int64; childAlign: Int64; padding: Int64; spacing: Int64; columns: Int64;
         fit: Int64;
+        payload: Int64;
     end;
     -- Layout results, kept apart from the properties the view sets so that
     -- the layout passes can read properties while writing geometry.
@@ -140,7 +145,7 @@ module body OS.Ui.Tree is
             ident => 0, key => 0, text => at, textEnd => at, extra => at, extraEnd => at,
             value => 0, low => 0, high => 0, aux => 0, handler => -1, handler2 => -1,
             fixedWidth => -1, fixedHeight => -1, minWidth => 0, minHeight => 0,
-            grow => 0, align => alignInherit, childAlign => alignInherit, padding => 0, spacing => 0, columns => 0, fit => 0);
+            grow => 0, align => alignInherit, childAlign => alignInherit, padding => 0, spacing => 0, columns => 0, fit => 0, payload => 0);
     end;
 
     function makeTree(): Tree is
@@ -235,6 +240,21 @@ module body OS.Ui.Tree is
     end;
     function add(tree: &![Tree], kind: Int64): Index is return append(&~tree, kind); end;
     function latest(tree: &[Tree]): Index is return tree->latest; end;
+    -- For tabs: pages already added to the open container, and its selected page.
+    generic [R: Region]
+    function tabIndexOf(tree: &![Tree, R]): Int64 is
+        let c0: Index := tree->current;
+        let ps: Span[Node, R] := slice(readVector(&(tree->nodes)), 0, length(readVector(&(tree->nodes))));
+        var n: Int64 := 0; var c: Index := ps[c0].first;
+        while c /= 0 do if ps[c].kind = kindTabPage then n := n + 1; end if; c := ps[c].next; end while;
+        return n;
+    end;
+    generic [R: Region]
+    function selectedTab(tree: &![Tree, R]): Int64 is
+        let c0: Index := tree->current;
+        let ps: Span[Node, R] := slice(readVector(&(tree->nodes)), 0, length(readVector(&(tree->nodes))));
+        return ps[c0].value;
+    end;
 
     -- Text belongs to the most recent node; append extends it (numbers, pieces).
     function pushBytes(tree: &![Tree], value: Span[Nat8]): Unit is
@@ -364,6 +384,11 @@ module body OS.Ui.Tree is
         let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].columns := columns; return nil;
     end;
     generic [R: Region]
+    function setPayload(tree: &![Tree, R], payload: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].payload := payload; return nil;
+    end;
+    generic [R: Region]
     function setFit(tree: &![Tree, R], fit: Int64): Unit is
         let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
         ns[l].fit := fit; return nil;
@@ -438,7 +463,8 @@ module body OS.Ui.Tree is
     function expands(kind: Int64): Bool is
         return kind = kindTextBox or kind = kindSlider or kind = kindProgress or kind = kindSeparator or kind = kindList
             or kind = kindTable or kind = kindTreeView or kind = kindTextView or kind = kindScroll or kind = kindTabs
-            or kind = kindGroup or kind = kindToolbar or kind = kindStatus or kind = kindColumn or kind = kindRow or kind = kindGrid or kind = kindSplit;
+            or kind = kindGroup or kind = kindToolbar or kind = kindStatus or kind = kindColumn or kind = kindRow or kind = kindGrid or kind = kindSplit
+            or kind = kindTabPage;
     end;
     function crossAlign(ps: Span[Node], parent: Index, child: Index): Int64 is
         if ps[child].align /= alignInherit then return ps[child].align; end if;
@@ -453,7 +479,7 @@ module body OS.Ui.Tree is
         return alignStart;
     end;
     function panel(kind: Int64): Bool is
-        return kind = kindGroup or kind = kindColumn or kind = kindGrid or kind = kindScroll or kind = kindTabs or kind = kindList
+        return kind = kindGroup or kind = kindTabPage or kind = kindColumn or kind = kindGrid or kind = kindScroll or kind = kindTabs or kind = kindList
             or kind = kindTable or kind = kindTreeView or kind = kindTextView;
     end;
     -- Lists, tables and trees: rows placed by index under an optional header.
@@ -480,8 +506,23 @@ module body OS.Ui.Tree is
         return k = kindRow or k = kindToolbar or k = kindStatus;
     end;
     -- Extra space a container reserves above its children (a group's title).
+    constant tabStrip: Int64 := 24;
     function insetTop(ps: Span[Node], i: Index): Int64 is
-        if ps[i].kind = kindGroup then return ps[i].padding + 10; end if; return ps[i].padding;
+        if ps[i].kind = kindGroup then return ps[i].padding + 10; end if;
+        if ps[i].kind = kindTabs then return ps[i].padding + tabStrip; end if;
+        return ps[i].padding;
+    end;
+    -- Each tab is its title plus 20 pixels.
+    function tabStripWidth(all: Span[Nat8], ps: Span[Node], i: Index): Int64 is
+        var w: Int64 := 8; var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindTabPage then w := w + textWidth(textSpan(all, ps, c)) + 20; end if; c := ps[c].next; end while;
+        return w;
+    end;
+    -- A pop-up button is as wide as its longest choice plus the triangle.
+    function popupWidth(all: Span[Nat8], ps: Span[Node], i: Index): Int64 is
+        var w: Int64 := 40; var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindMenuItem then w := maxInt(w, textWidth(textSpan(all, ps, c)) + 34); end if; c := ps[c].next; end while;
+        return w;
     end;
     function intrinsicWidth(all: Span[Nat8], ps: Span[Node], i: Index): Int64 is
         let k: Int64 := ps[i].kind; let t: Int64 := textWidth(textSpan(all, ps, i));
@@ -497,6 +538,7 @@ module body OS.Ui.Tree is
         if k = kindList or k = kindTable or k = kindTreeView or k = kindTextView or k = kindScroll then return 160; end if;
         if k = kindGroup then return t + 16; end if;
         if k = kindCell or k = kindHeader then return t + 12; end if;
+        if k = kindPopup then return popupWidth(all, ps, i); end if;
         return 0;
     end;
     function intrinsicHeight(all: Span[Nat8], ps: Span[Node], i: Index, width: Int64): Int64 is
@@ -514,6 +556,7 @@ module body OS.Ui.Tree is
         if k = kindList or k = kindTable or k = kindTreeView or k = kindTextView or k = kindScroll then return 100; end if;
         if k = kindCell or k = kindListRow then return rowHeight; end if;
         if k = kindHeader then return 19; end if;
+        if k = kindPopup then return 22; end if;
         if k = kindGroup then return 26; end if;
         return 0;
     end;
@@ -539,7 +582,7 @@ module body OS.Ui.Tree is
         while i > 0 do
             i := i - 1;
             let k: Int64 := ps[i].kind; var w: Int64 := 0;
-            if ps[i].first = 0 or listLike(k) or k = kindScroll then w := intrinsicWidth(all, ps, i);
+            if ps[i].first = 0 or listLike(k) or k = kindScroll or k = kindPopup then w := intrinsicWidth(all, ps, i);
             else if k = kindGrid then
                 g := gridColumns(ps, g, i, &!columnWidths);
                 for c from 0 until length(&columnWidths) do w := w + get(&columnWidths, c); end for;
@@ -557,6 +600,7 @@ module body OS.Ui.Tree is
                     if k = kindSplit then w := w + splitBar; else w := w + ps[i].spacing * (n - 1); end if;
                 end if;
                 if k = kindGroup then w := maxInt(w, intrinsicWidth(all, ps, i)); end if;
+                if k = kindTabs then w := maxInt(w, tabStripWidth(all, ps, i)); end if;
             end if;
             if k /= kindRoot then w := w + 2 * ps[i].padding; end if;
             g[i].prefWidth := constrain(ps[i].fixedWidth, ps[i].minWidth, w);
@@ -773,7 +817,7 @@ module body OS.Ui.Tree is
         while i > 0 do
             i := i - 1;
             let k: Int64 := ps[i].kind; var h: Int64 := 0;
-            if ps[i].first = 0 or listLike(k) or k = kindScroll then h := intrinsicHeight(all, ps, i, g[i].width);
+            if ps[i].first = 0 or listLike(k) or k = kindScroll or k = kindPopup then h := intrinsicHeight(all, ps, i, g[i].width);
             else if k = kindGrid then
                 let columns: Int64 := maxInt(ps[i].columns, 1);
                 var c: Index := ps[i].first; var at: Int64 := 0; var rowMax: Int64 := 0; var rows: Int64 := 0;
@@ -1009,10 +1053,16 @@ module body OS.Ui.Tree is
         end for;
         return 0;
     end;
+    -- Items of context menus and pop-up buttons are not keyboard shortcuts.
+    function inContext(ps: Span[Node], i: Index): Bool is
+        let p: Index := ps[i].parent;
+        return ps[p].kind = kindPopup or (ps[p].kind = kindMenu and has(ps[p].flags, flagContext));
+    end;
     -- A declared shortcut or menu item matching a key event (code with modifiers).
     function shortcut(ps: Span[Node], code: Int64): Index is
         for i from 1 until spanLength(ps) do
-            if (ps[i].kind = kindShortcut or ps[i].kind = kindMenuItem) and ps[i].value = code and code /= 0 and enabled(ps, i) then return i; end if;
+            if (ps[i].kind = kindShortcut or ps[i].kind = kindMenuItem) and ps[i].value = code and code /= 0 and enabled(ps, i)
+                and within(ps, i, topOverlay(ps)) and not inContext(ps, i) then return i; end if;
         end for;
         return 0;
     end;

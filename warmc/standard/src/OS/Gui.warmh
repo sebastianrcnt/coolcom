@@ -90,4 +90,14 @@ module OS.Gui is
     function clipboardSize(serial: Int64): Int64;
     -- The pointer over this window's client area: 0 arrow, 1 I-beam.
     function setPointer(window: &![Window], shape: Int64): Result[Unit, IoError];
+    -- Menus with keyboard shortcuts shown at the right (keys, e.g. "\u{2303}S"), and
+    -- flags 1 disabled, 2 checked, 4 separator. resetMenus removes every menu.
+    function resetMenus(window: &![Window]): Result[Unit, IoError];
+    function addMenuEntry(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError];
+    -- A pop-up list at client (x, y) with item current under the pointer. The choice
+    -- arrives as Menu(id => popupChoice + index); Menu(id => -1) when dismissed.
+    constant popupChoice: Int64;
+    function popupClear(window: &![Window]): Result[Unit, IoError];
+    function popupAdd(window: &![Window], value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError];
+    function popupShow(window: &![Window], x: Int64, y: Int64, current: Int64): Result[Unit, IoError];
 end module.

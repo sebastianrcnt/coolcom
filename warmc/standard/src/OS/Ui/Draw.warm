@@ -10,7 +10,8 @@ import OS.Ui.Tree (Node, Geom, textSpan, has, enabled, intersect, maxInt, minInt
     kindSlider, kindProgress, kindSeparator, kindImage, kindTextBox, kindToolbar, kindStatus,
     flagDefault, flagPlain, flagWrap, flagCenter, flagSecure, defaultRing, checkSize, splitBar, toIndex64, toInt,
     kindList, kindTable, kindTreeView, kindTextView, kindScroll, kindListRow, kindHeader, kindCell, listLike, listBody,
-    headerHeight, listInset, rowHeight, scrollBarWidth);
+    headerHeight, listInset, rowHeight, scrollBarWidth,
+    kindPopup, kindTabs, kindTabPage, kindDialog, kindMenuItem, flagHidden, flagDropTarget, tabStrip);
 module body OS.Ui.Draw is
     -- The classic Macintosh look, one bit: black on white, 50% gray patterns,
     -- rounded buttons with a bold default ring, inverted pressed state. All
@@ -137,6 +138,17 @@ module body OS.Ui.Draw is
     generic [R: Region]
     function paint(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool,
         state: &[State], clip: Rect, pictures: &[Vector[Picture]]): Unit is
+        paintNode(&~w, all, ps, gs, i, pressed, focused, keyboard, state, clip, pictures);
+        -- A drop target under a dragged item: a two-pixel frame.
+        if state->dropOver /= 0 and state->dropOver = ps[i].ident then
+            let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
+            box(&~w, r, black); box(&~w, inset(r, 1), black);
+        end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function paintNode(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool,
+        state: &[State], clip: Rect, pictures: &[Vector[Picture]]): Unit is
         let e: Ephemeral := ephemeral(state, ps[i].ident);
         let k: Int64 := ps[i].kind;
         let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
@@ -196,6 +208,17 @@ module body OS.Ui.Draw is
             paintBar(&~w, barOf(ps, gs, i, state, 0));
         else if k = kindTextView then
             paintTextView(&~w, all, ps, gs, i, r, focused, on, e, clip, state);
+        else if k = kindTabs then
+            paintTabs(&~w, all, ps, gs, i, r, focused and keyboard, on);
+        else if k = kindPopup then
+            paintPopup(&~w, all, ps, gs, i, r, pressed or state->popup = ps[i].ident, focused and keyboard, on);
+        else if k = kindDialog then
+            -- The classic modal frame: a black line, a white line, a two-pixel black ring.
+            fill(&~w, r, white); box(&~w, r, black); box(&~w, inset(r, 3), black); box(&~w, inset(r, 4), black);
+        else if k = kindToolbar then
+            fill(&~w, rect(r.x, r.y + r.height - 1, r.width, 1), black);
+        else if k = kindStatus then
+            fill(&~w, rect(r.x, r.y, r.width, 1), black);
         else if k = kindImage then
             picture(&~w, r.x + (r.width - ps[i].low) / 2, r.y + (r.height - ps[i].high) / 2, ps[i].value, black, pictures);
         else if k = kindSplit then
@@ -284,6 +307,62 @@ module body OS.Ui.Draw is
         setClip(&~w, clip);
         return nil;
     end;
+    ------------------------------------------------------------------ window parts
+
+    -- Folder tabs: each a box with rounded top corners; the selected one is taller
+    -- and opens into the page frame below.
+    generic [R: Region]
+    function paintTabs(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, ring: Bool, on: Bool): Unit is
+        let stripBase: Int64 := r.y + tabStrip - 1;
+        let frame: Rect := rect(r.x, stripBase, r.width, r.height - tabStrip + 1);
+        fill(&~w, frame, white); box(&~w, frame, black);
+        var tx: Int64 := r.x + 4; var c: Index := ps[i].first; var index: Int64 := 0;
+        while c /= 0 do
+            if ps[c].kind = kindTabPage then
+                let t: Span[Nat8, R] := sliceSpan(all, ps[c].text, ps[c].textEnd);
+                let tw: Int64 := textWidth(t) + 20;
+                let selected: Bool := index = ps[i].value;
+                var top: Int64 := r.y + 3; if selected then top := r.y; end if;
+                let tab: Rect := rect(tx, top, tw, stripBase - top + 1);
+                fill(&~w, rect(tab.x + 2, tab.y, tab.width - 4, 1), black);
+                fill(&~w, rect(tab.x + 1, tab.y + 1, 1, 1), black); fill(&~w, rect(tab.x + tab.width - 2, tab.y + 1, 1, 1), black);
+                fill(&~w, rect(tab.x, tab.y + 2, 1, tab.height - 2), black); fill(&~w, rect(tab.x + tab.width - 1, tab.y + 2, 1, tab.height - 2), black);
+                fill(&~w, rect(tab.x + 1, tab.y + 2, tab.width - 2, tab.height - 2), white);
+                fill(&~w, rect(tab.x + 2, tab.y + 1, tab.width - 4, 1), white);
+                if selected then fill(&~w, rect(tab.x + 1, stripBase, tab.width - 2, 1), white); end if;
+                var style: Int64 := styleBold; if not on then style := style | styleDim; end if;
+                text(&~w, tab.x + 10, top + (stripBase - top - lineHeight) / 2 + 1, t, black, style);
+                if selected and ring then focusRing(&~w, rect(tab.x + 7, top + 3, tw - 14, stripBase - top - 4)); end if;
+                tx := tx + tw; index := index + 1;
+            end if;
+            c := ps[c].next;
+        end while;
+        return nil;
+    end;
+    -- Classic pop-up menu button: a framed box with a one-pixel shadow, the chosen
+    -- item, and a downward triangle; inverted while its list is open.
+    generic [R: Region]
+    function paintPopup(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, open: Bool, ring: Bool, on: Bool): Unit is
+        let face: Rect := rect(r.x, r.y, r.width - 1, r.height - 1);
+        var fg: Int64 := black; var bg: Int64 := white; if open then fg := white; bg := black; end if;
+        fill(&~w, face, bg); box(&~w, face, black);
+        fill(&~w, rect(r.x + 2, r.y + r.height - 1, r.width - 2, 1), black); fill(&~w, rect(r.x + r.width - 1, r.y + 2, 1, r.height - 2), black);
+        var index: Int64 := 0; var c: Index := ps[i].first;
+        while c /= 0 do
+            if ps[c].kind = kindMenuItem then
+                if index = ps[i].value then
+                    var style: Int64 := styleBold; if not on then style := style | styleDim; end if;
+                    fittedText(&~w, face.x + 8, face.y + (face.height - lineHeight) / 2, sliceSpan(all, ps[c].text, ps[c].textEnd), face.width - 30, fg, style);
+                end if;
+                index := index + 1;
+            end if;
+            c := ps[c].next;
+        end while;
+        bitmap(&~w, rect(face.x + face.width - 16, face.y + face.height / 2 - 2, 7, 4), arrowDown(), 1, fg);
+        if ring then focusRing(&~w, inset(face, 2)); end if;
+        return nil;
+    end;
+
     ------------------------------------------------------------------ data views
 
     -- Arrows for scroll bars, sort marks and disclosure triangles (7x4 / 4x7).

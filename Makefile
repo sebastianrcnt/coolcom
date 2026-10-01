@@ -518,7 +518,7 @@ test: host-scroll-test gui-files-test
 
 # OS.Ui declarative framework: gallery/app scenarios, CPU/Venus at 1x/2x (docs/ui-framework.md).
 .PHONY: ui-test
-UI_STAGES ?= U1,U2,U3
+UI_STAGES ?= U1,U2,U3,U4
 # Order-only: under make -j test, run after every other suite. Its many VM sessions
 # (1x/2x, CPU/Venus) would otherwise starve the timing-sensitive suites running
 # beside them; alone at the end it adds no contention.
