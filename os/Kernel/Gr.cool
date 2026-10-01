@@ -1,0 +1,68 @@
+// Immediate-mode drawing into the calling task's physical BGRA surface.
+// Coordinates and damage are logical pixels. The compositor owns the chrome.
+CGuiWindow *GrWindow() {CGuiWindow *w = Fs->gui_window; if (!w || w->closed || !w->pixel) return NULL; return w;}
+U0 GrDamage(CGuiWindow *w, I64 x, I64 y, I64 width, I64 height)
+{
+    if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
+    if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
+    if (width <= 0 || height <= 0) return;
+    w->revision++; GuiDamage(w->x + 1 + GUI_PAD + x, w->y + GUI_TITLE + GUI_PAD + y, width, height);
+}
+U0 GrRect(I64 x, I64 y, I64 width, I64 height, I64 color)
+{
+    CGuiWindow *w = GrWindow;
+    if (!w || x < -32768 || x > 32767 || y < -32768 || y > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return;
+    if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
+    if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
+    if (width <= 0 || height <= 0) return;
+    GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, width, height, color & 0xFFFFFF);
+    GrDamage(w, x, y, width, height);
+}
+U32 *GrPixels(I64 *stride = NULL)
+{
+    CGuiWindow *w = GrWindow; if (!w) return NULL;
+    if (stride) *stride = w->pw * 4;
+    return w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale;
+}
+U0 GrPoint(CGuiWindow *w, I64 x, I64 y, I64 color)
+{
+    if (0 <= x < w->w && 0 <= y < w->h)
+        GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, 1, 1, color & 0xFFFFFF);
+}
+U0 GrLine(I64 x0, I64 y0, I64 x1, I64 y1, I64 color)
+{
+    CGuiWindow *w = GrWindow; I64 dx, dy, sx = 1, sy = 1, err, twice, minx, miny, width, height;
+    if (!w || x0 < -32768 || x0 > 32767 || y0 < -32768 || y0 > 32767 || x1 < -32768 || x1 > 32767 || y1 < -32768 || y1 > 32767) return;
+    minx = MinI64(x0, x1); miny = MinI64(y0, y1); width = AbsI64(x1 - x0) + 1; height = AbsI64(y1 - y0) + 1;
+    dx = AbsI64(x1 - x0); dy = -AbsI64(y1 - y0); if (x0 > x1) sx = -1; if (y0 > y1) sy = -1; err = dx + dy;
+    while (TRUE) {
+        GrPoint(w, x0, y0, color); if (x0 == x1 && y0 == y1) break;
+        twice = 2 * err; if (twice >= dy) {err += dy; x0 += sx;} if (twice <= dx) {err += dx; y0 += sy;}
+    }
+    GrDamage(w, minx, miny, width, height);
+}
+U0 GrText(I64 x, I64 y, U8 *text, I64 color = 0)
+{//UTF-8 Unifont, transparent background, integer physical scale.
+    CGuiWindow *w = GrWindow; U8 *glyph; I64 cp, len, cells, row, col, bits, start = x;
+    if (!w || !text || x < -32768 || x > 32767 || y < -32768 || y > 32767) return;
+    while (*text && x < w->w) {
+        len = Utf8Len(*text); if (!len) len = 1;
+        for (row = 1; row < len; row++) if (!text[row]) {len = 1; break;}
+        cp = Utf8Cp(text, len); text += len; glyph = FontGlyph(cp, &cells);
+        if (glyph) for (row = 0; row < 16; row++) {
+                bits = glyph[row]; if (cells == 2) bits = glyph[row * 2] << 8 | glyph[row * 2 + 1];
+                for (col = 0; col < cells * 8; col++) if (bits & (1 << (cells * 8 - col - 1))) GrPoint(w, x + col, y + row, color);
+            }
+        if (!glyph) cells = 1; x += cells * 8;
+    }
+    GrDamage(w, start, y, x - start, 16);
+}
+U0 GrBlit(I64 x, I64 y, I64 width, I64 height, U32 *source, I64 source_stride)
+{//BGRA, source stride in bytes; input is logical-sized, copied at integer scale.
+    CGuiWindow *w = GrWindow; I64 i, j;
+    if (!w || !source || width < 0 || width > 32767 || height < 0 || height > 32767 || source_stride < width * 4 || source_stride > 0x7FFFFFFF) return;
+    for (j = MaxI64(0, -y); j < height && j < w->h - y; j++)
+        for (i = MaxI64(0, -x); i < width && i < w->w - x; i++) GrPoint(w, x + i, y + j, *(source(U8 *) + j * source_stride + i * 4)(U32 *));
+    GrDamage(w, x, y, width, height);
+}
+U0 GrDirty(I64 x, I64 y, I64 width, I64 height) {CGuiWindow *w = GrWindow; if (w) GrDamage(w, x, y, width, height);}

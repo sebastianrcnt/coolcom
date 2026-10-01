@@ -3,7 +3,17 @@
 #define GUI_WINDOWS 16
 #define GUI_TITLE 22
 #define GUI_MENU 22
+#define GUI_PAD 3
+#define GUI_FOOTER 12
 #define GUI_WHITE 0xFFFFFF
+#define GUI_EVENT_MOUSE 1
+#define GUI_EVENT_KEY 2
+#define GUI_EVENT_RESIZE 3
+#define GUI_EVENT_CLOSE 4
+#define GUI_EVENT_MENU 5
+#define GUI_INPUT 1024
+#define GUI_EVENTS 64
+class CGuiEvent {I64 type, key, x, y, buttons, wheel, timestamp;};
 class CGuiWindow
 {
     CTask *owner;
@@ -11,22 +21,27 @@ class CGuiWindow
     U32 *pixels;
     I64 x, y, w, h, pw, ph, scale, serial, revision, lock;
     I64 cursor_x, cursor_y, cursor_w;
-    Bool closed, dirty, zoomed;
+    Bool closed, dirty, zoomed, pixel;
+    CGuiEvent events[GUI_EVENTS];
+    I64 event_head, event_tail; Bool event_lost;
     I64 restore_x, restore_y, restore_w, restore_h;
     U8 title[64];
 };
 class CGui
 {
-    CGuiWindow *windows[GUI_WINDOWS], *focus, *drag;
+    CGuiWindow *windows[GUI_WINDOWS], *focus, *drag, *capture;
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
     Bool resizing, damage;
     I64 x0, y0, x1, y1, clock_minute;
     U32 *desktop, *canvas, pointer[12 * 18];
     CTask *task;
     U8 *frame_hook, *stop_hook;
-    I64 frames, raster_rows, desktop_revision;
+    I64 frames, raster_rows, desktop_revision, wheel;
+    CGuiEvent input[GUI_INPUT];
+    I64 input_head, input_tail, input_lock; Bool input_lost;
 };
 CGui gui;
+extern U0 GuiEventPush(CGuiWindow *w, CGuiEvent *e);
 U8 *gui_start_hook; // resident Venus renderer, installed by Terminal.cool
 
 U0 GuiDamage(I64 x, I64 y, I64 w, I64 h)
@@ -36,7 +51,7 @@ U0 GuiDamage(I64 x, I64 y, I64 w, I64 h)
         if (x + w > gui.x1) gui.x1 = x + w; if (y + h > gui.y1) gui.y1 = y + h;}
     gui.damage = TRUE;
 }
-U0 GuiWinDamage(CGuiWindow *w) {GuiDamage(w->x, w->y, w->w + 3, w->h + GUI_TITLE + 3);}
+U0 GuiWinDamage(CGuiWindow *w) {GuiDamage(w->x, w->y, w->w + 2 * GUI_PAD + 3, w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3);}
 U0 GuiFill(U32 *p, I64 pw, I64 ph, I64 scale, I64 x, I64 y, I64 w, I64 h, I64 color)
 {//Logical rectangles, clipped before any pointer arithmetic.
     I64 i, j;
@@ -66,20 +81,27 @@ U0 GuiText(U32 *p, I64 pw, I64 ph, I64 scale, I64 x, I64 y, U8 *text)
 U0 GuiDecorate(CGuiWindow *w)
 {
     I64 i, s = w->scale, pw = w->pw, ph = w->ph;
-    GuiFill(w->pixels, pw, ph, s, 0, 0, w->w + 2, GUI_TITLE, GUI_WHITE);
-    if (gui.focus == w) for (i = 4; i < GUI_TITLE - 3; i += 3) GuiFill(w->pixels, pw, ph, s, 4, i, w->w - 6, 1, 0);
+    I64 bw = w->w + 2 * GUI_PAD, bh = w->h + 2 * GUI_PAD + GUI_FOOTER;
+    // White client insets separate the black frame from ANSI-black terminal cells.
+    GuiFill(w->pixels, pw, ph, s, 1, GUI_TITLE, bw, GUI_PAD, GUI_WHITE);
+    GuiFill(w->pixels, pw, ph, s, 1, GUI_TITLE + GUI_PAD, GUI_PAD, w->h, GUI_WHITE);
+    GuiFill(w->pixels, pw, ph, s, 1 + GUI_PAD + w->w, GUI_TITLE + GUI_PAD, GUI_PAD, w->h, GUI_WHITE);
+    GuiFill(w->pixels, pw, ph, s, 1, GUI_TITLE + GUI_PAD + w->h, bw, GUI_PAD + GUI_FOOTER + 1, GUI_WHITE);
+    GuiFill(w->pixels, pw, ph, s, 0, 0, bw + 2, GUI_TITLE, GUI_WHITE);
+    if (gui.focus == w) for (i = 4; i < GUI_TITLE - 3; i += 3) GuiFill(w->pixels, pw, ph, s, 4, i, bw - 6, 1, 0);
     i = StrLen(w->title) * 8;
-    GuiFill(w->pixels, pw, ph, s, (w->w - i) / 2 - 3, 1, i + 6, GUI_TITLE - 2, GUI_WHITE);
-    GuiText(w->pixels, pw, ph, s, (w->w - i) / 2, 3, w->title);
-    GuiFill(w->pixels, pw, ph, s, 7, 6, 10, 10, GUI_WHITE); GuiBox(w->pixels, pw, ph, s, 7, 6, 10, 10);
-    GuiFill(w->pixels, pw, ph, s, w->w - 16, 6, 10, 10, GUI_WHITE); GuiBox(w->pixels, pw, ph, s, w->w - 16, 6, 10, 10);
-    GuiFill(w->pixels, pw, ph, s, 0, GUI_TITLE - 1, w->w + 2, 1, 0);
-    GuiBox(w->pixels, pw, ph, s, 0, 0, w->w + 2, w->h + GUI_TITLE + 2);
-    GuiFill(w->pixels, pw, ph, s, w->w + 2, 1, 1, w->h + GUI_TITLE + 2, 0);
-    GuiFill(w->pixels, pw, ph, s, 1, w->h + GUI_TITLE + 2, w->w + 2, 1, 0);
-    GuiFill(w->pixels, pw, ph, s, w->w - 10, w->h + GUI_TITLE - 10, 11, 11, GUI_WHITE);
-    GuiBox(w->pixels, pw, ph, s, w->w - 10, w->h + GUI_TITLE - 10, 11, 11);
-    for (i = 0; i < 7; i += 2) GuiFill(w->pixels, pw, ph, s, w->w - 7 + i, w->h + GUI_TITLE - 7, 1, 7, 0);
+    GuiFill(w->pixels, pw, ph, s, (bw - i) / 2 - 3, 1, i + 6, GUI_TITLE - 2, GUI_WHITE);
+    GuiText(w->pixels, pw, ph, s, (bw - i) / 2, 3, w->title);
+    if (gui.focus == w) {
+        GuiFill(w->pixels, pw, ph, s, 7, 6, 10, 10, GUI_WHITE); GuiBox(w->pixels, pw, ph, s, 7, 6, 10, 10);
+        GuiFill(w->pixels, pw, ph, s, bw - 16, 6, 10, 10, GUI_WHITE); GuiBox(w->pixels, pw, ph, s, bw - 16, 6, 10, 10);
+        GuiBox(w->pixels, pw, ph, s, bw - 10, bh + GUI_TITLE - 10, 11, 11);
+        for (i = 0; i < 7; i += 2) GuiFill(w->pixels, pw, ph, s, bw - 7 + i, bh + GUI_TITLE - 7, 1, 7, 0);
+    }
+    GuiFill(w->pixels, pw, ph, s, 0, GUI_TITLE - 1, bw + 2, 1, 0);
+    GuiBox(w->pixels, pw, ph, s, 0, 0, bw + 2, bh + GUI_TITLE + 2);
+    GuiFill(w->pixels, pw, ph, s, bw + 2, 1, 1, bh + GUI_TITLE + 2, 0);
+    GuiFill(w->pixels, pw, ph, s, 1, bh + GUI_TITLE + 2, bw + 2, 1, 0);
     w->revision++; GuiWinDamage(w);
 }
 U0 GuiFocus(CGuiWindow *w)
@@ -101,12 +123,13 @@ Bool GuiResize(CGuiWindow *w, I64 width, I64 height)
     U32 *pixels; I64 cols, rows;
     if (!w || width < 160 || height < 64 || width > 4096 || height > 4096) return FALSE;
     cols = width * gui.scale / font.cw; rows = height * gui.scale / font.ch;
-    width = cols * font.cw / gui.scale; height = rows * font.ch / gui.scale;
-    pixels = CAlloc((width + 3) * (height + GUI_TITLE + 3) * gui.scale * gui.scale * 4);
+    if (!w->pixel) {width = cols * font.cw / gui.scale; height = rows * font.ch / gui.scale;}
+    pixels = CAlloc((width + 2 * GUI_PAD + 3) * (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * gui.scale * gui.scale * 4);
     if (!pixels) return FALSE;
+    MemSet(pixels, 0xFF, (width + 2 * GUI_PAD + 3) * (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * gui.scale * gui.scale * 4);
     GuiWinDamage(w); Free(w->pixels); w->pixels = pixels;
     w->w = width; w->h = height; w->scale = gui.scale;
-    w->pw = (width + 3) * gui.scale; w->ph = (height + GUI_TITLE + 3) * gui.scale;
+    w->pw = (width + 2 * GUI_PAD + 3) * gui.scale; w->ph = (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * gui.scale;
     w->serial = font.serial; w->cursor_w = 0;
     if (w->term) VtResize(w->term, cols, rows);
     GuiDecorate(w); w->dirty = TRUE;
@@ -125,7 +148,7 @@ U0 GuiZoom(CGuiWindow *w)
     if (w->zoomed) {GuiMove(w, w->restore_x, w->restore_y); GuiResize(w, w->restore_w, w->restore_h);}
     else {
         w->restore_x = w->x; w->restore_y = w->y; w->restore_w = w->w; w->restore_h = w->h;
-        GuiMove(w, 0, GUI_MENU); GuiResize(w, gui.w - 3, gui.h - GUI_MENU - GUI_TITLE - 3);
+        GuiMove(w, 0, GUI_MENU); GuiResize(w, gui.w - 2 * GUI_PAD - 3, gui.h - GUI_MENU - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER - 3);
     }
     w->zoomed = !w->zoomed;
 }
@@ -141,12 +164,12 @@ U0 GuiTaskGone(CTask *t)
     if (w) {w->owner = NULL; w->closed = TRUE; t->gui_window = NULL;}
 }
 U0 GuiShellSink(CVTerm *v, U8 c) {no_warn v; UartPut(c);}
-CGuiWindow *GuiNew(U8 *title, I64 width = 480, I64 height = 256)
+CGuiWindow *GuiNew(U8 *title, I64 width = 480, I64 height = 256, Bool pixel = FALSE)
 {
     CGuiWindow *w; I64 i;
     if (!gui_active || Gs->num || gui.count >= GUI_WINDOWS || Fs->gui_window) return NULL;
     w = CAlloc(sizeof(CGuiWindow)); if (!w) return NULL;
-    for (i = 0; i < 63 && title[i]; i++) w->title[i] = title[i]; w->owner = Fs;
+    for (i = 0; i < 63 && title[i]; i++) w->title[i] = title[i]; w->owner = Fs; w->pixel = pixel;
     w->term = VtNew(1, 1); w->term->owner = Fs; w->term->sink = &GuiShellSink;
     if (!GuiResize(w, width, height)) {VtRelease(w->term); Free(w); return NULL;}
     w->x = 20 + gui.count * 24; w->y = GUI_MENU + 12 + gui.count * 24;
@@ -161,8 +184,9 @@ U0 GuiShellTask(U8 *data)
     if (GuiNew("Shell")) {GuiLog("GUI SHELL OPEN\n"); if (gui.count == 2) GuiLog("GUI WINDOWS READY\n"); ShellTask(-1);}
 }
 CTask *GuiShell() {return Spawn(&GuiShellTask, NULL, "GUI Shell", 0, adam_task, SHELL_STACK);}
-Bool GuiKey(I64 ev)
-{//Interrupt-safe: shortcuts are queued for the compositor, other keys use the focus queue.
+Bool GuiDispatchKey(I64 ev, I64 timestamp)
+{//Called by the compositor in input order, after preceding mouse focus changes.
+    Bool shortcut = TRUE;
     if (!gui_active) return FALSE;
     if ((ev & (KF_CTRL | KF_ALT)) == (KF_CTRL | KF_ALT)) {
         if ((ev & KEY_CODE) == 'n') gui.action = 1;
@@ -171,24 +195,77 @@ Bool GuiKey(I64 ev)
         else if ((ev & KEY_CODE) == KEY_RIGHT) gui.action = 4;
         else if ((ev & KEY_CODE) == KEY_UP) gui.action = 5;
         else if ((ev & KEY_CODE) == KEY_TAB) gui.action = 6;
-        else return FALSE;
-        return TRUE;
+        else shortcut = FALSE;
+        if (shortcut) return TRUE;
     }
-    if (gui.focus && !gui.focus->closed) VtKeyPush(gui.focus->term, ev);
+    if (gui.focus && !gui.focus->closed) {
+        if (gui.focus->pixel) {
+            CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_KEY; e.key = ev; e.timestamp = timestamp;
+            GuiEventPush(gui.focus, &e);
+        } else VtKeyPush(gui.focus->term, ev);
+    }
     return TRUE;
+}
+U0 GuiEventPush(CGuiWindow *w, CGuiEvent *e)
+{
+    I64 next = (w->event_tail + 1) % GUI_EVENTS;
+    if (next == w->event_head) w->event_lost = TRUE;
+    else {MemCpy(&w->events[w->event_tail], e, sizeof(CGuiEvent)); w->event_tail = next;}
+    if (w->owner) TaskWake(w->owner);
+}
+U0 GuiInputPush(CGuiEvent *e)
+{
+    e->timestamp = TimerJiffies;
+    I64 daif = SpinLockIrq(&gui.input_lock), next = (gui.input_tail + 1) % GUI_INPUT;
+    if (next == gui.input_head) gui.input_lost = TRUE;
+    else {MemCpy(&gui.input[gui.input_tail], e, sizeof(CGuiEvent)); gui.input_tail = next;}
+    SpinUnlockIrq(&gui.input_lock, daif);
+    if (gui.task) TaskWake(gui.task);
+}
+Bool GuiInputPop(CGuiEvent *e)
+{
+    I64 daif = SpinLockIrq(&gui.input_lock); Bool found = gui.input_head != gui.input_tail;
+    if (found) {MemCpy(e, &gui.input[gui.input_head], sizeof(CGuiEvent)); gui.input_head = (gui.input_head + 1) % GUI_INPUT;}
+    SpinUnlockIrq(&gui.input_lock, daif); return found;
+}
+Bool GuiKey(I64 ev)
+{
+    CGuiEvent e; if (!gui_active) return FALSE;
+    MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_KEY; e.key = ev; GuiInputPush(&e); return TRUE;
+}
+U0 GuiMouseInput(I64 x, I64 y, I64 buttons, I64 wheel)
+{
+    CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MOUSE;
+    e.x = x; e.y = y; e.buttons = buttons; e.wheel = wheel; GuiInputPush(&e);
+}
+Bool GuiPoll(CGuiEvent *e)
+{
+    CGuiWindow *w = Fs->gui_window; I64 key;
+    if (!w || !e) return FALSE;
+    MemSet(e, 0, sizeof(CGuiEvent));
+    if (w->event_lost) {w->event_lost = FALSE; e->type = GUI_EVENT_KEY; e->key = KEY_INPUT_LOST; return TRUE;}
+    if (w->event_head != w->event_tail) {MemCpy(e, &w->events[w->event_head], sizeof(CGuiEvent)); w->event_head = (w->event_head + 1) % GUI_EVENTS; return TRUE;}
+    if (key = KeyPop) {e->type = GUI_EVENT_KEY; e->key = key; if (key == KEY_RESIZE) e->type = GUI_EVENT_RESIZE; return TRUE;}
+    return FALSE;
+}
+CGuiWindow *GuiNewPixel(U8 *title, I64 width = 480, I64 height = 256)
+{
+    CGuiWindow *w = GuiNew(title, width, height, TRUE);
+    if (w) {w->pixel = TRUE; GuiFill(w->pixels, w->pw, w->ph, w->scale, 1 + GUI_PAD, GUI_TITLE + GUI_PAD, w->w, w->h, GUI_WHITE); GuiDecorate(w);}
+    return w;
 }
 U0 GuiRaster(CGuiWindow *w)
 {//Only dirty terminal rows are rasterized into this window's BGRA texture backing.
     CVTerm *v = w->term; CVtCell *c; U32 *p;
     I64 daif, x, y, n, fg, bg, cw = font.cw, ch = font.ch, s = w->scale;
-    if (!v) return;
+    if (!v || w->pixel) return;
     daif = SpinLockIrq(&v->lock);
     if (v->dirty || w->dirty) {
         for (y = 0; y < v->rows; y++) if (v->row_dirty[y] || w->dirty || y == w->cursor_y || y == v->cy) {
                 for (x = 0; x < v->cols; x += n) {
                     c = &v->cells[y * v->cols + x]; n = 1;
                     if (c->width == 2 && x + 1 < v->cols) n = 2;
-                    VtCellColors(c, &fg, &bg); p = w->pixels + (GUI_TITLE * s + y * ch) * w->pw + s + x * cw;
+                    VtCellColors(c, &fg, &bg); p = w->pixels + ((GUI_TITLE + GUI_PAD) * s + y * ch) * w->pw + (1 + GUI_PAD) * s + x * cw;
                     FbGlyph(p, w->pw * 4, c->cp, n, FbRgb(fg), FbRgb(bg), c->attr & VT_ATTR_BOLD);
                 }
                 v->row_dirty[y] = 0; gui.raster_rows++;
@@ -197,7 +274,7 @@ U0 GuiRaster(CGuiWindow *w)
             x = v->cx; y = v->cy; n = v->cells[y * v->cols + x].width;
             if (!n || x + n > v->cols) n = 1;
             for (fg = 0; fg < ch; fg++) {
-                p = w->pixels + (GUI_TITLE * s + y * ch + fg) * w->pw + s + x * cw;
+                p = w->pixels + ((GUI_TITLE + GUI_PAD) * s + y * ch + fg) * w->pw + (1 + GUI_PAD) * s + x * cw;
                 for (bg = 0; bg < n * cw; bg++) p[bg] ^= 0xFFFFFF;
             }
         }
@@ -256,35 +333,47 @@ U0 GuiCompose()
     }
     gui.damage = FALSE; gui.frames++;
 }
-U0 GuiMouse()
+U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
 {
-    I64 x = mouse.mx / gui.scale, y = mouse.my / gui.scale, i;
-    CGuiWindow *w;
+    I64 x = mx / gui.scale, y = my / gui.scale, i;
+    CGuiWindow *w; Bool active;
     if (x != gui.mx || y != gui.my) {
         GuiDamage(gui.mx, gui.my, 12, 18); GuiDamage(x, y, 12, 18);
         gui.mx = x; gui.my = y;
-        if (gui.drag && (mouse.buttons & 1)) {
-            if (gui.resizing) GuiResize(gui.drag, MaxI64(160, x - gui.drag->x), MaxI64(64, y - gui.drag->y - GUI_TITLE));
+        if (gui.drag && (buttons & 1)) {
+            if (gui.resizing) GuiResize(gui.drag, MaxI64(160, x - gui.drag->x - 2 * GUI_PAD), MaxI64(64, y - gui.drag->y - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER));
             else GuiMove(gui.drag, x - gui.dx, y - gui.dy);
         }
     }
-    if ((mouse.buttons & 1) && !(gui.buttons & 1)) {
+    if ((buttons & 1) && !(gui.buttons & 1)) {
         if (y < GUI_MENU && x < 68) GuiShell;
         else for (i = gui.count - 1; i >= 0; i--) {
                 w = gui.windows[i];
-                if (w->x <= x < w->x + w->w + 2 && w->y <= y < w->y + w->h + GUI_TITLE + 2) {
-                    GuiFocus(w); gui.dx = x - w->x; gui.dy = y - w->y;
+                if (w->x <= x < w->x + w->w + 2 * GUI_PAD + 2 && w->y <= y < w->y + w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 2) {
+                    active = gui.focus == w; GuiFocus(w); gui.dx = x - w->x; gui.dy = y - w->y;
                     if (gui.dy < GUI_TITLE) {
-                        if (gui.dx < 20) GuiClose(w);
-                        else if (gui.dx >= w->w - 18) GuiZoom(w);
+                        if (gui.dx < 20) {if (active) GuiClose(w);}
+                        else if (gui.dx >= w->w + 2 * GUI_PAD - 18) {if (active) GuiZoom(w);}
                         else {gui.drag = w; gui.resizing = FALSE;}
-                    } else if (gui.dx >= w->w - 12 && gui.dy >= w->h + GUI_TITLE - 12) {gui.drag = w; gui.resizing = TRUE;}
+                    } else if (active && gui.dx >= w->w + 2 * GUI_PAD - 12 && gui.dy >= w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER - 12) {gui.drag = w; gui.resizing = TRUE;}
                     break;
                 }
             }
     }
-    if (!(mouse.buttons & 1)) gui.drag = NULL;
-    gui.buttons = mouse.buttons;
+    if (!(buttons & 1)) gui.drag = NULL;
+    w = gui.capture;
+    if (!w && gui.focus && !gui.drag) {
+        w = gui.focus;
+        if (!(w->x + 1 + GUI_PAD <= x < w->x + 1 + GUI_PAD + w->w && w->y + GUI_TITLE + GUI_PAD <= y < w->y + GUI_TITLE + GUI_PAD + w->h)) w = NULL;
+    }
+    if (w && !w->closed) {
+        CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MOUSE;
+        e.x = x - w->x - 1 - GUI_PAD; e.y = y - w->y - GUI_TITLE - GUI_PAD; e.buttons = buttons; e.wheel = wheel - gui.wheel;
+        GuiEventPush(w, &e);
+        if (buttons & 1) gui.capture = w;
+    }
+    if (!(buttons & 1)) gui.capture = NULL;
+    gui.wheel = wheel; gui.buttons = buttons;
 }
 U0 GuiEnd()
 {
@@ -292,7 +381,7 @@ U0 GuiEnd()
     if (stop = gui.stop_hook) (*stop)();
     gui.frame_hook = gui.stop_hook = NULL;
     for (i = 0; i < gui.count; i++) GuiClose(gui.windows[i]);
-    gui.focus = gui.drag = NULL; gui_active = FALSE; gui_key_hook = NULL;
+    gui.focus = gui.drag = gui.capture = NULL; gui_active = FALSE; gui_key_hook = gui_mouse_hook = NULL;
     fb.redraw_all = TRUE; fb.pending = TRUE;
     FbRender;
 }
@@ -301,7 +390,12 @@ U0 GuiTask(U8 *data)
     I64 i, j, action; CGuiWindow *w;
     no_warn data;
     while (gui_active) {
-        GuiMouse;
+        CGuiEvent input;
+        while (GuiInputPop(&input)) {
+            if (input.type == GUI_EVENT_MOUSE) GuiMouse(input.x, input.y, input.buttons, input.wheel);
+            else GuiDispatchKey(input.key, input.timestamp);
+        }
+        if (gui.input_lost) {gui.input_lost = FALSE; if (gui.focus) VtKeyPush(gui.focus->term, KEY_INPUT_LOST);}
         action = gui.action; gui.action = 0;
         if (action == 1) GuiShell;
         else if (action == 2) {GuiEnd; break;}
@@ -311,12 +405,12 @@ U0 GuiTask(U8 *data)
             j = 0; if (action == 4) j = i;
             GuiMove(w, j, GUI_MENU);
             if (action == 5) i = gui.w;
-            GuiResize(w, i - 3, gui.h - GUI_MENU - GUI_TITLE - 3);
+            GuiResize(w, i - 2 * GUI_PAD - 3, gui.h - GUI_MENU - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER - 3);
         }
         for (i = 0; i < gui.count; i++) {
             w = gui.windows[i];
             if (w->closed) {
-                GuiWinDamage(w); if (gui.focus == w) gui.focus = NULL; if (gui.drag == w) gui.drag = NULL;
+                GuiWinDamage(w); if (gui.focus == w) gui.focus = NULL; if (gui.drag == w) gui.drag = NULL; if (gui.capture == w) gui.capture = NULL;
                 // Terminal refs keep data alive until inherited tasks are reaped.
                 if (w->owner) w->owner->gui_window = NULL;
                 for (j = i; j < gui.count - 1; j++) gui.windows[j] = gui.windows[j + 1];
@@ -349,8 +443,10 @@ Bool Gui()
     fb.top = 0; fb.cur_w = 0;
     if (fb.scanout) ArchMmioWrite32(fb.scanout, 0);
     if (fb.gpu) GpuCursorHide;
+    gui.buttons = mouse.buttons; gui.wheel = mouse.wheel;
     gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
-    gui_active = TRUE; gui_key_hook = &GuiKey;
+    gui.input_head = gui.input_tail = 0; gui.input_lost = FALSE;
+    gui_active = TRUE; gui_key_hook = &GuiKey; gui_mouse_hook = &GuiMouseInput;
     GuiPointerInit; GuiDesktop;
     FbRenderUnlock(daif);
     if (fb.venus && (start = gui_start_hook)) (*start)();

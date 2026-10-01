@@ -76,6 +76,8 @@
 #include "Shell.cool"
 #include "ShellCmp.cool"
 #include "Gui.cool"
+#include "Gr.cool"
+#include "GuiDemo.cool"
 #include "NetShell.cool"
 #include "NetHttp.cool"
 #include "KLink.cool"

@@ -32,9 +32,10 @@ def boot(mode, scale=1):
     (d / 'Init.cool').write_text(init)
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(d / 'Init.cool'), '::Init.cool'], check=True)
     script = testvm.BOOT + testvm.typed('Gui;\n') + 'wait GUI READY\nwait GUI WINDOWS READY\n'
+    script += line('CVTerm *back = gui.windows[0]->term; I64 dl = SpinLockIrq(&back->lock); back->bg = ANSI_RGB_FLAG | 0x204060; VtClear(back); back->dirty = TRUE; SpinUnlockIrq(&back->lock, dl);', 40)
     script += line('ConsPutS("\\e[2J\\e[H"); Print("WINDOW ONE\\n");', 1)
     # Click the left close box of the background window; its task is reaped.
-    script += f'2 0 {-369*scale}\n2 1 {-256*scale}\ndelay 30\n1 272 1\ndelay 30\n1 272 0\ndelay 30\n'
+    script += f'2 0 {-369*scale}\n2 1 {-256*scale}\ndelay 30\n1 272 1\ndelay 30\n1 272 0\ndelay 30\n1 272 1\ndelay 30\n1 272 0\ndelay 30\n'
     script += line('if (gui.count != 1) throw(5); GuiShell;', 11) + 'wait GUI WINDOWS READY\n'
     script += line('if (gui.count != 2) throw(6);', 12)
     # Restore pointer to its initial position for the title-drag scenario.
@@ -53,6 +54,7 @@ def boot(mode, scale=1):
     script += '1 29 1\n1 56 1\n' + testvm.keys_of(105) + '1 56 0\n1 29 0\ndelay 30\n'
     script += line('if (gui.focus->x || gui.focus->y != GUI_MENU) throw(4);', 32)
     script += line('GuiZoom(Fs->gui_window); GuiZoom(Fs->gui_window); GuiMove(Fs->gui_window, 80, 90); GuiResize(Fs->gui_window, 400, 208);', 4)
+    script += line('CVTerm *back = gui.windows[0]->term; I64 dl = SpinLockIrq(&back->lock); back->bg = ANSI_RGB_FLAG | 0x204060; VtClear(back); back->dirty = TRUE; SpinUnlockIrq(&back->lock, dl);', 40)
     script += line('ConsPutS("\\e[2J\\e[H"); Print("\\e[31mRED\\e[0m \\e[7mREVERSE\\e[0m\\n"); AnsiCursorHide;', 5)
     script += 'delay 300\nquit\n'
     (d / 'input.txt').write_text(script)
@@ -76,6 +78,12 @@ assert px(700, 300) == (0, 0, 0) and px(701, 300) == (255, 255, 255), 'desktop d
 assert px(750, 10) == (255, 255, 255) and px(750, 21) == (0, 0, 0), 'menu bar'
 assert px(80, 90) == (0, 0, 0) and px(81, 91) == (255, 255, 255), 'window border'
 assert px(104, 94) == (0, 0, 0), 'active title stripes'
+assert px(70, 150) == (32, 64, 96), 'background window has independent blue content'
+assert px(90, 150) == (0, 0, 0), 'front body must occlude background content'
+assert px(80, 150) == (0, 0, 0) and px(81, 150) == (255, 255, 255), 'left border and inset'
+assert px(100, 339) == (0, 0, 0) and px(100, 340) == (0, 0, 0), 'bottom border and shadow'
+assert px(51, 64) == (255, 255, 255), 'inactive close box hidden'
+assert px(524, 344) == (255, 255, 255), 'inactive resize box hidden'
 assert px(700, 300) != px(701, 300)
 two = boot('cpu', 2)
 for y in range(h):
