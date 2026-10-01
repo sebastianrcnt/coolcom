@@ -1,7 +1,7 @@
 // The C standard library for C programs translated to Cool (tools/c2hc), on top of the OS's own
 // functions. One file for both worlds:
 //   - in the OS (Kernel.coolh included first, so COOLCOM_KERNEL is defined) it calls the kernel
-//     (MAlloc, ConsPut, GetLine, FileRead/FileWrite, Sin, Now, ...);
+//     (MAlloc, ConsPut, GetKey/line editing, FileRead/FileWrite, Sin, Now, ...);
 //   - on the host (build/coolc --run) it imports the same names from the native host
 //     (coolc/Host/native.c registers them).
 // Everything is written with the I64i/U8i/F64 family, which both worlds have, and plain functions:
@@ -71,12 +71,90 @@ U0 LC_Write(I64i fd, U8i *buf, I64i n)
 U8i lc_line[520];
 I64i lc_line_pos, lc_line_len;
 
+#ifdef COOLCOM_KERNEL
+I64i LC_ReadLine(U8i *buf, I64i size)
+{//LibC terminal input: the kernel's editing helpers, with empty-line Ctrl+D as EOF.
+    I64i n = 0, pos = 0, hi = 0, ev, c, e;
+    U8i ubuf[4];
+    Bool rejected = FALSE;
+    U0 (*hook)(U8i *b, I64i size, I64i *_n, I64i *_pos);
+    buf[0] = 0;
+    while (TRUE) {
+        ev = GetKey;
+        c = ev & KEY_CODE;
+        if (c == KEY_ENTER)
+            break;
+        if (c == KEY_INPUT_LOST)
+            rejected = TRUE;
+        if (rejected) {
+            // Discard through Enter, as GetLine does; never execute partial input.
+        } else if (ev == (KF_CTRL | 'd') && n == 0)
+            return -1;
+        else if (c == KEY_LEFT) {
+            if (pos > 0) {
+                e = LinePrev(buf, pos);
+                LineBack(LineWidth(buf, e, pos));
+                pos = e;
+            }
+        } else if (c == KEY_RIGHT) {
+            if (pos < n) {
+                e = LineNext(buf, pos, n);
+                LineOut(buf, pos, e);
+                pos = e;
+            }
+        } else if (c == KEY_HOME || ev == (KF_CTRL | 'a')) {
+            LineBack(LineWidth(buf, 0, pos));
+            pos = 0;
+        } else if (c == KEY_END || ev == (KF_CTRL | 'e')) {
+            LineOut(buf, pos, n);
+            pos = n;
+        } else if (c == KEY_DEL) {
+            if (pos < n)
+                LineDelete(buf, &n, &pos, pos, LineNext(buf, pos, n));
+        } else if (c == KEY_BACKSPACE) {
+            if (pos > 0)
+                LineDelete(buf, &n, &pos, LinePrev(buf, pos), pos);
+        } else if (c == KEY_UP) {
+            if (hi < KeyHistory->n) {
+                if (!hi) StrCpy(KeyHistory->edit, buf);
+                hi++;
+                LineSet(buf, size, &n, &pos, HistGet(hi));
+            }
+        } else if (c == KEY_DOWN) {
+            if (hi > 0) {
+                hi--;
+                if (hi) LineSet(buf, size, &n, &pos, HistGet(hi));
+                else LineSet(buf, size, &n, &pos, KeyHistory->edit);
+            }
+        } else if (c == KEY_TAB && !(ev & (KF_CTRL | KF_ALT))) {
+            hook = line_complete_hook;
+            if (hook) (*hook)(buf, size, &n, &pos);
+        } else if (c >= 32 && c < KEY_SPECIAL && !(ev & (KF_CTRL | KF_ALT))) {
+            e = Utf8Enc(ubuf, c);
+            if (n + e > size - 1) {
+                Print("\nERROR: line exceeds %d bytes; input discarded\n", size - 1);
+                rejected = TRUE;
+            } else LineInsert(buf, size, &n, &pos, ubuf, e);
+        }
+    }
+    LineOut(buf, pos, n);
+    ConsPut('\n');
+    if (rejected) n = 0;
+    buf[n] = 0;
+    HistAdd(buf);
+    return n;
+}
+#endif
+
 I64i LC_GetChar()
-{//The next byte of the terminal input, or -1 at its end (never, in the OS: a line at a time).
+{//The next byte of terminal input, or -1 at EOF.
 #ifdef COOLCOM_KERNEL
     if (lc_line_pos >= lc_line_len) {
-        GetLine(lc_line, 512);
-        lc_line_len = StrLen(lc_line);
+        lc_line_len = LC_ReadLine(lc_line, 512);
+        if (lc_line_len < 0) {
+            lc_line_len = 0;
+            return -1;
+        }
         lc_line[lc_line_len++] = '\n';
         lc_line_pos = 0;
     }
@@ -1881,6 +1959,8 @@ I32i LC_GetC(LC_FILE *f)
         f->ungot = -1;
         return c;
     }
+    if (f->eof)
+        return -1;
     if (f->kind == 0) {
         c = LC_GetChar();
         if (c < 0)
@@ -2600,6 +2680,9 @@ I32i LibCRun(U8i *mainfp)
     else {
         lc_run_active = 1;
         lc_track_allocs = 1;
+        lc_line_pos = lc_line_len = 0;
+        stdin->eof = stdin->err = 0;
+        stdin->ungot = -1;
         status = (*fn)(lc_argc, lc_argv);
     }
     lc_run_active = 0;
