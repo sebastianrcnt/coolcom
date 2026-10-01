@@ -10,12 +10,23 @@ physical BGRA backing by the display's integer scale. Chrome stays monochrome;
 fill/text/line may use RGB colors. The 3-pixel client inset and all decorations
 belong to the compositor. Applications do not draw into the title or frame.
 
+Drawing targets a back buffer. present commits the dirty region as one completed
+frame; poll also commits before reading the next event, including Idle. Finish
+clear/repaint before present or the next poll. Sleeping while drawing keeps the
+previous completed frame visible. present does not wait for scanout.
+
 Widgets are immediate-mode. Keep Button, List and TextInput state in the app and
 call the widgets when handling an event or repainting. Buttons activate on
 release (Enter activates a default button); selected list rows invert. Lists
 use listFrame plus listItem for each visible row. Scrollbars have arrow buttons,
 a dither track and a thumb. TextInput edits UTF-8 with left/right/home/end,
 backspace/delete and a 256-byte capacity. Destroy it before closing the Window.
+
+buttonNeedsRedraw, listNeedsRedraw (with the selectable row width) and
+textInputNeedsRedraw query whether an event changes visible state or activates a
+control before repainting. Resolve listSelection before drawing visible rows so
+the previous selection is erased in that same frame. Passive mouse motion has
+no hover artwork to update.
 
 poll returns Idle when empty; sleep/yield through OS.Task while idle. Close is a
 request: finish cleanup and close the Window promptly (the desktop forces a

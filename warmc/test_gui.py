@@ -6,12 +6,12 @@ from os_modules import os_modules
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/warm-gui'
 OUT.mkdir(parents=True, exist_ok=True)
-imports = 'import OS.Gui (Gui, Window, open, close, acquireGui, releaseGui); import OS.Error (IoError);\n'
+imports = 'import OS.Gui (Gui, Window, open, close, present, acquireGui, releaseGui); import OS.Error (IoError);\n'
 probes = [
     ('forge-window', 'let window: Window := Window(handle => 1); close(window);', False, 'callable'),
     ('forge-gui', 'let gui: Gui := Gui(); releaseGui(gui);', False, 'callable'),
     ('missing-authority', 'open("Test", 320, 200);', False, 'Wrong number of arguments'),
-    ('root-authority', 'var gui: Gui := acquireGui(&!root); case open(&!gui, "Test", 320, 200) of when Ok(value as window: Window) do close(window); when Err(error as error: IoError) do skip; end case; releaseGui(gui);', True, ''),
+    ('root-authority', 'var gui: Gui := acquireGui(&!root); case open(&!gui, "Test", 320, 200) of when Ok(value as window: Window) do var w: Window := window; present(&!w); close(w); when Err(error as error: IoError) do skip; end case; releaseGui(gui);', True, ''),
     ('unclosed-window', 'var gui: Gui := acquireGui(&!root); case open(&!gui, "Test", 320, 200) of when Ok(value as window: Window) do skip; when Err(error as error: IoError) do skip; end case; releaseGui(gui);', False, 'Linearity Error'),
 ]
 for name, body, success, diagnostic in probes:

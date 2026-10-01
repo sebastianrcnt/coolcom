@@ -1,5 +1,5 @@
 import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button, List, TextInput,
-    acquireGui, releaseGui, close, fill, text, textClipped, button, listFrame, listItem, makeTextInput, destroyTextInput,
+    present, buttonNeedsRedraw, listSelection, listNeedsRedraw, textInputNeedsRedraw, acquireGui, releaseGui, close, fill, text, textClipped, button, listFrame, listItem, makeTextInput, destroyTextInput,
     inputText, textInput, addMenu, addMenuItem);
 import GuiSupport (openWindow, nextEvent, shouldClose, drawString, drawNumber, copy, joinPath, parentPath, matches, index64);
 import OS.File (Filesystem, Bytes, acquireFilesystem, releaseFilesystem, readAll, byteSize, nth, closeBytes);
@@ -41,26 +41,28 @@ module body GuiFiles is
         var w: Window := openWindow(&!gui, "Files", 520, 340); var filter: TextInput := makeTextInput();
         var rows: List := List(selected => -1, first => 0); var up: Button := Button(pressed => false); var openButton: Button := Button(pressed => false);
         case addMenu(&!w, "File") of when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 0, "Close"); when Err(error as e: IoError) do skip; end case;
-        var running: Bool := true; var redraw: Bool := true;
+        var total: Int64 := 0; var running: Bool := true; var redraw: Bool := true;
         while running do
             let e: Event := nextEvent(&!w); running := not shouldClose(e);
-            var draw: Bool := true; case e of when Idle do draw := redraw; when Close do skip; when Menu(id as id: Int64) do skip;
-                when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wheel: Int64) do skip;
-                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip; end case;
+            let draw: Bool := running and (redraw or textInputNeedsRedraw(&filter, Rect(x => 72, y => 36, width => 232, height => 28), e)
+                or listNeedsRedraw(&rows, Rect(x => 12, y => 78, width => 244, height => 222), total, 226, e)
+                or buttonNeedsRedraw(&up, Rect(x => 424, y => 36, width => 72, height => 28), e, false)
+                or buttonNeedsRedraw(&openButton, Rect(x => 336, y => 36, width => 72, height => 28), e, true));
             if draw then
                 fill(&!w, Rect(x => 0, y => 0, width => 520, height => 340), 16777215);
                 text(&!w, 12, 12, "C:/", 0); drawString(&!w, 36, 12, &path); text(&!w, 12, 42, "Filter", 0);
                 case textInput(&!w, &!filter, Rect(x => 72, y => 36, width => 232, height => 28), e) of
                     when Ok(value as changed: Bool) do if changed then rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy(""); destroyString(content); content := copy(""); fileBytes := 0; printLn("GUI FILES FILTER"); end if;
                     when Err(error as error: IoError) do skip; end case;
-                let total: Int64 := count(&dir, inputText(&filter));
+                total := count(&dir, inputText(&filter));
+                rows.selected := listSelection(&rows, Rect(x => 12, y => 78, width => 244, height => 222), total, 226, e);
                 listFrame(&!w, &!rows, Rect(x => 12, y => 78, width => 244, height => 222), total, e);
                 let firstRow: Int64 := rows.first; var i: Int64 := 0; var more: Bool := true; var iterator: Entries := listing(&dir);
                 while more do case next(&!iterator) of when Some(value as row: Entry) do
                             let { name: String, size: Index, isDir: Bool, modified: Int64 } := row;
 
                             if matches(&name, inputText(&filter)) then
-                                if i >= firstRow and i < firstRow + 10 then
+                                if i >= firstRow and i < firstRow + 11 then
                                     let y: Int64 := 79 + (i - firstRow) * 20;
 
                                     let title: String := rowTitle(&name, isDir);
@@ -99,7 +101,7 @@ module body GuiFiles is
                     end if;
                 end if;
                 preview(&!w, &content); if fileBytes > 0 then text(&!w, 272, 312, "Bytes", 0); drawNumber(&!w, 320, 312, fileBytes); end if;
-                printLn("GUI FILES PAINTED");
+                present(&!w); printLn("GUI FILES PAINTED");
             end if; sleep(&tasks, 10);
         end while; destroyTextInput(filter); destroyString(path); destroyString(selected); destroyString(content); closeDir(dir); closeDir(rootDir); releaseFilesystem(fs);
         close(w); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI FILES CLOSED"); return ExitSuccess(); end;

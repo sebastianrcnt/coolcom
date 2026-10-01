@@ -1,5 +1,5 @@
 import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button,
-    acquireGui, releaseGui, close, fill, label, button, addMenu, addMenuItem, setScale, setFont);
+    present, buttonNeedsRedraw, listNeedsRedraw, textInputNeedsRedraw, acquireGui, releaseGui, close, fill, label, button, addMenu, addMenuItem, setScale, setFont);
 import GuiSupport (openWindow, nextEvent, shouldClose);
 import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
 import OS.Error (IoError);
@@ -13,9 +13,10 @@ module body GuiSettings is
         var running: Bool := true; var first: Bool := true; var missing: Bool := false;
         while running do
             let e: Event := nextEvent(&!w); running := not shouldClose(e);
-            var draw: Bool := true; case e of when Idle do draw := first; when Close do skip; when Menu(id as id: Int64) do skip;
-                when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wheel: Int64) do skip;
-                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip; end case;
+            let draw: Bool := running and (first or buttonNeedsRedraw(&one, Rect(x => 16, y => 44, width => 128, height => 28), e, true)
+                or buttonNeedsRedraw(&two, Rect(x => 168, y => 44, width => 128, height => 28), e, false)
+                or buttonNeedsRedraw(&bitmap, Rect(x => 16, y => 120, width => 128, height => 28), e, false)
+                or buttonNeedsRedraw(&mono, Rect(x => 168, y => 120, width => 128, height => 28), e, false));
             if draw then
                 fill(&!w, Rect(x => 0, y => 0, width => 320, height => 220), 16777215);
                 label(&!w, Rect(x => 16, y => 16, width => 288, height => 20), "Display scale");
@@ -31,6 +32,7 @@ module body GuiSettings is
                     when Err(error as error: IoError) do skip; end case;
                 var message: Span[Nat8, Static] := "Chrome keeps its bitmap font."; if missing then message := "System Mono is unavailable."; end if;
                 label(&!w, Rect(x => 16, y => 176, width => 288, height => 20), message);
+                present(&!w);
                 if first then first := false; printLn("GUI SETTINGS READY"); end if;
             end if; sleep(&tasks, 1);
         end while; close(w); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI SETTINGS CLOSED"); return ExitSuccess(); end;

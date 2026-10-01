@@ -1,12 +1,15 @@
-// Immediate-mode drawing into the calling task's physical BGRA surface.
+// Immediate-mode drawing into the calling task's BGRA back buffer.
 // Coordinates and damage are logical pixels. The compositor owns the chrome.
-CGuiWindow *GrWindow() {CGuiWindow *w = Fs->gui_window; if (!w || w->closed || !w->pixel) return NULL; return w;}
+CGuiWindow *GrWindow() {CGuiWindow *w = Fs->gui_window; if (Gs->num || !w || w->owner != Fs || w->closed || !w->pixel) return NULL; return w;}
 U0 GrDamage(CGuiWindow *w, I64 x, I64 y, I64 width, I64 height)
 {
     if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
     if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
     if (width <= 0 || height <= 0) return;
-    w->revision++; GuiDamage(w->x + 1 + GUI_PAD + x, w->y + GUI_TITLE + GUI_PAD + y, width, height);
+    if (!w->pending) {w->dirty_x0 = x; w->dirty_y0 = y; w->dirty_x1 = x + width; w->dirty_y1 = y + height;}
+    else {w->dirty_x0 = MinI64(w->dirty_x0, x); w->dirty_y0 = MinI64(w->dirty_y0, y);
+        w->dirty_x1 = MaxI64(w->dirty_x1, x + width); w->dirty_y1 = MaxI64(w->dirty_y1, y + height);}
+    w->pending = TRUE;
 }
 U0 GrRect(I64 x, I64 y, I64 width, I64 height, I64 color)
 {
@@ -15,14 +18,14 @@ U0 GrRect(I64 x, I64 y, I64 width, I64 height, I64 color)
     if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
     if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
     if (width <= 0 || height <= 0) return;
-    GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, width, height, (color & 0xFFFFFF) | 0xFF000000);
+    GuiFill(w->back + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, width, height, (color & 0xFFFFFF) | 0xFF000000);
     GrDamage(w, x, y, width, height);
 }
 U32 *GrPixels(I64 *stride = NULL)
 {
     CGuiWindow *w = GrWindow; if (!w) return NULL;
     if (stride) *stride = w->pw * 4;
-    return w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale;
+    return w->back + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale;
 }
 Bool GuiVulkanPresent(I64 device, I64 view, I64 width, I64 height, U32 *mirror = NULL, I64 stride = 0)
 {// Publish an app-owned sampled image after its producer fence has completed.
@@ -34,12 +37,12 @@ Bool GuiVulkanPresent(I64 device, I64 view, I64 width, I64 height, U32 *mirror =
     if (mirror) for (row = 0; row < height; row++) MemCpy(w->vk_mirror + row * width, mirror(U8 *) + row * stride, width * 4);
     else {Free(w->vk_mirror); w->vk_mirror = NULL;}
     w->vk_device = device; w->vk_view = view; w->vk_w = width; w->vk_h = height;
-    GrDamage(w, 0, 0, w->w, w->h); return TRUE;
+    GrDamage(w, 0, 0, w->w, w->h); return GuiPresent;
 }
 U0 GrPoint(CGuiWindow *w, I64 x, I64 y, I64 color)
 {
     if (0 <= x < w->w && 0 <= y < w->h)
-        GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, 1, 1, (color & 0xFFFFFF) | 0xFF000000);
+        GuiFill(w->back + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, 1, 1, (color & 0xFFFFFF) | 0xFF000000);
 }
 U0 GrLine(I64 x0, I64 y0, I64 x1, I64 y1, I64 color)
 {
