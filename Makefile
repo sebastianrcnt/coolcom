@@ -105,7 +105,9 @@ $(B)/BootStub.BIN: $(B)/arch.syms tools/mkbootstub.py
 	python3 tools/mkbootstub.py $(B)/pre/stub.elf $(B)/arch.syms $@
 
 BLOBS := SHELL_PRELUDE=build/ShellPrelude.coolh ARM64_OPS=os/Kernel/Arm64Ops.csv
-$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
+# binlink writes both files; one rule owns them so make -j (3.81 has no grouped targets) runs it once.
+$(B)/syms.ld: $(B)/kernel.raw
+$(B)/kernel.raw: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
 	python3 tools/binlink.py --org $(MODULE_BASE) $(addprefix --blob ,$(BLOBS)) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
 
 # Pass 2: the real link; check the assembly didn't move.
