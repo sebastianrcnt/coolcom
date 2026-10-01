@@ -354,15 +354,31 @@ U0 GuiDesktop()
     gui.desktop_revision++; gui.clock_minute = Now / (60 * CDATE_FREQ); GuiDamage(0, 0, gui.w, gui.h);
 }
 U0 GuiPointerInit()
-{
-    I64 x, y;
-    for (y = 0; y < 18; y++) for (x = 0; x < 12; x++) {
-            gui.pointer[y * 12 + x] = 0;
-            if (y < 13 && x <= y / 2) gui.pointer[y * 12 + x] = 0xFF000000;
-            if (y < 12 && x > 0 && x < y / 2) gui.pointer[y * 12 + x] |= GUI_WHITE;
-            if (y >= 10 && y < 18 && x >= 4 && x <= 6) gui.pointer[y * 12 + x] = 0xFF000000;
-            if (y >= 10 && y < 17 && x == 5) gui.pointer[y * 12 + x] |= GUI_WHITE;
-        }
+{//The classic arrow, 12 columns a row: B black, W white, space clear.
+    U8 *arrow =
+            "B           "
+            "BB          "
+            "BWB         "
+            "BWWB        "
+            "BWWWB       "
+            "BWWWWB      "
+            "BWWWWWB     "
+            "BWWWWWWB    "
+            "BWWWWWWWB   "
+            "BWWWWWWWWB  "
+            "BWWWWWBBBBB "
+            "BWWBWWB     "
+            "BWB BWWB    "
+            "BB  BWWB    "
+            "B    BWWB   "
+            "     BWWB   "
+            "      BB    ";
+    I64 i;
+    for (i = 0; i < 12 * 18; i++) {
+        gui.pointer[i] = 0;
+        if (i < 12 * 17 && arrow[i] == 'B') gui.pointer[i] = 0xFF000000;
+        if (i < 12 * 17 && arrow[i] == 'W') gui.pointer[i] = 0xFF000000 | GUI_WHITE;
+    }
 }
 U0 GuiCompose()
 {

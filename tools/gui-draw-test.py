@@ -43,7 +43,7 @@ def boot(mode):
     w, h, rows = testvm.read_png(d / 'screen.png')
     pixel = lambda x, y: tuple(rows[y][3*x:3*x+3])
     assert pixel(140, 205) == (0, 0, 0), 'mouse painting at local coordinates'
-    assert pixel(143, 210) == (0, 170, 255), 'GrRect color'
+    assert pixel(220, 205) == (0, 170, 255), 'GrRect color'  # clear of the arrow at (140, 205)
     assert pixel(183, 228) == (255, 170, 0), 'overlapping rectangle'
     assert pixel(120, 155) == (255, 255, 255), 'pixel client origin'
     print(f'gui-draw-test: {mode}, five windows, local click, 80 keys in {times[-1]-times[0]} ms PASS', flush=True)
