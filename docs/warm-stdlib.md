@@ -403,3 +403,19 @@ and intermediate symlinks whose outside target remains untouched.
   Both fit the existing 33 ms refresh budget; no noticeable slowdown appeared
   in this measurement. The benchmark checks saved Vim edits and restored focus
   and writes logs plus results under `build/program-perf`.
+
+### GUI window integration (G1)
+
+- The terminal APIs already use the calling task's terminal: size comes from the
+  window's cell grid, input from its virtual-terminal queue, and alternate-screen
+  restoration targets that same grid. Tmux consumes the window queue and forwards
+  events to its active pane; its compositor draws into the parent window.
+- Top's initial 200 ms CPU sample used a timed key read and discarded the result.
+  A quit key queued while WarmRun compiled the program could be consumed by that
+  sample and lost. The first key is now retained and dispatched after the first
+  monitor frame, including resize and navigation events.
+- Eagerly compiling both editors at every shell startup stalled the GUI compositor
+  when Tmux spawned a new pane. Mouse press/move/release transitions could collapse
+  before it polled them. Vim and Tmux now load on first use, once per shell, using
+  the same WarmRun sources. Forward declarations preserve the shell API and bind
+  to Warm's exports when loaded. A new pane no longer compiles unused applications.

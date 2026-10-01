@@ -81,6 +81,8 @@ def benchmark(kernel, revision, variant):
     Perf;
     '''
     runner = runner.replace('TM_START',tm_start).replace('TM_KEY',tm_key).replace('TM_PAINT',tm_paint).replace('TM_END',tm_end)
+    if variant == 'warm':
+        runner = 'WarmTmuxLoad;\n' + runner
     (out / 'Perf.cool').write_text(runner)
     copy(out / 'Perf.cool')
     script = testvm.BOOT + testvm.typed('#include "C:/Perf.cool"\n') + testvm.finish('PERFDONE1')

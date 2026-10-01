@@ -168,6 +168,7 @@ module body TopApp is
         var sort: Int64 := 0; var selected: Int64 := 0; var first: Int64 := 0;
         var message: Span[Nat8, Static] := "";
         var running: Bool := true; var baseline: Bool := true;
+        var startupKey: Key := Unknown(event => 0); var hasStartupKey: Bool := false;
         text(&!out, "[?1049h[?25l[2J");
         while running do
             let c: Clock := getClock(&system);
@@ -204,7 +205,12 @@ module body TopApp is
                             storeNth(&!rows, j, row);
                             i := i + 1; end while; end if;
                     if baseline then baseline := false; prevAt := c.ticks;
-                        let pause: Result[Key, IoError] := readKeyTimeout(&!input, 200);
+                        -- Keep input received during the initial CPU sample. A window can
+                        -- queue quit/resize before the first monitor frame is painted.
+                        case readKeyTimeout(&!input, 200) of
+                            when Err(error as e: IoError) do skip;
+                            when Ok(value as key: Key) do startupKey := key; hasStartupKey := true;
+                        end case;
                     else
                         var size: Size := Size(rows => 24, columns => 80);
                         case terminalSize(&out) of when Ok(value as s: Size) do size := s; when Err(error as e: IoError) do skip; end case;
@@ -255,7 +261,9 @@ module body TopApp is
                         cursor(&!out, size.rows); text(&!out, "[30;47m");
                         if spanLength(message) = 0 then text(&!out, " q quit  k kill  c cpu  p task  n name  s state  arrows select"); else text(&!out, message); end if;
                         text(&!out, "[0m"); message := ""; prevAt := c.ticks;
-                        case readKeyTimeout(&!input, 1000) of
+                        let event: Result[Key, IoError] := if hasStartupKey then Ok(value => startupKey) else readKeyTimeout(&!input, 1000);
+                        hasStartupKey := false;
+                        case event of
                             when Err(error as e: IoError) do skip;
                             when Ok(value as key: Key) do
                                 case key of
