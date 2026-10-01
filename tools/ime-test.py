@@ -30,10 +30,11 @@ def main():
     # Shell line editor: Print("<Hangul>\n"); typed with the IME on between the quotes.
     script += testvm.typed('Print("') + SHIFT_SPACE + testvm.typed(WORDS) + SHIFT_SPACE + testvm.typed('\\n");\n') + 'delay 600\n'
     # Vim insert mode: composed text is replaced as it grows; Backspace takes jamo off.
-    script += testvm.typed('Vim("C:/H.txt");\n') + 'delay 500\n'
+    # Vim (Warm) loads on first use; wait for its status line, not a fixed delay.
+    script += testvm.typed('Vim("C:/H.txt");\n') + 'wait NORMAL C:/H.txt\n'
     script += testvm.typed('i') + RIGHT_ALT + testvm.typed('gksrmf rkqtk\b\b') + SHIFT_SPACE
-    script += testvm.typed('\x1b:wq\n') + 'delay 400\n'
-    script += testvm.typed('Print("\\nVIMDONE\\n");\n') + 'delay 300\n'
+    script += testvm.typed('\x1b:wq\n') + 'wait C:/> \n'
+    script += testvm.typed('Print("\\nVIMDONE\\n");\n') + 'wait VIMDONE\n'
     # Screen: the shell line again, on a clean screen, for the screenshot.
     script += testvm.typed('Print("\\x1b[2J\\x1b[H') + SHIFT_SPACE + testvm.typed('gksrmf dkssud') + SHIFT_SPACE + testvm.typed('");\n')
     script += 'delay 600\nquit\n'
