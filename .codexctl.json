@@ -1,0 +1,7 @@
+{
+  "links": ["vendor/aiwnios", "vendor/austral", "vendor/fonts", "vendor/stb", "vendor/venus",
+            "vendor/venus-protocol", "vendor/venus-python", "vendor/vk.xml"],
+  "test": "make -j test",
+  "instructions": "Write commit messages in English. Read the canonical kernel header at coolc/Frontend/KernelA.coolh (os/Kernel/KernelA.coolh is generated). vendor/ entries are symlinks to the main checkout: never modify them.",
+  "notify": true
+}
