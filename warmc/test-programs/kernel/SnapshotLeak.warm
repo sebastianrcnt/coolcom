@@ -1,0 +1,12 @@
+import OS.CoolOS.System (System, Snapshot, acquireSystem, releaseSystem, snapshotTasks);
+import OS.Error (IoError);
+module body SnapshotLeak is
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        let system: System := acquireSystem(&!root);
+        case snapshotTasks(&system, 1) of
+            when Ok(value as s: Snapshot) do skip;
+            when Err(error as e: IoError) do skip;
+        end case;
+        releaseSystem(system); surrenderRoot(root); return ExitSuccess(); end;
+end module body.

@@ -289,9 +289,12 @@ report for each case are under `build/warmcool-comparison`.
 `examples/kernel` with the Warm compiler and runs them in the real kernel shell. Files
 writes and reads `Warm.txt` (checked with mtools), Fmt runs `WarmFmt` on a messy file on the disk (the result is compared with the fixture), Screen draws a rectangle whose pixels
 are checked in the screenshot, Key waits for a scripted key press, and Errors injects a
-throwing `FileWrite` at the adapter boundary. Four negative fixtures in
+throwing `FileWrite` at the adapter boundary. System checks monitor snapshots,
+heap/drive statistics, termination by number, clocks and timed terminal input,
+both ahead of time and with WarmRun. Seven negative fixtures in
 `test-programs/kernel` (leaked buffer, double close, missing capability, forged root
-capability) must be rejected. `ForeignUnit` checks Unit, scalar and span foreign calls
+capability, forged System capability, missing System capability, leaked snapshot)
+must be rejected. `ForeignUnit` checks Unit, scalar and span foreign calls
 natively.
 
 ## OS bindings and capabilities
@@ -301,6 +304,23 @@ natively.
 `Bytes` and returns `Result` with `OS.Error.IoError`; a failed read returns no
 resource to close. Inputs borrow spans. `OS.CoolOS.Framebuffer`, `OS.CoolOS.Key`
 and `OS.CoolOS.Task` hold the platform-specific operations.
+
+`OS.CoolOS.System` acquires a linear `System` capability from RootCapability.
+`snapshotTasks` copies up to 4096 task rows; use `snapshotCount`, `snapshotTask`
+and `snapshotName`, then `releaseSnapshot`. Names are owned Strings (destroy them
+with `destroyString`). Row states are running/ready/sleeping/stopped/killing (0..4);
+rows include task number, core, counter ticks, idle flag, stack bytes and switches.
+`heapStats`, `driveFree`, `killTask` and `clock` supply monitor data and termination
+by task number. Missing tasks return NotFound; idle and calling tasks return Denied.
+Drive free bytes are -1 when FAT32 FSInfo has no count. Convert task counter ticks
+with `Clock.ticksPerSecond`, and uptime jiffies with `Clock.jiffiesPerSecond`.
+
+`OS.Terminal.terminalSize` borrows Output and returns rows/columns (24x80 without
+a screen on CoolOS). `readKeyTimeout` borrows Input, accepts 0..2147483647
+milliseconds (zero polls once), and returns IoError.Timeout on expiration.
+These additions return an unsupported Other error on the host backend.
+`examples/kernel/System.warm` exercises these APIs, including a worker on core 1
+and copied data after its termination; run `tools/warm-kernel-test.py --filter System`.
 
 The scalar ABI is implemented in `OSHost.cool` and `OSKernel.cool`, packaged
 with the corresponding runtime. The temporary `OS.Raw` binding has been removed;

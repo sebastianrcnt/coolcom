@@ -1,0 +1,87 @@
+pragma Unsafe_Module;
+import Austral.Memory (Address, Pointer, allocate, nullCheck, load, deallocate);
+import OS.Error (IoError, fromCode, status);
+import Standard.String (String, destroyString);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+module body OS.CoolOS.System is
+    record System: Linear is end;
+    record Snapshot: Linear is handle: Int64; end;
+    function acquireSystem(root: &![RootCapability]): System is return System(); end;
+    function releaseSystem(system: System): Unit is let {} := system; return nil; end;
+    pragma Foreign_Import(External_Name => "WsSnapshotTasks");
+    private function rawSnapshot(maxCount: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsSnapshotCount");
+    private function rawCount(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsSnapshotTask");
+    private function rawTask(handle: Int64, index: Int64, info: Pointer[TaskInfo]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsSnapshotNameByte");
+    private function rawNameByte(handle: Int64, index: Int64, byte: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsReleaseSnapshot");
+    private function rawRelease(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WsHeapStats");
+    private function rawHeap(info: Pointer[HeapInfo]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsDriveFree");
+    private function rawDrive(letter: Nat8, info: Pointer[DriveInfo]): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsKillTask");
+    private function rawKill(taskNum: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WsClock");
+    private function rawClock(info: Pointer[Clock]): Int64 is end;
+    private function signed(value: Index): Int64 is
+        if value > 9223372036854775807 then return -1; end if;
+        return @embed(Int64, "$1", value); end;
+    function snapshotTasks(system: &[System], maxCount: Index): Result[Snapshot, IoError] is
+        let handle: Int64 := rawSnapshot(signed(maxCount));
+        if handle < 0 then return Err(error => fromCode(handle)); end if;
+        return Ok(value => Snapshot(handle => handle)); end;
+    function snapshotCount(snapshot: &[Snapshot]): Index is
+        case toIndex(rawCount(snapshot->handle)) of when Some(value as n: Index) do return n; when None do abort("Invalid snapshot count"); end case; end;
+    function releaseSnapshot(snapshot: Snapshot): Unit is let { handle: Int64 } := snapshot; rawRelease(handle); return nil; end;
+    function snapshotName(snapshot: &[Snapshot], index: Index): Result[String, IoError] is
+        var builder: StringBuilder := makeStringBuilder();
+        var byte: Int64 := 0;
+        while true do
+            let code: Int64 := rawNameByte(snapshot->handle, signed(index), byte);
+            if code < 0 then destroyString(finalize(builder)); return Err(error => fromCode(code)); end if;
+            if code = 0 then return Ok(value => finalize(builder)); end if;
+            case toNat8(code) of when Some(value as b: Nat8) do writeByte(&!builder, b); when None do abort("Invalid name byte"); end case;
+            byte := byte + 1;
+        end while;
+        return Ok(value => finalize(builder)); end;
+    function killTask(system: &![System], taskNum: Int64): Result[Unit, IoError] is return status(rawKill(taskNum)); end;
+    function snapshotTask(snapshot: &[Snapshot], index: Index): Result[TaskInfo, IoError] is
+        let address: Address[TaskInfo] := allocate();
+        case nullCheck(address) of
+            when None do abort("System sample allocation failed");
+            when Some(value as info: Pointer[TaskInfo]) do
+                let code: Int64 := rawTask(snapshot->handle, signed(index), info);
+                if code < 0 then deallocate(info); return Err(error => fromCode(code)); end if;
+                let value: TaskInfo := load(info); deallocate(info); return Ok(value => value);
+        end case; end;
+    function heapStats(system: &[System]): Result[HeapInfo, IoError] is
+        let address: Address[HeapInfo] := allocate();
+        case nullCheck(address) of
+            when None do abort("System sample allocation failed");
+            when Some(value as info: Pointer[HeapInfo]) do
+                let code: Int64 := rawHeap(info);
+                if code < 0 then deallocate(info); return Err(error => fromCode(code)); end if;
+                let value: HeapInfo := load(info); deallocate(info); return Ok(value => value);
+        end case; end;
+    function driveFree(system: &[System], letter: Nat8): Result[DriveInfo, IoError] is
+        let address: Address[DriveInfo] := allocate();
+        case nullCheck(address) of
+            when None do abort("System sample allocation failed");
+            when Some(value as info: Pointer[DriveInfo]) do
+                let code: Int64 := rawDrive(letter, info);
+                if code < 0 then deallocate(info); return Err(error => fromCode(code)); end if;
+                let value: DriveInfo := load(info); deallocate(info); return Ok(value => value);
+        end case; end;
+    function clock(system: &[System]): Result[Clock, IoError] is
+        let address: Address[Clock] := allocate();
+        case nullCheck(address) of
+            when None do abort("System sample allocation failed");
+            when Some(value as info: Pointer[Clock]) do
+                let code: Int64 := rawClock(info);
+                if code < 0 then deallocate(info); return Err(error => fromCode(code)); end if;
+                let value: Clock := load(info); deallocate(info); return Ok(value => value);
+        end case; end;
+end module body.

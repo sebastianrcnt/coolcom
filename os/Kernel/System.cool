@@ -1,0 +1,106 @@
+// Copied monitor data: callers never retain pointers into scheduler rings.
+class CTaskSnapshot
+{
+    I64 task_num, core, state, ticks, idle, stack_size, switches;
+    U8 name[TASK_NAME_LEN];
+};
+
+I64 TaskSnapshot(CTaskSnapshot *rows, I64 max_count)
+{//Return copied row count (possibly truncated); zero capacity is valid.
+    I64 i, n = 0, daif, now, j;
+    CCPU *c;
+    CTask *t;
+    CTaskSnapshot *row;
+    if (max_count < 0 || (!rows && max_count)) return -12;
+    for (i = 0; i < mp_cnt && i < CORES_MAX && n < max_count; i++) {
+        c = &cpu_structs[i];
+        daif = SpinLockIrq(&c->lock);
+        // Read the counter after locking: acct_from may change while waiting for the lock.
+        now = ArchCntVct;
+        t = c->seth_task;
+        if (t) do {
+                row = &rows[n++];
+                row->task_num = t->task_num;
+                row->core = i;
+                row->ticks = t->task_ticks;
+                if (t == c->cur_task) row->ticks += now - c->acct_from;
+                if (Bt(&t->task_flags, TASKf_KILL_TASK)) row->state = 4;
+                else if (t == c->cur_task) row->state = 0;
+                else if (Bt(&t->task_flags, TASKf_SUSPENDED)) row->state = 3;
+                else if (t->wake_jiffy > jiffies) row->state = 2;
+                else row->state = 1;
+                row->idle = t == c->seth_task;
+                row->stack_size = t->stack_end - t->stk;
+                row->switches = t->swap_cnter;
+                for (j = 0; j < TASK_NAME_LEN; j++) row->name[j] = t->task_name[j];
+                row->name[TASK_NAME_LEN - 1] = 0;
+                t = t->next_task;
+            } while (t != c->seth_task && n < max_count);
+        SpinUnlockIrq(&c->lock, daif);
+    }
+    return n;
+}
+
+I64 KillTask(I64 number)
+{//Request termination by number under the ring lock. Never dereference an old snapshot.
+    I64 i, daif, result = -10;
+    CCPU *c;
+    CTask *t;
+    for (i = 0; i < mp_cnt && i < CORES_MAX; i++) {
+        c = &cpu_structs[i];
+        daif = SpinLockIrq(&c->lock);
+        t = c->seth_task;
+        if (t) do {
+                if (t->task_num == number) {
+                    if (t == c->seth_task || t == WarmTaskCurrent()) result = -13;
+                    else {
+                        LBts(&t->task_flags, TASKf_KILL_TASK);
+                        t->wake_jiffy = 0;
+                        result = 0;
+                    }
+                    break;
+                }
+                t = t->next_task;
+            } while (t != c->seth_task);
+        SpinUnlockIrq(&c->lock, daif);
+        if (result != -10) {
+            if (!result) CoreKick(c);
+            return result;
+        }
+    }
+    return result;
+}
+
+I64 DriveFree(U8 letter, I64 *free_bytes, I64 *total_bytes)
+{//FAT32 FSInfo free count; -1 bytes means unknown. Missing drive returns NotFound.
+    CDrv *dv;
+    I64 cluster_size;
+    Bool unlock;
+    if (!free_bytes || !total_bytes) return -12;
+    *free_bytes = *total_bytes = 0;
+    if ('a' <= letter <= 'z') letter -= 'a' - 'A';
+    if (!('A' <= letter <= 'Z')) return -12;
+    dv = Let2Drv(letter, FALSE);
+    if (!dv) return -10;
+    unlock = DrvLock(dv);
+    cluster_size = dv->spc * BLK_SIZE;
+    *total_bytes = ((dv->size + dv->drv_offset - dv->data_area) / dv->spc - 1) * cluster_size;
+    if (dv->fis->free_clus == 0xFFFFFFFF) *free_bytes = -1;
+    else *free_bytes = dv->fis->free_clus * cluster_size;
+    if (unlock) DrvUnlock(dv);
+    return 0;
+}
+
+class CSystemClock
+{
+    I64 ticks, ticks_per_second, uptime_jiffies, jiffies_per_second, cores, current_task;
+};
+U0 SystemClock(CSystemClock *clock)
+{//Task ticks are counter ticks, not jiffies. Uptime uses the tickless-safe clock.
+    clock->ticks = ArchCntVct;
+    clock->ticks_per_second = cnt_freq;
+    clock->uptime_jiffies = TimerJiffies;
+    clock->jiffies_per_second = JIFFY_FREQ;
+    clock->cores = mp_cnt;
+    clock->current_task = WarmTaskCurrent()->task_num;
+}

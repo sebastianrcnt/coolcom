@@ -63,7 +63,7 @@ module body OS.Task is
     generic [T: Type(Sendable), R: Type(Sendable)]
     function spawnOn(tasks: &![Tasks], worker: Fn[T, R], arg: T, core: Index): Result[Task[R], IoError] is
         var target: Int64 := -2;
-        case toInt64(core) of when Some(value as n: Int64) do target := n; when None do skip; end case;
+        if core <= 9223372036854775807 then target := @embed(Int64, "$1", core); end if;
         return launch(worker, arg, target); end;
     generic [R: Type(Sendable)]
     function join(task: Task[R]): Result[R, TaskError] is

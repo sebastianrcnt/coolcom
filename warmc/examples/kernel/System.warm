@@ -1,0 +1,156 @@
+import OS.CoolOS.System (System, Snapshot, TaskInfo, HeapInfo, DriveInfo, Clock,
+    acquireSystem, releaseSystem, snapshotTasks, snapshotCount, snapshotTask, snapshotName,
+    releaseSnapshot, heapStats, driveFree, killTask, clock);
+import OS.Terminal (Input, Output, Size, Key, Char, acquireInput, acquireOutput, releaseInput,
+    releaseOutput, terminalSize, readKeyTimeout);
+import OS.Task (Tasks, Task, TaskError, Killed, Aborted, acquireTasks, releaseTasks, spawnOn, join, sleep);
+import OS.Error (IoError, ioErrorCode);
+import Standard.String (String, length, destroyString);
+module body System is
+    private function expect(ok: Bool): Unit is
+        if not ok then abort("System assertion failed"); end if; return nil; end;
+    private function sample(system: &[System], maximum: Index): Snapshot is
+        case snapshotTasks(system, maximum) of
+            when Ok(value as s: Snapshot) do return s;
+            when Err(error as e: IoError) do abort("Snapshot failed");
+        end case; end;
+    private function row(s: &[Snapshot], index: Index): TaskInfo is
+        case snapshotTask(s, index) of
+            when Ok(value as info: TaskInfo) do return info;
+            when Err(error as e: IoError) do abort("Snapshot row failed");
+        end case; end;
+    private function time(system: &[System]): Clock is
+        case clock(system) of
+            when Ok(value as c: Clock) do return c;
+            when Err(error as e: IoError) do abort("Clock failed");
+        end case; end;
+    private function worker(tasks: Tasks): Unit is
+        sleep(&tasks, 60000); releaseTasks(tasks); return nil; end;
+    private function denied(result: Result[Unit, IoError], code: Int64): Unit is
+        case result of
+            when Ok(value as u: Unit) do abort("Kill unexpectedly succeeded");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = code);
+        end case; return nil; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var system: System := acquireSystem(&!root);
+        var tasks: Tasks := acquireTasks(&!root);
+        var input: Input := acquireInput(&!root);
+        let output: Output := acquireOutput(&!root);
+        let before: Clock := time(&system);
+        expect(before.ticksPerSecond > 0 and before.jiffiesPerSecond = 1000 and before.cores >= 2);
+        case heapStats(&system) of
+            when Ok(value as h: HeapInfo) do
+                expect(h.used > 0 and h.total >= h.used and h.usedBlocks > 0 and h.freeBlocks > 0);
+                expect(h.largestFree > 0 and h.largestFree <= h.total - h.used);
+            when Err(error as e: IoError) do abort("Heap stats failed");
+        end case;
+        case driveFree(&system, 'c') of
+            when Ok(value as d: DriveInfo) do expect(d.totalBytes > 0 and d.freeBytes >= -1 and d.freeBytes <= d.totalBytes);
+            when Err(error as e: IoError) do abort("Drive stats failed");
+        end case;
+        case driveFree(&system, '?') of
+            when Ok(value as d: DriveInfo) do abort("Invalid drive accepted");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -12);
+        end case;
+        case driveFree(&system, 'Z') of
+            when Ok(value as d: DriveInfo) do abort("Missing drive accepted");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -10);
+        end case;
+        case terminalSize(&output) of
+            when Ok(value as s: Size) do expect(s.rows > 0 and s.columns > 0);
+            when Err(error as e: IoError) do abort("Terminal size failed");
+        end case;
+        case readKeyTimeout(&!input, -1) of
+            when Ok(value as k: Key) do abort("Negative timeout accepted");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -12);
+        end case;
+        case readKeyTimeout(&!input, 0) of
+            when Ok(value as k: Key) do abort("Poll unexpectedly read a key");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -17);
+        end case;
+        let start: Clock := time(&system);
+        case readKeyTimeout(&!input, 5) of
+            when Ok(value as k: Key) do abort("Timeout unexpectedly read a key");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -17);
+        end case;
+        let finish: Clock := time(&system);
+        expect(finish.uptimeJiffies >= start.uptimeJiffies + 5);
+        let empty: Snapshot := sample(&system, 0); expect(snapshotCount(&empty) = 0); releaseSnapshot(empty);
+        let small: Snapshot := sample(&system, 1); expect(snapshotCount(&small) = 1); releaseSnapshot(small);
+        case snapshotTasks(&system, 4097) of
+            when Ok(value as s: Snapshot) do releaseSnapshot(s); abort("Oversized snapshot accepted");
+            when Err(error as e: IoError) do expect(ioErrorCode(e) = -12);
+        end case;
+        let childTasks: Tasks := acquireTasks(&!root);
+        case spawnOn(&!tasks, worker, childTasks, 1) of
+            when Err(error as e: IoError) do abort("Monitor worker spawn failed");
+            when Ok(value as child: Task[Unit]) do
+                sleep(&tasks, 10);
+                let s: Snapshot := sample(&system, 128);
+                var idleCount: Int64 := 0;
+                var target: Int64 := 0;
+                var targetIndex: Index := 0;
+                var selfTicks: Int64 := -1;
+                for i from 0 to snapshotCount(&s) - 1 do
+                    let t: TaskInfo := row(&s, i);
+                    expect(t.taskNum > 0 and t.core >= 0 and t.core < before.cores);
+                    expect(t.state >= 0 and t.state <= 4 and t.ticks >= 0 and t.stackSize > 0 and t.switches >= 0);
+                    case snapshotName(&s, i) of
+                        when Ok(value as name: String) do expect(length(&name) > 0); destroyString(name);
+                        when Err(error as e: IoError) do abort("Snapshot name failed");
+                    end case;
+                    if t.idle = 1 then
+                        idleCount := idleCount + 1; denied(killTask(&!system, t.taskNum), -13);
+                    else if t.core = 1 and t.state = 2 then target := t.taskNum; targetIndex := i;
+                    end if;
+                    if t.taskNum = before.currentTask then expect(t.state = 0); selfTicks := t.ticks; end if;
+                end for;
+                expect(idleCount = before.cores and target > 0 and selfTicks >= 0);
+                denied(killTask(&!system, before.currentTask), -13);
+                denied(killTask(&!system, 9223372036854775807), -10);
+                case snapshotTask(&s, snapshotCount(&s)) of
+                    when Ok(value as t: TaskInfo) do abort("Out-of-range row accepted");
+                    when Err(error as e: IoError) do expect(ioErrorCode(e) = -12);
+                end case;
+                case snapshotName(&s, snapshotCount(&s)) of
+                    when Ok(value as name: String) do destroyString(name); abort("Out-of-range name accepted");
+                    when Err(error as e: IoError) do expect(ioErrorCode(e) = -12);
+                end case;
+                case killTask(&!system, target) of
+                    when Ok(value as u: Unit) do skip;
+                    when Err(error as e: IoError) do abort("Kill request failed");
+                end case;
+                case join(child) of
+                    when Ok(value as u: Unit) do abort("Killed worker returned");
+                    when Err(error as e: TaskError) do
+                        case e of when Killed do skip; when Aborted(message as m: Span[Nat8, Static]) do abort("Worker aborted"); end case;
+                end case;
+                sleep(&tasks, 5); denied(killTask(&!system, target), -10);
+                -- Copied names and rows survive termination and reaping of the original task.
+                let retained: TaskInfo := row(&s, targetIndex);
+                expect(retained.taskNum = target);
+                case snapshotName(&s, targetIndex) of
+                    when Ok(value as name: String) do expect(length(&name) = 8); destroyString(name);
+                    when Err(error as e: IoError) do abort("Retained name failed");
+                end case;
+                releaseSnapshot(s);
+                let later: Snapshot := sample(&system, 128);
+                for i from 0 to snapshotCount(&later) - 1 do
+                    let t: TaskInfo := row(&later, i);
+                    if t.taskNum = before.currentTask then expect(t.ticks >= selfTicks); end if;
+                    expect(t.taskNum /= target);
+                end for;
+                releaseSnapshot(later);
+        end case;
+        let after: Clock := time(&system);
+        expect(after.ticks > before.ticks and after.uptimeJiffies >= before.uptimeJiffies);
+        printLn("WARM SYSTEM KEY READY");
+        case readKeyTimeout(&!input, 3000) of
+            when Ok(value as k: Key) do
+                case k of when Char(codepoint as c: Nat32) do expect(c = 120); when Up do abort("Unexpected key"); when Down do abort("Unexpected key"); when Left do abort("Unexpected key"); when Right do abort("Unexpected key"); when Home do abort("Unexpected key"); when End do abort("Unexpected key"); when PageUp do abort("Unexpected key"); when PageDown do abort("Unexpected key"); when Insert do abort("Unexpected key"); when Delete do abort("Unexpected key"); when Enter do abort("Unexpected key"); when Escape do abort("Unexpected key"); when Backspace do abort("Unexpected key"); when Tab do abort("Unexpected key"); when Ctrl(codepoint as cp: Nat32) do abort("Unexpected key"); when FunctionKey(number as n: Nat8) do abort("Unexpected key"); when Unknown(event as n: Int64) do abort("Unexpected key"); end case;
+            when Err(error as e: IoError) do abort("Timed key read failed");
+        end case;
+        releaseInput(input); releaseOutput(output); releaseTasks(tasks); releaseSystem(system); surrenderRoot(root);
+        printLn("WARM SYSTEM PASS"); return ExitSuccess(); end;
+end module body.

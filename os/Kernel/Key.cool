@@ -317,6 +317,18 @@ U0 KeyWait()
         TaskEventSleep;
 }
 
+I64 GetKeyTimeout(I64 timeout_ms)
+{//Zero polls once. A timeout is -17 (Warm IoError.Timeout); never echo input.
+    I64 ev, start;
+    if (timeout_ms < 0 || timeout_ms > 0x7FFFFFFF) return -12;
+    start = TimerJiffies;
+    while (TRUE) {
+        if (ev = KeyPop) return ev;
+        if (TimerJiffies - start >= timeout_ms * JIFFY_FREQ / 1000) return -17;
+        Sleep(1);
+    }
+}
+
 I64 GetKey(Bool echo = FALSE)
 {//Wait for a key event (key code | KF_ flags) from the window or the terminal.
     I64 ev, c;

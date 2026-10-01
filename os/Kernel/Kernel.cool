@@ -63,6 +63,7 @@
 #include "DskCopy.cool"
 #include "DskMount.cool"
 #include "DskTools.cool"
+#include "System.cool"
 #include "KPower.cool"
 #include "NetDrv.cool"
 #include "NetParse.cool"  // generated from NetParse.warm (Makefile)

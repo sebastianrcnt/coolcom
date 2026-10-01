@@ -81,3 +81,16 @@ I64 WkunixToDate(I64 stamp) {return -1;}
 I64 Wkdir(U8 *text, U64 size) {return -1;}
 I64 Wkcd(U8 *text, U64 size) {return -1;}
 I64 WkvalidName(U8 *text, U64 size) {return -1;}
+
+// These CoolOS monitor extensions are unavailable on the host backend.
+I64 WkreadKeyTimeout(I64 ms) {return -1;}
+I64 WkterminalSize(U8 *size) {return -1;}
+I64 WsSnapshotTasks(I64 max_count) {return -1;}
+I64 WsSnapshotCount(I64 handle) {return 0;}
+I64 WsSnapshotTask(I64 handle, I64 index, U8 *info) {return -1;}
+I64 WsSnapshotNameByte(I64 handle, I64 index, I64 byte) {return -1;}
+U0 WsReleaseSnapshot(I64 handle) {}
+I64 WsHeapStats(U8 *info) {return -1;}
+I64 WsDriveFree(I64 letter, U8 *info) {return -1;}
+I64 WsKillTask(I64 number) {return -1;}
+I64 WsClock(U8 *clock) {return -1;}

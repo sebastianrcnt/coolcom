@@ -310,3 +310,55 @@ I64 WkinputByte() {
     }
     return wk_input_line[wk_input_pos++];
 }
+
+I64 WkreadKeyTimeout(I64 ms) {
+    I64 result = -1;
+    try {result = GetKeyTimeout(ms);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+class WkTerminalSize {I64 rows, columns;};
+I64 WkterminalSize(WkTerminalSize *size) {
+    I64 result = -1;
+    try {AnsiTermSize(&size->rows, &size->columns); result = 0;} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+
+class WsSnapshot {CTaskSnapshot *rows; I64 count;};
+I64 WsSnapshotTasks(I64 max_count) {
+    if (max_count < 0 || max_count > 4096) return -12;
+    WsSnapshot *s = NULL;
+    I64 result = -1;
+    try {
+        s = CAlloc(sizeof(WsSnapshot));
+        s->rows = CAlloc(max_count * sizeof(CTaskSnapshot));
+        s->count = TaskSnapshot(s->rows, max_count);
+        if (s->count >= 0) return s(I64);
+        result = s->count;
+    } catch {Fs->catch_except = TRUE;}
+    if (s) {Free(s->rows); Free(s);} return result;
+}
+I64 WsSnapshotCount(WsSnapshot *s) {return s->count;}
+class WsTaskInfo {I64 task_num, core, state, ticks, idle, stack_size, switches;};
+I64 WsSnapshotTask(WsSnapshot *s, I64 index, WsTaskInfo *info) {
+    if (index < 0 || index >= s->count) return -12;
+    MemCpy(info, &s->rows[index], sizeof(WsTaskInfo)); return 0;
+}
+I64 WsSnapshotNameByte(WsSnapshot *s, I64 index, I64 byte) {
+    if (index < 0 || index >= s->count || byte < 0 || byte >= TASK_NAME_LEN) return -12;
+    return s->rows[index].name[byte];
+}
+U0 WsReleaseSnapshot(WsSnapshot *s) {Free(s->rows); Free(s);}
+class WsHeapInfo {I64 used, total, free_blocks, largest_free, used_blocks;};
+I64 WsHeapStats(WsHeapInfo *info) {
+    if (!HeapStats(&info->used, &info->total, &info->free_blocks, &info->largest_free, &info->used_blocks)) return -1;
+    return 0;
+}
+class WsDriveInfo {I64 free_bytes, total_bytes;};
+I64 WsDriveFree(I64 letter, WsDriveInfo *info) {
+    if (letter < 0 || letter > 255) return -12;
+    I64 result = -1;
+    try {result = DriveFree(letter, &info->free_bytes, &info->total_bytes);} catch {Fs->catch_except = TRUE;}
+    return result;
+}
+I64 WsKillTask(I64 number) {return KillTask(number);}
+I64 WsClock(CSystemClock *clock) {SystemClock(clock); return 0;}
