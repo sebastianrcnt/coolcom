@@ -5,6 +5,7 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+make -s os/Kernel/KernelA.coolh
 export COOLC_COMPILER_BIN=${COOLC_COMPILER_BIN:-$ROOT/coolc/seed/Compiler.BIN}
 OUT=$ROOT/build/checks
 mkdir -p "$OUT"
