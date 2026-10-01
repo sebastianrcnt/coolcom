@@ -419,3 +419,109 @@ and intermediate symlinks whose outside target remains untouched.
   before it polled them. Vim and Tmux now load on first use, once per shell, using
   the same WarmRun sources. Forward declarations preserve the shell API and bind
   to Warm's exports when loaded. A new pane no longer compiles unused applications.
+
+## Stage 6: language fixes
+
+Design decisions (2026-10-01), written before implementation:
+
+1. **Loop exits.** Options: stop flags only; unlabelled exits; labelled exits.
+   Adopt `break;` / `continue;` and `break outer;` / `continue outer;`, with
+   `while outer: condition do` or `for outer: i from ... do`. Labels are local
+   to enclosing loops; duplicate active labels and missing targets are errors.
+   Each exit must consume loop-local owned values and preserve ownership of
+   values outside its target loop. Borrowing and immutable parameters stay as-is;
+   there is no arbitrary `goto`.
+2. **Remainder.** Options: function only; Euclidean modulo; alias for `rem`.
+   Adopt `%` at the `*`/`/` precedence, left associative, lowering to `rem`.
+   Division truncates toward zero: a nonzero remainder has the dividend's sign
+   (`-7 % 3 = -1`, `7 % -3 = 1`). Zero divisor and signed minimum `% -1`
+   abort just like `rem`; floats are rejected.
+3. **Escapes.** Options: literal control bytes; C escapes; Unicode scalar escapes.
+   Adopt `\xHH` (exactly two hex digits, one byte), `\e` (ESC), `\u{H...}`
+   (1-6 hex digits, Unicode scalar encoded as UTF-8), plus `\0`, `\n`, `\r`,
+   `\t`, `\\`, `\"`, `\'`. Embedded NUL keeps its byte length. Malformed new
+   escapes, surrogates and values above U+10FFFF are errors. Unknown legacy
+   escapes remain literal backslash plus character; triple strings/docstrings
+   keep their existing rules. Embed snippets keep their source-text semantics.
+4. **Postfix fields.** Options: require temporaries; arbitrary temporary borrows;
+   read-only paths on computed values. Adopt `f(x).field` and `(expr).field`,
+   including chained fields/indexes. The computed base and extracted result must
+   be Free: dropping owned fields or borrowing an ephemeral owner is rejected.
+   Buffer self-update still requires the explicit borrow-lifetime temporary.
+5. **Ranges.** Options: change `to` to half-open (breaking); new punctuation;
+   additive named bound. Adopt `for i from start until end do` for `[start,end)`.
+   New loops snapshot both bounds once; empty/reversed ranges do no work.
+   Existing `to` stays inclusive and retains endpoint re-evaluation. Iteration
+   at maximum Index terminates without wrapping. Loop variables remain Index.
+   Add `slice`/`sliceMut` to Buffer and String, and `sliceSpan` for borrowed spans,
+   with half-open bounds including empty spans; existing getSpan/span APIs stay
+   inclusive. Scratch allocation and typed tree containers remain library work;
+   no allocator or unsafe editor boundary is changed by this stage.
+6. **Formatting.** Options: terminal-only printf; compiler interpolation; portable
+   library formatter. Adopt `Standard.Format.format(template, args)` returning
+   an owned String, with a borrowed span of typed FormatArg values (text, signed,
+   unsigned). Sequential `{}` / `{:s}` / `{:d}` / `{:x}` / `{:X}`, width such as
+   `{:6d}` and zero padding `{:06d}`, and escaped `{{` / `}}`. Width is a minimum;
+   zero padding follows a minus sign. Bad templates/types/counts abort as bugs.
+   No variadic ABI, unsafe printf format strings, or terminal capability needed.
+7. **Signed arithmetic.** Options: keep calls; general body inliner; narrowly emit
+   Pervasive checked primitives. Adopt only signed trapping +, -, *, / (and rem),
+   evaluating operands once into typed temporaries. Preserve all overflow and
+   division checks/messages using the emitter's existing checked embed lowering.
+   No user-function or broad arithmetic inlining. Require number regressions,
+   actual Vim.warm editing/large-file validation and before/after VM measurements.
+   Existing editor C-string caching, allocation ownership, lazy loading, terminal
+   capabilities and GUI integration remain intact.
+
+Implementation notes:
+
+- The first signed inliner used fresh operand/bound/check temporaries for every
+  operation. It passed the number suite but faulted in the real Vim benchmark
+  (Sync exception, FAR 0x800201138; `build/stage6-inline-first-failure.log`).
+  The adopted emitter reuses typed scratch slots per generated function and
+  leaves expression results distinct. Actual Vim editing/saving and large-file
+  benchmarks then passed. The general Cool backend sensitivity to large generated
+  functions is not claimed fixed; no broad body inliner was introduced.
+- Format's numeric output is split into small helpers; signed magnitude handles
+  INT64_MIN without negating it directly. String.fromLiteral and StringBuilder's
+  copy loops now use `until`, also handling empty strings without subtraction.
+- main was integrated at bfbd7f5 (warmcli). Portable tests run through `tools/warm`
+  and `tools/toolchain.mk`; disk application checks stay under `os/Warm` with
+  explicit `--coolos`. Standard.Format is discovered by the public host CLI.
+  Man APIs are regenerated by `tools/warm-man.py`, including Standard.Format.
+
+Performance (2026-10-01): `python3 tools/warm-inline-perf.py build/kernel.Image
+--repeat 3` compares the same unchanged Vim.warm and same kernel image, 640x480,
+changing only the signed-inline dispatch in the generated Warm shell package.
+Each run checks 2000 navigation keys, 2000 inserted bytes saved to FAT32, 50
+repaints, a jump/repaint in a 330 KB file, and restored Tmux focus. Medians:
+
+| Workload | Calls before | Inline after |
+| --- | ---: | ---: |
+| Vim navigation, microseconds/key | 0.2359 | 0.2281 |
+| Vim insertion, microseconds/key | 0.07463 | 0.05950 |
+| Vim repaint, milliseconds | 4.0144 | 3.9884 |
+| Vim 330 KB jump + repaint, milliseconds | 7.0326 | 7.1165 |
+| Tmux forwarding, microseconds/key | 0.07960 | 0.06883 |
+| Tmux forced repaint, milliseconds | 15.1548 | 13.3052 |
+
+Insertion improved about 20%; navigation about 3%. Large-file jump increased
+about 1.2%, within the spread of these VM trials; repaint costs are effectively
+unchanged for Vim. These VM timings do not establish hardware latency or a
+Tmux rendering improvement. Full trial data, kernel/package SHA-256 hashes and
+logs are in `build/warm-inline-perf/results.json` and `build/warm-inline-perf/`.
+The script restores the generated package even when a benchmark fails.
+
+Validation: `make -j test` completed with exit code **0** after integrating main.
+This includes 306 unchanged upstream cases, 64 Stage 6 checks with 364 signed
+arithmetic results, standard-library/host CLI tests, kernel generated modules,
+and 126 real Vim VM input/save/cursor/quit/recovery cases. Tree-sitter's five
+corpus fixtures, all 450 tracked Warm files, and the five new source/formatter
+files parse; formatter fixtures and corpus are fixed points with identical ASTs.
+Man API coverage and regenerated pages passed (`build/stage6-man`).
+
+The first full parallel run timed out in the unchanged Cool GUI drawing test;
+that test passed in isolation on both CPU and Venus, and the second full
+`make -j test` passed. Logs are `build/stage6-test-first.log`,
+`build/stage6-gui-draw-retry.log`, and `build/stage6-test.log`. GUI implementation
+files and vendor sources were not edited by this change.

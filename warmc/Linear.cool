@@ -1,6 +1,7 @@
 // Forward ownership analysis over declaration identities, with branch snapshots.
 class CWState {CWState *next; CWNode *var; I64 alive, reads, writes, temp_reads, temp_writes;};
-class CWFlow {CWState *states; Bool returned;};
+class CWLoopFlow {CWLoopFlow *next; CWNode *node; CWState *entry;};
+class CWFlow {CWState *states; CWLoopFlow *loops; Bool returned;};
 Bool WMustConsume(CWNode *ty)
 {
     return ty && WUniverseOf(ty) != 0 && WUniverseOf(ty) != 3 && !WEq(ty->name, "&!") && !WEq(ty->name, "Span!");
@@ -19,7 +20,7 @@ CWFlow *WFork(CWUnit *u, CWFlow *flow)
 {
     CWFlow *copy = WAlloc(u, sizeof(CWFlow));
     CWState *s, *c;
-    copy->returned = flow->returned;
+    copy->returned = flow->returned; copy->loops = flow->loops;
     for (s = flow->states; s; s = s->next) {c = WAlloc(u, sizeof(CWState)); MemCpy(c, s, sizeof(CWState)); c->next = copy->states; copy->states = c;}
     return copy;
 }
@@ -116,6 +117,7 @@ U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow)
     CWNode *v, *c, *b;
     CWState *s, *saved, *x;
     CWFlow *a, *other, *merged = NULL;
+    CWLoopFlow *loop;
     Bool write;
     if (u->error_kind) return;
     if (WEq(n->tag, "block")) {WLinearBlock(u, n, flow); return;}
@@ -132,6 +134,16 @@ U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow)
                 s->alive = 1;
             } else WUse(u, flow, v, v->resolved, FALSE);
         }
+    } else if (WEq(n->tag, "break") || WEq(n->tag, "continue")) {
+        for (loop = flow->loops; loop && loop->node != n->resolved; loop = loop->next) {}
+        if (!loop) {WFail(u, n->token, "Linearity Error", "Missing loop ownership context"); return;}
+        for (s = flow->states; s; s = s->next) {
+            for (x = loop->entry; x && x->var != s->var; x = x->next) {}
+            if (x) {
+                if (s->alive != x->alive) WFail(u, n->token, "Linearity Error", "Loop exit changes ownership of an outer variable");
+            } else if (s->alive && WMustConsume(WDeclType(s->var))) WFail(u, n->token, "Linearity Error", "Loop exit leaves an unconsumed local value");
+        }
+        WReleaseTemps(flow); flow->returned = TRUE;
     } else if (WEq(n->tag, "return")) {
         WLinearExpr(u, WChild(n, "value"), flow); WReleaseTemps(flow); WCheckLive(u, n, flow->states, NULL); flow->returned = TRUE;
     } else if (WEq(n->tag, "discard")) {
@@ -148,8 +160,10 @@ U0 WLinearStmt(CWUnit *u, CWNode *n, CWFlow *flow)
             for (s = flow->states; s; s = s->next) if (s->alive != WState(a, s->var)->alive) WFail(u, n->token, "Linearity Error", "Loop condition consumes an outer variable");
         }
         else {WLinearExpr(u, WChild(n, "from"), flow); WLinearExpr(u, WChild(n, "to"), flow);}
-        WReleaseTemps(flow); a = WFork(u, flow); WLinearBlock(u, WChild(n, "body"), a);
-        for (s = flow->states; s; s = s->next) {x = WState(a, s->var); if (s->alive != x->alive) WFail(u, n->token, "Linearity Error", "Loop changes ownership of an outer variable");}
+        WReleaseTemps(flow); a = WFork(u, flow);
+        loop = WAlloc(u, sizeof(CWLoopFlow)); loop->node = n; loop->entry = WFork(u, flow)->states; loop->next = a->loops; a->loops = loop;
+        WLinearBlock(u, WChild(n, "body"), a);
+        for (s = flow->states; s; s = s->next) {x = WState(a, s->var); if (!a->returned && s->alive != x->alive) WFail(u, n->token, "Linearity Error", "Loop changes ownership of an outer variable");}
     } else if (WEq(n->tag, "borrow")) {
         v = WChild(n, "original"); c = WChild(n, "mode"); write = !WEq(c->name, "&");
         WLoan(u, flow, n, v->resolved, write, FALSE); s = WState(flow, v->resolved);

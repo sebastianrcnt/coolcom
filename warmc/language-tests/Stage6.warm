@@ -1,0 +1,99 @@
+import Standard.Buffer (Buffer, allocateEmpty, insertBack, destroyFree, slice as bufferSlice, sliceMut as bufferSliceMut);
+import Standard.String (String, length, nthByte, destroyString, fromLiteral, slice, sliceMut);
+import Standard.Format (FormatArg, Text, Signed, Unsigned, format);
+
+module body Stage6 is
+    record Pair: Free is value: Int64; end;
+    record Nested[T: Free]: Free is info: T; end;
+    function pair(value: Int64): Pair is return Pair(value => value); end;
+    function nested(): Nested[Pair] is return Nested(info => pair(42)); end;
+    function bound(calls: &![Index]): Index is
+        -- Mutate the caller through a scalar reference.
+        let next: Index := !calls + 1;
+        @embed(Unit, "AU_STORE($1, $2)", calls, next);
+        return 4;
+    end;
+    function expect(str: String, expected: Span[Nat8]): Unit is
+        if length(&str) /= spanLength(expected) then abort("format length mismatch"); end if;
+        for i from 0 until spanLength(expected) do
+            if nthByte(&str, i) /= expected[i] then abort("format bytes mismatch"); end if;
+        end for;
+        destroyString(str);
+        return nil;
+    end;
+    function main(): ExitCode is
+        var count: Index := 0;
+        for outer: i from 0 until 4 do
+            for j from 0 until 5 do
+                if j = 1 then continue outer; end if;
+                count := count + 1;
+            end for;
+        end for;
+        if count /= 4 then abort("labelled continue"); end if;
+        while done: true do
+            for i from 0 to 2 do
+                case Some(value => i) of
+                    when Some(value as n: Index) do
+                        if n = 1 then break done; end if;
+                    when None do skip;
+                end case;
+                count := count + 1;
+            end for;
+        end while;
+        if count /= 5 then abort("labelled break"); end if;
+        var attempts: Index := 0;
+        while again: attempts < 5 do
+            attempts := attempts + 1;
+            if attempts < 3 then continue again; end if;
+            break;
+        end while;
+        if attempts /= 3 then abort("while continue"); end if;
+        var calls: Index := 0;
+        for i from 0 until bound(&!calls) do count := count + 1; end for;
+        if calls /= 1 or count /= 9 then abort("until snapshots"); end if;
+        for i from 0 until 0 do abort("empty range"); end for;
+        for i from 5 until 3 do abort("reversed range"); end for;
+        for i from maximum_index to maximum_index do count := count + 1; end for;
+        if count /= 10 then abort("inclusive maximum range"); end if;
+        if pair(17).value /= 17 or nested().info.value /= 42 then abort("call fields"); end if;
+        if (pair(23)).value /= 23 then abort("parenthesized fields"); end if;
+        let a: Int64 := -7;
+        let b: Int64 := 3;
+        if a % b /= -1 or b % a /= 3 or 7 % (0 - b) /= 1 then abort("remainder sign"); end if;
+        if a % b /= rem(a, b) or (a + 20) % b * 2 /= 2 then abort("remainder precedence"); end if;
+        let bytes: Span[Nat8, Static] := "\x1b\e\0\u{1f642}\u{d7ff}\u{e000}\u{10ffff}\\\"\q";
+        if spanLength(bytes) /= 21 then abort("escape length"); end if;
+        if bytes[0] /= 27 or bytes[1] /= 27 or bytes[2] /= 0 or bytes[3] /= 240 then abort("escape bytes"); end if;
+        if bytes[17] /= 92 or bytes[18] /= 34 or bytes[19] /= 92 or bytes[20] /= 'q' then abort("escape tail"); end if;
+        if spanLength(sliceSpan(bytes, 21, 21)) /= 0 then abort("empty span slice"); end if;
+        if sliceSpan(bytes, 0, 1)[0] /= 27 then abort("computed span index"); end if;
+        var string: String := fromLiteral("abc");
+        if spanLength(slice(&string, 3, 3)) /= 0 then abort("empty string slice"); end if;
+        borrow writable: &![String, S] := &!string do
+            let sp: Span![Nat8, S] := sliceMut(writable, 0, 3);
+            let sub: Span![Nat8, S] := sliceSpanMut(sp, 1, 2);
+            sub[0] := 'X';
+        end borrow;
+        expect(string, "aXc");
+        var args: Buffer[FormatArg[Static]] := allocateEmpty();
+        if spanLength(bufferSlice(&args, 0, 0)) /= 0 then abort("empty buffer slice"); end if;
+        insertBack(&!args, Signed(value => minimum_int64));
+        insertBack(&!args, Signed(value => -42));
+        insertBack(&!args, Unsigned(value => maximum_nat64));
+        insertBack(&!args, Unsigned(value => 42));
+        insertBack(&!args, Text(value => "hi"));
+        expect(format("{{{} {:06d} {:x} {:04X} {:4s}}}", bufferSlice(&args, 0, 5)), "{-9223372036854775808 -00042 ffffffffffffffff 002A   hi}");
+        expect(format("plain {{}}", bufferSlice(&args, 0, 0)), "plain {}");
+        destroyFree(args);
+        var raw: Buffer[Nat8] := allocateEmpty();
+        insertBack(&!raw, 'a');
+        borrow mutable: &![Buffer[Nat8], B] := &!raw do
+            let rw: Span![Nat8, B] := bufferSliceMut(mutable, 0, 1);
+            rw[0] := 'b';
+        end borrow;
+        if bufferSlice(&raw, 0, 1)[0] /= 'b' then abort("mutable buffer slice"); end if;
+        destroyFree(raw);
+        printLn("STAGE 6 PASS");
+        return ExitSuccess();
+    end;
+end module body.

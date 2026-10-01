@@ -366,3 +366,98 @@ end module body.
                 (binary_expression
                   (integer)
                   (integer))))))))))
+
+================================================================================
+Stage 6: loop exits, half-open bounds, remainder, computed fields and escapes
+================================================================================
+
+module body Test is
+    function f(): Unit is
+        while outer: ok do
+            for inner: i from 0 until 10 do
+                if i % 2 = 0 then continue inner; end if;
+                break outer;
+            end for;
+            continue;
+        end while;
+        printLn(f(x).info.value);
+        printLn((f(x)).field);
+        printLn("\x1b\e\u{1f642}\0");
+        return nil;
+    end;
+end module body.
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (module_definition
+    (module_name
+      (identifier))
+    (function_declaration
+      (identifier)
+      (parameters)
+      (type_application
+        (type_identifier))
+      (block
+        (while_statement
+          (loop_label
+            (identifier))
+          (identifier)
+          (block
+            (for_statement
+              (loop_label
+                (identifier))
+              (identifier)
+              (integer)
+              (integer)
+              (block
+                (if_statement
+                  (binary_expression
+                    (binary_expression
+                      (identifier)
+                      (integer))
+                    (integer))
+                  (block
+                    (loop_exit_statement
+                      (identifier))))
+                (loop_exit_statement
+                  (identifier))))
+            (loop_exit_statement)))
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (argument
+                (path_expression
+                  (call_expression
+                    (identifier)
+                    (arguments
+                      (argument
+                        (identifier))))
+                  (identifier)
+                  (identifier))))))
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (argument
+                (path_expression
+                  (parenthesized_expression
+                    (call_expression
+                      (identifier)
+                      (arguments
+                        (argument
+                          (identifier)))))
+                  (identifier))))))
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (argument
+                (string
+                  (escape_sequence)
+                  (escape_sequence)
+                  (escape_sequence)
+                  (escape_sequence))))))
+        (return_statement
+          (nil))))))

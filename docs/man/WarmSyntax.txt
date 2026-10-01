@@ -18,7 +18,10 @@ Bindings and control flow:
     var y: Nat64 := x + 2;         -- mutable; y := 4 assigns
     if y > x then ... else ... end if;
     while condition do ... end while;
-    for i from 0 to count do ... end for;
+    for i from 0 to last do ... end for;     -- inclusive, legacy
+    for i from 0 until count do ... end for; -- half-open, bounds once
+    while outer: condition do ... break outer; ... end while;
+    break; continue; continue outer;        -- enclosing loops only
     case result of
         when Ok(value as v: Index) do ...
         when Err(error as e: IoError) do ...
@@ -45,7 +48,7 @@ Operator precedence, loose to tight:
     &                  bitwise AND
     << >>              shifts
     + -
-    * /
+    * / %
     prefix - not ~
 Arithmetic/bitwise chains associate left. Bitwise operations bind tighter
 than comparisons: flags & 2 /= 0 means (flags & 2) /= 0.
@@ -59,3 +62,15 @@ compiler README for supported scalar/span/record ABI and unsafe restrictions.
 There is no anonymous closure syntax. See Man("OS.Task").
 
 Source: warmc/README.md (C:/Warm/Docs/README.md).
+
+% means rem: quotient truncates toward zero, remainder follows the dividend's
+sign. -7 % 3 is -1; 7 % -3 is 1. Zero divisor and signed minimum % -1 abort.
+Call/parenthesized results support field/index paths: f(x).field, f(x)[i].
+Computed bases and extracted values must be Free; owned temporaries cannot be
+silently discarded. Loop exits consume local owners and preserve outer owners.
+String escapes: \xHH byte, \e ESC, \u{1F642} Unicode scalar as UTF-8, \0 NUL,
+\n, \r, \t, \\, \" and \'. NUL counts toward spanLength. Invalid new escapes
+and Unicode surrogates are errors. Unknown legacy escapes remain literal.
+Buffer/String slice and sliceMut, and sliceSpan/sliceSpanMut, use [start,end)
+and permit empty slices. Legacy getSpan/span endpoints remain inclusive.
+Portable text/numeric formatting: Man("Standard.Format").

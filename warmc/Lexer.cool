@@ -9,7 +9,7 @@ Bool WPrefix(U8 *s, U8 *p)
 }
 Bool WKeyword(U8 *s)
 {
-    U8 *p = "and or not module is body import as end constant type function generic record union case of when typeclass instance method if then else let var while for do from to borrow return skip Free Linear Type Region pragma sizeof nil true false Span private";
+    U8 *p = "and or not module is body import as end constant type function generic record union case of when typeclass instance method if then else let var while for do from to until borrow return break continue skip Free Linear Type Region pragma sizeof nil true false Span private";
     I64 n = StrLen(s);
     while (*p) {
         if (WPrefix(p, s) && (p[n] == ' ' || !p[n])) return TRUE;
@@ -17,6 +17,66 @@ Bool WKeyword(U8 *s)
         if (*p) p++;
     }
     return FALSE;
+}
+I64 WHex(I64 c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+// Decode ordinary strings by byte count, including NUL. Unknown old escapes stay literal.
+U8 *WDecodeString(CWUnit *u, CWToken *token, U8 *s, I64 *size)
+{
+    U8 *out = WAlloc(u, StrLen(s) + 1);
+    I64 i = 0, n = 0, c, cp, digits, h;
+    while (s[i] && !u->error_kind) {
+        c = s[i++];
+        if (c == 92 && s[i]) {
+            c = s[i++];
+            if (c == 'x') {
+                h = WHex(s[i]);
+                if (h < 0 || !s[i] || WHex(s[i + 1]) < 0) goto bad_escape;
+                c = h * 16 + WHex(s[i + 1]); i += 2;
+            } else if (c == 'u') {
+                if (s[i++] != '{') goto bad_escape;
+                cp = 0; digits = 0;
+                while (s[i] && s[i] != '}') {
+                    h = WHex(s[i++]); if (h < 0 || ++digits > 6) goto bad_escape;
+                    cp = cp * 16 + h;
+                }
+                if (s[i] != '}' || !digits || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) goto bad_escape;
+                i++;
+                if (cp < 0x80) c = cp;
+                else if (cp < 0x800) {out[n++] = 0xc0 | (cp >> 6); c = 0x80 | (cp & 63);}
+                else if (cp < 0x10000) {out[n++] = 0xe0 | (cp >> 12); out[n++] = 0x80 | ((cp >> 6) & 63); c = 0x80 | (cp & 63);}
+                else {out[n++] = 0xf0 | (cp >> 18); out[n++] = 0x80 | ((cp >> 12) & 63); out[n++] = 0x80 | ((cp >> 6) & 63); c = 0x80 | (cp & 63);}
+            } else if (c == 'e') c = 27;
+            else if (c == '0') c = 0;
+            else if (c == 'n') c = 10;
+            else if (c == 'r') c = 13;
+            else if (c == 't') c = 9;
+            else if (c == 39 || c == '"' || c == 92) {}
+            else if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+                while (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') i++;
+                if (s[i++] != 92) goto bad_escape;
+                goto decode_next;
+            } else out[n++] = 92;
+        }
+        out[n++] = c;
+decode_next:
+    }
+    *size = n; return out;
+bad_escape:
+    WFail(u, token, "Parse Error", "Malformed string escape or invalid Unicode scalar");
+    *size = n; return out;
+}
+// Embed text historically removes only escaped quotes; C backslashes are left for WGEmbed.
+U8 *WEmbedText(CWUnit *u, U8 *s)
+{
+    U8 *out = WAlloc(u, StrLen(s) + 1); I64 i = 0, n = 0;
+    while (s[i]) {if (s[i] == 92 && s[i + 1] == '"') i++; out[n++] = s[i++];}
+    return out;
 }
 CWToken *WLex(CWUnit *u, CWSource *src)
 {
@@ -78,13 +138,14 @@ CWToken *WLex(CWUnit *u, CWSource *src)
             if (s[i + 1] == '"' && s[i + 2] == '"') {quote = 3; k = 6;}
             i += quote; j = i;
             while (i < src->size) {
-                if (s[i] == 92 && s[i + 1] == '"' && (quote == 1 || (s[i + 2] == '"' && s[i + 3] == '"'))) i += quote + 1;
+                if (quote == 1 && s[i] == 92 && s[i + 1]) i += 2;
+                else if (quote == 3 && s[i] == 92 && s[i + 1] == '"' && s[i + 2] == '"' && s[i + 3] == '"') i += 4;
                 else if (s[i] == '"' && (quote == 1 || (s[i + 1] == '"' && s[i + 2] == '"'))) break;
                 else i++;
             }
             value = WAlloc(u, (i - j) + 1); n = 0;
             while (j < i) {
-                if (s[j] == 92 && s[j + 1] == '"' && (quote == 1 || (s[j + 2] == '"' && s[j + 3] == '"'))) j++;
+                if (quote == 3 && s[j] == 92 && s[j + 1] == '"' && s[j + 2] == '"' && s[j + 3] == '"') j++;
                 value[n++] = s[j++];
             }
             if (i == src->size) k = -1; else i += quote;
@@ -92,7 +153,7 @@ CWToken *WLex(CWUnit *u, CWSource *src)
             if (WPrefix(s + i, "@embed")) {i += 6;}
             else if (WPrefix(s + i, "&!") || WPrefix(s + i, "&~") || WPrefix(s + i, "&(") || WPrefix(s + i, "/=") || WPrefix(s + i, "<=") || WPrefix(s + i, ">=") || WPrefix(s + i, "->") || WPrefix(s + i, "=>") || WPrefix(s + i, ":=") || WPrefix(s + i, "<<") || WPrefix(s + i, ">>")) i += 2;
             else {
-                value = "()[]{}+-*/=<>;&,.:!|^~";
+                value = "()[]{}+-*/%=<>;&,.:!|^~";
                 j = 0; while (value[j] && value[j] != c) j++;
                 if (!value[j]) k = -1;
                 i++; value = NULL;
@@ -101,6 +162,7 @@ CWToken *WLex(CWUnit *u, CWSource *src)
         t = WAlloc(u, sizeof(CWToken)); t->source = src; t->start = start; t->end = i; t->kind = k;
         if (!value) value = WText(u, s + start, i - start);
         t->text = value;
+        if (k == 5) WDecodeString(u, t, value, &n);
         if (tail) tail->next = t; else head = t;
         tail = t; u->tokens++;
         if (k == -1) WFail(u, t, "Parse Error", "Invalid character or unterminated literal");

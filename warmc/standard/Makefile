@@ -7,6 +7,7 @@ MODULES := \
 		src/Buffer.warmh,src/Buffer.warm \
 		src/String.warmh,src/String.warm \
 		src/StringBuilder.warmh,src/StringBuilder.warm \
+		src/Format.warmh,src/Format.warm \
 		src/IO/IO.warmh,src/IO/IO.warm \
 		src/IO/Terminal.warmh,src/IO/Terminal.warm \
 		test/Unit.warmh,test/Unit.warm \

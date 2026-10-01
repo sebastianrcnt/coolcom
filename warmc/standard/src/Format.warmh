@@ -1,0 +1,21 @@
+import Standard.String (String);
+
+module Standard.Format is
+    union FormatArg[R: Region]: Free is
+        case Text is
+            value: Span[Nat8, R];
+        case Signed is
+            value: Int64;
+        case Unsigned is
+            value: Nat64;
+    end;
+
+    """
+    Format sequential {}, {:s}, {:d}, {:x}, {:X} placeholders. Optional decimal
+    width pads on the left; a leading zero selects numeric zero padding after
+    the sign. {{ and }} emit braces. Invalid formats, types and counts abort.
+    The caller owns and must destroy the returned String.
+    """
+    generic [T: Region, A: Region, R: Region]
+    function format(template: Span[Nat8, T], args: Span[FormatArg[R], A]): String;
+end module.

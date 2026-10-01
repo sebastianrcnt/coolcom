@@ -5,6 +5,12 @@
 -- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 --
 module Austral.Pervasive is
+    generic [T: Type, R: Region]
+    function sliceSpan(sp: Span[T, R], start: Index, endExclusive: Index): Span[T, R];
+
+    generic [T: Type, R: Region]
+    function sliceSpanMut(sp: Span![T, R], start: Index, endExclusive: Index): Span![T, R];
+
     -- Intrinsic marker: implementations are derived by the compiler.
     typeclass Sendable(T: Type) is end;
     union Option[T: Type]: Type is

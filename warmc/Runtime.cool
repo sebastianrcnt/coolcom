@@ -48,6 +48,12 @@ U8 au_abort(au_span_t * message) {wh_abort(message->wh_data); return 0;}
 U0 au_make_span(au_span_t * out, U8 *data, U64 size) {
     out->wh_data = data; out->wh_size = size;
 }
+// Half-open slices allow [size,size), including a null empty span.
+U0 au_slice_span(au_span_t * out, au_span_t * sp, U64 start, U64 end, U64 element_size) {
+    if (start > end || end > sp->wh_size) wh_abort("sliceSpan: invalid half-open bounds");
+    if (element_size && start > 0xffffffffffffffff / element_size) wh_abort("sliceSpan: offset overflow");
+    au_make_span(out, sp->wh_data + start * element_size, end - start);
+}
 U0 au_make_span_from_string(au_span_t * out, U8 *data, U64 size) {
     au_make_span(out, data, size);
 }

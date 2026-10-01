@@ -369,3 +369,41 @@ TCP and ephemeral UDP; listeners and fixed local UDP ports require unrestricted
 authority. UDP sockets retain and enforce the policy independently.
 `OS.CoolOS.Framebuffer` takes Output; `OS.CoolOS.Key` takes Input and returns
 `Result[Bool,IoError]` or `Result[Option[Key],IoError]`.
+
+## Stage 6 language fixes
+
+`break;` and `continue;` target the innermost loop. `while outer: condition do`
+and `for outer: i from a until b do` label loops for `break outer;` and
+`continue outer;`. Exits must consume local owned resources and preserve outer
+ownership. Active labels must be unique. Function parameters remain immutable.
+
+`for i from a until b do` visits `[a,b)`, evaluating both bounds once; empty and
+reversed ranges do no work. Legacy `to` stays inclusive and re-evaluates its end
+bound. Both forms bind Index and terminate at maximum Index without wrapping.
+Buffer and String `slice`/`sliceMut` and Pervasive `sliceSpan`/`sliceSpanMut` take
+half-open bounds, accepting empty slices including `[length,length)`. Existing
+`getSpan`, `getSpanMut`, `span`, and `spanWrite` keep inclusive endpoints.
+
+`%` is `rem` at multiplication precedence. Division truncates toward zero and
+nonzero remainder follows the dividend's sign; `-7 % 3 = -1`, `7 % -3 = 1`.
+Zero divisor and signed minimum `% -1` abort. Float remainder is unavailable.
+Signed Pervasive +, -, *, / and rem are emitted inline with their checks.
+
+Ordinary strings accept `\xHH`, `\e`, `\u{H...}` (1-6 hex digits, UTF-8 scalar),
+`\0`, `\n`, `\r`, `\t`, `\\`, `\"`, and `\'`. NUL is included in byte length.
+Invalid new escapes and surrogates are parse errors. Unknown legacy escapes
+and triple-string/docstring behavior are preserved; embed text retains C escapes.
+`f(x).field`, `(expr).field` and their chained indexes/fields evaluate the base
+once. Computed bases and extracted results must be Free; temporary owned records
+cannot lose their resources through field selection.
+
+`Standard.Format.format(template, args)` returns an owned String from borrowed
+bytes and a span of `FormatArg[R]` (`Text`, `Signed`, `Unsigned`). It supports
+`{}`, `{:s}`, `{:d}`, `{:x}`, `{:X}`, minimum width (`{:6d}`), zero padding
+(`{:06d}`), and literal braces (`{{`, `}}`). Numeric zero padding follows the
+minus sign; signed hex uses sign and magnitude. Text width is in bytes.
+Malformed templates/types/counts abort. Destroy the returned String.
+
+`python3 warmc/test_language.py` tests these features, ownership rejection,
+checked arithmetic boundaries and existing disk applications. See
+[Stage 6 design and measurements](../docs/warm-stdlib.md#stage-6-language-fixes).

@@ -86,4 +86,10 @@ module Standard.String is
     """
     generic [R: Region]
     function getSpanMut(string: &![String, R], start: Index, final: Index): Span![Nat8, R];
+    generic [R: Region]
+    function slice(string: &[String, R], start: Index, endExclusive: Index): Span[Nat8, R];
+
+    generic [R: Region]
+    function sliceMut(string: &![String, R], start: Index, endExclusive: Index): Span![Nat8, R];
+
 end module.

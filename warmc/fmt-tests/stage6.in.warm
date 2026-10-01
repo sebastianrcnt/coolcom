@@ -1,0 +1,15 @@
+module body Test is
+function f():Unit is
+var x:Index:=0;
+while outer: x<3 do
+for inner:i from 0 until 4 do
+if i%2=0 then continue inner;end if;
+x:=x+1;
+if x=3 then break outer;end if;
+end for;
+end while;
+printLn(get(x).field);
+printLn("\x1b\e\u{1f642}\0\\\"");
+return nil;
+end;
+end module body.

@@ -3,7 +3,7 @@ class CWBuffer {U8 *data; I64 size, capacity;};
 class CWGen {
     CWUnit *unit;
     CWBuffer *types_text, *body;
-    CWNode *types, *names, *functions, *last_function, *current, *bindings, *address_dependencies;
+    CWNode *types, *names, *functions, *last_function, *current, *bindings, *address_dependencies, *scratch;
     I64 serial; Bool native;
 };
 U0 WGPut(CWUnit *u, CWBuffer *b, U8 *text)
@@ -154,20 +154,24 @@ U0 WGCopy(CWGen *g, U8 *dst, U8 *src, CWNode *ty)
     }
 }
 CWNode *WGConcrete(CWGen *g, CWNode *ty) {return WSubst(g->unit, ty, g->bindings);}
-U8 *WGQuote(CWUnit *u, U8 *s)
+U8 *WGQuoteBytes(CWUnit *u, U8 *s, I64 size)
 {
     CWBuffer *b = WAlloc(u, sizeof(CWBuffer)); I64 i; U8 ch[2]; ch[1] = 0;
     WGPut(u, b, "\"");
-    for (i = 0; s[i]; i++) {
+    for (i = 0; i < size; i++) {
         if (s[i] == '"') WGPut(u, b, "\\\"");
         else if (s[i] == 92) WGPut(u, b, "\\\\");
         else if (s[i] == '\n') WGPut(u, b, "\\n");
         else if (s[i] == '\r') WGPut(u, b, "\\r");
         else if (s[i] == '\t') WGPut(u, b, "\\t");
+        else if (s[i] < 32 || s[i] >= 127) {
+            U8 octal[5]; octal[0] = 92; octal[1] = '0' + (s[i] >> 6); octal[2] = '0' + ((s[i] >> 3) & 7); octal[3] = '0' + (s[i] & 7); octal[4] = 0; WGPut(u, b, octal);
+        }
         else {ch[0] = s[i]; WGPut(u, b, ch);}
     }
     WGPut(u, b, "\""); return b->data;
 }
+U8 *WGQuote(CWUnit *u, U8 *s) {return WGQuoteBytes(u, s, StrLen(s));}
 I64 WGTag(CWNode *cons)
 {
     CWNode *c; I64 i = 0;
@@ -250,8 +254,10 @@ string_next:
 U8 *WGPath(CWGen *g, CWNode *n)
 {
     CWUnit *u = g->unit;
-    CWNode *p, *ty = WGConcrete(g, WDeclType(n->resolved)), *inner;
-    U8 *result = WGName(g, n->resolved), *idx, *ptr, *ix, *size;
+    CWNode *p, *base = WChild(n, "base"), *ty, *inner;
+    U8 *result, *idx, *ptr, *ix, *size;
+    if (base) {ty = WGConcrete(g, base->ty); result = WGExpr(g, base);}
+    else {ty = WGConcrete(g, WDeclType(n->resolved)); result = WGName(g, n->resolved);}
     Bool transform = WEq(n->tag, "ref-path");
     for (p = n->first; p; p = p->next) if (WEq(p->role, "path")) {
             if (WEq(p->tag, "index")) {
@@ -369,6 +375,8 @@ U8 *WGEmbed(CWGen *g, CWNode *n, CWNode *args)
         if (!WEq(tail, expected->data)) {WFail(u, n->token, "Unsupported Feature", "Unsupported printf argument syntax"); return "0";}
         for (bound = args; bound; bound = bound->next) if (WEq(bound->ty->name, "Float32")) bound->name = WG3(u, "wc_f32_to_f64(", bound->name, ")");
         expr = WG3(u, "Print(", fmt, WGExpand(u, tail, args)); WGLine(g, WGCat(u, expr, ";")); return "0";
+    } else if (WEq(s, "au_slice_span($1, $2, $3, $4)") && c && c->next && !c->next->next) {
+        tmp = WGTemp(g, ty); WGLine(g, WG3(u, "au_slice_span(&", tmp, WGCat(u, WGExpand(u, ", &$1, $2, $3, $4)", args), ";"))); return tmp;
     } else if (c && !c->next && (WEq(s, "__builtin_add_overflow($1, $2, &$3)") || WEq(s, "__builtin_sub_overflow($1, $2, &$3)") || WEq(s, "__builtin_mul_overflow($1, $2, &$3)"))) {
         bits = WIntBits(c->ty->name); sign = WPrefix(c->ty->name, "Int"); maximum = "0xffffffffffffffff"; minimum = "0x8000000000000000";
         if (bits == 8) {maximum = "255"; minimum = "-128";} else if (bits == 16) {maximum = "65535"; minimum = "-32768";} else if (bits == 32) {maximum = "4294967295"; minimum = "-2147483648";}
@@ -415,9 +423,53 @@ CWNode *WGArguments(CWGen *g, CWNode *n)
         }
     return args;
 }
-// Pervasive's integer primitives are open-coded instead of called: the unsigned trapping
-// +, - and * (the checks and messages of their Pervasive bodies), the bitwise and/or/xor and
-// the widening conversions. Everything else is a call. NULL: not one of these.
+// Reuse statement-local arithmetic scratch storage within each generated function.
+// Results remain fresh: nested expressions may still need an earlier result.
+U8 *WGArithmeticScratch(CWGen *g, CWNode *ty, U8 *role)
+{
+    CWNode *p;
+    for (p = g->scratch; p; p = p->next) if (WTypeEq(p->ty, ty) && WEq(p->role, role)) return p->name;
+    p = WNode(g->unit, "scratch", NULL); p->ty = ty; p->role = role; p->name = WGTemp(g, ty);
+    p->next = g->scratch; g->scratch = p; return p->name;
+}
+// Only the signed Pervasive primitives, with typed bounds and operands. In particular,
+// keep signed minimum out of Cool's unsigned constant-expression arithmetic.
+U8 *WGOpenSigned(CWGen *g, CWNode *d, CWNode *a, CWNode *b, CWNode *ty)
+{
+    CWUnit *u = g->unit; I64 bits = WIntBits(ty->name);
+    U8 *name = d->name, *pattern, *op, *minimum, *maximum, *lo, *hi, *tmp, *flag;
+    CWNode *values = WNode(u, "value", d->token), *v;
+    if (!WEq(name, "trappingAdd") && !WEq(name, "trappingSubtract") && !WEq(name, "trappingMultiply") && !WEq(name, "trappingDivide") && !WEq(name, "rem")) return NULL;
+    tmp = WGArithmeticScratch(g, ty, "lhs"); WGCopy(g, tmp, a->name, ty); values->name = tmp;
+    v = WNode(u, "value", d->token); values->next = v; tmp = WGArithmeticScratch(g, ty, "rhs"); WGCopy(g, tmp, b->name, ty); v->name = tmp;
+    minimum = "0x8000000000000000"; maximum = "0x7fffffffffffffff";
+    if (bits == 8) {minimum = "-128"; maximum = "127";}
+    else if (bits == 16) {minimum = "-32768"; maximum = "32767";}
+    else if (bits == 32) {minimum = "-2147483648"; maximum = "2147483647";}
+    hi = WGArithmeticScratch(g, ty, "maximum"); WGCopy(g, hi, maximum, ty); lo = WGArithmeticScratch(g, ty, "minimum"); WGCopy(g, lo, minimum, ty);
+    v->next = WNode(u, "value", d->token); v = v->next; v->name = hi;
+    v->next = WNode(u, "value", d->token); v = v->next; v->name = lo;
+    if (WEq(name, "trappingDivide") || WEq(name, "rem")) {
+        U8 *message = WG3(u, " (", ty->name, ")");
+        if (WEq(name, "rem")) message = WG3(u, "(", ty->name, ")");
+        WGLine(g, WG3(u, "if (", values->next->name, WG3(u, " == 0) wh_abort(\"Division by zero in ", name, WGCat(u, message, "\");"))));
+        pattern = "(($1 == $4) && ($2 == -1))";
+        op = "($1 / $2)"; if (WEq(name, "rem")) op = "($1 % $2)";
+    } else {
+        pattern = "(($2 > 0) && ($1 > ($3 - $2))) || (($2 < 0) && ($1 < ($4 - $2)))"; op = "($1 + $2)";
+        if (WEq(name, "trappingSubtract")) {pattern = "(($2 < 0) && ($1 > ($3 + $2))) || (($2 > 0) && ($1 < ($4 + $2)))"; op = "($1 - $2)";}
+        if (WEq(name, "trappingMultiply")) {
+            pattern = "(($1 > 0) && ((($2 > 0) && ($1 > ($3 / $2))) || (($2 < 0) && ($2 < ($4 / $1))))) || (($1 < 0) && ((($2 > 0) && ($1 < ($4 / $2))) || (($2 < 0) && ($1 < ($3 / $2)))))"; op = "($1 * $2)";
+        }
+    }
+    flag = WGArithmeticScratch(g, WTypeNamed(u, d->scope, "Bool"), "overflow");
+    WGLine(g, WG3(u, flag, " = ", WGCat(u, WGExpand(u, pattern, values), ";")));
+    maximum = WG3(u, " (", ty->name, ")"); if (WEq(name, "rem")) maximum = WG3(u, "(", ty->name, ")");
+    WGLine(g, WG3(u, "if (", flag, WG3(u, ") wh_abort(\"Overflow in ", name, WGCat(u, maximum, "\");"))));
+    tmp = WGTemp(g, ty); WGCopy(g, tmp, WGExpand(u, op, values), ty); return tmp;
+}
+// Open-code signed checked arithmetic, unsigned trapping +, - and *, unsigned
+// bitwise operations and widening conversions. Other primitives remain calls.
 U8 *WGOpenCode(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
 {
     CWUnit *u = g->unit; CWNode *p, *v, *vals[2]; U8 *op = NULL, *check = NULL, *max, *flag, *tmp, *name = d->name;
@@ -430,7 +482,8 @@ U8 *WGOpenCode(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
             vals[n++] = v;
         }
     if ((WEq(name, "widenToNat64") || WEq(name, "widenToIndex")) && n == 1) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[0]->name, ty); return tmp;}
-    if (n != 2 || WPrefix(ty->name, "Int")) return NULL;
+    if (n != 2) return NULL;
+    if (WPrefix(ty->name, "Int")) return WGOpenSigned(g, d, vals[0], vals[1], ty);
     // Operands in variables of their type, as in the Pervasive bodies: HolyC folds constant
     // operands as signed I64 (0xffffffffffffffff / 256 would be 0).
     for (n = 0; n < 2; n++) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[n]->name, ty); vals[n]->name = tmp;}
@@ -563,6 +616,7 @@ U8 *WGExpr(CWGen *g, CWNode *n)
 {
     CWUnit *u = g->unit; CWNode *ty = WGConcrete(g, n->ty), *d, *v, *args;
     U8 *a, *b, *tmp, *op, *text;
+    I64 string_size;
     if (u->error_kind) return "0";
     if (n->lowered) return WGExpr(g, n->lowered);
     if (WEq(n->tag, "literal")) {
@@ -575,8 +629,10 @@ U8 *WGExpr(CWGen *g, CWNode *n)
             }
             return text;
         }
-        text = WGStringValue(u, n); tmp = WGTemp(g, ty);
-        WGLine(g, WG3(u, "au_make_span_from_string(&", tmp, WG3(u, ", ", WGQuote(u, text), WG3(u, ", ", WGDec(u, StrLen(text)), ");")))); return tmp;
+        if (n->token->kind == 5) text = WDecodeString(u, n->token, n->name, &string_size);
+        else {text = WGStringValue(u, n); string_size = StrLen(text);}
+        tmp = WGTemp(g, ty);
+        WGLine(g, WG3(u, "au_make_span_from_string(&", tmp, WG3(u, ", ", WGQuoteBytes(u, text, string_size), WG3(u, ", ", WGDec(u, string_size), ");")))); return tmp;
     }
     if (WEq(n->tag, "variable")) {
         d = n->resolved;
@@ -595,7 +651,7 @@ U8 *WGExpr(CWGen *g, CWNode *n)
         }
         return WGName(g, d);
     }
-    if (WEq(n->tag, "path") || WEq(n->tag, "ref-path")) return WGPath(g, n);
+    if (WEq(n->tag, "path") || WEq(n->tag, "ref-path") || WEq(n->tag, "value-path")) return WGPath(g, n);
     if (WEq(n->tag, "call")) return WGCallExpr(g, n);
     if (WEq(n->tag, "embed")) {args = WGArguments(g, n); return WGEmbed(g, n, args);}
     if (WEq(n->tag, "sizeof")) return WG3(u, "sizeof(", WGType(g, WGConcrete(g, WChild(n, "type"))), ")");
@@ -662,12 +718,24 @@ U0 WGStmt(CWGen *g, CWNode *n)
     else if (WEq(n->tag, "if")) {
         a = WGExpr(g, WChild(n, "condition")); WGLine(g, WG3(u, "if (", a, ") {")); WGStmt(g, WChild(n, "then"));
         c = WChild(n, "else"); if (c) {WGLine(g, "} else {"); WGStmt(g, c);} WGLine(g, "}");
+    } else if (WEq(n->tag, "break") || WEq(n->tag, "continue")) {
+        a = n->resolved->pair->name; if (WEq(n->tag, "continue")) a = n->resolved->pair->tag;
+        WGLine(g, WG3(u, "goto ", a, ";"));
     } else if (WEq(n->tag, "while")) {
-        WGLine(g, "while (1) {"); a = WGExpr(g, WChild(n, "condition")); WGLine(g, WG3(u, "if (!(", a, ")) break;")); WGStmt(g, WChild(n, "body")); WGLine(g, "}");
+        n->pair = WNode(u, WGFresh(g, "wc_next"), n->token); n->pair->name = WGFresh(g, "wc_end");
+        WGLine(g, WGCat(u, n->pair->tag, ":;"));
+        WGLine(g, "while (1) {"); a = WGExpr(g, WChild(n, "condition")); WGLine(g, WG3(u, "if (!(", a, ")) break;")); WGStmt(g, WChild(n, "body")); WGLine(g, "}"); WGLine(g, WGCat(u, n->pair->name, ":;"));
     } else if (WEq(n->tag, "for")) {
         name = WGName(g, n->resolved); value = WGExpr(g, WChild(n, "from")); WGBindLocal(g, n->resolved, value);
-        WGLine(g, "while (1) {"); limit = WGExpr(g, WChild(n, "to")); WGLine(g, WG3(u, "if (", name, WG3(u, " > ", limit, ") break;")));
-        WGStmt(g, WChild(n, "body")); WGLine(g, WGCat(u, name, "++;")); WGLine(g, "}");
+        n->pair = WNode(u, WGFresh(g, "wc_next"), n->token); n->pair->name = WGFresh(g, "wc_end");
+        if (n->flags & 16384) {limit = WGExpr(g, WChild(n, "to")); a = WGTemp(g, n->resolved->ty); WGCopy(g, a, limit, n->resolved->ty); limit = a;}
+        WGLine(g, "while (1) {");
+        if (!(n->flags & 16384)) limit = WGExpr(g, WChild(n, "to"));
+        a = " > "; if (n->flags & 16384) a = " >= ";
+        WGLine(g, WG3(u, "if (", name, WG3(u, a, limit, ") break;")));
+        WGStmt(g, WChild(n, "body")); WGLine(g, WGCat(u, n->pair->tag, ":;"));
+        WGLine(g, WG3(u, "if (", name, " == 0xffffffffffffffff) break;"));
+        WGLine(g, WGCat(u, name, "++;")); WGLine(g, "}"); WGLine(g, WGCat(u, n->pair->name, ":;"));
     } else if (WEq(n->tag, "borrow")) {
         v = WChild(n, "original"); value = WGName(g, v->resolved); c = WChild(n, "mode");
         if (!WEq(c->name, "&~")) value = WG3(u, "(&(", value, "))"); WGBindLocal(g, n->resolved, value); WGStmt(g, WChild(n, "body"));
@@ -792,7 +860,7 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
             for (d = m->first; d; d = d->next) if (WEq(d->tag, "function"))
                     for (p = d->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Export")) WGRequest(g, d, WScope(u, NULL));
     for (f = g->functions; f && !u->error_kind; f = f->next) {
-        g->current = f; g->bindings = f->pair; g->body = WAlloc(u, sizeof(CWBuffer));
+        g->current = f; g->bindings = f->pair; g->scratch = NULL; g->body = WAlloc(u, sizeof(CWBuffer));
         sig = WGSignature(g, f); WGLine(g, WGCat(u, sig, " {"));
         for (p = f->resolved->first; p; p = p->next) if (WEq(p->role, "parameter")) {
                 ty = WSubst(u, WChild(p, "type"), f->pair);

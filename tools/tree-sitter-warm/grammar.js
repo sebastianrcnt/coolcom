@@ -274,6 +274,7 @@ module.exports = grammar({
       $.borrow_statement,
       $.return_statement,
       $.skip_statement,
+      $.loop_exit_statement,
       $.assignment_statement,
       $.expression_statement,
     ),
@@ -346,6 +347,7 @@ module.exports = grammar({
 
     while_statement: $ => seq(
       'while',
+      optional($.loop_label),
       field('condition', $._expression),
       'do',
       $.block,
@@ -356,10 +358,11 @@ module.exports = grammar({
 
     for_statement: $ => seq(
       'for',
+      optional($.loop_label),
       field('name', $.identifier),
       'from',
       field('from', $._expression),
-      'to',
+      choice('to', 'until'),
       field('to', $._expression),
       'do',
       $.block,
@@ -386,6 +389,10 @@ module.exports = grammar({
     return_statement: $ => seq('return', $._expression, ';'),
 
     skip_statement: _ => seq('skip', ';'),
+
+    loop_label: $ => prec(1, seq($.identifier, ':')),
+
+    loop_exit_statement: $ => seq(choice('break', 'continue'), optional($.identifier), ';'),
 
     assignment_statement: $ => seq(
       field('target', $._simple_expression),
@@ -426,7 +433,7 @@ module.exports = grammar({
         [PREC.bit_and, '&'],
         [PREC.shift, choice('<<', '>>')],
         [PREC.add, choice('+', '-')],
-        [PREC.mul, choice('*', '/')],
+        [PREC.mul, choice('*', '/', '%')],
       ];
       return choice(...table.map(([p, op]) => prec.left(p, seq(
         field('left', $._simple_expression),
@@ -451,6 +458,7 @@ module.exports = grammar({
       $.float,
       $.character,
       $.string,
+      $.docstring,
       $.boolean,
       $.nil,
       $.identifier,
@@ -479,7 +487,7 @@ module.exports = grammar({
     ),
 
     path_expression: $ => seq(
-      field('base', $.identifier),
+      field('base', choice($.identifier, $.call_expression, $.parenthesized_expression)),
       repeat1($._path_element),
     ),
 
@@ -547,7 +555,7 @@ module.exports = grammar({
       '"',
     ),
 
-    escape_sequence: _ => token.immediate(/\\(.|\n)/),
+    escape_sequence: _ => token.immediate(choice(/\\x[0-9a-fA-F]{2}/, /\\u\{[0-9a-fA-F]{1,6}\}/, /\\[^xu]/)),
 
     identifier: _ => /[A-Za-z][A-Za-z0-9_]*/,
   },

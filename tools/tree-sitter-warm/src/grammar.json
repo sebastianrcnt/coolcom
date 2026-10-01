@@ -1590,6 +1590,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "loop_exit_statement"
+        },
+        {
+          "type": "SYMBOL",
           "name": "assignment_statement"
         },
         {
@@ -2027,6 +2031,18 @@
           "value": "while"
         },
         {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "loop_label"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
           "type": "FIELD",
           "name": "condition",
           "content": {
@@ -2064,6 +2080,18 @@
           "value": "for"
         },
         {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "loop_label"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
           "type": "FIELD",
           "name": "name",
           "content": {
@@ -2084,8 +2112,17 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "to"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "to"
+            },
+            {
+              "type": "STRING",
+              "value": "until"
+            }
+          ]
         },
         {
           "type": "FIELD",
@@ -2222,6 +2259,57 @@
         {
           "type": "STRING",
           "value": "skip"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "loop_label": {
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "identifier"
+          },
+          {
+            "type": "STRING",
+            "value": ":"
+          }
+        ]
+      }
+    },
+    "loop_exit_statement": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "break"
+            },
+            {
+              "type": "STRING",
+              "value": "continue"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "identifier"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         },
         {
           "type": "STRING",
@@ -2663,6 +2751,10 @@
                     {
                       "type": "STRING",
                       "value": "/"
+                    },
+                    {
+                      "type": "STRING",
+                      "value": "%"
                     }
                   ]
                 }
@@ -2774,6 +2866,10 @@
         {
           "type": "SYMBOL",
           "name": "string"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "docstring"
         },
         {
           "type": "SYMBOL",
@@ -2946,8 +3042,21 @@
           "type": "FIELD",
           "name": "base",
           "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "identifier"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "call_expression"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "parenthesized_expression"
+              }
+            ]
           }
         },
         {
@@ -3309,8 +3418,21 @@
     "escape_sequence": {
       "type": "IMMEDIATE_TOKEN",
       "content": {
-        "type": "PATTERN",
-        "value": "\\\\(.|\\n)"
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "PATTERN",
+            "value": "\\\\x[0-9a-fA-F]{2}"
+          },
+          {
+            "type": "PATTERN",
+            "value": "\\\\u\\{[0-9a-fA-F]{1,6}\\}"
+          },
+          {
+            "type": "PATTERN",
+            "value": "\\\\[^xu]"
+          }
+        ]
       }
     },
     "identifier": {
