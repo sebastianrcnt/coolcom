@@ -12,6 +12,17 @@
 // searched first-fit. Free() coalesces with both neighbours immediately, so
 // an empty heap is always a single block. A zero-size in-use sentinel header
 // ends the range. State lives in a CHeapCtrl so tasks can get their own later.
+//
+// Large blocks (MAlloc/CAlloc/ReAlloc of BIG_MIN bytes or more) do not need
+// one physically contiguous range: they live in the big region, a virtual
+// window above the DRAM aperture mapped page by page (16 KiB) through
+// level-3 tables reserved at boot. Its pages are page-aligned runs carved
+// from whatever holes the boundary-tag heap has, so a big MAlloc succeeds
+// while the total free memory suffices, however fragmented; Free unmaps them
+// and gives the runs back to the heap. Big blocks are not identity mapped:
+// DMA buffers, page tables and task stacks use MAllocDma/CAllocDma (always
+// the contiguous, identity-mapped heap), and drivers that take caller
+// buffers translate them with MemPhys/MemPhysRun.
 
 #define HEAP_MAGIC 0xB10C5AFE
 #define HEAP_USER  64
@@ -386,29 +397,523 @@ U0 HeapStatsCtrl(CHeapCtrl *hc)
             hc->used >> 10, nu, (hc->total - hc->used) >> 10, nf, big >> 10, st);
 }
 
+// ---- Page runs for the big region. ----
+#define MEM_PAGE   16384
+
+// Pages of a page-aligned run that fit in free block b when the payload
+// starts at the first page boundary leaving room for its header (and for a
+// free leading remainder, if any). *pay receives that payload address.
+I64 HeapRunFit(CMemBlk *b, I64 *pay)
+{
+    I64 B = b, S = BlkSize(b), P = (B + HEAP_USER + MEM_PAGE - 1) & ~(MEM_PAGE - 1);
+    if (P - HEAP_USER - B > 0 && P - HEAP_USER - B < HEAP_MIN)
+        P += MEM_PAGE;
+    *pay = P;
+    if (B + S < P + MEM_PAGE + 16)
+        return 0;
+    return (B + S - P - 16) / MEM_PAGE;   // a run of n pages is a block of n * MEM_PAGE + 80
+}
+
+// Allocate a used heap block whose payload is a page-aligned run of `want`
+// pages if some free block can hold that, else the longest run available
+// (at least `min`). Returns the payload; *got receives its page count.
+U8 *HeapAllocRun(CHeapCtrl *hc, I64 want, I64 min, I64 *got, I64 caller = 0)
+{
+    CMemBlk *b, *c, *best = NULL;
+    I64 i, n, P, bestP = 0, bestn = 0, lead, prev, S, tot, rem;
+    *got = 0;
+    if (want < 1 || min < 1 || min > want)
+        return NULL;
+    HeapLock(hc);
+    for (i = HeapBin(MEM_PAGE + 80); i < HEAP_NBINS; i++)
+        for (b = hc->bin[i]; b; b = b->next) {
+            n = HeapRunFit(b, &P);
+            if (n >= want) {
+                best = b;
+                bestP = P;
+                bestn = want;
+                goto run_found;
+            }
+            if (n > bestn) {
+                best = b;
+                bestP = P;
+                bestn = n;
+            }
+        }
+    if (bestn < min) {
+        HeapUnlock(hc);
+        return NULL;
+    }
+run_found:
+    b = best;
+    P = bestP;
+    n = bestn;
+    HeapUnlink(hc, b);
+    S = BlkSize(b);
+    prev = BlkPrev(b);
+    lead = P - HEAP_USER - b(I64);
+    c = P - HEAP_USER;
+    if (lead) {   // the leading remainder stays free
+        BlkSet(b, lead, 0, prev);
+        HeapLink(hc, b);
+        prev = lead;
+    }
+    S -= lead;
+    tot = HeapBlkSize(n * MEM_PAGE);
+    rem = S - tot;
+    if (rem >= HEAP_MIN) {
+        HeapPutFree(hc, c(U8 *) + tot, rem, tot);
+        BlkSet(c, tot, 1, prev);
+    } else {
+        BlkSet(c, S, 1, prev);
+        BlkSetPrev(c(U8 *) + S, S);
+    }
+    if (!caller)
+        caller = ArchFp(U8 **)[1];
+    HeapSeal(c, n * MEM_PAGE, caller);
+    hc->used += BlkSize(c);
+    HeapUnlock(hc);
+    *got = n;
+    return P;
+}
+
+// ---- The big region. A big block starts at a page boundary with a 64-byte
+// header (the heap's canary layout) and is followed by at least one
+// unmapped guard page. Blocks are kept in a list sorted by address. ----
+
+#define BIG_MIN    (256 << 10)       // MAlloc threshold for the big region
+#define BIG_BASE   0xC00000000       // 48 GiB: above both DRAM apertures, below the 64 GiB VA limit
+#define BIG_MAGIC  0xB16B10C5
+#define BIG_USER   64
+#define BIG_PTE    (3 | (1 << 2) | (3 << 8) | (1 << 10))   // page, Normal WB, inner shareable, AF
+#define BIG_PA     0xFFFFFFFFC000
+
+class CBigBlk
+{
+    I64 magic, pages;          // mapped pages, header included
+    CBigBlk *next, *prev;
+    I64 requested, caller, front[2];
+};
+
+class CBigCtrl
+{
+    U8 *start, *end;     // virtual window
+    I64 *pte;            // its level-3 entries, one flat array
+    CBigBlk *head;
+    I64 blks, pages, requested, runs;
+    I64 lock;
+};
+
+CBigCtrl big_heap;
+
+Bool BigHas(U8 *p) {return big_heap.start <= p < big_heap.end;}
+
+I64 *BigPte(U8 *va) {return big_heap.pte + ((va - big_heap.start) >> 14);}
+
+// Reserve the window and its level-3 tables, taken from the start of the
+// RAM range before the heap is set up on the rest: twice the heap's size
+// (VA is cheap; blocks keep guard pages), limited by the free level-2 slots.
+U0 BigInit(U8 **start, U8 *end)
+{
+    I64 *l2 = ArchL2Table, i0 = BIG_BASE >> 25, n, i;
+    I64 s = (*start(I64) + MEM_PAGE - 1) & ~(MEM_PAGE - 1);
+    MemSet(&big_heap, 0, sizeof(CBigCtrl));
+    n = ((end(I64) - s) * 2 + (1 << 25) - 1) >> 25;
+    for (i = 0; i < n && i0 + i < 2048; i++)
+        if (l2[i0 + i])
+            break;
+    n = i;
+    if (n < 1 || end(I64) - s < n * MEM_PAGE * 4)
+        return;
+    big_heap.pte = s;
+    MemSet(big_heap.pte, 0, n * MEM_PAGE);
+    for (i = 0; i < n; i++)
+        l2[i0 + i] = (s + i * MEM_PAGE) | 3;
+    ArchTlbFlush;
+    big_heap.start = BIG_BASE(U8 *);
+    big_heap.end = big_heap.start + (n << 25);
+    *start = s + n * MEM_PAGE;
+}
+
+// Unmap n pages at va and give their runs back to the heap. A run starts at
+// the first page or where the physical address jumps: two runs are never
+// adjacent (a run's block ends 16 bytes past its last page and the next
+// payload needs a 64-byte header). The TLB is flushed before reuse.
+U0 BigUnmap(U8 *va, I64 n)
+{
+    I64 *e = BigPte(va), i, pa, last = 0;
+    for (i = 0; i < n; i++)
+        e[i] = e[i] & ~1;
+    ArchTlbFlush;
+    for (i = 0; i < n; i++) {
+        pa = e[i] & BIG_PA;
+        if (pa && (!i || pa != last + MEM_PAGE)) {
+            HeapFree(&sys_heap, pa);
+            big_heap.runs--;
+        }
+        last = pa;
+        e[i] = 0;
+    }
+}
+
+// Map n fresh pages at va (whose entries are empty). FALSE, with nothing
+// kept, if the heap cannot supply them.
+Bool BigMap(U8 *va, I64 n, I64 caller)
+{
+    I64 *e = BigPte(va), i = 0, k, got;
+    U8 *pa;
+    if (n * MEM_PAGE > HeapFreeBytes(&sys_heap))
+        return FALSE;
+    while (i < n) {
+        pa = HeapAllocRun(&sys_heap, n - i, 1, &got, caller);
+        if (!pa) {
+            BigUnmap(va, i);
+            return FALSE;
+        }
+        big_heap.runs++;
+        for (k = 0; k < got; k++)
+            e[i + k] = (pa(I64) + k * MEM_PAGE) | BIG_PTE;
+        i += got;
+    }
+    ArchTlbFlush;   // for the dsb/isb: no entry was valid, nothing stale to drop
+    return TRUE;
+}
+
+I64 BigPages(I64 size) {return (BIG_USER + size + 8 + MEM_PAGE - 1) / MEM_PAGE;}
+
+U0 BigSeal(CBigBlk *b, I64 size, I64 caller)
+{
+    I64 i;
+    U8 *tail = b(U8 *) + BIG_USER + size;
+    b->requested = size;
+    b->caller = caller;
+    b->front[0] = b->front[1] = HEAP_CANARY;
+    for (i = 0; i < 8; i++)
+        tail[i] = (HEAP_CANARY >> (i * 8)) & 255;
+}
+
+Bool BigCanary(CBigBlk *b, U8 *who)
+{
+    I64 i;
+    U8 *tail;
+    Bool ok = b->front[0] == HEAP_CANARY && b->front[1] == HEAP_CANARY;
+    if (b->requested < 0 || BigPages(b->requested) > b->pages)
+        ok = FALSE;
+    else {
+        tail = b(U8 *) + BIG_USER + b->requested;
+        for (i = 0; i < 8; i++)
+            if (tail[i] != ((HEAP_CANARY >> (i * 8)) & 255))
+                ok = FALSE;
+    }
+    if (!ok) {
+        RawPrint("%s: heap overflow block=%X size=%d allocated at %p\n",
+                 who, b(U8 *) + BIG_USER, b->requested, b->caller);
+        heap_errs++;
+    }
+    return ok;
+}
+
+// Is p the payload of a live big block? Silent.
+Bool BigOwns(U8 *p)
+{
+    CBigBlk *b = p - BIG_USER;
+    if (!BigHas(p) || (p(I64) & (MEM_PAGE - 1)) != BIG_USER || !(*BigPte(b) & 1))
+        return FALSE;
+    return b->magic == BIG_MAGIC && b->pages >= 1 &&
+            b->pages <= (big_heap.end - b(U8 *)) / MEM_PAGE;
+}
+
+CBigBlk *BigChk(U8 *p, U8 *who)
+{
+    CBigBlk *b = p - BIG_USER;
+    if (!BigOwns(p)) {
+        RawPrint("%s: bad pointer %p (invalid or double free)\n", who, p);
+        heap_errs++;
+        return NULL;
+    }
+    if (!BigCanary(b, who))
+        return NULL;
+    return b;
+}
+
+U8 *BigAlloc(I64 size, I64 caller)
+{
+    I64 n, daif;
+    U8 *cur;
+    CBigBlk *b, *prev = NULL, *nb;
+    if (size < 0 || !big_heap.start || size > big_heap.end - big_heap.start)
+        return NULL;
+    n = BigPages(size);
+    daif = SpinLockIrq(&big_heap.lock);
+    cur = big_heap.start;
+    for (nb = big_heap.head; nb; nb = nb->next) {   // first fit, a guard page after each
+        if (nb(U8 *) - cur >= (n + 1) * MEM_PAGE)
+            break;
+        cur = nb(U8 *) + (nb->pages + 1) * MEM_PAGE;
+        prev = nb;
+    }
+    if ((!nb && big_heap.end - cur < (n + 1) * MEM_PAGE) || !BigMap(cur, n, caller)) {
+        SpinUnlockIrq(&big_heap.lock, daif);
+        return NULL;
+    }
+    b = cur;
+    b->magic = BIG_MAGIC;
+    b->pages = n;
+    BigSeal(b, size, caller);
+    b->prev = prev;
+    b->next = nb;
+    if (prev)
+        prev->next = b;
+    else
+        big_heap.head = b;
+    if (nb)
+        nb->prev = b;
+    big_heap.blks++;
+    big_heap.pages += n;
+    big_heap.requested += size;
+    SpinUnlockIrq(&big_heap.lock, daif);
+    return b(U8 *) + BIG_USER;
+}
+
+U0 BigFree(U8 *p)
+{
+    CBigBlk *b;
+    I64 daif = SpinLockIrq(&big_heap.lock);
+    b = BigChk(p, "Free");
+    if (b) {
+        if (b->prev)
+            b->prev->next = b->next;
+        else
+            big_heap.head = b->next;
+        if (b->next)
+            b->next->prev = b->prev;
+        big_heap.blks--;
+        big_heap.pages -= b->pages;
+        big_heap.requested -= b->requested;
+        b->magic = 0;
+        BigUnmap(b, b->pages);
+    }
+    SpinUnlockIrq(&big_heap.lock, daif);
+}
+
+// Resize in place when the mapped pages suffice or the pages after the block
+// (keeping a guard page) are free. NULL: move it (p untouched); *bad is set
+// if p is not a valid big block.
+U8 *BigReAllocInPlace(U8 *p, I64 size, Bool *bad)
+{
+    CBigBlk *b;
+    I64 n = BigPages(size), daif = SpinLockIrq(&big_heap.lock);
+    U8 *lim;
+    *bad = FALSE;
+    b = BigChk(p, "ReAlloc");
+    if (!b) {
+        *bad = TRUE;
+        SpinUnlockIrq(&big_heap.lock, daif);
+        return NULL;
+    }
+    if (n > b->pages) {
+        lim = big_heap.end;
+        if (b->next)
+            lim = b->next;
+        if (b(U8 *) + (n + 1) * MEM_PAGE > lim ||
+                !BigMap(b(U8 *) + b->pages * MEM_PAGE, n - b->pages, b->caller)) {
+            SpinUnlockIrq(&big_heap.lock, daif);
+            return NULL;
+        }
+        big_heap.pages += n - b->pages;
+        b->pages = n;
+    }
+    big_heap.requested += size - b->requested;
+    BigSeal(b, size, b->caller);
+    SpinUnlockIrq(&big_heap.lock, daif);
+    return p;
+}
+
+// Walk the big blocks: order, headers, canaries, mappings, guard pages and
+// counters. Optionally reports the block and page counts.
+Bool BigCheck(I64 *nblks = NULL, I64 *npages = NULL)
+{
+    CBigBlk *b, *prev = NULL;
+    I64 i, nb = 0, np = 0, daif = SpinLockIrq(&big_heap.lock);
+    Bool ok = TRUE;
+    for (b = big_heap.head; b; b = b->next) {
+        if (b->prev != prev || !BigOwns(b(U8 *) + BIG_USER) ||
+                (prev && b(U8 *) < prev(U8 *) + (prev->pages + 1) * MEM_PAGE) ||
+                b(U8 *) + (b->pages + 1) * MEM_PAGE > big_heap.end) {
+            ok = FALSE;
+            break;
+        }
+        if (!BigCanary(b, "HeapCheck"))
+            ok = FALSE;
+        for (i = 0; i < b->pages; i++)
+            if (!(BigPte(b)[i] & 1))
+                ok = FALSE;
+        if (*BigPte(b(U8 *) + b->pages * MEM_PAGE))
+            ok = FALSE;   // guard page mapped
+        nb++;
+        np += b->pages;
+        prev = b;
+    }
+    if (ok && (nb != big_heap.blks || np != big_heap.pages))
+        ok = FALSE;
+    SpinUnlockIrq(&big_heap.lock, daif);
+    if (nblks)
+        *nblks = nb;
+    if (npages)
+        *npages = np;
+    return ok;
+}
+
+// Physical address of p: identity outside the big region, 0 if unmapped.
+I64 MemPhys(U8 *p)
+{
+    I64 e;
+    if (!BigHas(p))
+        return p;
+    e = *BigPte(p);
+    if (!(e & 1))
+        return 0;
+    return (e & BIG_PA) | (p(I64) & (MEM_PAGE - 1));
+}
+
+// How many of the max bytes at p are physically contiguous (all of them
+// outside the big region). Drivers split device requests at these runs.
+I64 MemPhysRun(U8 *p, I64 max)
+{
+    I64 run, pa;
+    if (!BigHas(p))
+        return max;
+    pa = MemPhys(p);
+    run = MEM_PAGE - (p(I64) & (MEM_PAGE - 1));
+    while (run < max && BigHas(p + run) && MemPhys(p + run) == pa + run)
+        run += MEM_PAGE;
+    if (run > max)
+        run = max;
+    return run;
+}
+
+U0 BigStats()
+{
+    I64 nb, np;
+    U8 *st = "consistent";
+    if (!BigCheck(&nb, &np))
+        st = "CORRUPT";
+    Print("big:  %d blks, %d KB requested in %d KB of pages (%d runs), window %d MB, %s\n",
+            nb, big_heap.requested >> 10, np * (MEM_PAGE >> 10), big_heap.runs,
+            (big_heap.end - big_heap.start) >> 20, st);
+}
+
 // ---- TempleOS API on the system heap. There is one heap: the task arguments
 // (whose heap TempleOS allocates from) are accepted and ignored. ----
 
-U0 MemInit(U8 *start, U8 *end) {HeapInit(&sys_heap, start, end);}
+U0 MemInit(U8 *start, U8 *end)
+{
+    BigInit(&start, end);
+    HeapInit(&sys_heap, start, end);
+}
+
+// Requests of BIG_MIN bytes or more go to the big region (virtually
+// contiguous only); if that fails they still try the heap.
+U8 *MemAlloc(I64 cnt, I64 caller)
+{
+    U8 *p;
+    if (cnt >= BIG_MIN) {
+        p = BigAlloc(cnt, caller);
+        if (p)
+            return p;
+    }
+    return HeapAlloc(&sys_heap, cnt, caller);
+}
 
 U8 *MAlloc(I64 cnt, CTask *task = NULL)
 {
     no_warn task;
-    return HeapAlloc(&sys_heap, cnt, ArchFp(U8 **)[1]);
+    return MemAlloc(cnt, ArchFp(U8 **)[1]);
 }
 
 U8 *CAlloc(I64 cnt, CTask *task = NULL)
 {
-    U8 *p = HeapAlloc(&sys_heap, cnt, ArchFp(U8 **)[1]);
+    U8 *p = MemAlloc(cnt, ArchFp(U8 **)[1]);
     no_warn task;
     if (p)
         MemSet(p, 0, cnt);
     return p;
 }
 
-U0 Free(U8 *p) {HeapFree(&sys_heap, p);}
-U8 *ReAlloc(U8 *p, I64 size) {return HeapReAlloc(&sys_heap, p, size);}
-I64 MSize(U8 *p) {return HeapMSize(&sys_heap, p);}
+U8 *MAllocDma(I64 cnt)
+{//Physically contiguous and identity mapped (address = physical address) at any size: device buffers, page tables, stacks. Free with Free.
+    return HeapAlloc(&sys_heap, cnt, ArchFp(U8 **)[1]);
+}
+
+U8 *CAllocDma(I64 cnt)
+{//Zeroed MAllocDma.
+    U8 *p = HeapAlloc(&sys_heap, cnt, ArchFp(U8 **)[1]);
+    if (p)
+        MemSet(p, 0, cnt);
+    return p;
+}
+
+U0 Free(U8 *p)
+{
+    if (BigHas(p))
+        BigFree(p);
+    else
+        HeapFree(&sys_heap, p);
+}
+
+I64 MSize(U8 *p)
+{
+    CBigBlk *b;
+    I64 daif, n = 0;
+    if (!BigHas(p))
+        return HeapMSize(&sys_heap, p);
+    daif = SpinLockIrq(&big_heap.lock);
+    b = BigChk(p, "MSize");
+    if (b)
+        n = b->requested;
+    SpinUnlockIrq(&big_heap.lock, daif);
+    return n;
+}
+
+// Is p a live block (heap or big region)? Silent.
+Bool MemOwns(U8 *p) {return HeapOwns(&sys_heap, p) || BigOwns(p);}
+
+U8 *ReAlloc(U8 *p, I64 size)
+{//Contents move between the heap and the big region as the size crosses BIG_MIN.
+    I64 old, caller = ArchFp(U8 **)[1];
+    Bool bad;
+    U8 *q;
+    if (!p)
+        return MemAlloc(size, caller);
+    if (size < 0)
+        return NULL;
+    if (BigHas(p)) {
+        if (size >= BIG_MIN) {
+            q = BigReAllocInPlace(p, size, &bad);
+            if (q || bad)
+                return q;
+        }
+        old = MSize(p);
+        if (!old && !BigOwns(p))
+            return NULL;
+    } else {
+        if (size < BIG_MIN || !HeapOwns(&sys_heap, p))
+            return HeapReAlloc(&sys_heap, p, size);   // also reports a bad pointer
+        old = HeapMSize(&sys_heap, p);
+        if (!old && size)
+            return NULL;   // damaged (reported)
+        if (size <= old)
+            return HeapReAlloc(&sys_heap, p, size);
+    }
+    q = MemAlloc(size, caller);
+    if (!q)
+        return NULL;   // original block is untouched
+    if (old > size)
+        old = size;
+    MemCpy(q, p, old);
+    Free(p);
+    return q;
+}
 
 U8 *MAllocIdent(U8 *ptr, CTask *task = NULL)
 {//Copy of a heap block (its whole usable size).
@@ -445,9 +950,13 @@ U8 *AMAllocIdent(U8 *ptr) {return MAllocIdent(ptr);}
 Bool HeapStats(I64 *used = NULL, I64 *total = NULL, I64 *nfree = NULL,
                I64 *largest = NULL, I64 *nused = NULL)
 {//No arguments retain the console report. Output arguments describe one locked sample.
+    //Heap figures include the pages backing big-region blocks; the big region is checked too.
+    Bool ok;
     if (!used && !total && !nfree && !largest && !nused) {
         HeapStatsCtrl(&sys_heap);
+        BigStats;
         return TRUE;
     }
-    return HeapCheck(&sys_heap, nused, nfree, largest, used, total);
+    ok = HeapCheck(&sys_heap, nused, nfree, largest, used, total);
+    return BigCheck && ok;
 }

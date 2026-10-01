@@ -1,0 +1,19 @@
+Typed tasks with explicit ownership. acquireTasks borrows RootCapability;
+releaseTasks consumes Tasks. sleep uses milliseconds; yield gives up execution.
+spawn(&!tasks, worker, arg) moves one owned T into a named function Fn[T, R]
+and returns Result[Task[R], IoError]. spawnOn additionally chooses a core.
+Explicit core affinity is supported on CoolOS; macOS returns Other.
+
+T and R must satisfy intrinsic structural Sendable. Non-Static borrows/spans,
+raw pointers and RootCapability cannot cross task boundaries. Derive and move
+the capabilities the worker needs. Functions capture nothing; closures are
+not implemented. Records can hold the worker's owned environment explicitly.
+
+join consumes Task[R] and returns Ok(R), Err(Aborted(message)) or Err(Killed).
+A child abort fails its task. detach consumes Task[R] and requires R: Free
+as well as Sendable, so a linear result cannot be discarded silently.
+Abnormal termination or startup failure can leak nested resources in the moved
+argument; there is no generic destructor protocol yet.
+Examples: C:/Warm/Examples/kernel/Tasks.warm and System.warm.
+Source: docs/warm-closures.md, especially its Stage 4 implementation update;
+the earlier proposal is retained for design history.

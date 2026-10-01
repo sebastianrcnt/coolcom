@@ -1,0 +1,41 @@
+WarmExamples - where to find working programs
+
+On the OS disk:
+    C:/HelloWarm.warm                minimal Test:main
+    C:/Warm/Examples/hello-world/    printLn; Example.HelloWorld:main
+    C:/Warm/Examples/greet/          owned String, terminal input
+    C:/Warm/Examples/fib/            recursion
+    C:/Warm/Examples/record/         record construction
+    C:/Warm/Examples/union/          cases and matching
+    C:/Warm/Examples/generic-record/ generic record
+    C:/Warm/Examples/generic-union/  generic union
+    C:/Warm/Examples/named-argument/ named arguments
+    C:/Warm/Examples/ffi/            foreign calls
+    C:/Warm/Examples/memory/         linear memory management
+    C:/Warm/Examples/kernel/Files.warm   whole-file IO
+    C:/Warm/Examples/kernel/Screen.warm  framebuffer output
+    C:/Warm/Examples/kernel/Key.warm     keyboard input
+    C:/Warm/Examples/kernel/System.warm monitor, clocks, tasks
+
+Vim("C:/HelloWarm.warm"); opens a source file; :q returns to the shell.
+WarmRun("C:/HelloWarm.warm"); runs it. Imported examples need their library
+interfaces and bodies explicitly listed; see Man("WarmRun") and
+Man("WarmModules") for a generated, ready-to-use OS dependency list.
+
+Repository locations:
+    warmc/examples/                 portable examples and per-example Makefiles
+    warmc/examples/kernel/          OS examples (make warm-kernel-test)
+    warmc/standard/src/OS/          OS APIs and implementations
+    warmc/standard/src/             Standard.String, Buffer, Box, etc.
+    warmc/test-programs/suites/     small syntax, ownership and borrow fixtures
+    warmc/test_os.py                file/dir/net/time/random capability probes
+    warmc/test_tasks.py             typed worker, join/detach/error probes
+    tools/warm-kernel-test.py       OS dependency lists and execution checks
+
+On the host: make build/warmc, then make -C warmc/examples builds the portable
+examples. warmc/run-examples.sh builds, runs and checks them.
+make warm-test checks frontend, semantics, standard library and formatting.
+make -j test includes host checks and actual kernel-shell examples.
+
+Example README: C:/Warm/Examples/README.md (warmc/examples/README.md).
+Full compiler README: C:/Warm/Docs/README.md.

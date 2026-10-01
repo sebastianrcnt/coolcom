@@ -1,0 +1,18 @@
+IPv4 TCP/UDP with linear handles. acquireNetwork derives authority from
+RootCapability; releaseNetwork consumes it. Address.ip is Nat32; endpoints
+pair an Address with a Nat16 port. resolve maps a borrowed hostname to Address.
+narrowNet consumes Network and intersects an address/port allow list.
+An empty list denies all peers. Restricted policies permit outbound TCP and
+ephemeral UDP; listening or fixed local UDP binds require unrestricted authority.
+Sockets retain their policy after Network is released. UDP checks both send
+and received peers; denied datagrams are consumed without exposing their bytes.
+
+connect/listen/accept return owned TcpStream/TcpListener. send/receive return
+transferred byte counts, so handle partial IO. receive borrows destination
+storage. connect/accept/receive timeouts are Int64 milliseconds.
+close and closeListener consume handles and return Result.
+udpOpen returns UdpSocket; port 0 requests an ephemeral local port.
+udpSend borrows data; udpReceive returns count, sender Address and sender port.
+udpPort/listenPort query the local port. udpClose consumes its socket.
+Failures use IoError, including Denied, Timeout, Refused, Reset and Unreachable.
+Example: C:/Warm/Examples/kernel/Sockets.warm.

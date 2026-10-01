@@ -3,9 +3,10 @@
 This is the only implementation of the Warm compiler. It was written after the
 OCaml compiler of Austral (the fork's original `warmc`, since removed from the tree; its
 sources are upstream Austral at the commit named in `UPSTREAM_README.md`), following
-its parser, semantic passes and HC renderer, and the language specification under
-`docs`. Reference Austral code is Apache-2.0 WITH LLVM-exception; see
-`LICENSE`. No generated answer table or test fixture is used by the compiler. The builtins remain original Warm source compiled by the same
+its parser, semantic passes and HC renderer. The current path and assignment rules
+are documented in [docs/paths.md](docs/paths.md). Reference Austral code is
+Apache-2.0 WITH LLVM-exception; see `LICENSE`. No generated answer table or test
+fixture is used by the compiler. The builtins remain original Warm source compiled by the same
 pipeline as user modules.
 
 ## Lifetime and representation

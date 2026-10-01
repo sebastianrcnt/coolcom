@@ -202,10 +202,11 @@ PCI route uses a host-memory region. A virtio-pci transport on arm64 `-M virt`
 Can this be tested from this Mac?
 - QEMU on macOS with Venus: not with stock builds, and it would test MoltenVK again rather
   than a Linux driver.
-- A Linux VM on this Mac (Apple Virtualization, `tools/vzrun`), running QEMU with the
+- A separately provisioned Linux VM on this Mac, running QEMU with the
   software Vulkan driver lavapipe on the Linux side: this works without a GPU, just slowly.
   An arm64 Linux VM runs QEMU's arm64 guest under KVM if nested virtualization is available
-  (M3 or later), otherwise under TCG.
+  (M3 or later), otherwise under TCG. This repository does not provide a Linux VM
+  launcher or provisioning scripts; its retired VZ launcher served the UEFI probe.
 - CI on a Linux runner (x86-64 or arm64) with lavapipe and QEMU TCG: the check that does not
   depend on this machine.
 

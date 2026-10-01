@@ -96,6 +96,7 @@ $(B)/FontData.o: os/Kernel/Unifont.BIN
 build/ShellPrelude.coolh: $(KSRC) tools/mkprelude.py | build
 	python3 tools/mkprelude.py os/Kernel/Kernel.cool > $@
 
+# nm sorts names by locale; LC_ALL=C keeps arch.syms and the pass-2 check in one order.
 # Pass 1: link the assembly alone (HolyC symbols unresolved) to learn where its
 # routines land; the addresses don't depend on the HolyC module. The unresolved
 # symbols get a nearby stand-in so pc-relative references stay in range.
@@ -105,7 +106,7 @@ $(B)/arch.syms: $(ASM_OBJS) os/Kernel/Kernel.ld
 	aarch64-elf-nm -u $(B)/pre/all.o | awk '{print $$2 " = $(MODULE_BASE);"}' > $(B)/pre/syms.ld
 	echo 'KBSS_END = $(MODULE_BASE);' >> $(B)/pre/syms.ld
 	$(LD) $(B)/pre/syms.ld $(ASM_OBJS) -o $(B)/pre/arch.elf
-	aarch64-elf-nm $(B)/pre/arch.elf | grep ' [Tt] ' > $@
+	LC_ALL=C aarch64-elf-nm $(B)/pre/arch.elf | grep ' [Tt] ' > $@
 
 # The assembly for MakeKernel, the in-OS linker (tools/mkbootstub.py): linked
 # like pass 1 but with stand-ins only for binlink's symbols, so the linker
@@ -125,7 +126,7 @@ $(B)/kernel.raw: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(B
 $(B)/cool.elf: $(B)/kernel.raw $(B)/syms.ld $(ASM_OBJS) tools/Kernel.S
 	aarch64-elf-as -I $(B) tools/Kernel.S -o $(B)/Kernel.o
 	$(LD) $(B)/syms.ld $(ASM_OBJS) $(B)/Kernel.o -o $@
-	aarch64-elf-nm $@ | grep -F -f $(B)/arch.syms | cmp -s - $(B)/arch.syms \
+	LC_ALL=C aarch64-elf-nm $@ | grep -F -f $(B)/arch.syms | cmp -s - $(B)/arch.syms \
 	  || { echo "assembly symbols moved between link passes"; rm -f $@; exit 1; }
 
 $(B)/kernel.Image: $(B)/cool.elf
@@ -219,6 +220,12 @@ disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 .PHONY: disk-layout-test
 disk-layout-test: build/warmcool/Kernel.cool os/Kernel/NetParse.cool build/lua/LuaRuntime.cool
 	tools/disk-layout-test.sh
+
+.PHONY: warm-man-test
+warm-man-test: build/warmc
+	python3 tools/test_warm_man.py
+
+test: warm-man-test
 
 .PHONY: run-qemu qemu-test
 # QEMU virt uses the same relocatable arm64 Image and modern virtio-MMIO devices.
@@ -373,7 +380,7 @@ scroll-test: build/kernel.Image coolvm
 	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
 	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
 # Lua is translated source, outside the compiler seed and kernel image.
-LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool coolc/LibC/LibC.cool
+LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/repl.c tools/lua-support/Kernel.cool tools/lua-support/Host.cool coolc/LibC/LibC.cool
 build/lua/generated.stamp: $(LUASRC) build/ShellPrelude.coolh
 	python3 tools/lua-support/build.py
 	touch $@

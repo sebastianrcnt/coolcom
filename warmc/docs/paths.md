@@ -1,143 +1,107 @@
 # Paths, L-Values, and Reference Transforms
 
-This document describes the syntax and semantics of paths, l-values, and reference transforms.
+This is a language reference for the current Warm compiler, retained from the
+Austral documentation and updated for the Cool implementation. Paths are parsed
+in [Parser.cool](../Parser.cool), typed by `WPathType` in
+[Check.cool](../Check.cool), checked for ownership in
+[Linear.cool](../Linear.cool), and lowered by `WGPath` in
+[Emit.cool](../Emit.cool). They are used by Warm programs on both the host and
+the kernel; see [the compiler README](../README.md) for build and run commands.
 
 ## Paths
 
-A _path expression_ is used to access nested values.
+A path starts with a named value and has one or more elements:
 
-### Syntax
+- `.name` selects a record field.
+- `->name` selects a field through a read reference (`&`) or write reference
+  (`&!`) to a record.
+- `[i]` selects a `Span` or `Span!` element; `i` has type `Index`.
 
-A path expression is:
+The parser attaches paths to names, rather than arbitrary expressions:
+`pos.lat` is supported, while `f().lat` is not. Record fields must be visible
+to the current module; opaque payloads cannot be inspected from outside it.
+Indexing operates on spans, not the fixed arrays described by the older document.
+Generated code checks the span bounds and byte-offset multiplication.
 
-1. An expression called the _head_,
-2. Followed by one or more _path elements_, each of which is one of:
-  1. A _slot accessor_, `.name`, where `name` is slot name.
-  2. A _reference-slot accessor_, `->name`, where `name` is a slot name.
-  3. An _array index_, `[i]`, where `i` is an expression of type `Index`.
+The final value read through a path must have a `Free` type. The head can be
+linear: reading `pos.lat` observes `pos` without consuming it, as long as `lat`
+is `Free`. Intermediate fields can also be linear; for example, a path can
+reach a `Free` element through a mutable span stored in a linear record.
+Extracting a linear payload as a value is rejected because it would duplicate
+ownership. Use destructuring to move that payload instead.
 
-### Semantics
+Examples (with the corresponding record, reference and span types):
 
-1. The type of a path is the type of the nested value it accesses to.
-1. **Rule P1:** the head of a path cannot be a linearly-typed expression.
-  1. Rationale: if we had something like `f().x`, then the linear return value
-     of `f()` would be marked consumed (by appearing at the head of a path),
-     without it actually being destroyed anywhere.
-  1. **Rule P1.1**: the exception is if the head of a path is a variable, in
-     which case, its appearance doesn't count as a consumption. For example, if
-     `pos` is linear, then doing `pos.lat` (where `lat` is a slot of type
-     `Float32`) is perfectly safe. It is far less onerous to do `pos.lat` than
-     to ask the user to taka reference to `pos`, transform it into a reference
-     to `lat`, and dereference that.
- 1. **Rule P2:** as a corollary of the above exception , the type of a path must
-    be in the `Free` universe.
-    1. Rationale: if paths could end in linear values, then we could duplicate them, like so:
-    ```austral
-    let x1: Bar := foo.bar; -- foo not consumed
-    let x2: Bar := foo.bar; -- bar loaded twice
-    ```
-1. **Rule P3:** the head of a path expression must be a user-defined type, a
-   reference, or a fixed array.
-   1. Rationale: nothing else contains nested values.
-
-The type-checking rules for path elements are:
-
-1. `.name` needs the expression on the left to be a record type, its type is the
-   type of `name`.
-2. `->name` needs the expression on the left to be a read-reference or
-   write-reference to a record type, its type is the type of `name`.
-1. `[i]` needs the expression on the left to be a fixed array, its type is the
-   type of the array's elements.
-
-### Examples
-
-```
+```warm
 pos.lat
-foo.bar->baz[i]
+ref->lat
+bytes[i]
+container.bytes[i]
 ```
 
-## Reference Transforms
+## Reference transforms
 
-A _reference transform expression_ transforms a reference to a value into a
-reference to a more nested value.
+`&(path)` produces a reference to a nested value instead of loading the value.
+It requires a named head and at least one path element: `&(ref)` is rejected.
+Field elements must use `->`, while index elements use `[i]`.
 
-### Syntax
+- `&(ref->field)` requires a reference to a record and returns a reference to
+  the field, preserving that reference's region and read/write mode.
+- `&(bytes[i])` accepts a span and returns an element reference in the span's
+  region: `Span` gives `&`, and `Span!` gives `&!`.
+- A reference to a span can also be indexed inside a transform. Further
+  elements are checked against the reference produced by the preceding step.
 
-Reference transforms have a similar syntax to paths, but they are wrapped in `&(...)`.
+Unlike an ordinary path read, a transform can refer to a linear payload without
+copying it. The current linearity pass observes the head without consuming it;
+the inherited claim that every write-reference transform consumes its head
+does not describe this implementation. Borrowing and reborrowing syntax is
+separate (`&value`, `&!value`, `&~value` and `borrow ... end borrow`).
 
-The syntax of a reference transform expression is:
+Examples:
 
-1. Inside `&(...)`:
-   1. An expression, called the _head_,
-   1. Followed by one or more _transform elements_, each of which is one of:
-      1. A _reference-slot accessor_, `->name`, where `name` is a slot name.
-      1. An _array index_, `[i]`, where `i` is an expression of type `Index`.
-
-Why one or more? Because `&(foo)` would be a no-op.
-
-### Semantics
-
-1. **Rule RT1:** the type of the head must be either a read reference or a write
-   reference.
-1. **Rule RT2:** the type of a reference transform is a read reference if the
-   head is a read reference, and a write reference if the head is a write
-   reference.
-1. **Rule RT3:** transforming a write reference consumes it.
-1. **Rule RT4:** you can't take a mutable reference into a static array.
-
-The type-checking rules are:
-
-1. `&(foo->x)`: if `foo` is a reference to a record, then this is a reference to
-   the slot `x` in `foo`.
-1. `&(foo[i])`: if `foo` is a reference to a fixed array, then this a reference
-   to the `i`-th element of the array.
-
-### Examples
-
-```
-&(foo->lat->float)
-&(x->y[idx]->z)
+```warm
+let field: &[Int32, R] := &(ref->field);
+let element: &[Int32, R] := &(bytes[i]);
+let value: Int32 := !element;
 ```
 
-## L-Values
+## L-values and assignment
 
-L-values are the expressions left-hand side of an assignment. The "L" is for
-"left".
+The left side of `:=` is a variable or a path rooted in a named value. Field
+and span-index elements can be combined. The right side must have the target's
+type. Assignment cannot change a constant or write through a read reference
+or read-only span.
 
-### Syntax
+Reassigning a variable or its record fields requires a `var` binding. A `let`
+binding or parameter whose head type is `&!` or `Span!` can still write through
+that reference or span. Updating a path observes its head; it does not consume
+the containing record, reference or span.
 
-An L-value is either:
+Path targets must have a `Free` type, so assignment cannot overwrite a linear
+field or span element. Whole-variable assignment can reinitialize a linear
+variable after its previous value has been consumed; overwriting a live linear
+value or assigning to a borrowed variable is rejected.
 
-1.  A variable called the _head_, (this is the "simple lvalue" case)
-    1. Followed by zero or more _l-value elements_, which are one of:
-       1. A _slot accessor_, `.name`, where `name` is slot name.
-       1. A _reference-slot accessor_, `->name`, where `name` is a slot name.
-1. The dereference operator applied to an expression of write-reference type
-   (the "reference lvalue" case).
+Dereference expressions are supported for reading (`!ref`), but are not
+assignment targets in the current parser. The older examples `!(ref) := x`
+and `!(&(ref->field)) := x` are unsupported; assign through a field or span
+path instead.
 
-### Semantics
-
-1. The type of an L-value is the type if it was evaluated as an expression.
-1. **Rule L1:** the type of an L-value must match the type on the right-hand
-   side of the assignment.
-1. **Rule L2:** the type of an L-value must be in the `Free` universe:
-   1. Rationale: consider:
-      ```austral
-      -- `Foo` is a linear type
-      let l: Foo := f();
-      -- The original value of `l` is overwritten.
-      l := g();
-      -- The return value of `f()` leaks.
-      consume(l);
-      ```
-      If we're allowed to overwrite linear values, their original contents leak.
-1. **Rule L3:** the write reference is consumed.
-
-### Examples
-
+```warm
+count := 10;
+pos.lat := 10.0;
+ref->field := 10;
+bytes[i] := 42;
+container.bytes[i] := 42;
 ```
-a := 10;
-a.b.c := 10;
-!(ref) := x;
-!(&(x->y->z)) := 20;
-```
+
+## Validation
+
+`make warm-test` (also included in `make -j test`) runs `compare.py` against
+stored expectations, including [reference-transform cases](../test-programs/suites/013-ref-transforms)
+and [span cases](../test-programs/suites/016-spans). The latter cover transforms,
+out-of-bounds indexing and writes through spans held in records.
+[test_semantics.py](../test_semantics.py) also covers linear-field extraction
+and writing through read and mutable references. These tests use the current
+Warm compiler and do not require an installed Austral compiler.

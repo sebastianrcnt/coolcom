@@ -1,0 +1,6 @@
+CoolOS task utilities borrow OS.Task.Tasks.
+taskReport prints the kernel task report; isSilent queries silent-task status.
+Both return Result and retain the borrowed Tasks capability. Release Tasks
+when finished. Unsupported host operations return Other.
+For portable typed spawn/join/sleep use Man("OS.Task"); for structured
+monitoring and termination use Man("OS.CoolOS.System").

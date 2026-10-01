@@ -10,7 +10,10 @@ The headers in include/ are the hermetic clang parsing interface for c2hc.
 Memory, strings, C-locale classification, numeric conversion, printf formatting,
 stdio, math and UTC time are implemented over the OS primitives. File streams
 buffer entire files: writes reach FileWrite on fflush/fclose. stdin is byte input
-on the host and line input on the OS. There is no process, environment, dynamic
+on the host and edited line input on the OS. Ctrl+D on an empty OS input line
+signals EOF; the stream keeps EOF until clearerr/ungetc or a new LibCRun
+invocation, which also discards buffered stdin from the previous invocation.
+There is no process, environment, dynamic
 loader, or signal implementation. Check return values for unsupported operations.
 
 setjmp is lowered at its call site to the OS exception context; longjmp preserves

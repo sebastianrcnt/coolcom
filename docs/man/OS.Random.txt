@@ -1,0 +1,7 @@
+Deterministic, noncryptographic xorshift64. No capability required.
+seeded(seed) constructs a Free Rng; a zero seed selects a fixed nonzero state.
+next(&!rng) updates its state and returns Nat64. Identical seeds produce the
+same sequence; copying this Free value also copies its generator state.
+This API supplies no cryptographic entropy or security randomness.
+Source is a body-only module: public declarations are generated below.
+Example: C:/Warm/Examples/kernel/Tasks.warm.

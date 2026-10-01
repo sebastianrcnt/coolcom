@@ -19,10 +19,22 @@ for path in Init.cool Warm.cool coolc/Runtime/KGlbls.cool Compiler/Native.cool K
 done
 # Also preserve edits in the new directories on subsequent seed runs.
 mcopy -o -i "$img" "$dir/old" ::Warm/Examples/greet/Greet.warm
+mcopy -o -i "$img" "$dir/old" ::Man/Warm.txt
 tools/disk-files.sh "$img" -n
 mtype -i "$img" ::Warm/Examples/greet/Greet.warm >"$dir/read"
 cmp "$dir/old" "$dir/read"
+mtype -i "$img" ::Man/Warm.txt >"$dir/read"
+cmp "$dir/old" "$dir/read"
 tools/disk-files.sh "$img"
+python3 tools/warm-man.py --output "$dir/Man"
+for page in "$dir"/Man/*.txt; do
+    mtype -i "$img" "::Man/$(basename "$page")" >"$dir/read"
+    cmp "$page" "$dir/read"
+done
+for source in warmc/README.md docs/warm-stdlib.md docs/warm-closures.md; do
+    mtype -i "$img" "::Warm/Docs/$(basename "$source")" >"$dir/read"
+    cmp "$source" "$dir/read"
+done
 for path in coolc Compiler Warm.cool Warm.HC; do
     if mdir -i "$img" "::$path" >/dev/null 2>&1; then
         echo "disk-layout-test: legacy path remains: $path" >&2

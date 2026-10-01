@@ -9,7 +9,7 @@
 | `Nyan.cool` | `Nyan;`: animation, any key stops it. |
 | `Find.cool` | `Find("text", "*.cool")`: search files recursively, print `file,line: text` (third argument TRUE: ignore case). |
 | `Less.cool` | `Less("file")`: pager with wrapping by terminal columns (UTF-8, wide characters), Space/b/d/u/j/k/g/G, `/text` `?text` `n` `N`, `q`. |
-| `Man.cool` | `Man("Name")`: open Vim at the definition of a function, class, global or `#define`. The shell compiler's symbol table gives the file and line of what the shell compiled; kernel symbols are looked up in `C:/Kernel`. |
+| `Man.cool` | `Man;` opens the manual index; `Man("Warm")`, `Man("WarmSyntax")`, `Man("WarmRun")`, `Man("WarmExamples")` and `Man("OS.Terminal")` (or another `OS.*` module) open generated pages in `C:/Man`. Other names open Vim at a function, class, global or `#define` definition. The shell compiler's symbol table supplies compiled source locations; kernel symbols are looked up in `C:/Kernel` and `C:/Cool`. |
 | `Diff.cool` | `Diff("a", "b")`: report differing hunks (port of Aiwnios `Diff.HC`, ANSI colors instead of DolDoc); `Diff("a", "b", TRUE)` merges into `a` one hunk at a time (keys 1 2 a b q Esc). |
 | `Top.warm` | `Top;`: full-screen monitor refreshed every second: a bar per core, heap, FAT32 free space, and the tasks (core, state, CPU share over the last second, switches, stack; the core's first task is its idle task). Up/Down select, `c` `p` `n` `s` sort by CPU/task/name/state, `k` then `y` kills the selected task, `q` quits. |
 | `Cube.cool` | Optional GPU 3D demo: in a Venus-enabled `make run` shell, load `#include "C:/Cube.cool"` once and run `Cube;`. `make cube-run` launches a separate demo VM. Rotating lit cube, two smaller cubes, perspective camera, grid and shadow. W/S or +/- move forward/back, A/D pan, arrows orbit/look, Space pauses rotation, R resets, Q/Esc returns to the terminal. Requires the existing Venus terminal and the main framebuffer shell; no kernel changes. |
@@ -18,6 +18,17 @@
 | `Init.cool` | includes the above; defines `Cls`. |
 
 At the prompt a line such as `vim a.cool`, `find foo *.cool`, `less C:/Vim.cool`, `man StrLen`, `top` runs the tool (the shell turns command lines into calls; Tab completes function and file names).
+
+`tools/warm-man.py` generates the Warm manual during each disk installation from
+`docs/man/*.txt` and `warmc/standard/src/OS/**/*.warmh`. Body-only modules
+(`OS.Time`, `OS.Random`, `OS.Error`) use their public `.warm` declarations.
+New modules enter the index automatically and need a matching note in `docs/man`.
+Full reference documents are installed under `C:/Warm/Docs`; library and example
+sources remain in `C:/Warm/Standard` and `C:/Warm/Examples`.
+Seeding preserves manual edits; `make disk-install` refreshes generated pages.
+`make warm-man-test` compares body-only declarations with the compiler's AST,
+checks interface coverage and page/example references; disk-layout and text
+tests verify installation, preservation/refresh and actual `Man` navigation.
 
 The VM framebuffer and the UART terminal receive the same ANSI output, so the programs work on either; the terminal should be 80x24 or larger. `make vim-test`, `tmux-test`, `syntax-test` and `text-test` boot the VM and drive them with input scripts.
 

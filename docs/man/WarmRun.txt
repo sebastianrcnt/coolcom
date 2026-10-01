@@ -1,0 +1,52 @@
+WarmRun / WarmCompile - compiling and running Warm
+
+OS shell (C:/Init.cool loads C:/Warm/Warm.cool):
+    WarmRun("C:/HelloWarm.warm");
+    WarmRun("C:/Api.warmh,C:/Api.warm,C:/Main.warm", "Main:main");
+    WarmCompile("C:/HelloWarm.warm", "Test:main", "C:/HelloWarm.cool");
+
+WarmRun(paths, entry = "Test:main") returns Bool. Comma-separated paths list
+interfaces, bodies and every imported module; Pervasive/Memory are embedded.
+WarmCompile(paths, entry = "Test:main", output = NULL) also returns Bool.
+With output it writes Cool source; without output it executes like WarmRun.
+WarmRun uses ShellExe on the current shell task and returns FALSE on compile
+or runtime failure. Diagnostics include source file, line and caret.
+Repeated runs get distinct generated names; JIT code stays in the shell's
+symbol table. argv[0] is the source path list; no extra OS program arguments.
+
+Example without library dependencies:
+    WarmRun("C:/Warm/Examples/hello-world/HelloWorld.warm", "Example.HelloWorld:main");
+
+Mac host, from repository root:
+    make build/warmc
+    tools/warm run Foo.warm
+    tools/warm run --entrypoint=Main:main Api.warmh,Api.warm Main.warm -- arguments
+tools/warm run defaults to the last body's Module:main, saves intermediate
+files under build/warm-run/, and compiles, builds and runs. tools/warm compile
+stops after Cool source. A library input is Interface.warmh,Body.warm; a
+body-only module is one .warm file. List all dependencies.
+
+Separate compilation steps:
+    build/warmc compile Api.warmh,Api.warm Main.warm --entrypoint=Main:main --target-type=hc --output=build/Main.cool
+    COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" build/coolc build/Main.cool build/Main.BIN
+    build/coolc --run build/Main.BIN
+
+Compiler options: --parse, --dump-ast, --check (no emission),
+--error-format=plain|json, --no-entrypoint, --output=path, --target-type=hc.
+build/warmc's default entry is Test:main, unlike tools/warm run's inference.
+--kernel-module=NAME emits a kernel component and implies --no-entrypoint.
+Cool source is the only target. Generated internal aggregate ABI is private;
+Foreign_Export wrappers are the supported bridge to Cool.
+
+Formatting: tools/warmfmt [--check] files on host; WarmFmt("C:/x.warm")
+in the OS. WarmFmt(path, TRUE) reports without writing.
+
+OS programs with imports: Man("WarmModules") supplies generated shell
+statements for loading the full OS library and running the Files example.
+See Man("WarmExamples") for further programs; dependency lists also live
+in warmc/test_os.py and tools/warm-kernel-test.py on the host.
+Installed library source: C:/Warm/Standard/; examples: C:/Warm/Examples/.
+make disk-seed / make run add missing disk files and preserve edits;
+make disk-install refreshes them, including generated C:/Man/*.txt pages.
+
+Source: warmc/README.md (C:/Warm/Docs/README.md).

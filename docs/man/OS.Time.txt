@@ -1,0 +1,8 @@
+Pure clock/calendar queries, with no capability required.
+unixNow returns Unix seconds; monotonicMs returns monotonic milliseconds
+for elapsed-time measurements. fromUnix converts seconds to a UTC DateTime
+using the proleptic Gregorian calendar, including dates before 1970.
+now combines unixNow/fromUnix. Duration stores milliseconds as Int64.
+DateTime contains year, month, day, hour, minute and second.
+Source is a body-only module: public declarations below exclude private helpers.
+Example: C:/Warm/Examples/kernel/Tasks.warm.
