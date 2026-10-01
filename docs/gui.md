@@ -108,4 +108,32 @@ and exact 2x integer enlargement. Artifacts: `build/gui-test/`; full log:
 QEMU and kernel rebuild checks also passed. No protected app source or vendor
 file was modified.
 
-G2–G5 are pending.
+### G2 — complete, including G1 review corrections
+
+Pixel windows (`GuiNewPixel`) expose task-local `GrRect`, Bresenham `GrLine`,
+UTF-8 bitmap `GrText`, nearest-neighbor `GrBlit`, and physical BGRA access
+(`GrPixels`, byte stride; call `GrDirty` after direct writes). Gr coordinates
+are logical pixels. Operations clip to the client rectangle and track damage
+automatically. Pixel windows keep their requested logical dimensions.
+
+`GuiDraw;` opens the drawing demo as a separate task. `GuiPoll` returns local
+mouse/button/wheel events, keyboard events and resize notifications. Input IRQs
+queue ordered records for the compositor; a click and a following key reach the
+same focused task, including button presses/releases within one IRQ. The
+compositor wakes immediately for input; queues report overflow explicitly.
+
+G1 screenshot review corrections are included here: 3-pixel white client
+insets, a clear black body frame/shadow, a reserved bottom grow-box strip,
+active-only close/zoom/grow controls, and an activation click before a hidden
+control can be used. Bodies remain opaque in both composition paths. The
+screenshot scenario now gives the background terminal a distinct blue surface;
+assertions inspect the overlapping front body, left/bottom frame and shadow,
+insets and hidden inactive controls. The previous all-black terminal bodies
+made the separation visually ambiguous.
+
+Targeted validation: G1 and G2 GUI tests pass on CPU/Venus. G1's pixel equality
+and 2x checks still pass. Five-window drawing tests preserve every key in an
+80-key burst and check enqueue-to-app latency against a 100 ms ceiling, local
+mouse coordinates, primitive colors and CPU/Venus equality. `make -j test` exited 0 on 2026-10-01 (`build/g2-test.log`).
+
+G3–G5 are pending.

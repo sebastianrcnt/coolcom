@@ -1,0 +1,35 @@
+// G2 immediate-mode drawing/input example, independent of the shell compiler.
+U0 GuiDrawScene()
+{
+    CGuiWindow *w = GrWindow; U32 image[64]; I64 i;
+    if (!w) return;
+    GrRect(0, 0, w->w, w->h, GUI_WHITE);
+    GrText(12, 10, "Drawing — GrRect / GrLine / GrText / GrBlit");
+    GrRect(16, 40, 100, 70, 0x00AAFF); GrRect(40, 60, 100, 70, 0xFFAA00);
+    GrLine(16, 160, w->w - 20, 40, 0);
+    for (i = 0; i < 64; i++) image[i] = ((i / 8 ^ i) & 1) * GUI_WHITE;
+    GrBlit(170, 60, 8, 8, image, 32);
+    GrText(12, w->h - 26, "Click to draw; Q closes this window.");
+}
+U0 GuiDrawTask(U8 *data)
+{
+    CGuiEvent e; U8 *message;
+    no_warn data;
+    if (!GuiNewPixel("Drawing", 480, 256)) return;
+    GuiDrawScene; message = MStrPrint("GUI DRAW READY%d\n", gui.count); GuiLog(message); Free(message);
+    while (TRUE) {
+        while (GuiPoll(&e)) {
+            if (e.type == GUI_EVENT_KEY && e.key == 'q') return;
+            if (e.type == GUI_EVENT_KEY && e.key == 'p') {
+                message = MStrPrint("GUI DRAW PONG %d %d\n", TimerJiffies, TimerJiffies - e.timestamp); GuiLog(message); Free(message);
+            }
+            if (e.type == GUI_EVENT_RESIZE) GuiDrawScene;
+            if (e.type == GUI_EVENT_MOUSE && (e.buttons & 1)) {
+                GrRect(e.x - 2, e.y - 2, 5, 5, 0);
+                message = MStrPrint("GUI DRAW MOUSE %d %d\n", e.x, e.y); GuiLog(message); Free(message);
+            }
+        }
+        Sleep(1);
+    }
+}
+CTask *GuiDraw() {if (!gui_active) return NULL; return Spawn(&GuiDrawTask, NULL, "Drawing", 0, adam_task);}

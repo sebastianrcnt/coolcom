@@ -43,6 +43,7 @@ U8 kbd_down[256], kbd_norm[128], kbd_shift[128];
 class CMouse {I64 mx, my, wheel, buttons;};  // x, y: pixels (clamped to the screen when there is one)
 
 CMouse mouse;
+U8 *gui_mouse_hook; // U0 (*)(I64 x, I64 y, I64 buttons, I64 wheel), interrupt-safe
 
 U0 KbdMapRow(I64 code, U8 *lo, U8 *up)
 {
@@ -213,6 +214,8 @@ U0 MouseEvent(I64 type, I64 code, I64 value)
         else
             mouse.buttons &= ~bit;
     }
+    U0 (*route)(I64, I64, I64, I64); route = gui_mouse_hook;
+    if (route) (*route)(mouse.mx, mouse.my, mouse.buttons, mouse.wheel);
 }
 
 U0 InputIrq(I64 irq)

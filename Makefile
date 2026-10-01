@@ -493,3 +493,9 @@ gui-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS)
 	python3 tools/gui-test.py $< $(if $(RUN_VENUS),--venus)
 
 test: gui-test
+
+.PHONY: gui-draw-test
+gui-draw-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-draw-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-draw-test
