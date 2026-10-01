@@ -373,7 +373,7 @@ scroll-test: build/kernel.Image coolvm
 	python3 tools/scroll-bench.py scroll-test-ref $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --extra=--no-fb-scroll --expect-scanout 0
 	python3 tools/scroll-bench.py scroll-test-hw $< --repeat 1 --lines 160 $(SCROLL_TEST_SIZES) --extra=--no-gpu --expect-scanout 1 --compare scroll-test-ref
 # Lua is translated source, outside the compiler seed and kernel image.
-LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/Kernel.cool tools/lua-support/Host.cool coolc/LibC/LibC.cool
+LUASRC := $(wildcard vendor/lua-5.4.9/src/*.[ch] tools/c2hc/*.py coolc/LibC/include/*.h) tools/lua-support/build.py tools/lua-support/repl.c tools/lua-support/Kernel.cool tools/lua-support/Host.cool coolc/LibC/LibC.cool
 build/lua/generated.stamp: $(LUASRC) build/ShellPrelude.coolh
 	python3 tools/lua-support/build.py
 	touch $@
