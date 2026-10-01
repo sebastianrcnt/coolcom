@@ -1,0 +1,46 @@
+import OS.Error (IoError);
+import Standard.String (String);
+module OS.Gui is
+    -- Acquire from RootCapability; one window per task, created on core 0.
+    type Gui: Linear;
+    type Window: Linear;
+    record Rect: Free is x: Int64; y: Int64; width: Int64; height: Int64; end;
+    record Layout: Free is x: Int64; y: Int64; width: Int64; gap: Int64; end;
+    record Size: Free is width: Int64; height: Int64; end;
+    union Event: Free is
+        case Idle;
+        case Mouse is x: Int64; y: Int64; buttons: Int64; wheel: Int64;
+        case Key is code: Int64;
+        case Resize is width: Int64; height: Int64;
+        case Close;
+        case Menu is id: Int64;
+    end;
+    record Button: Free is pressed: Bool; end;
+    record List: Free is selected: Int64; first: Int64; end;
+    type TextInput: Linear;
+    function acquireGui(root: &![RootCapability]): Gui;
+    function releaseGui(gui: Gui): Unit;
+    function open(gui: &![Gui], title: Span[Nat8], width: Int64, height: Int64): Result[Window, IoError];
+    function close(window: Window): Unit;
+    function size(window: &[Window]): Result[Size, IoError];
+    function poll(window: &![Window]): Result[Event, IoError];
+    function fill(window: &![Window], rect: Rect, color: Int64): Result[Unit, IoError];
+    function line(window: &![Window], x0: Int64, y0: Int64, x1: Int64, y1: Int64, color: Int64): Result[Unit, IoError];
+    function text(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64): Result[Unit, IoError];
+    function measure(value: Span[Nat8]): Int64;
+    function label(window: &![Window], rect: Rect, value: Span[Nat8]): Result[Unit, IoError];
+    function vertical(x: Int64, y: Int64, width: Int64, gap: Int64): Layout;
+    function nextRow(layout: &![Layout], height: Int64): Rect;
+    function button(window: &![Window], state: &![Button], rect: Rect, value: Span[Nat8], event: Event, defaultButton: Bool): Result[Bool, IoError];
+    function scrollBar(window: &![Window], rect: Rect, first: Int64, count: Int64, page: Int64, event: Event): Result[Int64, IoError];
+    function listFrame(window: &![Window], state: &![List], rect: Rect, count: Int64, event: Event): Result[Unit, IoError];
+    function listItem(window: &![Window], state: &![List], rect: Rect, index: Int64, value: Span[Nat8], event: Event): Result[Bool, IoError];
+    function makeTextInput(): TextInput;
+    function destroyTextInput(input: TextInput): Unit;
+    generic [R: Region]
+    function inputText(input: &[TextInput, R]): Span[Nat8, R];
+    generic [R: Region]
+    function textInput(window: &![Window], input: &![TextInput, R], rect: Rect, event: Event): Result[Bool, IoError];
+    function addMenu(window: &![Window], title: Span[Nat8]): Result[Int64, IoError];
+    function addMenuItem(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8]): Result[Unit, IoError];
+end module.

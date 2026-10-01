@@ -1,0 +1,63 @@
+import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect,
+    Layout, Button, List, TextInput, acquireGui, releaseGui, open, close, poll,
+    fill, label, vertical, nextRow, button, listFrame, listItem, makeTextInput,
+    destroyTextInput, inputText, textInput, addMenu, addMenuItem);
+import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
+import OS.Error (IoError);
+module body Widgets is
+    private function window(gui: &![Gui]): Window is
+        case open(&~gui, "Widgets", 320, 240) of
+            when Ok(value as w: Window) do return w;
+            when Err(error as e: IoError) do abort("GUI unavailable");
+        end case; end;
+    private function event(w: &![Window]): Event is
+        case poll(&~w) of when Ok(value as e: Event) do return e; when Err(error as error: IoError) do abort("GUI event failed"); end case; end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root); let tasks: Tasks := acquireTasks(&!root);
+        var w: Window := window(&!gui); var input: TextInput := makeTextInput();
+        var ok: Button := Button(pressed => false); var rows: List := List(selected => 0, first => 0);
+        case addMenu(&!w, "File") of
+            when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 1, "Test Action"); addMenuItem(&!w, menu, 2, "Close");
+            when Err(error as e: IoError) do abort("Menu failed");
+        end case;
+        var running: Bool := true; var first: Bool := true;
+        while running do
+            let e: Event := event(&!w);
+            case e of
+                when Close do running := false;
+                when Menu(id as id: Int64) do if id = 2 then running := false; else printLn("GUI WIDGET MENU"); end if;
+                when Idle do skip; when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wheel: Int64) do skip;
+                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip;
+            end case;
+            var draw: Bool := true; case e of when Idle do draw := first; when Close do skip; when Menu(id as id: Int64) do skip;
+                when Mouse(x as x: Int64, y as y: Int64, buttons as b: Int64, wheel as wheel: Int64) do skip;
+                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip; end case;
+            if draw then
+                fill(&!w, Rect(x => 0, y => 0, width => 320, height => 240), 16777215);
+                var layout: Layout := vertical(16, 12, 288, 4); label(&!w, nextRow(&!layout, 24), "Warm OS.Gui");
+                listFrame(&!w, &!rows, Rect(x => 16, y => 40, width => 180, height => 120), 12, e);
+                let firstRow: Int64 := rows.first;
+                var i: Int64 := 0; while i < 6 do
+                    let index: Int64 := firstRow + i;
+                    var name: Span[Nat8, Static] := "Item"; if index = 0 then name := "One"; else if index = 1 then name := "Two"; else if index = 2 then name := "Three"; end if;
+                    case listItem(&!w, &!rows, Rect(x => 17, y => 41 + i * 20, width => 162, height => 20), index, name, e) of
+                        when Ok(value as selected: Bool) do if selected then printLn("GUI WIDGET LIST"); end if;
+                        when Err(error as error: IoError) do abort("List failed");
+                    end case;
+                    i := i + 1; end while;
+                case button(&!w, &!ok, Rect(x => 216, y => 40, width => 88, height => 28), "OK", e, true) of
+                    when Ok(value as clicked: Bool) do if clicked then printLn("GUI WIDGET BUTTON"); end if;
+                    when Err(error as error: IoError) do abort("Button failed");
+                end case;
+                case textInput(&!w, &!input, Rect(x => 16, y => 176, width => 288, height => 28), e) of
+                    when Ok(value as changed: Bool) do if changed then print("GUI WIDGET TEXT "); printLn(inputText(&input)); end if;
+                    when Err(error as error: IoError) do abort("Text failed");
+                end case;
+                if first then first := false; printLn("GUI WIDGET READY"); end if;
+            end if;
+            sleep(&tasks, 1);
+        end while;
+        destroyTextInput(input); close(w); releaseGui(gui); releaseTasks(tasks);
+        surrenderRoot(root); printLn("GUI WIDGET CLOSED"); return ExitSuccess(); end;
+end module body.

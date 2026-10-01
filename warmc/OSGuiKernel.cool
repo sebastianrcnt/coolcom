@@ -1,0 +1,74 @@
+// Checked scalar GUI adapters. Window ids are task-owned authority, not addresses.
+CGuiWindow *WgWindow(I64 handle)
+{
+    CGuiWindow *w = Fs->gui_window;
+    if (!gui_active || !w || w->id != handle || w->owner != Fs || w->closed || !w->pixel) return NULL;
+    return w;
+}
+I64 WgOpen(U8 *title, U64 size, I64 width, I64 height)
+{
+    U8 *s; CGuiWindow *w;
+    if (size > 63 || width < 160 || width > 4096 || height < 64 || height > 4096) return -12;
+    if (!gui_active || Gs->num) return -1;
+    s = WkString(title, size); if (!s) return -12;
+    w = GuiNewPixel(s, width, height); Free(s); if (!w) return -1;
+    return w->id;
+}
+U0 WgClose(I64 handle)
+{
+    CGuiWindow *w = WgWindow(handle);
+    if (w) {w->closed = TRUE; w->owner = NULL; Fs->gui_window = NULL;}
+}
+I64 WgRect(I64 handle, I64 x, I64 y, I64 width, I64 height, I64 color)
+{
+    if (!WgWindow(handle)) return -16;
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
+    GrRect(x, y, width, height, color); return 0;
+}
+I64 WgLine(I64 handle, I64 x0, I64 y0, I64 x1, I64 y1, I64 color)
+{
+    if (!WgWindow(handle)) return -16;
+    if (x0 < -32768 || x0 > 32767 || y0 < -32768 || y0 > 32767 || x1 < -32768 || x1 > 32767 || y1 < -32768 || y1 > 32767) return -12;
+    GrLine(x0, y0, x1, y1, color); return 0;
+}
+I64 WgText(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color)
+{
+    U8 *s;
+    if (!WgWindow(handle)) return -16;
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767) return -12;
+    s = WkString(text, size); if (!s) return -12;
+    GrText(x, y, s, color); Free(s); return 0;
+}
+I64 WgMeasure(U8 *text, U64 size) {U8 *s = WkString(text, size); I64 result; if (!s) return 0; result = GrMeasure(s); Free(s); return result;}
+I64 WgDither(I64 handle, I64 x, I64 y, I64 width, I64 height)
+{
+    if (!WgWindow(handle)) return -16;
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
+    GrDither(x, y, width, height); return 0;
+}
+I64 WgPoll(I64 handle)
+{
+    CGuiWindow *w = WgWindow(handle); if (!w) return -16;
+    if (!GuiPoll(&w->last_event)) return 0; return w->last_event.type;
+}
+I64 WgField(I64 handle, I64 field)
+{
+    CGuiWindow *w = WgWindow(handle); if (!w) return -16;
+    switch (field) {case 0: return w->last_event.key; case 1: return w->last_event.x; case 2: return w->last_event.y;
+        case 3: return w->last_event.buttons; case 4: return w->last_event.wheel; case 5: return w->w; case 6: return w->h;}
+    return -12;
+}
+I64 WgMenu(I64 handle, U8 *title, U64 size)
+{
+    CGuiWindow *w = WgWindow(handle); U8 *s; I64 result;
+    if (!w) return -16;
+    s = WkString(title, size); if (!s) return -12;
+    result = GuiAddMenu(w, s); Free(s); return result;
+}
+I64 WgMenuItem(I64 handle, I64 menu, I64 id, U8 *label, U64 size)
+{
+    CGuiWindow *w = WgWindow(handle); U8 *s; I64 result;
+    if (!w) return -16;
+    s = WkString(label, size); if (!s) return -12;
+    result = GuiAddMenuItem(w, menu, id, s); Free(s); return result;
+}

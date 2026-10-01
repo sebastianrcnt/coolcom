@@ -173,7 +173,7 @@ build/disk.img: | build
 WARMSRC := coolc/LibC/LibC.cool $(wildcard warmc/*.cool warmc/builtin/*.warmh warmc/builtin/*.warm) warmc/build.sh warmc/embed_builtins.py coolc/seed/Compiler.BIN
 build/warmcool/Warm.BIN: $(WARMSRC) build/coolc
 	./warmc/build.sh
-build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool warmc/OSNetCommon.cool warmc/OSNetKernel.cool warmc/OSTaskKernel.cool
+build/warmcool/Kernel.cool: build/warmcool/Warm.BIN warmc/package_kernel.py warmc/OSKernel.cool warmc/OSCommon.cool warmc/OSDirKernel.cool warmc/OSNetCommon.cool warmc/OSNetKernel.cool warmc/OSTaskKernel.cool warmc/OSGuiKernel.cool
 	python3 warmc/package_kernel.py
 
 # The network stack's packet parser (docs/networking.md), compiled to os/Kernel/NetParse.cool.
@@ -200,6 +200,7 @@ warm-test: build/warmc build/warmcool/Kernel.cool build/warmfmt.BIN
 	python3 warmc/test_standard.py
 	python3 warmc/test_os.py
 	python3 warmc/test_tasks.py
+	python3 warmc/test_gui.py
 	python3 warmc/test_fmt.py
 
 disk-install: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
@@ -499,3 +500,9 @@ gui-draw-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_V
 	python3 tools/gui-draw-test.py $< $(if $(RUN_VENUS),--venus)
 
 test: gui-draw-test
+
+.PHONY: gui-widgets-test
+gui-widgets-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-widgets-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-widgets-test

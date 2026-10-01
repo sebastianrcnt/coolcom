@@ -19,6 +19,7 @@ U0 GuiDrawTask(U8 *data)
     GuiDrawScene; message = MStrPrint("GUI DRAW READY%d\n", gui.count); GuiLog(message); Free(message);
     while (TRUE) {
         while (GuiPoll(&e)) {
+            if (e.type == GUI_EVENT_CLOSE) return;
             if (e.type == GUI_EVENT_KEY && e.key == 'q') return;
             if (e.type == GUI_EVENT_KEY && e.key == 'p') {
                 message = MStrPrint("GUI DRAW PONG %d %d\n", TimerJiffies, TimerJiffies - e.timestamp); GuiLog(message); Free(message);

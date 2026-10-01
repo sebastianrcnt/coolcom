@@ -11,7 +11,7 @@ class CGuiTexture
 };
 class CGuiGpu
 {
-    CGuiTexture textures[GUI_WINDOWS + 2];
+    CGuiTexture textures[GUI_WINDOWS + 3];
     CGfxImage target;
     CGfxBuffer readback;
     U64i sampler, set_layout, pool, layout, pipeline, shaders[2], cmd;
@@ -66,6 +66,9 @@ U0 GuiGpuFrame()
             if (i == gui.count) {GfxBufferDestroy(&t->upload); GfxImageDestroy(&t->image); MemSet(&t->image, 0, sizeof(CGfxImage)); t->window = NULL;}
         }
     }
+    if (ggui.textures[GUI_WINDOWS + 2].revision != gui.overlay_revision) {
+        GuiGpuTexture(&ggui.textures[GUI_WINDOWS + 2], gui.overlay, fb.w, fb.h); ggui.textures[GUI_WINDOWS + 2].revision = gui.overlay_revision;
+    }
     if (ggui.textures[0].revision != gui.desktop_revision) {
         GuiGpuTexture(&ggui.textures[0], gui.desktop, fb.w, fb.h); ggui.textures[0].revision = gui.desktop_revision;
     }
@@ -88,6 +91,7 @@ U0 GuiGpuFrame()
     vn_encode_vkCmdBindPipeline(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ggui.pipeline);
     GuiGpuRect(&ggui.textures[0], 0, 0);
     for (i = 0; i < gui.count; i++) for (j = 1; j <= GUI_WINDOWS; j++) if (ggui.textures[j].window == gui.windows[i]) GuiGpuRect(&ggui.textures[j], gui.windows[i]->x * gui.scale, gui.windows[i]->y * gui.scale);
+    GuiGpuRect(&ggui.textures[GUI_WINDOWS + 2], 0, 0, TRUE);
     GuiGpuRect(&ggui.textures[GUI_WINDOWS + 1], gui.mx * gui.scale, gui.my * gui.scale, TRUE);
     vn_encode_vkCmdEndRendering(&gfx.enc, 0, gfx.cmd);
     GfxImageBarrier(&ggui.target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
@@ -102,7 +106,7 @@ U0 GuiGpuStop()
 {
     I64 i;
     if (!ggui.ready) return;
-    for (i = 0; i < GUI_WINDOWS + 2; i++) if (ggui.textures[i].image.image) {GfxBufferDestroy(&ggui.textures[i].upload); GfxImageDestroy(&ggui.textures[i].image);}
+    for (i = 0; i < GUI_WINDOWS + 3; i++) if (ggui.textures[i].image.image) {GfxBufferDestroy(&ggui.textures[i].upload); GfxImageDestroy(&ggui.textures[i].image);}
     GfxBufferDestroy(&ggui.readback); GfxImageDestroy(&ggui.target);
     GfxBegin; vn_encode_vkDestroyPipeline(&gfx.enc, 0, gfx.device, ggui.pipeline, NULL);
     vn_encode_vkDestroyPipelineLayout(&gfx.enc, 0, gfx.device, ggui.layout, NULL);
@@ -126,8 +130,8 @@ U0 GuiGpuStart()
     MemSet(&layout, 0, sizeof(layout)); layout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO; layout.bindingCount = 1; layout.pBindings = &binding;
     ggui.set_layout = GfxId; GfxBegin; vn_encode_vkCreateDescriptorSetLayout(&gfx.enc, 0, gfx.device, &layout, NULL, &ggui.set_layout); GfxSubmit;
     GfxResult(vn_decode_vkCreateDescriptorSetLayout_reply(&gfx.reply, gfx.device, &layout, NULL, &ggui.set_layout), "GUI layout");
-    size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; size.descriptorCount = GUI_WINDOWS + 2;
-    MemSet(&pool, 0, sizeof(pool)); pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO; pool.maxSets = GUI_WINDOWS + 2; pool.poolSizeCount = 1; pool.pPoolSizes = &size;
+    size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; size.descriptorCount = GUI_WINDOWS + 3;
+    MemSet(&pool, 0, sizeof(pool)); pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO; pool.maxSets = GUI_WINDOWS + 3; pool.poolSizeCount = 1; pool.pPoolSizes = &size;
     ggui.pool = GfxId; GfxBegin; vn_encode_vkCreateDescriptorPool(&gfx.enc, 0, gfx.device, &pool, NULL, &ggui.pool); GfxSubmit;
     GfxResult(vn_decode_vkCreateDescriptorPool_reply(&gfx.reply, gfx.device, &pool, NULL, &ggui.pool), "GUI pool");
     ggui.shaders[0] = GfxShader("C:/Vulkan/terminal.vert.spv"); ggui.shaders[1] = GfxShader("C:/Vulkan/gui.frag.spv");

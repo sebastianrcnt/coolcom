@@ -136,4 +136,29 @@ and 2x checks still pass. Five-window drawing tests preserve every key in an
 80-key burst and check enqueue-to-app latency against a 100 ms ceiling, local
 mouse coordinates, primitive colors and CPU/Venus equality. `make -j test` exited 0 on 2026-10-01 (`build/g2-test.log`).
 
-G3–G5 are pending.
+### G3 — complete
+
+`OS.Gui` provides opaque linear Gui/Window capabilities, root acquisition,
+checked task-owned scalar adapters, typed local events, immediate label/button/
+list/scrollbar/text-input widgets, and a vertical row layout. The host backend
+reports unavailable GUI operations. Text inputs edit UTF-8 codepoints and keep
+text/caret within the control; buffer spans use counted, borrow-scoped ranges.
+Menus register on a window and appear for its focused app, with a server popup
+overlay, inverted selection, Escape and arrows/Enter. The System menu adds the
+Widgets launcher. Pixel close requests allow one second for app cleanup.
+
+`GuiWidgets;` compiles/runs the Warm example in an independent core-0 task;
+`GuiRun(program, entry)` uses the generated guest OS module list shared with
+`warmc/os_modules.py`. Widgets exercise every basic control and a File menu.
+Man pages were regenerated with `tools/warm-man.py` into `build/gui-man/`; the
+production installer regenerates them from `.warmh` plus the prose notes.
+
+Targeted tests cover capability construction denial, root acquisition, missing
+authority, unclosed windows, host ABI compilation, menu overlay pixels, rounded
+thick default-button borders, inverted list selection, scrollbar dithering,
+UTF-8 insertion/deletion, keyboard editing with visible output, and graceful
+close. CPU and Venus widget screenshots match exactly outside the clock.
+Artifacts: `build/gui-widgets-test/`. `make -j test` exited 0 on 2026-10-01
+(`build/g3-test.log`), including G1/G2 regression checks and all existing tests.
+
+G4–G5 are pending.
