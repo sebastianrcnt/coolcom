@@ -1,0 +1,49 @@
+// Micro-benchmark for small-function inlining: hand-written helpers in a hot loop.
+// tools/inline-bench.py compiles it with and without COOLC_NO_INLINE.
+#include "TestBase.coolh"
+class CVec {F64 x, y;};
+F64 Dot(CVec *a, CVec *b) {return a->x * b->x + a->y * b->y;}
+I64 Clamp(I64 v, I64 lo, I64 hi)
+{
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+I64 Lower(I64 c)
+{
+    if (c >= 'A' && c <= 'Z') return c + 32;
+    return c;
+}
+I64 Abs(I64 x)
+{
+    if (x < 0) return -x;
+    return x;
+}
+I64 Get(I64 *a, I64 i) {return a[i];}
+U0 Put(I64 *a, I64 i, I64 v) {a[i] = v;}
+
+#define N 4096
+I64 bench_a[N], bench_b[N];
+CVec bench_v[8];
+U0 Bench()
+{
+    I64 r, i, v, s = 0;
+    F64 f = 0;
+    U8 *str = "Hello, World! AbCd";
+    for (i = 0; i < N; i++)
+        bench_a[i] = i * 7 - 9000;
+    for (i = 0; i < 8; i++) {
+        bench_v[i].x = i;
+        bench_v[i].y = 1.5;
+    }
+    for (r = 0; r < 20000; r++)
+        for (i = 0; i < N; i++) {
+            v = Get(bench_a, i);
+            v = Clamp(v * 3 - 7, -1000, 1000);
+            s += Abs(v);
+            Put(bench_b, i, Lower(str[i & 15]));
+            f += Dot(&bench_v[i & 7], &bench_v[(i + 1) & 7]);
+        }
+    Print("%d %d %.1f\n", s, bench_b[N - 1], f);
+}
+Bench;

@@ -155,6 +155,37 @@ def liveness_source():
     return '\n'.join(out) + '\n', ''.join(expected) + 'aborts:0\n'
 
 
+def inline_test(env):
+    """Small-function inlining (docs/coolc-inline.md).
+
+    coolc/tests/inline/Inline.cool must print Inline.expected when compiled for arm64
+    and x86_64 with inlining, and for arm64 with COOLC_NO_INLINE; its COOLC_INLINE_TRACE
+    lines (node counts aside) must be Inline.trace. A function defined again in an AOT
+    unit after its first body was inlined is an error.
+    """
+    src = ROOT / 'coolc/tests/inline'
+    (OUT / 'Inline.cool').write_bytes((src / 'Inline.cool').read_bytes())
+    expected = (src / 'Inline.expected').read_text()
+    trace = (src / 'Inline.trace').read_text()
+    (OUT / 'InlineOn.cool').write_text('#include "Inline.cool"\n' + SUPPORT)
+    (OUT / 'InlineOff.cool').write_text('#define COOLC_NO_INLINE 1\n#include "Inline.cool"\n' + SUPPORT)
+    for name, target, host in [('InlineOn', 'arm64', 'coolc'), ('InlineOn', 'x86_64', 'coolc-x86_64'), ('InlineOff', 'arm64', 'coolc')]:
+        image = OUT / f'{name}-{target}.BIN'
+        log = OUT / f'{name}-{target}.compile.log'
+        run([str(ROOT/'build/coolc'), '--target', target, str(OUT/f'{name}.cool'), str(image)], log, env)
+        output = OUT / f'{name}-{target}.out'
+        run([str(ROOT/'build'/host), '--run', str(image)], output)
+        assert output.read_text() == expected, f'inlining ({name}, {target}): {output}'
+        lines = ''.join(re.sub(r' \(\d+ nodes\)$', '', line) + '\n' for line in log.read_text().splitlines() if line.startswith('inline: '))
+        assert lines == (trace if name == 'InlineOn' else ''), f'inline trace ({name}, {target}): {log}'
+    redefined = OUT / 'InlineRedefined.cool'
+    redefined.write_text('#include "TestBase.coolh"\nI64 V() {return 1;}\nI64 Old() {return V();}\n'
+                         'I64 V() {return 2;}\nPrint("%d\\n", Old());\n')
+    p = subprocess.run([str(ROOT/'build/coolc'), str(redefined), str(OUT/'InlineRedefined.BIN')], cwd=ROOT, env=env, capture_output=True)
+    assert p.returncode and b'defined again after its first definition was inlined' in p.stdout, p.stdout.decode()[-2000:]
+    print('PASS: inlining (same results inlined on arm64/x86_64 and not inlined; trace; AOT redefinition)')
+
+
 def run(cmd, log, env=None):
     with log.open('wb') as stream:
         p = subprocess.run(cmd, cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=90)
@@ -203,6 +234,7 @@ def main():
             run([str(ROOT/'build'/host), '--run', str(image)], output)
             assert output.read_text() == expected, f'large-function liveness ({target}): {output}'
         print('PASS: large-function liveness (variables past 64) on arm64 and x86_64')
+        inline_test(env)
         segments = OUT / 'Segments.cool'
         segments.write_text('#include "TestBase.coolh"\n' + """
 _intern 0x15 U8 *Fs(); extern U8 *__Fs();

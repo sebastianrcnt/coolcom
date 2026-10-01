@@ -1,0 +1,1212 @@
+// Small-function inlining on the frontend IR (CRPN lists), before register
+// allocation. Design, safety rules and limits: docs/coolc-inline.md.
+//
+// A function body is captured right before it is compiled (after its own calls
+// were expanded), and kept in its CCmpCtrl (one compilation unit). Later
+// functions of the same unit get direct calls to it replaced by a copy of the
+// body with fresh locals and labels.
+//
+// List order: cc->coc.coc_head.next is the last node emitted. A node's operands
+// follow it (its last operand first), and earlier statements follow later
+// ones, so "inserted after a statement's nodes" means "executed before it".
+
+#define INL_MAX_NODES      96   // nodes in a callee body (after its own inlining), in a loop
+#define INL_TINY_NODES     16   // nodes in a leaf body inlined at any call site
+#define INL_TIGHT_LOOP     512  // nodes in a loop whose calls get bodies up to INL_MAX_NODES
+#define INL_MAX_MEMBERS    32   // callee arguments and locals
+#define INL_MAX_FRAME      64   // bytes of callee locals that are class values
+#define INL_CALLER_NODES   6000 // a caller stops receiving bodies past this many added nodes
+#define INL_CALLER_MEMBERS 480  // nor past this many locals
+#define INL_TOMB           1(CInlBody *) // a body forgotten in CInlTab.slots
+#define ICF_INL_BODY       0x400000000   // a copied body, while InlCalls runs
+
+class CInlMember
+{
+    U8 *str;
+    CHashClass *member_class;
+    I64 offset, size, reg;
+    CArrayDim dim;
+    Bool written; // assigned, incremented or its address taken in the body
+};
+
+class CInlMisc
+{
+    CCodeMisc *orig; // only while capturing
+    I64 type, flags, offset, st_len;
+    U8 *str;
+    CHash *h;
+};
+
+class CInlBody
+{
+    CHashFun *fun;
+    CHashClass *ret_class;
+    I64 node_cnt, member_cnt, arg_cnt, misc_cnt, uses;
+    Bool leaf; // no calls
+    CRPN *nodes; // copies in list order: nodes[0] is the closing IC_LABEL
+    I64 *link1, *link2, *mref, *fref; // t.arg1_tree, t.arg2_tree, misc and member indices (-1: none)
+    CInlMember *members;
+    CInlMisc *miscs;
+};
+
+class CInlTab
+{
+    CInlBody **slots; // open addressing by function
+    I64 mask, cnt, serial;
+};
+
+class CInlCtx
+{
+    CCmpCtrl *cc;
+    CInlTab *tab;
+    I64 *addr_offs, addr_cnt, added_nodes;
+    CRPN *parent; // parent of the call InlSearch found
+    CInlBody *body;
+    I64 impure; // arguments with side effects of the call InlCallee accepted
+    CRPN *stmt; // the statement InlSearch looks at
+    Bool trace, in_loop, stmt_gone;
+};
+
+U0 InlBodyDel(CInlBody *b)
+{
+    I64 i;
+    if (!b) return;
+    for (i = 0; i < b->member_cnt; i++)
+        Free(b->members[i].str);
+    for (i = 0; i < b->misc_cnt; i++)
+        Free(b->miscs[i].str);
+    Free(b->members);
+    Free(b->miscs);
+    Free(b->nodes);
+    Free(b->link1);
+    Free(b->link2);
+    Free(b->mref);
+    Free(b->fref);
+    Free(b);
+}
+
+U0 InlTabDel(CCmpCtrl *cc)
+{
+    CInlTab *tab = cc->inline_tab;
+    I64 i;
+    if (!tab) return;
+    for (i = 0; i <= tab->mask; i++)
+        if (tab->slots[i] != INL_TOMB)
+            InlBodyDel(tab->slots[i]);
+    Free(tab->slots);
+    Free(tab);
+    cc->inline_tab = NULL;
+}
+
+I64 InlSlot(CInlTab *tab, CHashFun *fun)
+{//The slot of fun's body, or the empty slot that ends its probe sequence.
+    U64 h = fun(U64) >> 4;
+    CInlBody *b;
+    h = (h * 0x9E3779B97F4A7C15) >> 32;
+    while (TRUE) {
+        h &= tab->mask;
+        b = tab->slots[h];
+        if (!b || b != INL_TOMB && b->fun == fun)
+            return h;
+        h++;
+    }
+}
+
+CInlBody *InlBodyFind(CInlTab *tab, CHashFun *fun)
+{
+    if (!tab || !tab->cnt) return NULL;
+    return tab->slots[InlSlot(tab, fun)];
+}
+
+U0 InlForget(CCmpCtrl *cc, CHashFun *fun)
+{//A unit that defines a function again must not use the earlier body.
+    CInlTab *tab = cc->inline_tab;
+    I64 i;
+    if (!tab || !tab->cnt) return;
+    i = InlSlot(tab, fun);
+    if (tab->slots[i]) {
+        InlBodyDel(tab->slots[i]);
+        tab->slots[i] = INL_TOMB;
+    }
+}
+
+U0 InlTabAdd(CInlTab *tab, CInlBody *b)
+{
+    CInlBody **old = tab->slots;
+    I64 i, old_mask = tab->mask;
+    if (!old || (tab->cnt + 1) * 2 > tab->mask) { // count tombstones too: rehash
+        tab->mask = (old_mask + 1) * 2 - 1;
+        if (tab->mask < 255) tab->mask = 255;
+        tab->slots = CAlloc(8 * (tab->mask + 1));
+        tab->cnt = 0;
+        if (old) {
+            for (i = 0; i <= old_mask; i++)
+                if (old[i] && old[i] != INL_TOMB) {
+                    tab->slots[InlSlot(tab, old[i]->fun)] = old[i];
+                    tab->cnt++;
+                }
+            Free(old);
+        }
+    }
+    tab->slots[InlSlot(tab, b->fun)] = b;
+    tab->cnt++;
+}
+
+Bool InlDefined(CCmpCtrl *cc, U8 *name)
+{
+    return HashFind(name, cc->htc.define_hash_table, HTT_DEFINE_STR) != NULL;
+}
+
+I64 InlArgCnt(CRPN *n)
+{
+    switch (intermediate_code_table[n->type].arg_cnt) {
+        case IS_V_ARG:
+            return n->length;
+        case IS_2_ARG:
+            return 2;
+        case IS_1_ARG:
+            return 1;
+    }
+    return 0;
+}
+
+CRPN *InlChild(CRPN *n, I64 i)
+{//The i-th operand in list order (the last operand is child 0).
+    CRPN *c = n->next;
+    while (i-- > 0)
+        c = ICNext(c);
+    return c;
+}
+
+CRPN *InlLast(CRPN *n)
+{//The last list node of n's subtree.
+    return ICNext(n)->last;
+}
+
+U0 InlCut(CRPN *first, CRPN *last)
+{
+    first->last->next = last->next;
+    last->next->last = first->last;
+    first->last = NULL;
+    last->next = NULL;
+}
+
+U0 InlPasteBefore(CRPN *pos, CRPN *first, CRPN *last)
+{//Insert the chain first..last right before pos.
+    CRPN *prev = pos->last;
+    prev->next = first;
+    first->last = prev;
+    last->next = pos;
+    pos->last = last;
+}
+
+U0 InlFreeChain(CRPN *first, CRPN *last)
+{
+    CRPN *n = first, *n1;
+    while (TRUE) {
+        n1 = n->next;
+        Free(n);
+        if (n == last) break;
+        n = n1;
+    }
+}
+
+Bool InlScalar(CHashClass *c)
+{//Pointers and (unions forwarding to) internal types; not class values.
+    if (!c) return FALSE;
+    if (c->ptr_stars_cnt) return TRUE;
+    c = OptClassFwd(c);
+    return c->type & HTT_INTERNAL_TYPE && c->raw_type != RT_U0 && c->raw_type != RT_I0;
+}
+
+I64 InlRawType(CHashClass *c)
+{
+    if (c->ptr_stars_cnt) return RT_PTR;
+    return OptClassFwd(c)->raw_type;
+}
+
+Bool InlNarrow(I64 rt)
+{
+    return rt >= RT_I8 && rt <= RT_U32;
+}
+
+Bool InlFits(CRPN *n, I64 rt)
+{//Is n's value certainly representable in raw type rt? The backend does not narrow
+    //register-held values, so a narrow destination must only receive values that fit
+    //(see docs/coolc-inline.md, "Narrow types").
+    I64 v, nrt;
+    if (!InlNarrow(rt)) return TRUE;
+    switch (n->type) {
+        case IC_IMM_I64:
+            v = n->imm_i64;
+            switch (rt) {
+                case RT_I8: return v >= -0x80 && v <= 0x7F;
+                case RT_U8: return v >= 0 && v <= 0xFF;
+                case RT_I16: return v >= -0x8000 && v <= 0x7FFF;
+                case RT_U16: return v >= 0 && v <= 0xFFFF;
+                case RT_I32: return v >= -0x80000000 && v <= 0x7FFFFFFF;
+                case RT_U32: return v >= 0 && v <= 0xFFFFFFFF;
+            }
+            return FALSE;
+        case IC_EQU_EQU:
+        case IC_NOT_EQU:
+        case IC_LESS:
+        case IC_GREATER:
+        case IC_LESS_EQU:
+        case IC_GREATER_EQU:
+        case IC_NOT:
+        case IC_AND_AND:
+        case IC_OR_OR:
+        case IC_XOR_XOR:
+        case IC_TO_BOOL:
+            return TRUE;
+        case IC_FRAME:
+        case IC_DEREF:
+        case IC_CALL_INDIRECT:
+            break;
+        default:
+            return FALSE; // arithmetic and casts can leave the range
+    }
+    if (!n->ic_class || n->ic_dim || !InlScalar(n->ic_class)) return FALSE;
+    nrt = InlRawType(n->ic_class);
+    if (nrt == rt) return TRUE;
+    switch (rt) {
+        case RT_I16: return nrt == RT_I8 || nrt == RT_U8;
+        case RT_U16: return nrt == RT_U8;
+        case RT_I32: return nrt >= RT_I8 && nrt <= RT_U16;
+        case RT_U32: return nrt == RT_U8 || nrt == RT_U16;
+    }
+    return FALSE;
+}
+
+Bool InlBodyType(I64 t)
+{//IR node types a captured body may contain.
+    switch (t) {
+        case IC_LABEL:
+        case IC_IMM_I64:
+        case IC_IMM_F64:
+        case IC_STR_CONST:
+        case IC_ADDR_IMPORT:
+        case IC_TO_I64:
+        case IC_TO_F64:
+        case IC_TO_BOOL:
+        case IC_HOLYC_TYPECAST:
+        case IC_ADDR:
+        case IC_COM:
+        case IC_NOT:
+        case IC_UNARY_MINUS:
+        case IC_DEREF:
+        case IC__PP:
+        case IC__MM:
+        case IC_PP_:
+        case IC_MM_:
+        case IC_SHL:
+        case IC_SHR:
+        case IC_MUL:
+        case IC_DIV:
+        case IC_MOD:
+        case IC_AND:
+        case IC_OR:
+        case IC_XOR:
+        case IC_ADD:
+        case IC_SUB:
+        case IC_EQU_EQU:
+        case IC_NOT_EQU:
+        case IC_LESS:
+        case IC_GREATER_EQU:
+        case IC_GREATER:
+        case IC_LESS_EQU:
+        case IC_AND_AND:
+        case IC_OR_OR:
+        case IC_XOR_XOR:
+        case IC_ASSIGN:
+        case IC_SHL_EQU:
+        case IC_SHR_EQU:
+        case IC_MUL_EQU:
+        case IC_DIV_EQU:
+        case IC_MOD_EQU:
+        case IC_AND_EQU:
+        case IC_OR_EQU:
+        case IC_XOR_EQU:
+        case IC_ADD_EQU:
+        case IC_SUB_EQU:
+        case IC_JMP:
+        case IC_RET:
+        case IC_CALL_INDIRECT:
+        case IC_BR_ZERO:
+        case IC_BR_NOT_ZERO:
+        case IC_MIN_I64:
+        case IC_MIN_U64:
+        case IC_MAX_I64:
+        case IC_MAX_U64:
+        case IC_SQR:
+        case IC_SQRT:
+        case IC_COMMA:
+        case IC_FRAME:
+        case IC_VARGS:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+Bool InlHasMisc(I64 t)
+{
+    switch (t) {
+        case IC_LABEL:
+        case IC_JMP:
+        case IC_BR_ZERO:
+        case IC_BR_NOT_ZERO:
+        case IC_STR_CONST:
+        case IC_ADDR_IMPORT:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+Bool InlIsAssign(I64 t)
+{
+    switch (t) {
+        case IC_ASSIGN:
+        case IC_SHL_EQU:
+        case IC_SHR_EQU:
+        case IC_MUL_EQU:
+        case IC_DIV_EQU:
+        case IC_MOD_EQU:
+        case IC_AND_EQU:
+        case IC_OR_EQU:
+        case IC_XOR_EQU:
+        case IC_ADD_EQU:
+        case IC_SUB_EQU:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+I64 InlNodeIdx(CRPN **ptrs, I64 cnt, CRPN *n)
+{
+    I64 i;
+    if (!n) return -1;
+    for (i = 0; i < cnt; i++)
+        if (ptrs[i] == n)
+            return i;
+    return -1;
+}
+
+CInlBody *InlCapture(CCmpCtrl *cc, I64 fsp_flags)
+{//Copy the current function's IR if it may be inlined later, else NULL.
+    CHashFun *fun = cc->htc.fun;
+    CRPN *head = &cc->coc.coc_head, *n, *lhs, **ptrs = NULL;
+    CMemberLst *m;
+    CInlBody *b;
+    CInlMember *im;
+    CInlMisc *mi;
+    CCodeMisc *misc;
+    I64 i, j, cnt, frame = 0, rt;
+    if (fsp_flags & (FSF_INTERRUPT | FSF_HASERRCODE | FSF_ARGPOP | FSF_NOARGPOP | FSF_NOINLINE))
+        return NULL;
+    if (fun->flags & (1 << Ff_DOT_DOT_DOT | 1 << Ff_INTERNAL | 1 << Ff_INTERRUPT | 1 << Ff_HASERRCODE))
+        return NULL;
+    if (cc->flags & CCF_NO_REG_OPT) // try/catch
+        return NULL;
+    if (fun->return_class->size && !InlScalar(fun->return_class))
+        return NULL;
+    cnt = 0;
+    for (n = head->next; n != head; n = n->next)
+        if (++cnt > INL_MAX_NODES)
+            return NULL;
+    n = head->next;
+    if (cnt < 1 || n->type != IC_LABEL) return NULL;
+
+    b = CAlloc(sizeof(CInlBody));
+    b->fun = fun;
+    b->ret_class = fun->return_class;
+    b->arg_cnt = fun->arg_cnt;
+    for (m = fun->member_lst_and_root; m; m = m->next)
+        b->member_cnt++;
+    if (b->member_cnt > INL_MAX_MEMBERS || b->member_cnt < b->arg_cnt) goto fail;
+    b->members = CAlloc(sizeof(CInlMember) * (b->member_cnt + 1));
+    for (i = 0, m = fun->member_lst_and_root; m; m = m->next, i++) {
+        // A function pointer variable owns its type (MemberLstDel frees it), so a copy
+        // could not share it.
+        if (m->flags & (MLF_STATIC | MLF_DOT_DOT_DOT | MLF_FUN) || m->dim.next || m->fun_ptr || m->meta)
+            goto fail;
+        if (m->reg != REG_UNDEF && m->reg != REG_NONE && m->reg != REG_ALLOC)
+            goto fail; // an explicit register
+        if (i < b->arg_cnt && !InlScalar(m->member_class))
+            goto fail; // a class passed by value
+        if (m->dim.total_cnt != 1 || m->member_class->size <= 0)
+            goto fail;
+        if (!InlScalar(m->member_class))
+            frame += (m->member_class->size + 7) & ~7; // a class value stays in the frame
+        im = &b->members[i];
+        im->str = StrNew(m->str);
+        im->member_class = m->member_class;
+        im->offset = m->offset;
+        im->size = m->member_class->size;
+        im->reg = m->reg;
+        MemCpy(&im->dim, &m->dim, sizeof(CArrayDim));
+        im->dim.next = NULL;
+    }
+    if (frame > INL_MAX_FRAME) goto fail;
+
+    b->node_cnt = cnt;
+    b->nodes = MAlloc(sizeof(CRPN) * cnt);
+    b->link1 = MAlloc(8 * cnt);
+    b->link2 = MAlloc(8 * cnt);
+    b->mref = MAlloc(8 * cnt);
+    b->fref = MAlloc(8 * cnt);
+    b->miscs = CAlloc(sizeof(CInlMisc) * cnt);
+    ptrs = MAlloc(8 * cnt);
+    for (i = 0, n = head->next; n != head; n = n->next, i++)
+        ptrs[i] = n;
+    b->leaf = TRUE;
+    for (i = 0; i < cnt; i++) {
+        n = ptrs[i];
+        if (!InlBodyType(n->type) || n->ic_dim)
+            goto fail;
+        if (n->type == IC_CALL_INDIRECT)
+            b->leaf = FALSE;
+        MemCpy(&b->nodes[i], n, sizeof(CRPN));
+        b->link1[i] = InlNodeIdx(ptrs, cnt, n->t.arg1_tree);
+        b->link2[i] = InlNodeIdx(ptrs, cnt, n->t.arg2_tree);
+        b->mref[i] = -1;
+        b->fref[i] = -1;
+        if (InlIsAssign(n->type) && (b->link1[i] < 0 || b->link2[i] < 0))
+            goto fail;
+        if (InlHasMisc(n->type)) {
+            misc = n->ic_data;
+            if (!misc) goto fail;
+            for (j = 0; j < b->misc_cnt; j++)
+                if (b->miscs[j].orig == misc)
+                    break;
+            if (j == b->misc_cnt) {
+                mi = &b->miscs[b->misc_cnt++];
+                mi->orig = misc;
+                mi->type = misc->type;
+                mi->flags = misc->flags;
+                switch (misc->type) {
+                    case CMT_LABEL:
+                    case CMT_GOTO_LABEL:
+                        if (n->type == IC_STR_CONST || n->type == IC_ADDR_IMPORT)
+                            goto fail;
+                        mi->type = CMT_LABEL;
+                        mi->flags = 0;
+                        break;
+                    case CMT_STR_CONST:
+                        if (n->type != IC_STR_CONST) goto fail;
+                        mi->st_len = misc->st_len;
+                        mi->str = MAlloc(misc->st_len + 1);
+                        MemCpy(mi->str, misc->str, misc->st_len);
+                        break;
+                    case CMT_HASH_ENTRY:
+                        if (n->type != IC_ADDR_IMPORT || misc->flags & CMF_STATIC || !misc->h)
+                            goto fail;
+                        mi->h = misc->h;
+                        mi->offset = misc->offset;
+                        break;
+                    default:
+                        goto fail;
+                }
+            }
+            b->mref[i] = j;
+        }
+        if (n->type == IC_FRAME) {
+            for (j = 0; j < b->member_cnt; j++)
+                if (b->members[j].offset <= n->ic_data < b->members[j].offset + b->members[j].size)
+                    break;
+            if (j == b->member_cnt) goto fail;
+            b->fref[i] = j;
+        }
+    }
+    // Only straight-line code and forward branches: a loop's own cost hides a call's.
+    for (i = 0; i < cnt; i++)
+        if (ptrs[i]->type == IC_JMP || ptrs[i]->type == IC_BR_ZERO || ptrs[i]->type == IC_BR_NOT_ZERO)
+            for (j = i + 1; j < cnt; j++)
+                if (ptrs[j]->type == IC_LABEL && b->mref[j] == b->mref[i])
+                    goto fail; // the label comes first when executed
+    // Narrow destinations only receive values that fit (InlFits).
+    rt = 0;
+    if (b->ret_class->size)
+        rt = InlRawType(b->ret_class);
+    for (i = 0; i < cnt; i++) {
+        n = ptrs[i];
+        if (n->type == IC_RET && b->ret_class->size && !InlFits(n->next, rt))
+            goto fail;
+        if (n->type == IC_ADDR && n->next(CRPN *)->type == IC_FRAME)
+            b->members[b->fref[i + 1]].written = TRUE;
+        if (InlIsAssign(n->type) || n->type == IC__PP || n->type == IC__MM ||
+                n->type == IC_PP_ || n->type == IC_MM_) {
+            if (InlIsAssign(n->type))
+                lhs = ICNext(n->next);
+            else
+                lhs = n->next;
+            if (lhs->type == IC_FRAME)
+                b->members[b->fref[InlNodeIdx(ptrs, cnt, lhs)]].written = TRUE;
+            if (lhs->type == IC_FRAME && InlScalar(lhs->ic_class) &&
+                    InlNarrow(InlRawType(lhs->ic_class)) &&
+                    (n->type != IC_ASSIGN || !InlFits(n->next, InlRawType(lhs->ic_class))))
+                goto fail;
+        }
+    }
+    for (j = 0; j < b->misc_cnt; j++)
+        b->miscs[j].orig = NULL;
+    Free(ptrs);
+    return b;
+fail:
+    Free(ptrs);
+    InlBodyDel(b);
+    return NULL;
+}
+
+U0 InlCommit(CCmpCtrl *cc, CInlBody *b)
+{//The function compiled: make its body available to the rest of the unit.
+    CInlTab *tab = cc->inline_tab;
+    if (!b) return;
+    if (!tab) tab = cc->inline_tab = CAlloc(sizeof(CInlTab));
+    InlForget(cc, b->fun);
+    InlTabAdd(tab, b);
+}
+
+CMemberLst *InlCallerMember(CCmpCtrl *cc, I64 off)
+{
+    CMemberLst *m;
+    for (m = cc->htc.fun->member_lst_and_root; m; m = m->next)
+        if (m->offset == off)
+            return m;
+    return NULL;
+}
+
+Bool InlAddrTaken(CInlCtx *x, I64 off)
+{
+    I64 i;
+    for (i = 0; i < x->addr_cnt; i++)
+        if (x->addr_offs[i] == off)
+            return TRUE;
+    return FALSE;
+}
+
+Bool InlPureOp(I64 t)
+{//Operators without side effects (their operands may have some).
+    switch (t) {
+        case IC_TO_I64:
+        case IC_TO_F64:
+        case IC_TO_BOOL:
+        case IC_HOLYC_TYPECAST:
+        case IC_COM:
+        case IC_NOT:
+        case IC_UNARY_MINUS:
+        case IC_SHL:
+        case IC_SHR:
+        case IC_MUL:
+        case IC_DIV:
+        case IC_MOD:
+        case IC_AND:
+        case IC_OR:
+        case IC_XOR:
+        case IC_ADD:
+        case IC_SUB:
+        case IC_EQU_EQU:
+        case IC_NOT_EQU:
+        case IC_LESS:
+        case IC_GREATER_EQU:
+        case IC_GREATER:
+        case IC_LESS_EQU:
+        case IC_AND_AND:
+        case IC_OR_OR:
+        case IC_XOR_XOR:
+        case IC_MIN_I64:
+        case IC_MIN_U64:
+        case IC_MAX_I64:
+        case IC_MAX_U64:
+        case IC_COMMA:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+Bool InlStable(CInlCtx *x, CRPN *n)
+{//No side effects, and no value a call could change: constants, addresses and
+    //scalar locals whose address is never taken.
+    CMemberLst *m;
+    CRPN *c;
+    I64 i, cnt;
+    switch (n->type) {
+        case IC_IMM_I64:
+        case IC_IMM_F64:
+        case IC_STR_CONST:
+        case IC_ADDR_IMPORT:
+            return TRUE;
+        case IC_FRAME:
+            if (n->ic_dim || !InlScalar(n->ic_class) || InlAddrTaken(x, n->ic_data))
+                return FALSE;
+            m = InlCallerMember(x->cc, n->ic_data);
+            return m && !m->dim.next && InlScalar(m->member_class);
+        case IC_ADDR:
+            return n->next(CRPN *)->type == IC_FRAME;
+    }
+    if (!InlPureOp(n->type))
+        return FALSE;
+    cnt = InlArgCnt(n);
+    c = n->next;
+    for (i = 0; i < cnt; i++) {
+        if (!InlStable(x, c)) return FALSE;
+        c = ICNext(c);
+    }
+    return TRUE;
+}
+
+Bool InlConst(CRPN *n)
+{//Stable without reading any variable.
+    CRPN *c;
+    I64 i, cnt;
+    switch (n->type) {
+        case IC_IMM_I64:
+        case IC_IMM_F64:
+        case IC_STR_CONST:
+        case IC_ADDR_IMPORT:
+            return TRUE;
+        case IC_ADDR:
+            return n->next(CRPN *)->type == IC_FRAME;
+    }
+    if (!InlPureOp(n->type))
+        return FALSE;
+    cnt = InlArgCnt(n);
+    c = n->next;
+    for (i = 0; i < cnt; i++) {
+        if (!InlConst(c)) return FALSE;
+        c = ICNext(c);
+    }
+    return TRUE;
+}
+
+Bool InlNoOtherReads(CRPN *stmt, CRPN *call)
+{//Does stmt read no variable or memory outside call's subtree? The destination of a
+    //plain assignment to a local is written, not read.
+    CRPN *n = stmt, *end = ICNext(stmt), *call_end = ICNext(call), *lhs = NULL;
+    if (stmt->type == IC_ASSIGN)
+        lhs = ICNext(stmt->next);
+    while (n != end) {
+        if (n == call) {
+            n = call_end;
+        } else {
+            if (n->type == IC_FRAME && n != lhs && n->last(CRPN *)->type != IC_ADDR)
+                return FALSE;
+            if (n->type == IC_DEREF || n->type == IC_ADDR_IMPORT && n->last(CRPN *)->type == IC_DEREF)
+                return FALSE;
+            n = n->next;
+        }
+    }
+    return TRUE;
+}
+
+Bool InlPure(CInlCtx *x, CRPN *n)
+{//No side effects (it may read memory).
+    CRPN *c;
+    I64 i, cnt;
+    switch (n->type) {
+        case IC_IMM_I64:
+        case IC_IMM_F64:
+        case IC_STR_CONST:
+        case IC_ADDR_IMPORT:
+        case IC_FRAME:
+            return TRUE;
+        case IC_DEREF:
+        case IC_ADDR:
+            break;
+        default:
+            if (!InlPureOp(n->type))
+                return FALSE;
+    }
+    cnt = InlArgCnt(n);
+    c = n->next;
+    for (i = 0; i < cnt; i++) {
+        if (!InlPure(x, c)) return FALSE;
+        c = ICNext(c);
+    }
+    return TRUE;
+}
+
+CInlBody *InlCallee(CInlCtx *x, CRPN *call)
+{//The body to inline for this call, or NULL.
+    CRPN *fn, *c;
+    CCodeMisc *misc;
+    CHashFun *f;
+    CInlBody *b;
+    I64 i, a, impure = 0, unstable = 0;
+    if (call->ic_flags & ICF_LOCK || call->length < 1)
+        return NULL;
+    fn = InlChild(call, call->length - 1);
+    if (fn->type == IC_ADDR_IMPORT) {
+        misc = fn->ic_data;
+        if (!misc || misc->type != CMT_HASH_ENTRY || misc->offset)
+            return NULL;
+        f = misc->h;
+    } else if (fn->type == IC_IMM_I64 && !(x->cc->flags & CCF_AOT_COMPILE)) {
+        f = fn->ic_class;
+        if (!f || !(f->type & HTT_FUN) || f->ptr_stars_cnt || fn->imm_i64 != f->exe_addr)
+            return NULL;
+    } else
+        return NULL;
+    if (!f || !(f->type & HTT_FUN) || f->ptr_stars_cnt)
+        return NULL;
+    if (!(b = InlBodyFind(x->tab, f)) || call->length - 1 != b->arg_cnt)
+        return NULL;
+    if ((b->node_cnt > INL_TINY_NODES || !b->leaf) && !x->in_loop)
+        return NULL;
+    if (x->added_nodes + b->node_cnt > INL_CALLER_NODES ||
+            x->cc->htc.fun->member_cnt + b->member_cnt + 1 > INL_CALLER_MEMBERS)
+        return NULL;
+    c = call->next;
+    for (i = 0; i < b->arg_cnt; i++) {
+        a = b->arg_cnt - 1 - i;
+        if (!InlFits(c, InlRawType(b->members[a].member_class)))
+            return NULL;
+        if (!InlConst(c)) {
+            unstable++;
+            if (!InlPure(x, c))
+                impure++;
+        }
+        c = ICNext(c);
+    }
+    // Arguments are evaluated first to last before the body; that order is only
+    // observable when one has a side effect and another reads something.
+    if (impure > 1 || impure && unstable > 1)
+        return NULL;
+    x->impure = impure;
+    return b;
+}
+
+Bool InlSiblingOK(CInlCtx *x, CRPN *n, I64 j, CRPN *c)
+{//May operand j (list order) of n be evaluated after a call hoisted out of another operand?
+    if (n->type == IC_ASSIGN && j == 1) { // the destination of a plain assignment
+        if (c->type == IC_FRAME) return TRUE;
+        if (c->type == IC_DEREF) return InlStable(x, c->next);
+    }
+    return InlStable(x, c);
+}
+
+CRPN *InlSearch(CInlCtx *x, CRPN *n, CRPN *parent)
+{//A call in n's subtree that can move in front of the statement. Calls in a call's
+    //arguments come first: once they are expanded, the call may qualify (InlCalls).
+    CRPN *c, *c2, *res;
+    I64 i, j, cnt;
+    cnt = InlArgCnt(n);
+    c = n->next;
+    for (i = 0; i < cnt; i++) {
+        // && and || only evaluate their right operand (child 0) conditionally.
+        if ((n->type == IC_AND_AND || n->type == IC_OR_OR) && i == 0)
+            goto next;
+        c2 = n->next;
+        for (j = 0; j < cnt; j++) {
+            if (j != i && !InlSiblingOK(x, n, j, c2))
+                goto next;
+            c2 = ICNext(c2);
+        }
+        if (res = InlSearch(x, c, n))
+            return res;
+next:
+        c = ICNext(c);
+    }
+    // A U0 function is inlined only as a whole statement. An argument with a side
+    // effect runs before the statement's other operands: they must not read anything.
+    if (n->type == IC_CALL_INDIRECT && (x->body = InlCallee(x, n)) &&
+            (!parent || x->body->ret_class->size) &&
+            (!x->impure || InlNoOtherReads(x->stmt, n))) {
+        x->parent = parent;
+        return n;
+    }
+    return NULL;
+}
+
+I64 InlFrameAlloc(CHashFun *fun, I64 size)
+{
+    fun->size = (fun->size - size) & ~7;
+    return fun->size;
+}
+
+CMemberLst *InlNewMember(CCmpCtrl *cc, U8 *str, CHashClass *cls, I64 size)
+{
+    CHashFun *fun = cc->htc.fun;
+    CMemberLst *m = MemberLstNew(REG_UNDEF);
+    m->str = str;
+    m->member_class = cls;
+    m->size = size;
+    m->dim.cnt = 0;
+    m->dim.total_cnt = 1;
+    m->use_cnt = 1; // no "unused" diagnostics for compiler-made locals
+    m->offset = InlFrameAlloc(fun, (size + 7) & ~7);
+    MemberAdd(cc, m, fun, PRS1B_NULL);
+    fun->member_cnt++;
+    return m;
+}
+
+CRPN *InlNode(I64 type, I64 data, CHashClass *cls, I64 line)
+{
+    CRPN *n = CAlloc(sizeof CRPN);
+    n->type = type;
+    n->ic_data = data;
+    n->ic_class = cls;
+    n->ic_line = line;
+    return n;
+}
+
+Bool InlDroppable(CRPN *n)
+{//A discarded return value whose evaluation can be dropped.
+    switch (n->type) {
+        case IC_IMM_I64:
+        case IC_IMM_F64:
+        case IC_FRAME:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+Bool InlLeafArg(CInlCtx *x, CRPN *arg, CInlMember *p)
+{//May the body read (a copy of) arg itself for parameter p? Only constants, addresses
+    //and locals a call cannot change, for a 64-bit parameter the body never writes.
+    I64 prt, art;
+    if (p->written || !InlScalar(p->member_class) || !arg->ic_class || arg->ic_dim)
+        return FALSE;
+    prt = InlRawType(p->member_class);
+    switch (arg->type) {
+        case IC_IMM_I64:
+            return prt == RT_I64 || prt == RT_U64;
+        case IC_IMM_F64:
+            return prt == RT_F64;
+        case IC_FRAME:
+        case IC_ADDR:
+            if (!InlStable(x, arg)) return FALSE;
+            break;
+        case IC_ADDR_IMPORT:
+            break;
+        default:
+            return FALSE;
+    }
+    if (!InlScalar(arg->ic_class)) return FALSE;
+    art = InlRawType(arg->ic_class);
+    if (prt == RT_F64 || art == RT_F64)
+        return prt == art;
+    return (prt == RT_I64 || prt == RT_U64) && (art == RT_I64 || art == RT_U64);
+}
+
+CRPN *InlCopyLeaf(CCmpCtrl *cc, CRPN *arg, CHashClass *cls, I64 line, CRPN *pos)
+{//A copy of a leaf argument (InlLeafArg) typed as the parameter, inserted before pos.
+    CRPN *n = MAlloc(sizeof CRPN), *c;
+    CCodeMisc *misc;
+    MemCpy(n, arg, sizeof CRPN);
+    n->ic_class = cls;
+    n->ic_line = line;
+    n->live_out = n->live_in = n->use_regs = n->kill_regs = NULL;
+    n->user_data = n->user_data2 = NULL;
+    n->t.arg1_tree = n->t.arg2_tree = NULL;
+    QueInsRev(n, pos);
+    if (arg->type == IC_ADDR_IMPORT) {
+        misc = COCMiscNew(cc, CMT_HASH_ENTRY);
+        misc->flags = arg->ic_data(CCodeMisc *)->flags;
+        misc->offset = arg->ic_data(CCodeMisc *)->offset;
+        misc->h = arg->ic_data(CCodeMisc *)->h;
+        n->ic_data = misc;
+    } else if (arg->type == IC_ADDR) {
+        c = MAlloc(sizeof CRPN);
+        MemCpy(c, arg->next, sizeof CRPN);
+        c->ic_line = line;
+        c->live_out = c->live_in = c->use_regs = c->kill_regs = NULL;
+        c->user_data = c->user_data2 = NULL;
+        QueInsRev(c, pos);
+        n->t.arg1_tree = c;
+    }
+    return n;
+}
+
+CRPN *InlExpand(CInlCtx *x, CRPN *stmt, CRPN *call)
+{//Replace call (in statement stmt) by its callee's body: arguments into fresh
+    //locals, then the body, then stmt reading the result local. Returns the
+    //first argument statement in list order (or the statement after stmt).
+    CCmpCtrl *cc = x->cc;
+    CInlBody *b = x->body;
+    CRPN *parent = x->parent, *end = ICNext(stmt), *n, *c, *frame, *jmp, *last,
+            **nn, **arg_first, **arg_last, *fn_last, *ret_node = NULL, *resume = end,
+            *fwd = NULL;
+    CRPN tmp_head;
+    CCodeMisc **nm;
+    CMemberLst *m;
+    CHashClass *ret_class = NULL;
+    I64 *newoff, i, a, ret_off = 0, line = stmt->ic_line, serial = ++x->tab->serial;
+    Bool need_ret = b->ret_class->size && stmt != call;
+
+    if (x->trace)
+        Print("inline: %s into %s (%d nodes)\n", b->fun->str, cc->htc.fun->str, b->node_cnt);
+    x->added_nodes += b->node_cnt;
+    b->uses++;
+
+    // Locate the arguments before the call's subtree is taken apart.
+    arg_first = MAlloc(8 * (b->arg_cnt + 1));
+    arg_last = MAlloc(8 * (b->arg_cnt + 1));
+    c = call->next;
+    for (i = 0; i < b->arg_cnt; i++) {
+        a = b->arg_cnt - 1 - i;
+        arg_first[a] = c;
+        arg_last[a] = InlLast(c);
+        c = ICNext(c);
+    }
+    fn_last = InlLast(c);
+
+    // x = f(...); with x a local of the result's type: the body assigns x itself.
+    if (need_ret && stmt == parent && stmt->type == IC_ASSIGN && stmt->next == call) {
+        c = ICNext(call);
+        if (c->type == IC_FRAME && c->ic_class == call->ic_class && InlStable(x, c))
+            fwd = c;
+    }
+
+    // Fresh locals for the callee's locals, its arguments unless they are read in
+    // place (InlLeafArg), and the result.
+    newoff = MAlloc(8 * (b->member_cnt + 1));
+    for (i = 0; i < b->member_cnt; i++) {
+        if (i < b->arg_cnt && InlLeafArg(x, arg_first[i], &b->members[i])) {
+            newoff[i] = 0;
+        } else {
+            m = InlNewMember(cc, MStrPrint("%s@%d", b->members[i].str, serial),
+                             b->members[i].member_class, b->members[i].size);
+            if (b->members[i].reg == REG_NONE || b->members[i].reg == REG_ALLOC)
+                m->reg = b->members[i].reg;
+            newoff[i] = m->offset;
+        }
+    }
+    if (fwd) {
+        ret_off = fwd->ic_data;
+        ret_class = fwd->ic_class;
+    } else if (need_ret) {
+        m = InlNewMember(cc, MStrPrint("@ret%d", serial), call->ic_class, 8);
+        ret_off = m->offset;
+        ret_class = m->member_class;
+    }
+
+    // Fresh labels, string constants and symbol references.
+    nm = MAlloc(8 * (b->misc_cnt + 1));
+    for (i = 0; i < b->misc_cnt; i++) {
+        nm[i] = COCMiscNew(cc, b->miscs[i].type);
+        nm[i]->flags = b->miscs[i].flags;
+        nm[i]->offset = b->miscs[i].offset;
+        nm[i]->h = b->miscs[i].h;
+        if (b->miscs[i].type == CMT_STR_CONST) {
+            nm[i]->st_len = b->miscs[i].st_len;
+            nm[i]->str = MAlloc(b->miscs[i].st_len + 1);
+            MemCpy(nm[i]->str, b->miscs[i].str, b->miscs[i].st_len);
+            cc->flags |= CCF_HAS_MISC_DATA;
+        }
+    }
+
+    // Copy the body into a temporary list.
+    QueInit(&tmp_head);
+    nn = MAlloc(8 * b->node_cnt);
+    for (i = 0; i < b->node_cnt; i++) {
+        a = b->fref[i];
+        if (a >= 0 && a < b->arg_cnt && !newoff[a]) {
+            nn[i] = InlCopyLeaf(cc, arg_first[a], b->members[a].member_class, line, &tmp_head);
+            goto next_copy;
+        }
+        n = nn[i] = MAlloc(sizeof CRPN);
+        MemCpy(n, &b->nodes[i], sizeof CRPN);
+        n->ic_line = line;
+        n->live_out = n->live_in = n->use_regs = n->kill_regs = NULL;
+        n->user_data = n->user_data2 = NULL;
+        n->changed = FALSE;
+        if (b->mref[i] >= 0)
+            n->ic_data = nm[b->mref[i]];
+        if (a >= 0)
+            n->ic_data = newoff[a] + n->ic_data - b->members[a].offset;
+        QueIns(n, tmp_head.last);
+        n->t.arg1_tree = NULL;
+        n->t.arg2_tree = NULL;
+next_copy:
+    }
+    for (i = 0; i < b->node_cnt; i++) {
+        n = nn[i];
+        if (b->link1[i] >= 0) n->t.arg1_tree = nn[b->link1[i]];
+        if (b->link2[i] >= 0) n->t.arg2_tree = nn[b->link2[i]];
+    }
+    // return x; -> result=x; goto end; (no jump from the last statement)
+    for (i = 1; i < b->node_cnt; i++) {
+        n = nn[i];
+        if (n->type != IC_RET || b->fref[i] >= 0) goto next_node;
+        c = n->next;
+        jmp = NULL;
+        if (i != 1)
+            jmp = InlNode(IC_JMP, nn[0]->ic_data, cmp.internal_types[RT_U0], line);
+        if (ret_class) {
+            frame = InlNode(IC_FRAME, ret_off, ret_class, line);
+            QueIns(frame, InlLast(c));
+            n->type = IC_ASSIGN;
+            n->ic_class = ret_class;
+            n->t.arg1_tree = frame;
+            n->t.arg1_class = frame->ic_class;
+            n->t.arg2_tree = c;
+            n->t.arg2_class = c->ic_class;
+            if (jmp) QueInsRev(jmp, n);
+        } else {
+            if (jmp) QueInsRev(jmp, n);
+            if (!b->ret_class->size || InlDroppable(c)) {
+                last = InlLast(c);
+                InlCut(c, last);
+                InlFreeChain(c, last);
+            }
+            QueRem(n);
+            Free(n);
+        }
+next_node:
+    }
+    Free(nn);
+    for (n = tmp_head.next; n != &tmp_head; n = n->next)
+        n->ic_flags |= ICF_INL_BODY; // not scanned again (InlCalls)
+
+    // The body goes right before the statement.
+    x->stmt_gone = fwd || stmt == call;
+    if (tmp_head.next != &tmp_head) {
+        n = tmp_head.next;
+        last = tmp_head.last;
+        InlCut(n, last);
+        InlPasteBefore(end, n, last);
+    }
+    // Arguments, first to last, before the body.
+    for (a = b->arg_cnt - 1; a >= 0; a--) {
+        if (!newoff[a]) goto next_arg; // read in place: freed with the call
+        InlCut(arg_first[a], arg_last[a]);
+        frame = InlNode(IC_FRAME, newoff[a], b->members[a].member_class, line);
+        n = InlNode(IC_ASSIGN, 0, b->members[a].member_class, line);
+        n->t.arg1_tree = frame;
+        n->t.arg1_class = frame->ic_class;
+        n->t.arg2_tree = arg_first[a];
+        n->t.arg2_class = arg_first[a]->ic_class;
+        n->visited = stmt->visited; // in a tight loop (InlCalls)
+        QueIns(n, end->last);
+        if (resume == end) resume = n;
+        InlPasteBefore(end, arg_first[a], arg_last[a]);
+        QueIns(frame, end->last);
+next_arg:
+    }
+    if (fwd) {
+        // The body assigned the destination: drop the statement (its arguments are
+        // gone, so it is the assignment, the call, the callee's address and fwd).
+        InlCut(stmt, fwd);
+        InlFreeChain(stmt, fwd);
+    } else {
+        // The statement reads the result instead of calling.
+        if (need_ret) {
+            ret_node = InlNode(IC_FRAME, ret_off, call->ic_class, line);
+            ret_node->ic_flags = call->ic_flags;
+            QueInsRev(ret_node, call);
+            if (parent) {
+                if (parent->t.arg1_tree == call) parent->t.arg1_tree = ret_node;
+                if (parent->t.arg2_tree == call) parent->t.arg2_tree = ret_node;
+            }
+        }
+        InlCut(call, fn_last);
+        InlFreeChain(call, fn_last);
+    }
+    Free(arg_first);
+    Free(arg_last);
+    Free(newoff);
+    Free(nm);
+    return resume;
+}
+
+Bool InlAnyLock(CRPN *stmt)
+{
+    CRPN *n, *end = ICNext(stmt);
+    for (n = stmt; n != end; n = n->next)
+        if (n->ic_flags & ICF_LOCK)
+            return TRUE;
+    return FALSE;
+}
+
+U0 InlCalls(CInlCtx *x)
+{//Expand inlinable calls in the current function's statements.
+    CCmpCtrl *cc = x->cc;
+    CRPN *head = &cc->coc.coc_head, *stmt, *call, *next;
+    CCodeMisc *misc;
+    I64 cnt = 0, pos, start, *depth;
+    for (stmt = head->next; stmt != head; stmt = stmt->next)
+        if (stmt->type == IC_ADDR)
+            cnt++;
+    x->addr_offs = MAlloc(8 * (cnt + 1));
+    for (stmt = head->next; stmt != head; stmt = stmt->next)
+        if (stmt->type == IC_ADDR && stmt->next(CRPN *)->type == IC_FRAME)
+            x->addr_offs[x->addr_cnt++] = stmt->next(CRPN *)->ic_data;
+    // Tight loops: a backward branch at most INL_TIGHT_LOOP nodes after its label (in
+    // execution order) makes the nodes in between a loop body; CRPN.visited marks them.
+    // CCodeMisc.rpn (a cache LabelToRPN fills when compiling) meanwhile holds a
+    // label's position plus one.
+    cnt = 0;
+    for (stmt = head->next; stmt != head; stmt = stmt->next)
+        cnt++;
+    depth = CAlloc(8 * (cnt + 2));
+    pos = 0;
+    for (stmt = head->last; stmt != head; stmt = stmt->last) {
+        if (stmt->type == IC_LABEL) {
+            stmt->ic_data(CCodeMisc *)->rpn = (pos + 1)(U8 *);
+        } else if (stmt->type == IC_JMP || stmt->type == IC_BR_ZERO || stmt->type == IC_BR_NOT_ZERO) {
+            start = stmt->ic_data(CCodeMisc *)->rpn(I64) - 1;
+            if (start >= 0 && pos - start <= INL_TIGHT_LOOP) {
+                depth[start]++;
+                depth[pos + 1]--;
+            }
+        }
+        pos++;
+    }
+    pos = 0;
+    start = 0;
+    for (stmt = head->last; stmt != head; stmt = stmt->last) {
+        start += depth[pos++];
+        stmt->visited = start > 0;
+    }
+    Free(depth);
+    for (misc = cc->coc.coc_next_misc; misc != &cc->coc.coc_next_misc; misc = misc->next)
+        misc->rpn = NULL;
+    // A statement is scanned again after an expansion, for its next call. Then the
+    // argument statements are, but copied bodies are not (ICF_INL_BODY).
+    stmt = head->next;
+    while (stmt != head) {
+        x->in_loop = stmt->visited;
+        x->stmt = stmt;
+        if (stmt->ic_flags & ICF_INL_BODY || InlAnyLock(stmt) || !(call = InlSearch(x, stmt, NULL))) {
+            stmt = ICNext(stmt);
+        } else {
+            next = InlExpand(x, stmt, call);
+            if (x->stmt_gone)
+                stmt = next;
+        }
+    }
+    for (stmt = head->next; stmt != head; stmt = stmt->next) {
+        stmt->visited = FALSE;
+        stmt->ic_flags &= ~ICF_INL_BODY;
+    }
+    Free(x->addr_offs);
+}
+
+CInlBody *InlFun(CCmpCtrl *cc, I64 fsp_flags)
+{//The current function is parsed: expand its inlinable calls, and capture its body
+    //for later functions (InlCommit, once it compiled).
+    CInlCtx x;
+    CInlTab *tab = cc->inline_tab;
+    CInlBody *b;
+    if (cc->error_cnt || InlDefined(cc, "COOLC_NO_INLINE")) // COOLC_NO_INLINE: none in this unit
+        return NULL;
+    // AOT calls bind to a function's last definition in the unit, so copies of an
+    // earlier one would be wrong. (A JIT definition is a new function: calls compiled
+    // before it keep the old one, like its copies.)
+    b = InlBodyFind(tab, cc->htc.fun);
+    if (b && b->uses && cc->flags & CCF_AOT_COMPILE) {
+        LexError(cc, MStrPrint("Function '%s' is defined again after its first definition was inlined (make that one noinline) at ",
+                               cc->htc.fun->str));
+        return NULL;
+    }
+    InlForget(cc, cc->htc.fun);
+    if (tab && tab->cnt) {
+        MemSet(&x, 0, sizeof(CInlCtx));
+        x.cc = cc;
+        x.tab = tab;
+        x.trace = InlDefined(cc, "COOLC_INLINE_TRACE");
+        InlCalls(&x);
+    }
+    return InlCapture(cc, fsp_flags);
+}

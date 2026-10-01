@@ -419,6 +419,7 @@ U0 CMiscInit() {
     CmpAddKw(cmp.asm_hash, "haserrcode", 45);
     CmpAddKw(cmp.asm_hash, "argpop", 46);
     CmpAddKw(cmp.asm_hash, "noargpop", 47);
+    CmpAddKw(cmp.asm_hash, "noinline", KW_NOINLINE); //coolc (Inline.cool)
     CmpAddKw(cmp.asm_hash, "DU8", 48);
     CmpAddKw(cmp.asm_hash, "DU16", 49);
     CmpAddKw(cmp.asm_hash, "DU32", 50);

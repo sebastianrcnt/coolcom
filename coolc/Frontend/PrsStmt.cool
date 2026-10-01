@@ -158,6 +158,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
     CMemberLst *tmpm;
     CCodeMisc *saved_leave_label;
     CHashFun *fun;
+    CInlBody *inl_body;
     I64 i, j, size, *r;
     Bool old_trace, unused_locals = FALSE;
     U8 *msg;
@@ -184,6 +185,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
     RPNAddNew(cc, IC_LABEL, cc->lb_leave, 0, FALSE);
     cc->lb_leave = saved_leave_label;
     cc->htc.fun->size &= ~7;
+    inl_body = InlFun(cc, fsp_flags); //coolc: small-function inlining (Inline.cool)
     if (cc->flags & CCF_AOT_COMPILE) {
         //ARM likes 4byte align for instrcutions
         while (cc->aotc->rip % 4)
@@ -216,6 +218,7 @@ U0 PrsFun(CCmpCtrl *cc, CHashClass *tmp_return, U8 *name, I64 fsp_flags)
         }
         SysSymImportsResolve(cc->htc.fun->str, 0);
     }
+    InlCommit(cc, inl_body);
     LBtr(&cc->htc.fun->flags, Cf_EXTERN);
     COCPop(cc);
     tmpm = cc->htc.fun->member_lst_and_root;
@@ -1326,6 +1329,9 @@ sm_import:
                                     break;
                                 case KW_NOARGPOP:
                                     fsp_flags = FSF_NOARGPOP | fsp_flags & (FSG_FUN_FLAGS2 | FSF_ASM);
+                                    break;
+                                case KW_NOINLINE: //coolc (Inline.cool)
+                                    fsp_flags = FSF_NOINLINE | fsp_flags & (FSG_FUN_FLAGS2 | FSF_ASM);
                                     break;
                                 case KW_PUBLIC:
                                     fsp_flags = FSF_PUBLIC | fsp_flags & (FSG_FUN_FLAGS2 | FSF_ASM);

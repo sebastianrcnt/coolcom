@@ -21,6 +21,7 @@ extern Bool Trace(Bool val = ON);
 
 extern U0 ClassMemberLstDel(CHashClass *tmpc);
 extern U0 CmpCtrlDel(CCmpCtrl *cc);
+extern U0 InlTabDel(CCmpCtrl *cc);
 extern CCmpCtrl *CmpCtrlNew(U8 *buf = NULL, I64 flags = 0, U8 *filename = NULL);
 extern I64 CmpCtrlSize(CCmpCtrl *cc);
 extern Bool IsLexExpression2Bin(

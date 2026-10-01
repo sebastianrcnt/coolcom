@@ -25,7 +25,8 @@ if gtimeout -k 2 45 build/coolvm --headless --no-venus --cpus 2 --mem 1024 --tim
     && tr -d '\r' <"$log" | grep -qx 'MEMSAFE RECOVERED 81' \
     && grep -q 'KERNEL TEST PASS' "$log" && grep -q '  net: PASS' "$log" && grep -q 'net: loopback ok' "$log" && grep -q 'net: parser ok' "$log" && tr -d '\r' <"$log" | grep -qx '49' \
     && [ "$(tr -d '\r' <"$log" | grep -cx 'Break')" = 2 ] \
-    && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx '63' && tr -d '\r' <"$log" | grep -qx 'A92' \
+    && [ "$(tr -d '\r' <"$log" | grep -cx '51')" = 2 ] && tr -d '\r' <"$log" | grep -qx '42' && tr -d '\r' <"$log" | grep -qx 'A92' \
+    && [ "$(tr -d '\r' <"$log" | grep -cx '63')" = 2 ] && tr -d '\r' <"$log" | grep -q '^inline: Doubled into Tripled ' \
     && tr -d '\r' <"$log" | grep -A2 -x 'ERROR: Expected an expression' | grep -qx '            ^' && python3 tools/kernel-verify.py verify "$dir"; then
     tail -n 12 "$log"
     grep -E '^net: (parser|address|HTTP|DNS failed)' "$log" | tr -d '\r'
