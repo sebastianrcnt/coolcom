@@ -62,7 +62,7 @@ def boot(name,scale=1,copy=False,cpu=False,lifecycle=False,exit_gui=False,multip
     script=testvm.BOOT
     if exit_gui:
         script+=testvm.typed('I64 before=0,i;for(i=0;i<GPU_VENUS_BLOBS;i++)if(venus.blobs[i].id)before++;\n')
-    script+=testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n'
+    script+=testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script+=testvm.typed('#include "C:/VkProbe.cool"\nVkBaseline;\n')+'wait VKTEST2\n'
     if cpu:script+=testvm.typed('gui.frame_hook=NULL;\n')
     script+=testvm.typed(f'VkLaunch({"TRUE" if copy else "FALSE"});\n')+'wait CUBE WINDOW READY\n'

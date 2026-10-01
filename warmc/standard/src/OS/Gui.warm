@@ -4,7 +4,7 @@ import OS.Error (IoError, fromCode, status);
 import Standard.String (String, makeString, destroyString, getSpan, nthByte, storeNth);
 module body OS.Gui is
     record Gui: Linear is end;
-    record Window: Linear is handle: Int64; end;
+    record Window: Linear is handle: Int64; pending: Event; buttons: Int64; end;
     record TextInput: Linear is data: String; length: Index; cursor: Index; focused: Bool; end;
     function acquireGui(root: &![RootCapability]): Gui is return Gui(); end;
     function releaseGui(gui: Gui): Unit is let {} := gui; return nil; end;
@@ -34,16 +34,16 @@ module body OS.Gui is
     function open(gui: &![Gui], title: Span[Nat8], width: Int64, height: Int64): Result[Window, IoError] is
         let h: Int64 := rawOpen(spanToPointer(title), spanLength(title), width, height);
         if h < 0 then return Err(error => fromCode(h)); end if;
-        return Ok(value => Window(handle => h)); end;
-    function close(window: Window): Unit is let { handle: Int64 } := window; rawClose(handle); return nil; end;
+        return Ok(value => Window(handle => h, pending => Idle(), buttons => 0)); end;
+    function close(window: Window): Unit is let { handle: Int64, pending: Event, buttons: Int64 } := window; rawClose(handle); return nil; end;
     function size(window: &[Window]): Result[Size, IoError] is
         let w: Int64 := rawField(window->handle, 5); let h: Int64 := rawField(window->handle, 6);
         if w < 0 then return Err(error => fromCode(w)); end if; return Ok(value => Size(width => w, height => h)); end;
     pragma Foreign_Import(External_Name => "WgPresent");
     private function rawPresent(handle: Int64): Int64 is end;
     function present(window: &![Window]): Result[Unit, IoError] is return status(rawPresent(window->handle)); end;
-    function poll(window: &![Window]): Result[Event, IoError] is
-        let h: Int64 := window->handle; let kind: Int64 := rawPoll(h);
+    private function readEvent(h: Int64): Result[Event, IoError] is
+        let kind: Int64 := rawPoll(h);
         if kind < 0 then return Err(error => fromCode(kind)); end if;
         if kind = 1 then return Ok(value => Mouse(x => rawField(h, 1), y => rawField(h, 2), buttons => rawField(h, 3), wheel => rawField(h, 4)));
         else if kind = 2 then return Ok(value => Key(code => rawField(h, 0)));
@@ -51,6 +51,42 @@ module body OS.Gui is
         else if kind = 4 then return Ok(value => Close());
         else if kind = 5 then return Ok(value => Menu(id => rawField(h, 0)));
         end if; return Ok(value => Idle()); end;
+    -- Preserve keys, menus, resize, close, button edges and wheel direction
+    -- changes. Only a consecutive run of motion / same-direction wheel is folded.
+    function poll(window: &![Window]): Result[Event, IoError] is
+        rawPresent(window->handle);
+        var event: Event := window->pending; window->pending := Idle();
+        case event of
+            when Idle do case readEvent(window->handle) of
+                    when Ok(value as value: Event) do event := value;
+                    when Err(error as error: IoError) do return Err(error => error);
+                end case;
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do skip;
+            when Key(code as code: Int64) do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
+            when Close do skip; when Menu(id as id: Int64) do skip;
+        end case;
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                if buttons /= window->buttons then window->buttons := buttons; return Ok(value => event); end if;
+                var lastX: Int64 := x; var lastY: Int64 := y; var sum: Int64 := wheel; var more: Bool := true;
+                while more do case readEvent(window->handle) of
+                        when Err(error as error: IoError) do return Err(error => error);
+                        when Ok(value as next: Event) do case next of
+                                when Mouse(x as nx: Int64, y as ny: Int64, buttons as nb: Int64, wheel as nw: Int64) do
+                                    if nb = buttons and not ((sum < 0 and nw > 0) or (sum > 0 and nw < 0)) then
+                                        lastX := nx; lastY := ny; sum := sum + nw;
+                                    else window->pending := next; more := false; end if;
+                                when Idle do more := false;
+                                when Key(code as code: Int64) do window->pending := next; more := false;
+                                when Resize(width as w: Int64, height as h: Int64) do window->pending := next; more := false;
+                                when Close do window->pending := next; more := false;
+                                when Menu(id as id: Int64) do window->pending := next; more := false;
+                            end case;
+                    end case; end while;
+                return Ok(value => Mouse(x => lastX, y => lastY, buttons => buttons, wheel => sum));
+            when Idle do skip; when Key(code as code: Int64) do skip;
+            when Resize(width as w: Int64, height as h: Int64) do skip; when Close do skip; when Menu(id as id: Int64) do skip;
+        end case; return Ok(value => event); end;
     function fill(window: &![Window], rect: Rect, color: Int64): Result[Unit, IoError] is
         return status(rawRect(window->handle, rect.x, rect.y, rect.width, rect.height, color)); end;
     function line(window: &![Window], x0: Int64, y0: Int64, x1: Int64, y1: Int64, color: Int64): Result[Unit, IoError] is
@@ -104,7 +140,7 @@ module body OS.Gui is
                 if (buttons & 1) /= 0 and contains(rect, x, y) then
                     if y < rect.y + 16 then value := value - 1;
                     else if y >= rect.y + rect.height - 16 then value := value + 1;
-                    else if rect.height > 32 then value := (y - rect.y - 16) * maximum / (rect.height - 32); end if;
+                    else if rect.height > 46 then value := (y - rect.y - 23) * maximum / (rect.height - 46); end if;
                 end if;
             when Idle do skip; when Key(code as code: Int64) do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
             when Close do skip; when Menu(id as id: Int64) do skip;
@@ -234,7 +270,8 @@ module body OS.Gui is
     function listSelection(state: &[List], rect: Rect, count: Int64, rowWidth: Int64, event: Event): Int64 is
         case event of
             when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
-                let index: Int64 := state->first + (y - rect.y - 1) / 20;
+                let first: Int64 := scrollValue(Rect(x => rect.x + rect.width - 16, y => rect.y, width => 16, height => rect.height), state->first, count, rect.height / 20, event);
+                let index: Int64 := first + (y - rect.y - 1) / 20;
                 if (buttons & 1) /= 0 and x > rect.x and x < rect.x + 1 + rowWidth and y > rect.y and y < rect.y + 1 + (rect.height / 20) * 20 and index < count then return index; end if;
             when Idle do skip; when Key(code as code: Int64) do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
             when Close do skip; when Menu(id as id: Int64) do skip;

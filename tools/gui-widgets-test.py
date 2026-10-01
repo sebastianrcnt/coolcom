@@ -29,7 +29,7 @@ def boot(mode, close=False):
     subprocess.run(['mcopy','-o','-i',disk,d / 'Widgets.warm','::Warm/Examples/gui/Widgets.warm'],check=True)
     if mode == 'venus':
         subprocess.run([ROOT / 'tools/venus/install.sh', disk], check=True, stdout=subprocess.DEVNULL)
-    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n'
+    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script += testvm.typed('GuiWidgets;\n') + 'wait GUI WIDGET READY\n'
     mx, my = 400, 300
     def move(x, y):

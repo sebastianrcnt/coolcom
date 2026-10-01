@@ -14,7 +14,7 @@ def boot(mode,scale):
     testvm.create_disk(disk)
     testvm.install_disk_files(disk,stdout=subprocess.DEVNULL)
     if mode=='venus': subprocess.run([ROOT / 'tools/venus/install.sh',disk],check=True,stdout=subprocess.DEVNULL)
-    script=testvm.BOOT+testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n'+testvm.typed('GuiSettings;\n')+'wait GUI SETTINGS READY\n'
+    script=testvm.BOOT+testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'+testvm.typed('GuiSettings;\n')+'wait GUI SETTINGS READY\n'
     if scale==2:
         script+=testvm.pointer_absolute(304,165,800,600)+'delay 40\n1 272 1\ndelay 40\n1 272 0\nwait GUI SETTINGS SCALE2\nwait GUI SCALE APPLIED\n'
     else:

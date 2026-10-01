@@ -46,7 +46,7 @@ class CGui
     I64 cursor_w, cursor_h, hot_x, hot_y; Bool cursor_visible;
     CTask *task;
     U8 *frame_hook, *stop_hook;
-    I64 frames, raster_rows, desktop_revision, overlay_revision, wheel, vk_device;
+    I64 compose_ticks, frames, raster_rows, desktop_revision, overlay_revision, wheel, vk_device;
     Bool menu_open; I64 menu_index, menu_hover; CGuiWindow *menu_window;
     CGuiEvent input[GUI_INPUT];
     I64 input_head, input_tail, input_lock; Bool input_lost;
@@ -240,7 +240,7 @@ U0 GuiLog(U8 *text) {while (*text) UartPut(*text++);}
 U0 GuiShellTask(U8 *data)
 {
     no_warn data;
-    if (GuiNew("Shell")) {GuiLog("GUI SHELL OPEN\n"); if (gui.count == 2) GuiLog("GUI WINDOWS READY\n"); ShellTask(-1);}
+    if (GuiNew("Shell")) {GuiLog("GUI SHELL OPEN\n"); GuiLog("GUI WINDOWS READY\n"); ShellTask(-1);}
 }
 CTask *GuiShell() {return Spawn(&GuiShellTask, NULL, "GUI Shell", 0, adam_task, SHELL_STACK);}
 class CGuiProgram {U8 *program, *entry;};
@@ -249,7 +249,9 @@ U0 GuiProgramTask(CGuiProgram *app)
     CVTerm *v = VtNew(80, 24); U8 *modules, *paths, *command;
     VtBind(Fs, v); v->owner = Fs; v->sink = &GuiShellSink; VtRelease(v);
     ShellTask(0);
-    modules = FileRead("C:/GuiModules.txt");
+    modules = NULL;
+    if (!StrCmp(app->entry, "GuiFiles:main") && FileFind("C:/GuiFilesModules.txt")) modules = FileRead("C:/GuiFilesModules.txt");
+    if (!modules) modules = FileRead("C:/GuiModules.txt");
     if (modules) {
         paths = MStrPrint("%s,%s", modules, app->program);
         command = MStrPrint("WarmRun(\"%s\", \"%s\");", paths, app->entry);
@@ -448,7 +450,7 @@ U0 GuiPointerInit()
 }
 U0 GuiCompose()
 {
-    I64 x, y, i, sx, s = gui.scale, pw = fb.w;
+    I64 started = ArchCntVct, x, y, i, sx, s = gui.scale, pw = fb.w;
     I64 x0 = MaxI64(0, gui.x0) * s, y0 = MaxI64(0, gui.y0) * s;
     I64 x1 = MinI64(gui.w, gui.x1) * s, y1 = MinI64(gui.h, gui.y1) * s;
     CGuiWindow *w; U0 (*frame)(); U32 *src, *dst; I64 cy, cx; U32 p;
@@ -483,7 +485,7 @@ U0 GuiCompose()
         FbCopyRect(x0, y0, x1 - x0, y1 - y0); FbDamage(y0, y1);
     }
     for (i = 0; i < gui.count; i++) gui.windows[i]->presented = gui.windows[i]->revision;
-    gui.damage = FALSE; gui.frames++;
+    gui.damage = FALSE; gui.frames++; gui.compose_ticks += ArchCntVct - started;
 }
 U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
 {
@@ -628,7 +630,7 @@ Bool Gui()
     FbRenderUnlock(daif);
     if (fb.venus && (start = gui_start_hook)) (*start)();
     gui.task = Spawn(&GuiTask, NULL, "Compositor", 0, adam_task);
-    GuiShell; GuiShell;
+    GuiShell;
     Print("GUI READY\n");
     return TRUE;
 }

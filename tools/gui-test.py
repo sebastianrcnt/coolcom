@@ -31,7 +31,7 @@ def boot(mode, scale=1):
     init += '\nFontSet(NULL);\n'
     (d / 'Init.cool').write_text(init)
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(d / 'Init.cool'), '::Init.cool'], check=True)
-    script = testvm.BOOT + testvm.typed('Gui;\n') + 'wait GUI READY\nwait GUI WINDOWS READY\n'
+    script = testvm.BOOT + testvm.typed('Gui;\n') + 'wait GUI READY\nwait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script += line('CVTerm *back = gui.windows[0]->term; I64 dl = SpinLockIrq(&back->lock); back->bg = ANSI_RGB_FLAG | 0x204060; VtClear(back); back->dirty = TRUE; SpinUnlockIrq(&back->lock, dl);', 40)
     script += line('ConsPutS("\\e[2J\\e[H"); Print("WINDOW ONE\\n");', 1)
     # Click the left close box of the background window; its task is reaped.

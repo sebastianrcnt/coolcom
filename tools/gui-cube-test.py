@@ -18,7 +18,7 @@ def boot(name,lifecycle=False,cpu=False):
         subprocess.run([ROOT / 'tools/venus/install.sh',disk],check=True,stdout=subprocess.DEVNULL)
         for shader in (ROOT / 'build/venus').glob('cube.*.spv'):
             subprocess.run(['mcopy','-o','-i',disk,shader,'::Vulkan/'],check=True)
-    script=testvm.BOOT+testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n'
+    script=testvm.BOOT+testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script+=testvm.typed('I64 cb=0,ci; for(ci=0;ci<GPU_VENUS_BLOBS;ci++) if(venus.blobs[ci].id) cb++; GuiCube;\n')
     if cpu:
         script+='wait Cube needs\ndelay 100\nquit\n'

@@ -5,7 +5,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'os/Warm'))
 from modules import os_modules, disk_path
-paths = [disk_path(p)
-         for pair in os_modules(ROOT) for p in pair.split(',')]
+pairs = os_modules(ROOT)
+if '--files' in sys.argv:
+    # Files' transitive imports; avoid parsing/emitting unrelated terminal,
+    # networking and CoolOS display modules on each cold app launch.
+    names = {'Buffer', 'String', 'StringBuilder', 'OS/Error', 'OS/File', 'OS/Dir', 'OS/Task', 'OS/Gui'}
+    base = ROOT / 'warmc/standard/src'
+    pairs = [pair for pair in pairs if any((base / (name + '.warm')).as_posix() in pair for name in names)]
+paths = [disk_path(p) for pair in pairs for p in pair.split(',')]
 # No newline: GuiRun appends another module path.
 sys.stdout.write(','.join(paths))

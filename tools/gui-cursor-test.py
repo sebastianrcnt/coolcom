@@ -40,7 +40,7 @@ U0 CursorCheck()
 }
 ''')
     subprocess.run(['mcopy','-o','-i',disk,fixture,'::Cursor.cool'],check=True)
-    script=testvm.BOOT+testvm.typed(f'FontSet(NULL); FontScale({scale}); Gui;\n')+'wait GUI WINDOWS READY\n'
+    script=testvm.BOOT+testvm.typed(f'FontSet(NULL); FontScale({scale}); Gui;\n')+'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script+=testvm.typed('#include "C:/Cursor.cool"\nCursorProbe;\n')+'wait CURSOR SHAPE1\ndelay 100\n'
     # MOVE only, away from all windows; shape stays unchanged.
     script+=testvm.pointer_absolute(700*scale,500*scale,800*scale,600*scale)+'delay 100\n'
