@@ -7,17 +7,14 @@ once those three are printed, the same keys go to the UART as raw bytes
 (0x02, ESC [ A, a lone ESC that only the timeout makes Esc).
 Usage: key-test.py kernel.Image
 """
-import importlib.util
-import pathlib
 import subprocess
 import sys
 import threading
 import time
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("kv", ROOT / "tools/kernel-verify.py")
-kv = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(kv)
+import testvm
+from testvm import ROOT
+
 
 LCTRL, B, UP, ESC = 29, 48, 103, 1
 EXPECT = ["2000062", "110001", "1B"]  # KF_CTRL|'b', KEY_UP, KEY_ESC
@@ -26,11 +23,10 @@ LINE = r'I64 i; for (i = 0; i < 6; i++) Print("key %X\n", GetKey);'
 
 def main():
     script = ROOT / "build/key-test-input.txt"
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed(LINE) +
-                      f"1 {LCTRL} 1\n" + kv.keys_of(B) + f"1 {LCTRL} 0\n" +
-                      kv.keys_of(UP) + kv.keys_of(ESC))
-    vm = subprocess.Popen(["gtimeout", "-k", "2", "25", "build/coolvm", "--headless", "--no-venus", "--cpus", "2",
-                           "--mem", "1024", "--timeout", "20", "--input-script", str(script), sys.argv[1]],
+    script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line(LINE) +
+                      f"1 {LCTRL} 1\n" + testvm.keys_of(B) + f"1 {LCTRL} 0\n" +
+                      testvm.keys_of(UP) + testvm.keys_of(ESC))
+    vm = subprocess.Popen(testvm.vm_command(sys.argv[1], no_venus=True, timeout=20, input_script=script, host_timeout=25),
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out, keys = [], []
 

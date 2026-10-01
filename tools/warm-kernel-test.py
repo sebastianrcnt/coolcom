@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Compile Warm examples and #include them in the real FAT32 kernel shell."""
 import argparse
-import importlib.util
 from pathlib import Path
 import subprocess
-
-ROOT = Path(__file__).resolve().parent.parent
-MODULE = ROOT / "warmc/standard/src/OS"
 import sys
+
+import testvm
+from testvm import ROOT
+
+MODULE = ROOT / "warmc/standard/src/OS"
 sys.path.insert(0, str(ROOT / "warmc"))
 from os_modules import os_modules
-spec = importlib.util.spec_from_file_location("kv", ROOT / "tools/kernel-verify.py")
-kv = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(kv)
 
 def run(*args):
     p = subprocess.run(list(map(str, args)), cwd=ROOT, capture_output=True)
@@ -22,7 +20,7 @@ def run(*args):
 
 def install(disk):
     # Exercise the production installer rather than flattening library fixtures.
-    run(ROOT / "tools/disk-files.sh", disk)
+    testvm.install_disk_files(disk, capture_output=True)
     run("mdel", "-i", disk, "::Init.cool")
     assert b"Warm.cool" in run("mdir", "-b", "-i", disk, "::Warm/Warm.cool").stdout
     for old in ("::Warm.cool", "::coolc", "::Compiler"):
@@ -49,16 +47,14 @@ def warm_run(paths, entry):
     for index, line in enumerate(lines):
         line += ' Print("WARM-INPUT-%d\\n", ' + str(index) + ');'
         assert len(line) < 255
-        script += kv.typed(line) + "wait WARM-INPUT-" + str(index) + "\n"
-    return script + kv.typed('WarmRun(warm_inputs, "' + entry + '");')
+        script += testvm.typed_line(line) + "wait WARM-INPUT-" + str(index) + "\n"
+    return script + testvm.typed_line('WarmRun(warm_inputs, "' + entry + '");')
 
 def stdin_test(OUT):
     """WarmRun the greet example in the shell: it reads a line typed at the terminal."""
     std = ROOT / "warmc/standard/src"
     disk = OUT / "stdin-disk.img"
-    with disk.open("wb") as f:
-        f.truncate(64 * 1024 * 1024)
-    run("mformat", "-i", disk, "-F", "::")
+    testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     install(disk)
     files = []
     for name in ("Buffer", "String", "StringBuilder", "OS/Terminal"):
@@ -67,15 +63,14 @@ def stdin_test(OUT):
               ROOT / "warmc/examples/greet/Greet.warmh", ROOT / "warmc/examples/greet/Greet.warm"]
     modules = ",".join(disk_path(path) for path in files)
     script = OUT / "Stdin.input"
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
-                      kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
+    script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line('#include "C:/Warm/Warm.cool"') +
+                      testvm.typed_line('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
                       warm_run(modules, "Example.Greet:main") +
-                      "delay 3000\n" + kv.typed("Zed") + "wait Hello, Zed!\ndelay 200\nquit\n")
+                      "delay 3000\n" + testvm.typed_line("Zed") + "wait Hello, Zed!\ndelay 200\nquit\n")
     log = OUT / "Stdin.log"
     with log.open("wb") as stream:
-        proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "35",
-            "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
+        proc = subprocess.Popen(testvm.vm_command(str(ROOT / "build/kernel.Image"), executable=ROOT / "build/coolvm",
+            no_venus=True, timeout=35, disk=disk, input_script=script, host_timeout=40),
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
         proc.wait()
     output = log.read_text(errors="replace")
@@ -87,9 +82,7 @@ def stdin_test(OUT):
 def portable_test(OUT, name):
     """Compile and run a portable file program with WarmRun itself."""
     disk = OUT / (name + "-run.img")
-    with disk.open("wb") as f:
-        f.truncate(64 * 1024 * 1024)
-    run("mformat", "-i", disk, "-F", "::")
+    testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     install(disk)
     files = []
     for pair in os_modules(ROOT):
@@ -102,16 +95,14 @@ def portable_test(OUT, name):
     script = OUT / (name + "Run.input")
     # Wait for the compiler to load before typing the long lines: keys typed while the
     # shell is busy queue in a 256-key ring, and under load (make -j test) some were lost.
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
-        kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
+    script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line('#include "C:/Warm/Warm.cool"') +
+        testvm.typed_line('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
         warm_run(modules, name + ":main") +
         "wait " + marker + "\ndelay 200\nquit\n")
     log = OUT / (name + "Run.log")
-    with log.open("wb") as stream:
-        proc = subprocess.run(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "35",
-            "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
-            cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
+    proc = testvm.run_vm(testvm.vm_command(str(ROOT / "build/kernel.Image"), executable=ROOT / "build/coolvm",
+        no_venus=True, timeout=35, disk=disk, input_script=script, host_timeout=40), log,
+        cwd=ROOT, stdin=subprocess.DEVNULL)
     output = log.read_text(errors="replace")
     assert proc.returncode == 0, output[-6000:]
     assert "ERROR:" not in output and "input FIFO overflow" not in output, output[-6000:]
@@ -121,21 +112,18 @@ def portable_test(OUT, name):
 def fmt_test(OUT):
     """WarmFmt in the shell formats a messy file on the disk (the fixture of warmc/test_fmt.py)."""
     disk = OUT / "fmt-disk.img"
-    with disk.open("wb") as f:
-        f.truncate(64 * 1024 * 1024)
-    run("mformat", "-i", disk, "-F", "::")
+    testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     install(disk)
     run("mcopy", "-o", "-i", disk, ROOT / "warmc/fmt-tests/basic.in.warm", "::Fmt.warm")
     script = OUT / "Fmt.input"
-    script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/Warm/Warm.cool"') +
-                      kv.typed('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
-                      kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT CHANGED C:/Fmt.warm\n" +
-                      kv.typed('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT OK C:/Fmt.warm\ndelay 300\nquit\n")
+    script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line('#include "C:/Warm/Warm.cool"') +
+                      testvm.typed_line('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
+                      testvm.typed_line('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT CHANGED C:/Fmt.warm\n" +
+                      testvm.typed_line('WarmFmt("C:/Fmt.warm");') + "wait WARMFMT OK C:/Fmt.warm\ndelay 300\nquit\n")
     log = OUT / "Fmt.log"
     with log.open("wb") as stream:
-        proc = subprocess.Popen(["gtimeout", "-k", "2", "40", str(ROOT / "build/coolvm"),
-            "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "35",
-            "--disk", str(disk), "--input-script", str(script), str(ROOT / "build/kernel.Image")],
+        proc = subprocess.Popen(testvm.vm_command(str(ROOT / "build/kernel.Image"), executable=ROOT / "build/coolvm",
+            no_venus=True, timeout=35, disk=disk, input_script=script, host_timeout=40),
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
         proc.wait()
     output = log.read_text(errors="replace")
@@ -177,9 +165,7 @@ def main():
     assert run(ROOT / "build/coolc", "--run", foreign_bin).stdout == b"FOREIGN UNIT PASS\n"
     print("warm-kernel: native foreign Unit/scalar/span PASS", flush=True)
     disk = OUT / "disk.img"
-    with disk.open("wb") as f:
-        f.truncate(64 * 1024 * 1024)
-    run("mformat", "-i", disk, "-F", "::")
+    testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     adapter = OUT / "Adapter.cool"
     adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool", "OSNetCommon.cool", "OSNetKernel.cool", "OSTaskKernel.cool"]))
     run("mcopy", "-o", "-i", disk, adapter, "::Adapter.cool")
@@ -206,15 +192,14 @@ def main():
         script = OUT / (name + ".input")
         marker = "WARM " + name.upper().replace("FILES", "FILE") + " PASS"
         # Type once the shell prompts; stop the VM once the program has passed (coolvm wait/quit).
-        script.write_text("wait Cool shell\nwait > \n" + kv.typed('#include "C:/' + name + '.cool"') +
-                          ("wait WARM KEY READY\n" + kv.keys_of(45) if name == "Key" else "") +
+        script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line('#include "C:/' + name + '.cool"') +
+                          ("wait WARM KEY READY\n" + testvm.keys_of(45) if name == "Key" else "") +
                           "wait " + marker + "\ndelay 200\nquit\n")
         log = OUT / (name + ".log")
         with log.open("wb") as stream:
-            proc = subprocess.Popen(["gtimeout", "-k", "2", "22", str(ROOT / "build/coolvm"),
-                "--headless", "--no-venus", "--cpus", "2", "--mem", "1024", "--timeout", "18",
-                "--disk", str(disk), "--input-script", str(script),
-                "--screenshot", str(OUT / (name + ".png")), str(ROOT / "build/kernel.Image")],
+            proc = subprocess.Popen(testvm.vm_command(str(ROOT / "build/kernel.Image"), executable=ROOT / "build/coolvm",
+                no_venus=True, timeout=18, disk=disk, input_script=script,
+                screenshot=OUT / (name + ".png"), host_timeout=22),
                 cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT)
             proc.wait()
         output = log.read_text(errors="replace")
@@ -227,7 +212,7 @@ def main():
         assert errors == expected_errors, shell_output[-6000:]
         assert "heap overflow" not in shell_output, shell_output[-6000:]
         if name == "Screen":
-            width, height, rows = kv.read_png(OUT / "Screen.png")
+            width, height, rows = testvm.read_png(OUT / "Screen.png")
             assert width > 50 and height > 420
             assert all(row[10*3:50*3] == bytes([0, 255, 0]) * 40
                        for row in rows[400:420]), "Warm framebuffer rectangle missing"

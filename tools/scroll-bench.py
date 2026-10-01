@@ -3,17 +3,16 @@
 import argparse
 import ctypes
 import struct
-import importlib.util
 import json
 import pathlib
 import re
 import resource
 import subprocess
 
+import testvm
+from testvm import ROOT
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location('vim', ROOT / 'tools/vim-test.py')
-vim = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(vim)
 p = argparse.ArgumentParser()
 p.add_argument('label')
 p.add_argument('image')
@@ -63,13 +62,13 @@ for width, height in sizes:
         burst = burst.replace('3000', str(a.lines))
         probe = ''
         if a.expect_scanout is not None:
-            probe = vim.typed('Print("SCAN%d %d\\n",1,fb.scanout!=NULL);\n') + 'wait SCAN1 \n'
+            probe = testvm.typed('Print("SCAN%d %d\\n",1,fb.scanout!=NULL);\n') + 'wait SCAN1 \n'
         if a.expect_gpu is not None:
-            probe += vim.typed('Print("GPU%d %d\\n",1,fb.gpu);\n') + 'wait GPU1 \n'
+            probe += testvm.typed('Print("GPU%d %d\\n",1,fb.gpu);\n') + 'wait GPU1 \n'
         if a.expect_venus is not None:
-            probe += vim.typed('Print("VENUS%d %d\\n",1,fb.venus);\n') + 'wait VENUS1 \n'
-        script = (vim.BOOT + probe + vim.typed(forced+'\n') + 'wait MEASURE1 \n' +
-                  vim.typed(burst+'\n') + 'wait BURST1 \n' + vim.typed(pixels+'\n') +
+            probe += testvm.typed('Print("VENUS%d %d\\n",1,fb.venus);\n') + 'wait VENUS1 \n'
+        script = (testvm.BOOT + probe + testvm.typed(forced+'\n') + 'wait MEASURE1 \n' +
+                  testvm.typed(burst+'\n') + 'wait BURST1 \n' + testvm.typed(pixels+'\n') +
                   f'wait pixel {height//16*3+6:04d}\ndelay 200\nquit\n')
         (d/'input.txt').write_text(script)
         before = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -114,11 +113,8 @@ for width, height in sizes:
             mode = re.search(r'VENUS1 ([01])',log)
             assert mode and int(mode[1]) == a.expect_venus, f'wrong Vulkan selection: {d}'
         if a.compare:
-            vs = importlib.util.spec_from_file_location('verify', ROOT / 'tools/kernel-verify.py')
-            verify = importlib.util.module_from_spec(vs)
-            vs.loader.exec_module(verify)
             reference = ROOT / 'build/scroll-bench' / f'{a.compare}-{width}-{height}-{trial}' / 'screen.png'
-            assert verify.read_png(reference) == verify.read_png(d/'screen.png'), f'pixels differ: {d}'
+            assert testvm.read_png(reference) == testvm.read_png(d/'screen.png'), f'pixels differ: {d}'
         results.append(row)
         print(json.dumps(row),flush=True)
 (ROOT/'build/scroll-bench'/f'{a.label}.json').write_text(json.dumps(results,indent=2)+'\n')

@@ -4,7 +4,9 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
+import testvm
+from testvm import ROOT
+
 
 def run(*args, **kwargs):
     return subprocess.run(list(map(str, args)), cwd=ROOT, capture_output=True, **kwargs)
@@ -12,9 +14,7 @@ def run(*args, **kwargs):
 with tempfile.TemporaryDirectory(prefix="input-limits-", dir=ROOT / "build") as tmp:
     out = Path(tmp)
     disk = out / "disk.img"
-    with disk.open("wb") as stream:
-        stream.truncate(64 * 1024 * 1024)
-    assert run("mformat", "-i", disk, "-F", "::").returncode == 0
+    testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     init = out / "Init.cool"
     init.write_text('''U8 limit_line[16];
 I64 limit_i;
@@ -34,8 +34,7 @@ Print("INPUT-RECOVERY:%s\\n", limit_line);
 Shutdown;
 ''')
     assert run("mcopy", "-i", disk, init, "::Init.cool").returncode == 0
-    vm = [ROOT / "build/coolvm", "--headless", "--cpus", "2", "--mem", "1024",
-          "--timeout", "15", "--disk", disk]
+    vm = testvm.vm_command(executable=ROOT / "build/coolvm", timeout=15, disk=disk)
     result = run(*vm, ROOT / "build/kernel.Image", timeout=20, stdin=subprocess.DEVNULL)
     text = (result.stdout + result.stderr).decode(errors="replace")
     assert result.returncode == 0, text

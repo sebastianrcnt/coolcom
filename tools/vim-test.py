@@ -2,6 +2,7 @@
 """Real GetKey -> Vim -> FAT32 tests, with independent buffer/byte-cursor oracles.
 All generated files live under build/vim-test. No model of the editor is used.
 """
+from testvm import BOOT, check_init_log, finish, keys_of, typed, wait
 import pathlib
 import re
 import subprocess
@@ -10,65 +11,7 @@ import os
 import threading
 import time
 
-KEYS = {'\\': (43, False), ' ': (57, False), '\n': (28, False), '\x1b': (1, False),
-        '\b': (14, False), '\t': (15, False)}
-for first, lo, up in ((2, '1234567890-=', '!@#$%^&*()_+'),
-                      (16, 'qwertyuiop[]', 'QWERTYUIOP{}'),
-                      (30, "asdfghjkl;'", 'ASDFGHJKL:"'),
-                      (44, 'zxcvbnm,./', 'ZXCVBNM<>?')):
-    for i, (plain, shifted) in enumerate(zip(lo, up)):
-        KEYS[plain] = (first + i, False)
-        KEYS[shifted] = (first + i, True)
-
-
-def keys_of(code):
-    return f'1 {code} 1\n1 {code} 0\n'
-
-
-def typed(text):
-    result = ''
-    for ch in text:
-        if ch in ('\x12', '\x0f'):
-            result += '1 29 1\n' + keys_of(19 if ch == '\x12' else 24) + '1 29 0\n'
-        else:
-            code, shift = KEYS[ch]
-            if shift:
-                result += '1 42 1\n'
-            result += keys_of(code)
-            if shift:
-                result += '1 42 0\n'
-        result += 'delay 3\n'
-    return result
-
-
-# Input-script sync (tools/coolvm/README.md): the shell has started (and run C:/Init.cool) and shows its
-# prompt. Waiting for guest output instead of a fixed boot delay keeps the scripts right when
-# the host is loaded (make -j test); QUIT ends the VM instead of idling until --timeout.
-# A wait text must not occur in the echo of the lines typed before it: print numbers with
-# %d (Print("OPEN%d", 2) echoes as OPEN%d but prints OPEN2).
-BOOT = 'wait Cool shell\nwait > \n'
-
-
-def wait(text):
-    return f'wait {text}\n'
-
-
-def finish(text, settle=200):
-    """Wait for text, give the screen settle ms, then stop the VM (the screenshot is saved)."""
-    return wait(text) + f'delay {settle}\nquit\n'
-
-
-def check_init_log(log):
-    marker = 'Running C:/Init.cool\n'
-    if marker not in log:
-        raise AssertionError('shell did not run C:/Init.cool')
-    after_init = log.split(marker, 1)[1]
-    prompt = re.search(r'(?m)^(?:[A-Z]:\S*)?> ', after_init)  # "C:/> ", or "> " without a drive
-    if not prompt:
-        raise AssertionError('shell did not reach a prompt after C:/Init.cool')
-    diagnostics = re.findall(r'^(?:ERROR|WARNING):.*$', after_init[:prompt.start()], re.MULTILINE)
-    if diagnostics:
-        raise AssertionError('C:/Init.cool diagnostics:\n' + '\n'.join(diagnostics))
+import testvm
 
 
 KERNEL_A = pathlib.Path('coolc/Frontend/KernelA.coolh').read_bytes()
@@ -216,12 +159,8 @@ def screen_test(d, disk, kernel):
     script = d / 'screen-input.txt'
     script.write_text(BOOT + typed('Vim("C:/Screen.cool");\n') + wait('NORMAL C:/Screen.cool') +
                       typed('jj9lv') + wait('VISUAL C:/Screen.cool') + typed('l') + finish('\x1b[3;18H'))
-    with (d / 'screen.log').open('wb') as out:
-        proc = subprocess.run(['gtimeout', '-k', '2', '12', 'build/coolvm', '--headless', '--no-venus',
-                        '--cpus', '2', '--mem', '1024', '--width', '640', '--height', '480',
-                        '--timeout', '7', '--screenshot', str(d / 'screen.png'),
-                        '--input-script', str(script), '--disk', str(disk), kernel],
-                       stdout=out, stderr=subprocess.STDOUT)
+    proc = testvm.run_vm(testvm.vm_command(kernel, no_venus=True, timeout=7, screenshot=d / 'screen.png',
+        input_script=script, disk=disk, size=(640, 480), host_timeout=12), d / 'screen.log')
     if proc.returncode not in (0, 124):
         raise AssertionError(f'screen VM failed with {proc.returncode}')
     log = (d / 'screen.log').read_text(errors='replace')
@@ -241,14 +180,12 @@ def main():
     d = pathlib.Path('build/vim-test')
     d.mkdir(parents=True, exist_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    run(['mformat', '-i', str(disk), '-F', '-v', 'VIMTEST', '::'])
+    testvm.create_disk(disk, 64 * 1024 * 1024, label='VIMTEST', capture_output=True)
 
     def copy(path, name):
         run(['mcopy', '-o', '-i', str(disk), str(path), '::' + name])
 
-    run(['tools/disk-files.sh', str(disk)])
+    testvm.install_disk_files(disk, capture_output=True)
     other = d / 'Other.txt'
     other.write_text('other\n')
     copy(other, other.name)
@@ -300,10 +237,8 @@ def main():
     copy(path, path.name)
     (d / 'input.txt').write_text(script)
     with (d / 'vm.log').open('wb') as out:
-        proc = subprocess.Popen(['gtimeout', '-k', '2', '65', 'build/coolvm', '--headless', '--no-venus',
-                               '--cpus', '2', '--mem', '1024', '--width', '640', '--height', '480', '--timeout', '60',
-                               '--input-script', str(d / 'input.txt'), '--disk', str(disk),
-                               sys.argv[1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(testvm.vm_command(sys.argv[1], no_venus=True, timeout=60, input_script=d / 'input.txt', disk=disk,
+            size=(640, 480), host_timeout=65), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         def capture():
             seen = b''
             sent = False
