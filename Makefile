@@ -528,3 +528,9 @@ gui-cursor-qemu-test: build/kernel.Image build/warmcool/Kernel.cool
 	python3 tools/gui-cursor-qemu-test.py $<
 
 test: gui-cursor-qemu-test
+
+.PHONY: gui-vulkan-test
+gui-vulkan-test: build/kernel.Image build/coolvm-venus venus-terminal cube-shaders build/warmcool/Kernel.cool
+	python3 tools/gui-vulkan-test.py $<
+
+test: $(if $(RUN_VENUS),gui-vulkan-test)

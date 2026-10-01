@@ -254,4 +254,38 @@ CPU 1x / Venus 2x windows passed cursor-change/default restoration checks
 `build/cursor-full-test.log`). Artifacts are under `build/gui-cursor-test/`
 and `build/gui-cursor-qemu-test/`.
 
-G5 is pending.
+### G5 — complete
+
+`GuiVulkanPresent(device, view, physical_width, physical_height, mirror, stride)`
+publishes an app-owned sampled image in `SHADER_READ_ONLY_OPTIMAL` after its
+producer fence has completed. It validates the calling task's pixel window,
+the resident display device and current physical client size. Applications own
+the image/view, render commands and fences; the compositor owns only a borrowed
+image descriptor. Direct image rectangles and a transparent BGRA HUD/chrome
+texture compose in window Z order. Scene pixels do not pass through the window
+raster upload. `GuiVulkanDetach` ends the borrow before the producer destroys a
+view. Window resize invalidates the old publication and asks the app to repaint.
+
+An optional physical BGRA mirror supplies the CPU path. Cube retains readback
+for this fallback/verification, draws its HUD into a separate transparent layer,
+and now uses direct Vulkan by default in `GuiCube;`. `CubeWindow(0, FALSE)`
+provides the former readback window path for comparison. Other producers may
+omit the mirror to avoid readback; CPU composition then has a white client
+background with the overlay. This first API shares the resident Venus display
+device/queue and runs structural/presentation operations on core 0.
+
+Completed producer/compositor fences serialize publication and view replacement
+on core 0. Cube installs an idempotent task exit hook to reclaim its GPU resources
+on abrupt kill. The compositor retains closing windows until the owner is reaped,
+and GUI exit waits for producer cleanup before freeing surfaces. Texture slots
+track the monotonic window id as well as its address, including address reuse.
+Consecutive Ctrl+Alt+Tab keys now change focus immediately in input order.
+
+Acceptance compares the complete Cube frame/client/HUD for direct Vulkan,
+readback uploads and CPU mirrors at both 1x and 2x. It also covers concurrent
+Vulkan windows, camera/move/resize, abrupt kill, server close, application quit,
+GUI exit, and return to the original mapped GPU-buffer count. Odd physical screen
+sizes at 2x include the last partial logical pixel; tests compare a Vulkan client
+clipped at both right/bottom screen edges. Screenshots were visually reviewed.
+Artifacts: `build/gui-vulkan-test/`. `make -j test` passed (exit 0;
+`build/g5-test.log`).
