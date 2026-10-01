@@ -3,6 +3,8 @@
 # (vendor/aiwnios/Src, entered through FULL_PACKAGE.HC exactly as the Aiwnios
 # BOOTSTRAP command line does in vendor/aiwnios/c/main.c) to build/coolc.
 # Nothing is run; unresolved host/C runtime symbols are simply left unresolved.
+# Manual compatibility probe, independent of make test; see coolc/NATIVE.md.
+# The current seed compiles the unmodified full source set with Errs:0.
 #
 #   tools/aiwnios-compile.sh [outdir]      (default outdir: build/aiwnios-compile)
 #
@@ -12,14 +14,14 @@
 #   AIWNIOS             Aiwnios checkout       (default vendor/aiwnios)
 #   COMPONET_GR=0       skip the GUI/utility half of the OS (default 1: the
 #                       full HCRT_TOS.HC set, ~196 files)
-#   WORKAROUNDS=1       patch a private copy of Src/ for the coolc bugs listed
-#                       below so compilation can get past them (default 0: the
-#                       untouched sources, which currently abort in the backend)
+#   WORKAROUNDS=1       apply the historical patches below to a private Src copy
+#                       for older compiler images (default 0: untouched sources;
+#                       the current seed does not need these patches)
 #   TIMEOUT             seconds (default 600)
 # Writes stage/ (Src mirror + Drv.HC), compile.log and summary.txt to outdir.
 #
-# Known coolc bug worked around by WORKAROUNDS=1: storing into a local of
-# class type (not pointer) aborts the backend (abort() in Compiler/IRBind.cool
+# Historical coolc bug worked around by WORKAROUNDS=1: storing into a local of
+# class type (not pointer) aborted the backend (abort() in Compiler/IRBind.cool
 # or ArmBackendA.cool, unhandled exception 'Abrt', no source location). Valid
 # to Aiwnios, which lets such a local double as an integer/pointer:
 #   MultiProc.HC:9       CTask *task,task1;  ... task1=Fs;

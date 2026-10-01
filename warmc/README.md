@@ -18,6 +18,10 @@ source, with source/caret or JSON diagnostics. It runs under native `coolc` on t
 inside the OS kernel shell (`WarmRun` uses the shell's JIT). See [DESIGN.md](DESIGN.md) for
 the implementation boundaries.
 
+Building and testing Warm requires no OCaml, opam or installed Austral compiler.
+`compare.py` checks the stored upstream expectations, including `austral-stderr.txt`,
+with the Cool implementation; it does not invoke upstream Austral.
+
 ## Files
 
 | Path | What |
@@ -33,6 +37,7 @@ the implementation boundaries.
 | `test-programs/` | the end-to-end test suites |
 | `fmt-tests/` | the formatter's fixtures (`NAME.in.warm` formats to `NAME.exp.warm`) |
 | `compare.py` `test_*.py` | the tests |
+| [docs/paths.md](docs/paths.md) | current Warm paths, reference transforms and assignment rules |
 
 For editor support, use the [Cool/Warm Zed extension](../tools/zed-coolcom/README.md).
 

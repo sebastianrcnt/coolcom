@@ -31,6 +31,17 @@ COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" \
 `tools/native/prepare.sh` stages the owned compiler source under
 `build/native-src`; frontend fixes are enabled by default.
 
+For a manual legacy HolyC compatibility check, run `tools/aiwnios-compile.sh`
+after `make build/coolc`, with an existing Aiwnios checkout at `vendor/aiwnios`
+or selected by `AIWNIOS=/path/to/aiwnios`. It compiles the full
+`Src/FULL_PACKAGE.HC` bootstrap package without running it or modifying the
+checkout. The current seed compiles the unmodified sources with `Errs:0`;
+`WORKAROUNDS=1` is retained for older compiler images. The log, compiler tally
+and output BIN are under `build/aiwnios-compile/` (or the directory given as
+the first argument, which the script replaces). Check both the exit status
+and `Errs:0` in `summary.txt`. This optional probe needs the external sources
+and is independent of the normal build and `make test`.
+
 The OS reaches the same fixed point: `make selfhost-test` (part of `make test`)
 puts the staged sources on a FAT32 disk as `C:/Compiler`, the shell runs
 `Cmp("C:/Compiler/Native.cool", "C:/Self.BIN")` with the compiler loaded from the
