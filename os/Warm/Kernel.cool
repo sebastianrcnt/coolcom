@@ -27,7 +27,7 @@ I64 WKernelGetChar()
 Bool WarmCompile(U8 *paths, U8 *entry = "Test:main", U8 *output = NULL)
 {
     CWUnit *u = WNew();
-    U8 *path, *source, *code, *runtime;
+    U8 *path, *source, *code, *runtime, *program = NULL;
     I64 i = 0, start = 0, size;
     Bool ok = FALSE;
     u->symbol_base = (++warm_kernel_serial) * 1000000;
@@ -61,19 +61,29 @@ Bool WarmCompile(U8 *paths, U8 *entry = "Test:main", U8 *output = NULL)
                         ShellExe(WGCat(u, WKernelRuntime(u), "\nWKernelComplete();\n"));
                         warm_kernel_runtime_ready = warm_kernel_completed;
                     }
-                    warm_kernel_completed = FALSE;
-                    if (warm_kernel_runtime_ready) ShellExe(WGCat(u, code, "\nWKernelComplete();\n"));
-                    ok = warm_kernel_completed;
-                    if (ok) warm_kernel_runtime_ready = TRUE;
                 } catch {
                     Fs->catch_except = TRUE;
                     Print("Warm execution aborted\n");
                 }
+                // The program runs after the compiler's unit is freed: a long-running
+                // program (a GUI app) would otherwise keep every AST and table alive.
+                if (warm_kernel_runtime_ready) program = StrNew(WGCat(u, code, "\nWKernelComplete();\n"));
             }
         }
     }
     if (u->error_kind) WDiagnostic(u);
     WDestroy(u);
+    if (program) {
+        try {
+            warm_kernel_completed = FALSE;
+            ShellExe(program);
+            ok = warm_kernel_completed;
+        } catch {
+            Fs->catch_except = TRUE;
+            Print("Warm execution aborted\n");
+        }
+        Free(program);
+    }
     return ok;
 }
 Bool WarmRun(U8 *paths, U8 *entry = "Test:main") {return WarmCompile(paths, entry);}

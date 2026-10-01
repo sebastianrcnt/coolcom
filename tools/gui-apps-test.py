@@ -21,22 +21,25 @@ def boot(mode):
     def click(x,y):
         return testvm.pointer_absolute(x,y,800,600) + 'delay 40\n1 272 1\ndelay 40\n1 272 0\ndelay 40\n'
     script += testvm.typed('GuiTop;\n') + 'wait GUI TOP READY\n'
-    script += click(100,176) + 'wait GUI TOP SELECTED\n' + click(520,417) + 'wait GUI TOP KILL DENIED\n'
+    # Window 2's client starts at (72,107). Select the first task (Adam), Kill, confirm with Return.
+    script += click(140,170) + 'wait GUI TOP SELECTED\n' + click(552,427) + 'delay 200\n' + testvm.keys_of(28) + 'wait GUI TOP KILL DENIED\n'
     script += click(78,92) + 'wait GUI TOP CLOSED\n'
     script += testvm.typed('GuiSettings;\n') + 'wait GUI SETTINGS READY\n'
-    script += click(304,165) + 'wait GUI SETTINGS SCALE2\nwait GUI SCALE APPLIED\n'
-    script += click(304,330) + 'wait GUI SETTINGS SCALE1\nwait GUI SCALE APPLIED\n'
-    script += click(152,241) + 'wait GUI SETTINGS BITMAP\n'
+    # The 2x radio; at 2x the 1x radio's logical (186,147) is (372,294) in pointer pixels.
+    script += click(146,167) + 'wait GUI SETTINGS SCALE2\nwait GUI SCALE APPLIED\n'
+    script += click(372,294) + 'wait GUI SETTINGS SCALE1\nwait GUI SCALE APPLIED\n'
+    script += click(166,223) + 'wait GUI SETTINGS BITMAP\n'
     script += click(78,92) + 'wait GUI SETTINGS CLOSED\n'
     script += testvm.typed('GuiFiles;\n') + 'wait GUI FILES PAINTED\n'
-    # Navigate into Kernel, then back to the root through the app's Dir capability.
-    script += click(160,155) + testvm.typed('Kernel') + 'wait GUI FILES FILTER\n'
-    script += 'delay 100\n' + click(100,196) + 'wait GUI FILES SELECTED\n'
-    script += click(444,157) + 'wait GUI FILES DIRECTORY\nwait GUI FILES PAINTED\n'
-    script += click(532,157) + 'wait GUI FILES UP\nwait GUI FILES PAINTED\n'
-    script += click(160,155) + testvm.typed('GuiFixture.txt') + 'wait GUI FILES FILTER\n'
-    script += 'delay 100\n' + click(100,196) + 'wait GUI FILES SELECTED\n'
-    script += click(444,157) + 'wait GUI FILES PREVIEW\n'
+    # Navigate into Kernel, then back to the root through the app's Dir capability:
+    # the filter field (553,127), the first row (140,186), Open (180,127), Up (108,127).
+    script += click(553,127) + testvm.typed('Kernel') + 'wait GUI FILES FILTER\n'
+    script += 'delay 100\n' + click(140,186) + 'wait GUI FILES SELECTED\n'
+    script += click(180,127) + 'wait GUI FILES DIRECTORY\nwait GUI FILES LOADED\n'
+    script += click(108,127) + 'wait GUI FILES UP\nwait GUI FILES LOADED\n'
+    script += click(553,127) + testvm.typed('GuiFixture.txt') + 'wait GUI FILES FILTER\n'
+    script += 'delay 100\n' + click(140,186) + 'wait GUI FILES SELECTED\n'
+    script += click(180,127) + 'wait GUI FILES PREVIEW\n'
     # A later mouse event must preserve the preview.
     script += click(560,430) + 'delay 100\nquit\n'
     (d / 'input.txt').write_text(script)
@@ -50,9 +53,8 @@ def boot(mode):
     w,h,rows=testvm.read_png(d / 'screen.png')
     pixel=lambda x,y: tuple(rows[y][3*x:3*x+3])
     assert pixel(69,150)==(255,255,255),'file window inset'
-    assert any(pixel(x,y)==(0,0,0) for y in range(191,209) for x in range(344,560)), 'file preview visible'
-    assert pixel(90,190)==(0,0,0),'file selection inversion'
-    assert pixel(591,195)==(255,255,255),'filename clipped before outside client'
+    assert any(pixel(x,y)==(0,0,0) for y in range(158,175) for x in range(400,600)), 'file preview visible'
+    assert pixel(225,186)==(0,0,0),'file selection inversion'
     print(f'gui-apps-test: {mode}, task monitor, scale changes, directory navigation, preview PASS',flush=True)
     return w,h,rows
 

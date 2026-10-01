@@ -13,7 +13,7 @@ import OS.Ui.Tree (Tree, Node, Geom, Damage, props, geometry, textBytes, textSpa
     flagDisabled, flagDefault, flagCancel, flagFocusable, flagClickFocus, flagSecure,
     keyCodeMask, keyShift, keyCtrl, keyAlt, keyTab, keyEnter, keyEscape, keyInputLost, keyBackspace, keyDelete,
     keyLeft, keyRight, keyUp, keyDown, keyHome, keyEnd, keyPageUp, keyPageDown, splitBar,
-    kindListRow, kindHeader, listLike, listBody, headerHeight, rowsThatFit, listInset, rowHeight, scrollBarWidth, flagWrap,
+    kindListRow, kindHeader, kindCell, listLike, listBody, headerHeight, rowsThatFit, listInset, rowHeight, scrollBarWidth, flagWrap,
     kindPopup, kindTabPage, kindMenu, flagDraggable, flagDropTarget, flagContext, flagHidden, tabStrip);
 module body OS.Ui.Engine is
     -- Framework-owned interaction state (focus, the control under the mouse,
@@ -151,7 +151,12 @@ module body OS.Ui.Engine is
     -- Everything that changes how a node is drawn, including framework state.
     function visualHash(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, state: &[State]): Nat64 is
         var h: Nat64 := mix(bits(ps[i].kind), bits(ps[i].flags));
-        h := mix(h, bits(ps[i].value)); h := mix(h, bits(ps[i].low)); h := mix(h, bits(ps[i].high)); h := mix(h, bits(ps[i].aux));
+        h := mix(h, bits(ps[i].value)); h := mix(h, bits(ps[i].low)); h := mix(h, bits(ps[i].aux));
+        -- A list's selection is drawn by its rows and cells: moving it repaints two rows,
+        -- not the whole list.
+        if not listLike(ps[i].kind) then h := mix(h, bits(ps[i].high)); end if;
+        if ps[i].kind = kindListRow and ps[ps[i].parent].high = ps[i].value then h := mix(h, 19); end if;
+        if ps[i].kind = kindCell and ps[ps[ps[i].parent].parent].high = ps[ps[i].parent].value then h := mix(h, 19); end if;
         h := mix(h, bits(gs[i].x)); h := mix(h, bits(gs[i].y)); h := mix(h, bits(gs[i].width)); h := mix(h, bits(gs[i].height));
         h := mix(h, bits(gs[i].clipX)); h := mix(h, bits(gs[i].clipY)); h := mix(h, bits(gs[i].clipWidth)); h := mix(h, bits(gs[i].clipHeight));
         h := hashBytes(h, textSpan(all, ps, i));

@@ -74,9 +74,11 @@ I64 WgMenuItem(I64 handle, I64 menu, I64 id, U8 *label, U64 size)
     result = GuiAddMenuItem(w, menu, id, s); Free(s); return result;
 }
 
-I64 WgScale(I64 scale) {if (!gui_active || Gs->num) return -1; if (scale != 1 && scale != 2) return -12; if (FontScale(scale) != scale) return -1; return 0;}
+// Scale 0 reads the current scale; font choice -1 reads whether a TrueType font is active.
+I64 WgScale(I64 scale) {if (!scale) return font.scale; if (!gui_active || Gs->num) return -1; if (scale != 1 && scale != 2) return -12; if (FontScale(scale) != scale) return -1; return 0;}
 I64 WgFont(I64 choice, I64 size)
 {
+    if (choice == -1) return font.cfg.face != NULL;
     if (!gui_active || Gs->num) return -1; if (choice < 0 || choice > 1 || size < 6 || size > 96) return -12;
     U8 *path = NULL; if (choice) path = "C:/Fonts/SarasaMonoK-Regular.ttf";
     if (!FontSet(path, size)) return -10; return 0;

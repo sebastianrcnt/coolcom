@@ -304,14 +304,9 @@ CTask *GuiRun(U8 *program, U8 *entry)
     if (!task) {Free(app->program); Free(app->entry); Free(app);} return task;
 }
 CTask *GuiWidgets() {return GuiRun("C:/Warm/Examples/gui/Widgets.warm", "Widgets:main");}
-CTask *GuiApp(U8 *name, U8 *entry)
-{
-    U8 *paths = MStrPrint("C:/Warm/Examples/gui/Support.warmh,C:/Warm/Examples/gui/Support.warm,C:/Warm/Examples/gui/%s.warm", name);
-    CTask *task = GuiRun(paths, entry); Free(paths); return task;
-}
-CTask *GuiFiles() {return GuiApp("Files", "GuiFiles:main");}
-CTask *GuiTop() {return GuiApp("Top", "GuiTop:main");}
-CTask *GuiSettings() {return GuiApp("Settings", "GuiSettings:main");}
+CTask *GuiFiles() {return GuiRun("C:/Warm/Examples/gui/Files.warm", "GuiFiles:main");}
+CTask *GuiTop() {return GuiRun("C:/Warm/Examples/gui/Top.warm", "GuiTop:main");}
+CTask *GuiSettings() {return GuiRun("C:/Warm/Examples/gui/Settings.warm", "GuiSettings:main");}
 CTask *GuiGallery() {return GuiRun("C:/Warm/Examples/gui/Gallery.warm", "Gallery:main");}
 U0 GuiCubeTask(U8 *data)
 {

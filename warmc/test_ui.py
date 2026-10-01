@@ -18,7 +18,7 @@ assert p.returncode == 0 and p.stdout.endswith(b'UI HOST PASS\n'), (p.stdout + p
 # Every example built on OS.Ui type-checks against the portable library.
 for app in sorted((ROOT / 'warmc/examples/gui').glob('*.warm')):
     if 'import OS.Ui' in app.read_text():
-        p = warm('check', app)
+        p = warm('check', *(['--coolos'] if 'import OS.CoolOS' in app.read_text() else []), app)
         assert p.returncode == 0, (app, (p.stdout + p.stderr).decode(errors='replace'))
 # Without a display the application reports that the GUI is unavailable.
 p = warm('run', ROOT / 'warmc/examples/gui/Gallery.warm')

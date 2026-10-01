@@ -184,7 +184,8 @@ G3 widgets, editor/pane tests and the existing suite.
 ### G4 — complete
 
 The System menu launches `GuiFiles;`, `GuiTop;`, `GuiSettings;`, and `GuiCube;`.
-The three utility apps use Warm OS.Gui and a shared application helper module.
+The three utility apps used Warm OS.Gui and a shared application helper module;
+U5 rewrote them on OS.Ui (see [ui-framework.md](ui-framework.md)).
 Files confines read access through OS.Dir/OS.File capabilities, shows directory
 markers and an inverted selection, filters names, navigates folders/parents,
 and retains a text preview/byte count across mouse events. GUI Top displays
@@ -427,7 +428,8 @@ Cold opening also parsed/emitted unrelated modules. The installer now generates
 `GuiFilesModules.txt` with Files' transitive imports; older disks fall back to
 `GuiModules.txt`. Compiler implementations remain unchanged.
 
-**Method.** `tools/gui-files-test.py` installs an isolated disk with 160 tiny
+**Method.** (Retired in U5, when Files was rewritten on OS.Ui; `tools/ui-test.py`
+stage U5 measures the new Files.) `tools/gui-files-test.py` installed an isolated disk with 160 tiny
 files plus the production directory tree, bitmap font, 800x600 at 1x. Cold
 launch uses the real `GuiFiles`/guest WarmRun path. A test-only copy of the
 generated compiler package times parse/file loading, checking and emission.
@@ -524,3 +526,11 @@ explicit GuiShell) and existing loaded-suite G2/Tmux timing failures; the final
 full run passed all assertions. Isolated before/after logs:
 `build/gui-files-before-merged.log`, `build/gui-files-after-merged.log`.
 No changes were pushed.
+
+### OS.Ui — the declarative framework
+
+Above the immediate-mode OS.Gui sits OS.Ui (U1 to U5): an application keeps a
+model, describes the window from it, and changes it with messages. The menus,
+dialogs, tables, text fields, Files, Top, Settings and the Gallery are built on
+it. Its design, measurements and screenshots are in
+[ui-framework.md](ui-framework.md); `tools/ui-test.py` is its VM acceptance test.

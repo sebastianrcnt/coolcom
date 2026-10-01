@@ -34,7 +34,8 @@ U0 RedrawCheck(I64 app)
     for(i=0;i<32;i++) RedrawMouse(w, 24+i*2, 24+i, 0);
     Sleep(60);
     if(w->revision!=revision || w->pending) throw(20+app);
-    if(app==0) {x=340;y=40;} else if(app==1) y=300; else if(app==3) {x=220;y=44;}
+    // A button (Files: Reload, Top: Refresh), the selected 1x radio in Settings, a Widgets button.
+    if(app==0) {x=184;y=20;} else if(app==1) {x=48;y=320;} else if(app==2) {x=114;y=40;} else {x=220;y=44;}
     RedrawMouse(w,x,y,1); deadline=TimerJiffies+500;
     while(w->revision<=revision && TimerJiffies<deadline) Sleep(1);
     if(w->revision<=revision) throw(30+app);

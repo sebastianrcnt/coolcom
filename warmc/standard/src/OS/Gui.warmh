@@ -57,6 +57,9 @@ module OS.Gui is
     -- Desktop authority changes terminal fonts; chrome remains bitmap art.
     function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError];
     function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError];
+    -- The display scale now (1 or 2) and whether the terminal uses System Mono (else the bitmap font).
+    function displayScale(gui: &[Gui]): Int64;
+    function systemMonoFont(gui: &[Gui]): Bool;
     -- Drawing support for OS.Ui. Every Gr operation honours the clip rectangle.
     function setClip(window: &![Window], rect: Rect): Result[Unit, IoError];
     function clearClip(window: &![Window]): Result[Unit, IoError];

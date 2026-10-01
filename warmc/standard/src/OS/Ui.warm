@@ -45,18 +45,6 @@ module body OS.Ui is
         case WithDrop is make: Fn[Drop, M];
         case ViaFile is wrap: Fn[FileEvent, M]; what: Int64;
     end;
-    -- A drop: the dragged node's payload and the pointer inside the target.
-    record Drop: Free is payload: Int64; x: Int64; y: Int64; end;
-    -- What happens inside a file dialog (OS.Ui.Files): its list, a row opened,
-    -- Up, Open/Save, Cancel, or an edit of the file name.
-    union FileEvent: Free is
-        case Rows is state: ListState;
-        case Pick is index: Int64;
-        case Up;
-        case Choose;
-        case Cancel;
-        case Name is edit: TextEdit;
-    end;
 
     record View[M: Free]: Linear is tree: Tree; handlers: Vector[Handler[M]]; end;
 
@@ -78,9 +66,6 @@ module body OS.Ui is
         menus: Nat64;
         outline: Rect;
     end;
-    -- An image registered with the App (or a built-in icon): views refer to it
-    -- by this handle and never copy pixels.
-    record Image: Free is id: Int64; width: Int64; height: Int64; end;
 
     ------------------------------------------------------------------ application
 

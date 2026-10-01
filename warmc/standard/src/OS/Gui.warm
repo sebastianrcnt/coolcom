@@ -310,6 +310,8 @@ module body OS.Gui is
     pragma Foreign_Import(External_Name => "WgFont");
     private function rawFont(choice: Int64, pointSize: Int64): Int64 is end;
     function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError] is return status(rawScale(scale)); end;
+    function displayScale(gui: &[Gui]): Int64 is let s: Int64 := rawScale(0); if s < 1 then return 1; end if; return s; end;
+    function systemMonoFont(gui: &[Gui]): Bool is return rawFont(-1, 0) = 1; end;
     function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError] is
         var choice: Int64 := 0; if systemMono then choice := 1; end if; return status(rawFont(choice, pointSize)); end;
     pragma Foreign_Import(External_Name => "WgClip");

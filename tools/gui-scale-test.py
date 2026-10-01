@@ -16,9 +16,10 @@ def boot(mode,scale):
     if mode=='venus': subprocess.run([ROOT / 'tools/venus/install.sh',disk],check=True,stdout=subprocess.DEVNULL)
     script=testvm.BOOT+testvm.typed('FontSet(NULL); Gui;\n')+'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'+testvm.typed('GuiSettings;\n')+'wait GUI SETTINGS READY\n'
     if scale==2:
-        script+=testvm.pointer_absolute(304,165,800,600)+'delay 40\n1 272 1\ndelay 40\n1 272 0\nwait GUI SETTINGS SCALE2\nwait GUI SCALE APPLIED\n'
+        # Settings is window 2 (client at 72,107): its 2x radio.
+        script+=testvm.pointer_absolute(146,166,800,600)+'delay 40\n1 272 1\ndelay 40\n1 272 0\nwait GUI SETTINGS SCALE2\nwait GUI SCALE APPLIED\n'
     else:
-        script+=testvm.pointer_absolute(152,82,400,300)
+        script+=testvm.pointer_absolute(73,83,400,300)
     script+='delay 200\nquit\n'
     (d / 'input.txt').write_text(script)
     testvm.run_vm(testvm.vm_command(KERNEL,executable=ROOT / ('build/coolvm-venus' if mode=='venus' else 'build/coolvm'),no_venus=mode=='cpu',size=(400*scale,300*scale),scale=1,
@@ -30,9 +31,12 @@ def boot(mode,scale):
 
 one=boot('cpu',1)
 two=boot('cpu',2)
+# The scale radios differ (1x chosen in one run, 2x in the other): skip their dots.
+radios=lambda x,y: 92<=x<106 and 137<=y<177
 for y in range(one[1]):
     limit=one[0]-60 if y<21 else one[0]
     for x in range(limit):
+        if radios(x,y): continue
         p=one[2][y][3*x:3*x+3]
         for dy in range(2):
             assert two[2][2*y+dy][6*x:6*x+6]==p+p,f'scale resize mismatch {x},{y}'

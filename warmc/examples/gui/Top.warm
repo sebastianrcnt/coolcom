@@ -1,68 +1,229 @@
-import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button, List,
-    present, buttonNeedsRedraw, listSelection, listNeedsRedraw, textInputNeedsRedraw, acquireGui, releaseGui, close, fill, text, button, listFrame, listItem, addMenu, addMenuItem);
-import GuiSupport (openWindow, nextEvent, shouldClose, drawString, drawNumber, index64);
-import OS.CoolOS.System (System, Snapshot, TaskInfo, HeapInfo, Clock, acquireSystem, releaseSystem,
-    snapshotTasks, snapshotCount, snapshotTask, snapshotName, releaseSnapshot, heapStats, killTask, clock);
-import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
+import OS.Gui (Gui, acquireGui, releaseGui);
 import OS.Error (IoError);
-import Standard.String (String, length, getSpan, destroyString);
+import OS.CoolOS.System (System, Snapshot, TaskInfo, HeapInfo, Clock, acquireSystem, releaseSystem, snapshotTasks, snapshotCount,
+    snapshotTask, snapshotName, releaseSnapshot, heapStats, killTask, clock);
+import Standard.String (String, length as stringLength, slice as stringSlice, destroyString);
+import Standard.Vector (Vector, make, push, pop, get, borrowGet, length as count, destroyFree, destroyEmpty);
+import OS.Ui (App, View, ListState, openApp, closeApp, next, newView, column, row, done, padding, spacing, grow, label, append,
+    appendInt, plain, button, disabled, tableView, tableColumn, tableRow, cell, statusBar, spacer, progress, fixedWidth, every, menu,
+    menuItem, menuSeparator, confirm, alert, iconCaution, iconStop, listState);
 module body GuiTop is
-    private function sample(system: &[System]): Snapshot is
-        case snapshotTasks(system, 256) of when Ok(value as s: Snapshot) do return s; when Err(error as e: IoError) do abort("Task snapshot failed"); end case; end;
-    private function time(system: &[System]): Clock is
-        case clock(system) of when Ok(value as c: Clock) do return c; when Err(error as e: IoError) do abort("Clock failed"); end case; end;
-    private function oldTicks(snapshot: &[Snapshot], id: Int64, fallback: Int64): Int64 is
-        var i: Index := 0; while i < snapshotCount(snapshot) do
-            case snapshotTask(snapshot, i) of when Ok(value as info: TaskInfo) do if info.taskNum = id then return info.ticks; end if; when Err(error as e: IoError) do skip; end case;
-            i := i + 1; end while; return fallback; end;
+    """Top: the tasks on every core with their CPU share, refreshed every
+    second, and the heap in use. Kill asks first. Built on OS.Ui. Prints GUI
+    TOP markers for the VM tests."""
+    record Row: Free is id: Int64; core: Int64; share: Int64; state: Int64; ticks: Int64; end;
+    record Model: Linear is
+        system: System;
+        rows: Vector[Row];
+        names: Vector[String];
+        table: ListState;
+        before: Clock;
+        heapUsed: Int64;
+        heapTotal: Int64;
+        asking: Bool;      -- the Kill confirmation is showing
+        refused: Bool;     -- the last Kill was refused
+    end;
+    union Msg: Free is
+        case Table is state: ListState;
+        case Refresh;
+        case Kill;
+        case KillConfirmed;
+        case KillCancelled;
+        case Dismiss;
+        case Quit;
+    end;
+    function tableState(s: ListState): Msg is return Table(state => s); end;
+    function int(i: Index): Int64 is case toInt64(i) of when Some(value as n: Int64) do return n; when None do return 0; end case; end;
+    function idx(i: Int64): Index is case toIndex(i) of when Some(value as n: Index) do return n; when None do return 0; end case; end;
+    generic [R: Region]
+    function nameOf(m: &[Model, R], r: Int64): Span[Nat8, R] is
+        let s: &[String, R] := borrowGet(&(m->names), idx(r));
+        return stringSlice(s, 0, stringLength(s));
+    end;
+    function rowAt(m: &[Model], r: Int64): Row is return get(&(m->rows), idx(r)); end;
+    function rowCount(m: &[Model]): Int64 is return int(count(&(m->rows))); end;
+    function tableOf(m: &[Model]): ListState is return m->table; end;
+    function selectedTask(m: &[Model]): Int64 is
+        let t: ListState := m->table;
+        if t.selected < 0 or t.selected >= int(count(&(m->rows))) then return 0; end if;
+        return get(&(m->rows), idx(t.selected)).id;
+    end;
+    function clearNames(names: Vector[String]): Unit is
+        var v: Vector[String] := names; var more: Bool := true;
+        while more do case pop(&!v) of when Some(value as s: String) do destroyString(s); when None do more := false; end case; end while;
+        destroyEmpty(v); return nil;
+    end;
+    function now(system: &[System]): Clock is
+        case clock(system) of
+            when Ok(value as c: Clock) do return c;
+            when Err(error as e: IoError) do return Clock(ticks => 0, ticksPerSecond => 1, uptimeJiffies => 0, jiffiesPerSecond => 1000, cores => 1, currentTask => 0);
+        end case;
+    end;
+    -- The ticks a task had at the previous sample (its current ticks if it is new).
+    function previousTicks(rows: &[Vector[Row]], id: Int64, fallback: Int64): Int64 is
+        for i from 0 until count(rows) do if get(rows, i).id = id then return get(rows, i).ticks; end if; end for;
+        return fallback;
+    end;
+    -- Sample the tasks: CPU share since the previous sample.
+    function sample(m: Model): Model is
+        let { system as system: System, rows as old: Vector[Row], names as oldNames: Vector[String], table as table: ListState,
+            before as before: Clock, heapUsed as hu: Int64, heapTotal as ht: Int64, asking as asking: Bool, refused as refused: Bool } := m;
+        let current: Clock := now(&system);
+        let elapsed: Int64 := current.ticks - before.ticks;
+        var rows: Vector[Row] := make(); var names: Vector[String] := make();
+        case snapshotTasks(&system, 256) of
+            when Ok(value as snap: Snapshot) do
+                for i from 0 until snapshotCount(&snap) do
+                    case snapshotTask(&snap, i) of
+                        when Ok(value as info: TaskInfo) do
+                            var share: Int64 := 0;
+                            if elapsed > 0 then share := 100 * (info.ticks - previousTicks(&old, info.taskNum, info.ticks)) / elapsed; end if;
+                            if share < 0 then share := 0; end if; if share > 100 then share := 100; end if;
+                            case snapshotName(&snap, i) of
+                                when Ok(value as name: String) do
+                                    push(&!names, name);
+                                    push(&!rows, Row(id => info.taskNum, core => info.core, share => share, state => info.state, ticks => info.ticks));
+                                when Err(error as e: IoError) do skip;
+                            end case;
+                        when Err(error as e: IoError) do skip;
+                    end case;
+                end for;
+                releaseSnapshot(snap);
+            when Err(error as e: IoError) do skip;
+        end case;
+        destroyFree(old); clearNames(oldNames);
+        var used: Int64 := hu; var total: Int64 := ht;
+        case heapStats(&system) of
+            when Ok(value as heap: HeapInfo) do used := heap.used; total := heap.total;
+            when Err(error as e: IoError) do skip;
+        end case;
+        var t: ListState := table;
+        if t.selected >= int(count(&rows)) then t := ListState(first => t.first, selected => -1, fit => t.fit, sort => t.sort, descending => t.descending); end if;
+        return Model(system => system, rows => rows, names => names, table => t, before => current, heapUsed => used, heapTotal => total,
+            asking => asking, refused => refused);
+    end;
+    function withFlags(m: Model, table: ListState, asking: Bool, refused: Bool): Model is
+        let { system as system: System, rows as rows: Vector[Row], names as names: Vector[String], table as old: ListState,
+            before as before: Clock, heapUsed as hu: Int64, heapTotal as ht: Int64, asking as a: Bool, refused as r: Bool } := m;
+        return Model(system => system, rows => rows, names => names, table => table, before => before, heapUsed => hu, heapTotal => ht,
+            asking => asking, refused => refused);
+    end;
+    function kill(m: Model): Model is
+        var current: Model := m;
+        let id: Int64 := selectedTask(&current);
+        let table: ListState := tableOf(&current);
+        let { system as system0: System, rows as rows: Vector[Row], names as names: Vector[String], table as old: ListState,
+            before as before: Clock, heapUsed as hu: Int64, heapTotal as ht: Int64, asking as a: Bool, refused as r: Bool } := current;
+        var system: System := system0;
+        var refused: Bool := false;
+        case killTask(&!system, id) of
+            when Ok(value as u: Unit) do printLn("GUI TOP KILLED");
+            when Err(error as e: IoError) do refused := true; printLn("GUI TOP KILL DENIED");
+        end case;
+        return sample(Model(system => system, rows => rows, names => names, table => table, before => before, heapUsed => hu, heapTotal => ht,
+            asking => false, refused => refused));
+    end;
+    function update(model: Model, msg: Msg): Model is
+        var current: Model := model;
+        let table: ListState := tableOf(&current);
+        let asking: Bool := current.asking;
+        case msg of
+            when Table(state as s: ListState) do
+                if s.selected /= table.selected and s.selected >= 0 then printLn("GUI TOP SELECTED"); end if;
+                return withFlags(current, s, asking, false);
+            when Refresh do return sample(current);
+            when Kill do if selectedTask(&current) = 0 then return current; end if; return withFlags(current, table, true, false);
+            when KillConfirmed do return kill(current);
+            when KillCancelled do return withFlags(current, table, false, false);
+            when Dismiss do return withFlags(current, table, false, false);
+            when Quit do return current;
+        end case;
+    end;
+    function stateName(s: Int64): Span[Nat8, Static] is
+        if s = 0 then return "run"; end if; if s = 2 then return "sleep"; end if; if s = 3 then return "stop"; end if;
+        if s = 4 then return "kill"; end if; return "ready";
+    end;
+    function view(model: &[Model]): View[Msg] is
+        var v: View[Msg] := newView();
+        let table: ListState := tableOf(model);
+        let total: Int64 := rowCount(model);
+        menu(&!v, "File");
+        menuItem(&!v, "Refresh", "Ctrl+R", Refresh());
+        menuItem(&!v, "Kill Task", "Ctrl+K", Kill()); disabled(&!v, selectedTask(model) = 0);
+        menuSeparator(&!v);
+        menuItem(&!v, "Close", "Ctrl+W", Quit());
+        done(&!v);
+        column(&!v); padding(&!v, 8); spacing(&!v, 8);
+        row(&!v); spacing(&!v, 8);
+        label(&!v, "Heap"); progress(&!v, model->heapUsed / 1024, model->heapTotal / 1024); grow(&!v, 1);
+        label(&!v, ""); appendInt(&!v, model->heapUsed / 1048576); append(&!v, " / "); appendInt(&!v, model->heapTotal / 1048576);
+        append(&!v, " MB"); plain(&!v);
+        done(&!v);
+        tableView(&!v, table, total, tableState); grow(&!v, 1);
+        tableColumn(&!v, "Task", 190, false);
+        tableColumn(&!v, "ID", 50, false);
+        tableColumn(&!v, "Core", 50, false);
+        tableColumn(&!v, "CPU %", 60, false);
+        tableColumn(&!v, "State", 70, false);
+        var r: Int64 := table.first;
+        while r < total and r <= table.first + table.fit do
+            let info: Row := rowAt(model, r);
+            tableRow(&!v, r);
+            cell(&!v, nameOf(model, r));
+            cell(&!v, ""); appendInt(&!v, info.id);
+            cell(&!v, ""); appendInt(&!v, info.core);
+            cell(&!v, ""); appendInt(&!v, info.share);
+            cell(&!v, stateName(info.state));
+            done(&!v);
+            r := r + 1;
+        end while;
+        done(&!v);
+        row(&!v); spacing(&!v, 8);
+        button(&!v, "Refresh", Refresh());
+        spacer(&!v);
+        button(&!v, "Kill", Kill()); disabled(&!v, selectedTask(model) = 0);
+        done(&!v);
+        done(&!v);
+        if model->asking then
+            confirm(&!v, iconCaution(), "Stop the selected task? Unsaved work in it is lost.", "Cancel", KillCancelled(), "Kill", KillConfirmed());
+        end if;
+        if model->refused then alert(&!v, iconStop(), "That task cannot be killed.", "OK", Dismiss()); end if;
+        every(&!v, 1000, Refresh());
+        return v;
+    end;
     function main(initial: RootCapability): ExitCode is
-        var root: RootCapability := initial; var gui: Gui := acquireGui(&!root); let tasks: Tasks := acquireTasks(&!root);
-        var system: System := acquireSystem(&!root); var w: Window := openWindow(&!gui, "Top", 520, 340);
-        var previous: Snapshot := sample(&system); var before: Clock := time(&system);
-        var rows: List := List(selected => -1, first => 0); var refresh: Button := Button(pressed => false); var kill: Button := Button(pressed => false);
-        var selectedTask: Int64 := 0; var running: Bool := true; var first: Bool := true;
-        case addMenu(&!w, "File") of when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 0, "Close"); when Err(error as e: IoError) do skip; end case;
-        while running do
-            let e: Event := nextEvent(&!w); running := not shouldClose(e); let now: Clock := time(&system);
-            let draw: Bool := running and (first or now.uptimeJiffies - before.uptimeJiffies >= 1000
-                or listNeedsRedraw(&rows, Rect(x => 12, y => 58, width => 496, height => 222), index64(snapshotCount(&previous)), 210, e)
-                or buttonNeedsRedraw(&refresh, Rect(x => 16, y => 296, width => 112, height => 28), e, true)
-                or buttonNeedsRedraw(&kill, Rect(x => 392, y => 296, width => 112, height => 28), e, false));
-            if draw then
-                let current: Snapshot := sample(&system);
-                fill(&!w, Rect(x => 0, y => 0, width => 520, height => 340), 16777215);
-                text(&!w, 16, 12, "Heap MB", 0);
-                case heapStats(&system) of when Ok(value as heap: HeapInfo) do drawNumber(&!w, 88, 12, heap.used / 1048576); text(&!w, 136, 12, "/", 0); drawNumber(&!w, 152, 12, heap.total / 1048576); when Err(error as error: IoError) do skip; end case;
-                text(&!w, 16, 38, "Task                     ID   Core CPU% State", 0);
-                rows.selected := listSelection(&rows, Rect(x => 12, y => 58, width => 496, height => 222), index64(snapshotCount(&current)), 210, e);
-                listFrame(&!w, &!rows, Rect(x => 12, y => 58, width => 496, height => 222), index64(snapshotCount(&current)), e);
-                var i: Index := 0; var visible: Int64 := 0; let firstRow: Int64 := rows.first;
-                while i < snapshotCount(&current) do
-                    if index64(i) >= firstRow and visible < 11 then
-                        case snapshotTask(&current, i) of when Ok(value as info: TaskInfo) do
-                                case snapshotName(&current, i) of when Ok(value as name: String) do
-                                        case listItem(&!w, &!rows, Rect(x => 13, y => 59 + visible * 20, width => 210, height => 20), index64(i), getSpan(&name, 0, length(&name) - 1), e) of
-                                            when Ok(value as clicked: Bool) do if clicked then selectedTask := info.taskNum; printLn("GUI TOP SELECTED"); end if;
-                                            when Err(error as error: IoError) do skip; end case;
-                                        destroyString(name);
-                                    when Err(error as error: IoError) do skip; end case;
-                                let y: Int64 := 61 + visible * 20; drawNumber(&!w, 232, y, info.taskNum); drawNumber(&!w, 288, y, info.core);
-                                var share: Int64 := 0; if now.ticks > before.ticks then share := 100 * (info.ticks - oldTicks(&previous, info.taskNum, info.ticks)) / (now.ticks - before.ticks); end if;
-                                if share < 0 then share := 0; end if; if share > 100 then share := 100; end if;
-                                drawNumber(&!w, 328, y, share); var state: Span[Nat8, Static] := "ready";
-                                if info.state = 0 then state := "run"; else if info.state = 2 then state := "sleep"; else if info.state = 3 then state := "stop"; else if info.state = 4 then state := "kill"; end if;
-                                text(&!w, 384, y, state, 0);
-                            when Err(error as error: IoError) do skip; end case;
-                        visible := visible + 1;
-                    end if; i := i + 1;
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root);
+        let system: System := acquireSystem(&!root);
+        let start: Clock := now(&system);
+        var model: Model := sample(Model(system => system, rows => make(), names => make(), table => listState(), before => start,
+            heapUsed => 0, heapTotal => 1, asking => false, refused => false));
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Top", 520, 340);
+        case opening of
+            when Ok(value as app0: App[Msg]) do
+                var app: App[Msg] := app0;
+                printLn("GUI TOP READY");
+                var running: Bool := true;
+                while running do
+                    case next(&!app, view(&model)) of
+                        when Some(value as msg: Msg) do
+                            case msg of
+                                when Quit do running := false;
+                                when Table(state as s: ListState) do skip; when Refresh do skip; when Kill do skip;
+                                when KillConfirmed do skip; when KillCancelled do skip; when Dismiss do skip;
+                            end case;
+                            model := update(model, msg);
+                        when None do running := false;
+                    end case;
                 end while;
-                case button(&!w, &!refresh, Rect(x => 16, y => 296, width => 112, height => 28), "Refresh", e, true) of when Ok(value as clicked: Bool) do skip; when Err(error as error: IoError) do skip; end case;
-                case button(&!w, &!kill, Rect(x => 392, y => 296, width => 112, height => 28), "Kill", e, false) of
-                    when Ok(value as clicked: Bool) do if clicked and selectedTask > 0 then case killTask(&!system, selectedTask) of when Ok(value as u: Unit) do printLn("GUI TOP KILLED"); when Err(error as error: IoError) do printLn("GUI TOP KILL DENIED"); end case; end if;
-                    when Err(error as error: IoError) do skip; end case;
-                releaseSnapshot(previous); previous := current; before := now;
-                present(&!w);
-                if first then first := false; printLn("GUI TOP READY"); end if;
-            end if; sleep(&tasks, 10);
-        end while; releaseSnapshot(previous); close(w); releaseSystem(system); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI TOP CLOSED"); return ExitSuccess(); end;
+                closeApp(app);
+            when Err(error as e: IoError) do printLn("GUI TOP NO GUI");
+        end case;
+        let { system as s: System, rows as rs: Vector[Row], names as ns: Vector[String], table as t: ListState, before as b: Clock,
+            heapUsed as hu: Int64, heapTotal as ht: Int64, asking as a: Bool, refused as r: Bool } := model;
+        destroyFree(rs); clearNames(ns); releaseSystem(s);
+        releaseGui(gui); surrenderRoot(root);
+        printLn("GUI TOP CLOSED");
+        return ExitSuccess();
+    end;
 end module body.

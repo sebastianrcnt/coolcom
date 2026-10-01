@@ -77,7 +77,7 @@ tree os/Warm/standard/src Warm/Standard
 tree warmc/builtin Warm/Standard/builtin
 tree warmc/examples Warm/Examples
 tree "$stage/Man" Man
-put Warm/Docs/ warmc/README.md docs/warm-stdlib.md docs/warm-closures.md
+put Warm/Docs/ warmc/README.md docs/warm-stdlib.md docs/warm-closures.md docs/ui-framework.md
 
 # An explicit install replaces Init.cool and the mapped kernel sources above,
 # so the old layout can now be removed. Seeding keeps old files and user edits.

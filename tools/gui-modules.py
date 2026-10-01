@@ -29,8 +29,6 @@ def file_of(module):
 
 def closure(app):
     names, todo = set(), [EXAMPLES / (app + '.warm')]
-    todo += [p for p in (EXAMPLES / 'Support.warmh', EXAMPLES / 'Support.warm')
-             if 'import GuiSupport' in todo[0].read_text()]
     while todo:
         text = todo.pop().read_text()
         for module in re.findall(r'^\s*import\s+([A-Za-z][\w.]*)', text, re.M):

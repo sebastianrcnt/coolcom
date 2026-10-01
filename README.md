@@ -16,6 +16,8 @@ kernel itself, can be edited and rebuilt from inside the OS.
 - Also: Lua 5.4 translated to Cool through `tools/c2hc`, a Zed extension for both languages.
 
 Start with the [user guide](docs/USER-GUIDE.md): `make run` on an Apple silicon Mac.
+Desktop applications are written in Warm with OS.Ui, a declarative UI framework with a
+classic Macintosh look: see [docs/ui-framework.md](docs/ui-framework.md).
 
 ## Warm 시작하기
 
