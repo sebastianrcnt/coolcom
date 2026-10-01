@@ -39,7 +39,8 @@ class CGui
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
     Bool resizing, damage;
     I64 x0, y0, x1, y1, clock_minute;
-    U32 *desktop, *canvas, *overlay, pointer[12 * 18];
+    U32 *desktop, *canvas, *overlay, pointer[12 * 18], cursor[32 * 32];
+    I64 cursor_w, cursor_h, hot_x, hot_y; Bool cursor_visible;
     CTask *task;
     U8 *frame_hook, *stop_hook;
     I64 frames, raster_rows, desktop_revision, overlay_revision, wheel;
@@ -374,6 +375,19 @@ U0 GuiDesktop()
     GuiText(gui.desktop, pw, ph, s, gui.w - 52, 3, clock);
     gui.desktop_revision++; gui.clock_minute = Now / (60 * CDATE_FREQ); GuiDamage(0, 0, gui.w, gui.h);
 }
+Bool GuiPointerApply()
+{
+    if (!gui.cursor_visible || !fb.gpu) return FALSE;
+    return GpuPointerSet(gui.cursor, gui.cursor_w, gui.cursor_h, gui.scale, gui.hot_x, gui.hot_y, gui.mx * gui.scale, gui.my * gui.scale);
+}
+Bool GuiPointerSet(U32 *pixels, I64 width, I64 height, I64 hot_x = 0, I64 hot_y = 0)
+{// Shape pixels are BGRA with alpha; geometry and hotspot are logical pixels.
+    if (!gui_active || Gs->num || !pixels || width < 1 || height < 1 || width > 32 || height > 32 || hot_x < 0 || hot_y < 0 || hot_x >= width || hot_y >= height) return FALSE;
+    MemCpy(gui.cursor, pixels, width * height * 4); gui.cursor_w = width; gui.cursor_h = height;
+    gui.hot_x = hot_x; gui.hot_y = hot_y; gui.cursor_visible = TRUE; return GuiPointerApply;
+}
+U0 GuiPointerHide() {if (gui_active && !Gs->num) {gui.cursor_visible = FALSE; if (fb.gpu) GpuCursorHide;}}
+Bool GuiPointerShow() {if (!gui_active || Gs->num || !gui.cursor_w) return FALSE; gui.cursor_visible = TRUE; return GuiPointerApply;}
 U0 GuiPointerInit()
 {//The classic arrow, 12 columns a row: B black, W white, space clear.
     U8 *arrow =
@@ -406,7 +420,7 @@ U0 GuiCompose()
     I64 x, y, i, sx, s = gui.scale, pw = fb.w;
     I64 x0 = MaxI64(0, gui.x0) * s, y0 = MaxI64(0, gui.y0) * s;
     I64 x1 = MinI64(gui.w, gui.x1) * s, y1 = MinI64(gui.h, gui.y1) * s;
-    CGuiWindow *w; U32 p; U0 (*frame)();
+    CGuiWindow *w; U0 (*frame)();
     for (y = y0; y < y1; y++) MemCpy(gui.canvas + y * pw + x0, gui.desktop + y * pw + x0, (x1 - x0) * 4);
     for (i = 0; i < gui.count; i++) {
         w = gui.windows[i];
@@ -416,11 +430,6 @@ U0 GuiCompose()
         }
     }
     for (y = y0; y < y1; y++) for (x = x0; x < x1; x++) if (gui.overlay[y * pw + x] >> 24) gui.canvas[y * pw + x] = gui.overlay[y * pw + x];
-    for (y = MaxI64(y0, gui.my * s); y < MinI64(y1, (gui.my + 18) * s); y++)
-        for (x = MaxI64(x0, gui.mx * s); x < MinI64(x1, (gui.mx + 12) * s); x++) {
-            p = gui.pointer[(y / s - gui.my) * 12 + x / s - gui.mx];
-            if (p >> 24) gui.canvas[y * pw + x] = p;
-        }
     if (frame = gui.frame_hook) (*frame)();
     else {
         for (y = y0; y < y1; y++) MemCpy(fb.back + y * fb.stride + x0 * 4, gui.canvas + y * pw + x0, (x1 - x0) * 4);
@@ -434,13 +443,13 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
     I64 x = mx / gui.scale, y = my / gui.scale, i;
     CGuiWindow *w; Bool active;
     if (x != gui.mx || y != gui.my) {
-        GuiDamage(gui.mx, gui.my, 12, 18); GuiDamage(x, y, 12, 18);
         gui.mx = x; gui.my = y;
         if (gui.drag && (buttons & 1)) {
             if (gui.resizing) GuiResize(gui.drag, MaxI64(160, x - gui.drag->x - 2 * GUI_PAD), MaxI64(64, y - gui.drag->y - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER));
             else GuiMove(gui.drag, x - gui.dx, y - gui.dy);
         }
     }
+    if (fb.gpu) GpuPointerMove(mx, my);
     if (GuiMenuMouse(x, y, buttons)) {gui.buttons = buttons; gui.wheel = wheel; return;}
     if ((buttons & 1) && !(gui.buttons & 1)) {
         for (i = gui.count - 1; i >= 0; i--) {
@@ -474,6 +483,7 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
 U0 GuiEnd()
 {
     I64 i; U0 (*stop)();
+    if (fb.gpu) GpuCursorHide; gui.cursor_visible = FALSE;
     if (stop = gui.stop_hook) (*stop)();
     gui.frame_hook = gui.stop_hook = NULL;
     for (i = 0; i < gui.count; i++) GuiStopWindow(gui.windows[i]);
@@ -492,7 +502,7 @@ U0 GuiRescale()
     for (i = 0; i < gui.count; i++) {
         w = gui.windows[i]; GuiResize(w, w->w, w->h); GuiMove(w, w->x, w->y);
     }
-    GuiDesktop; if (start = gui_start_hook) (*start)();
+    GuiDesktop; GuiPointerApply; if (start = gui_start_hook) (*start)();
     GuiLog("GUI SCALE APPLIED\n");
 }
 U0 GuiTask(U8 *data)
@@ -567,7 +577,7 @@ Bool Gui()
     gui.input_head = gui.input_tail = 0; gui.input_lost = FALSE;
     gui_active = TRUE; gui_key_hook = &GuiKey; gui_mouse_hook = &GuiMouseInput;
     gui.menu_open = FALSE; gui.menu_window = NULL; gui.overlay_revision++;
-    GuiPointerInit; GuiDesktop;
+    GuiPointerInit; GuiPointerSet(gui.pointer, 12, 18); GuiDesktop;
     FbRenderUnlock(daif);
     if (fb.venus && (start = gui_start_hook)) (*start)();
     gui.task = Spawn(&GuiTask, NULL, "Compositor", 0, adam_task);

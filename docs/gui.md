@@ -220,12 +220,38 @@ scroll pixel comparison waits for the final drawing/finish and shell prompt,
 rather than taking a screenshot after the last text row but before the rectangle
 has been drawn. Pixel and 100 ms input bounds remain unchanged.
 
-Before G5, implement the user's hardware-cursor integration decision. GUI
+Before G5, the user requested a hardware-cursor integration stage. GUI
 pointers use standard virtio-gpu UPDATE_CURSOR/MOVE_CURSOR with a 64x64 BGRA
 resource and hotspot; shape APIs support future I-beam/wait cursors. GUI exit
 hides that resource. coolvm displays it through NSCursor with physical-to-view
 scaling, uses the default Mac arrow for terminal mode, and composites the guest
 cursor only in exported screenshots/frame dumps. CPU and Venus use the same
 cursor path. Standard QEMU virtio-gpu cursor behavior should also be covered.
+
+### Hardware cursor — complete
+
+`GuiPointerSet` accepts up to 32x32 logical BGRA pixels and a logical hotspot;
+`GuiPointerHide` and `GuiPointerShow` preserve/restore the shape. Integer scale
+produces a transparent 64x64 DMA-backed virtio-gpu resource. Movement uses
+MOVE_CURSOR; setting shape/hotspot uses UPDATE_CURSOR. GUI CPU and Venus
+composition contain no pointer pixels, and exiting GUI hides the resource.
+The text caret now uploads inverted pixels into the 2D scanout instead of using
+the hardware pointer. Font changes inside GUI retain its pointer.
+
+coolvm's view installs a shape-specific NSCursor through cursor rectangles;
+physical-to-view scale and hotspot follow current display dimensions. Moving
+updates the guest screenshot position without rebuilding the native shape.
+Unconfigured/hidden guest cursors use the default Mac arrow. Window framebuffer
+and direct Metal presentation omit the cursor; exported PNGs and raw frame dumps
+compose it over both 2D and Venus scanouts. The standard cursor queue uses only
+an outgoing descriptor and completes without a response, as QEMU requires.
+
+Tests use an asymmetric custom alpha shape, nonzero hotspot, 1x/2x, shape change,
+hide/show, GUI exit, and canvas assertions proving no software pointer remains.
+The standard QEMU virt virtio-gpu UPDATE/MOVE/hide sequence also passes. Native
+CPU 1x / Venus 2x windows passed cursor-change/default restoration checks
+(`build/cursor-native-test.log`). `make -j test` passed (exit 0;
+`build/cursor-full-test.log`). Artifacts are under `build/gui-cursor-test/`
+and `build/gui-cursor-qemu-test/`.
 
 G5 is pending.

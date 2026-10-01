@@ -516,3 +516,15 @@ gui-cube-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal cube-
 	python3 tools/gui-cube-test.py $<
 
 test: gui-apps-test gui-scale-test $(if $(RUN_VENUS),gui-cube-test)
+
+.PHONY: gui-cursor-test
+gui-cursor-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-cursor-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-cursor-test
+
+.PHONY: gui-cursor-qemu-test
+gui-cursor-qemu-test: build/kernel.Image build/warmcool/Kernel.cool
+	python3 tools/gui-cursor-qemu-test.py $<
+
+test: gui-cursor-qemu-test

@@ -207,7 +207,10 @@ bool gpu_mmio(uint64_t off, int size, bool wr, uint64_t *val);
 bool gpu_irq_level(void);
 void gpu_resize(uint32_t width, uint32_t height);
 void gpu_scale(uint32_t scale); /* the window's backing scale, unless --scale fixed it */
-bool gpu_snapshot(uint8_t **pixels, uint32_t *width, uint32_t *height); /* g.lock held */
+bool gpu_snapshot(uint8_t **pixels, uint32_t *width, uint32_t *height, bool cursor);
+uint32_t gpu_display_width(void);
+uint32_t gpu_display_height(void);
+uint64_t gpu_cursor_snapshot(uint32_t *pixels, uint32_t *hx, uint32_t *hy, bool *visible); /* g.lock held */
 void fb_snapshot(uint8_t *dst); /* visible scanout, including ring wrap */
 void display_init(void);
 void display_pump(double seconds); /* run the window's event loop for that long */
