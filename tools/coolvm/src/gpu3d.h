@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #define GPU3D_SHM_BASE 0x400000000ULL
-#define GPU3D_SHM_SIZE (256ULL << 20)
+#define GPU3D_SHM_SIZE (2048ULL << 20)  // every Venus terminal buffer at the largest screen (6K Retina and up)
 #define GPU3D_REPLY_MAX 4096
 /* VIRTIO_GPU_F_VIRGL, F_RESOURCE_BLOB, F_CONTEXT_INIT. */
 #define GPU3D_FEATURES ((1u<<0)|(1u<<3)|(1u<<4))

@@ -23,7 +23,7 @@ vim = module('vim_test', ROOT / 'tools/vim-test.py')
 verify = module('kernel_verify', ROOT / 'tools/kernel-verify.py')
 vim.KEYS[' '] = (57, False)
 vim.KEYS['|'] = (43, True)
-START = {'resize': (1024, 768)}  # the boot size, when the screen is resized
+START = {'resize': (1024, 768), 'resize-large': (1024, 768)}  # the boot size, when the screen is resized
 PROBE = vim.typed('Print("VENUS%d %d\\n",1,fb.venus); FbCursorHide; FbFlush; '
                   'I64 vr=fb.venus_rows,vb=fb.venus_cell_bytes,vf=fb.venus_frames; '
                   'Print("direct cells%d\\n",1); FbFlush; '
@@ -154,6 +154,9 @@ if '--window-only' not in sys.argv:
             line('Print("\\xed\\x95\\x9c\\xea\\xb8\\x80 left %d\\n", 7);') + 'delay 800\n')
     compare('resize', line('ConsClear; Print("before %d\\n", 1);') + 'wait before 1\nresize 800 600\ndelay 800\n' +
             line('Print("after %d\\n", 2);') + 'wait after 2\n', size=(800, 600))
+    # A 6K Retina display full screen: every frame buffer at this size must fit the blob aperture.
+    compare('resize-large', 'resize 2000 1400\ndelay 600\nresize 6016 3384\ndelay 2500\n' + line('Print("large %d\\n", 3);') + 'wait large 3\n',
+            size=(6016, 3384))
     resident_and_fallback()
 if '--window' in sys.argv or '--window-only' in sys.argv:
     d=OUT/'colors'; log=d/'window.log'
