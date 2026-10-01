@@ -15,7 +15,7 @@ U0 GrRect(I64 x, I64 y, I64 width, I64 height, I64 color)
     if (x < 0) {width += x; x = 0;} if (y < 0) {height += y; y = 0;}
     if (width > w->w - x) width = w->w - x; if (height > w->h - y) height = w->h - y;
     if (width <= 0 || height <= 0) return;
-    GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, width, height, color & 0xFFFFFF);
+    GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, width, height, (color & 0xFFFFFF) | 0xFF000000);
     GrDamage(w, x, y, width, height);
 }
 U32 *GrPixels(I64 *stride = NULL)
@@ -24,10 +24,22 @@ U32 *GrPixels(I64 *stride = NULL)
     if (stride) *stride = w->pw * 4;
     return w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale;
 }
+Bool GuiVulkanPresent(I64 device, I64 view, I64 width, I64 height, U32 *mirror = NULL, I64 stride = 0)
+{// Publish an app-owned sampled image after its producer fence has completed.
+    // Image layout is SHADER_READ_ONLY_OPTIMAL; lifetime ends only after detach.
+    // GrPixels is a transparent BGRA overlay. The optional mirror supports CPU.
+    CGuiWindow *w = GrWindow; I64 row;
+    if (!w || Gs->num || !fb.venus || !view || !device || device != gui.vk_device || width != w->w * w->scale || height != w->h * w->scale || (mirror && (stride < width * 4 || stride > 0x7FFFFFFF))) return FALSE;
+    if (mirror && !w->vk_mirror) {w->vk_mirror = CAlloc(width * height * 4); if (!w->vk_mirror) return FALSE;}
+    if (mirror) for (row = 0; row < height; row++) MemCpy(w->vk_mirror + row * width, mirror(U8 *) + row * stride, width * 4);
+    else {Free(w->vk_mirror); w->vk_mirror = NULL;}
+    w->vk_device = device; w->vk_view = view; w->vk_w = width; w->vk_h = height;
+    GrDamage(w, 0, 0, w->w, w->h); return TRUE;
+}
 U0 GrPoint(CGuiWindow *w, I64 x, I64 y, I64 color)
 {
     if (0 <= x < w->w && 0 <= y < w->h)
-        GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, 1, 1, color & 0xFFFFFF);
+        GuiFill(w->pixels + (GUI_TITLE + GUI_PAD) * w->scale * w->pw + (1 + GUI_PAD) * w->scale, w->pw, w->h * w->scale, w->scale, x, y, 1, 1, (color & 0xFFFFFF) | 0xFF000000);
 }
 U0 GrLine(I64 x0, I64 y0, I64 x1, I64 y1, I64 color)
 {

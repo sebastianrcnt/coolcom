@@ -254,4 +254,71 @@ CPU 1x / Venus 2x windows passed cursor-change/default restoration checks
 `build/cursor-full-test.log`). Artifacts are under `build/gui-cursor-test/`
 and `build/gui-cursor-qemu-test/`.
 
-G5 is pending.
+### G5 — complete
+
+`GuiVulkanPresent(device, view, physical_width, physical_height, mirror, stride)`
+publishes an app-owned sampled image in `SHADER_READ_ONLY_OPTIMAL` after its
+producer fence has completed. It validates the calling task's pixel window,
+the resident display device and current physical client size. Applications own
+the image/view, render commands and fences; the compositor owns only a borrowed
+image descriptor. Direct image rectangles and a transparent BGRA HUD/chrome
+texture compose in window Z order. Scene pixels do not pass through the window
+raster upload. `GuiVulkanDetach` ends the borrow before the producer destroys a
+view. Window resize invalidates the old publication and asks the app to repaint.
+
+An optional physical BGRA mirror supplies the CPU path. Cube retains readback
+for this fallback/verification, draws its HUD into a separate transparent layer,
+and now uses direct Vulkan by default in `GuiCube;`. `CubeWindow(0, FALSE)`
+provides the former readback window path for comparison. Other producers may
+omit the mirror to avoid readback; CPU composition then has a white client
+background with the overlay. This first API shares the resident Venus display
+device/queue and runs structural/presentation operations on core 0.
+
+Completed producer/compositor fences serialize publication and view replacement
+on core 0. Cube installs an idempotent task exit hook to reclaim its GPU resources
+on abrupt kill. The compositor retains closing windows until the owner is reaped,
+and GUI exit waits for producer cleanup before freeing surfaces. Texture slots
+track the monotonic window id as well as its address, including address reuse.
+Consecutive Ctrl+Alt+Tab keys now change focus immediately in input order.
+
+Acceptance compares the complete Cube frame/client/HUD for direct Vulkan,
+readback uploads and CPU mirrors at both 1x and 2x. It also covers concurrent
+Vulkan windows, camera/move/resize, abrupt kill, server close, application quit,
+GUI exit, and return to the original mapped GPU-buffer count. Odd physical screen
+sizes at 2x include the last partial logical pixel; tests compare a Vulkan client
+clipped at both right/bottom screen edges. Screenshots were visually reviewed.
+Artifacts: `build/gui-vulkan-test/`. `make -j test` passed (exit 0;
+`build/g5-test.log`).
+
+
+### Post-G5 Warm toolchain integration and input backlog — complete
+
+Merged `main` Warm CLI/toolchain isolation (`bfbd7f5`); CoolOS kernel bindings
+now live in `os/Warm/`, while portable OS.Gui remains in the standard library.
+The Warm terminal-application integration section and all GUI stages are kept.
+
+The reported 63-of-80 key failure was reproduced on both CPU and Venus with a
+single 80-key raw-input backlog, waiting for completed presentation before VM
+shutdown. The 64-slot window event ring has 63 usable entries; the compositor
+pumped the complete source backlog before a consumer could run, dropped 17 keys,
+and reported `KEY_INPUT_LOST`. Reproduction log: `build/burst-repro.log`.
+
+Window event capacity now matches the 1024-slot raw-input ring. The compositor
+yields to notified pixel-window producers before synchronous GPU composition,
+so they drain input and paint before the frame. Actual overflow remains explicit.
+The drawing demo reports lost input and acknowledges completed presentation.
+Its regression test covers both 80 host keys and a deterministic 80-key queued
+backlog with five windows, all 160 responses, no loss, CPU/Venus pixel equality,
+and the existing 100 ms dispatch/burst bounds. Tests wait for every response and
+completed presentation before exiting. Acceptance results are recorded below.
+
+`make -j test` passed three consecutive times on the same implementation (exit
+0 each), including the merged Warm CLI tests, G1–G5, hardware cursors and the
+existing terminal applications. Each CPU/Venus drawing run delivered all 160
+keys without overflow and satisfied both the 100 ms event-age and burst bounds.
+
+| Full suite run / log | CPU host / queued burst | Venus host / queued burst |
+| --- | --- | --- |
+| `build/post-g5-test-1.log` | 67 / 13 ms | 48 / 8 ms |
+| `build/post-g5-test-2.log` | 58 / 15 ms | 52 / 11 ms |
+| `build/post-g5-test-3.log` | 77 / 13 ms | 64 / 10 ms |

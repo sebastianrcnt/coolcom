@@ -12,7 +12,7 @@ class CCubeDemo
     Bool active, locked, hooks, paused;
     I64 daif, w, h, frames;
     CCubeParams params;
-    CGuiWindow *window;
+    CGuiWindow *window; CTask *owner; U32 *overlay; Bool direct, sampled;
     I64 mouse_x, mouse_y; Bool mouse_down;
 };
 CCubeDemo cube;
@@ -130,6 +130,8 @@ U64i CubeShader(U8 *code, I64 size)
 }
 U0 CubeTargetClose()
 {
+    if (cube.window) GuiVulkanDetach(cube.window);
+    Free(cube.overlay); cube.overlay = NULL; cube.sampled = FALSE;
     // Handle partially constructed targets too (for example, exhausted blob slots).
     if (cube.readback.blob) GfxCheck(GpuBlobDestroy(cube.readback.blob), "cube readback unmap");
     GfxBegin;
@@ -153,8 +155,9 @@ U0 CubeTarget()
     GfxCheck(cube.w >= 160 && cube.h >= 120 && cube.w <= 4096 && cube.h <= 4096, "cube display size");
     cube.params.w = cube.w; cube.params.h = cube.h;
     GfxImageCreate(&cube.target, cube.w, cube.h, VK_FORMAT_B8G8R8A8_UNORM,
-                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
     GfxBufferCreate(&cube.readback, cube.w * cube.h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    if (cube.direct) {cube.overlay = CAlloc(cube.w * cube.h * 4); GfxCheck(cube.overlay != NULL, "cube overlay");}
     CubePipeline(cube.w, cube.h, cube.shaders, &cube.layout, &cube.pipeline);
     if (cube.window) Print("CUBE WINDOW SIZE %dx%d\n", cube.w, cube.h);
 }
@@ -184,13 +187,17 @@ U0 CubeClose()
     } catch {Fs->catch_except = TRUE;}
     cube_ids = gfx.next_id;
     Free(gfx.commands); MemSet(&gfx, 0, sizeof(CGfx));
-    CubeUnlock; cube.active = FALSE; shell_stmt_cleanup = NULL;
+    CubeUnlock; cube.active = FALSE; if (Fs == cube.owner) shell_stmt_cleanup = NULL;
 }
+
+U0 CubeTaskExit(U8 *data) {no_warn data; CubeClose;}
 
 U0 CubePixel(I64 x, I64 y, I64 rgb)
 {
-    if (x >= 0 && y >= 0 && x < cube.w && y < cube.h)
+    if (x >= 0 && y >= 0 && x < cube.w && y < cube.h) {
         *(cube.readback.mapping + (y * cube.w + x) * 4)(U32i *) = 0xFF000000 | rgb;
+        if (cube.overlay) cube.overlay[y * cube.w + x] = 0xFF000000 | rgb;
+    }
 }
 
 I64 CubeGlyph(I64 c)
@@ -257,8 +264,10 @@ U0 CubeDraw()
     copy.imageSubresource.layerCount = 1; copy.imageExtent.width = cube.w; copy.imageExtent.height = cube.h; copy.imageExtent.depth = 1;
     MemSet(&barrier, 0, sizeof(barrier)); barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     GfxRecord;
-    GfxImageBarrier(&cube.target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    if (cube.sampled) GfxImageBarrier(&cube.target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    else GfxImageBarrier(&cube.target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     vn_encode_vkCmdBeginRendering(&gfx.enc, 0, gfx.cmd, &rendering);
     vn_encode_vkCmdBindPipeline(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cube.pipeline);
     vn_encode_vkCmdPushConstants(&gfx.enc, 0, gfx.cmd, cube.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(CCubeParams), &cube.params);
@@ -271,7 +280,13 @@ U0 CubeDraw()
     vn_encode_vkCmdCopyImageToBuffer(&gfx.enc, 0, gfx.cmd, cube.target.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, cube.readback.buffer, 1, &copy);
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
     vn_encode_vkCmdPipelineBarrier(&gfx.enc, 0, gfx.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, NULL, 0, NULL);
+    if (cube.direct) {
+        GfxImageBarrier(&cube.target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT);
+        cube.sampled = TRUE;
+    }
     GfxExecute;
+    if (cube.overlay) MemSet(cube.overlay, 0, cube.w * cube.h * 4);
     // HUD is composited into the coherent readback; the 3D scene itself is GPU rendered.
     if (cube.w < 720) scale = 1;
     CubeText("CUBE / 01", 26, 24, 3, 0xD7F4FF);
@@ -283,8 +298,13 @@ U0 CubeDraw()
     if (cube.window) {
         I64 stride, row; U32 *pixels = GrPixels(&stride);
         GfxCheck(pixels != NULL, "cube window surface");
-        for (row = 0; row < cube.h; row++) MemCpy(pixels(U8 *) + row * stride, cube.readback.mapping + row * cube.w * 4, cube.w * 4);
-        GrDirty(0, 0, cube.window->w, cube.window->h);
+        if (cube.direct) {
+            for (row = 0; row < cube.h; row++) MemCpy(pixels(U8 *) + row * stride, cube.overlay + row * cube.w, cube.w * 4);
+            GfxCheck(GuiVulkanPresent(gfx.device, cube.target.view, cube.w, cube.h, cube.readback.mapping, cube.w * 4), "cube Vulkan window");
+        } else {
+            for (row = 0; row < cube.h; row++) MemCpy(pixels(U8 *) + row * stride, cube.readback.mapping + row * cube.w * 4, cube.w * 4);
+            GrDirty(0, 0, cube.window->w, cube.window->h);
+        }
     } else GfxCheck(GpuScanoutBlob(cube.readback.blob, cube.w, cube.h, cube.w * 4), "cube scanout");
     cube.frames++;
 }
@@ -315,7 +335,7 @@ Bool CubeKey(I64 c)
     cube.params.yaw = cube.params.yaw % 6283;
     return TRUE;
 }
-U0 Cube(I64 max_frames = 0)
+U0 Cube(I64 max_frames = 0, Bool direct = TRUE)
 {
     U8 *vert = NULL, *frag = NULL; I64 vert_size, frag_size, now, last, deadline;
     Bool running = TRUE; U0 (*finish)();
@@ -331,7 +351,8 @@ U0 Cube(I64 max_frames = 0)
         Free(vert); Free(frag); Print("Cube shaders missing or invalid; run make cube-disk.\n"); return;
     }
     MemSet(&cube, 0, sizeof(CCubeDemo)); MemSet(&gfx, 0, sizeof(CGfx));
-    cube.window = GrWindow;
+    cube.window = GrWindow; cube.owner = Fs; cube.direct = cube.window && direct;
+    if (cube.window) Fs->exit_hook = &CubeTaskExit;
     cube.active = TRUE; shell_stmt_cleanup = &CubeClose;
     gfx.next_id = cube_ids; if (!gfx.next_id) gfx.next_id = (Fs->task_num + 1) << 32;
     gfx.no_sleep = TRUE; gfx.soft_fail = TRUE;
@@ -349,6 +370,7 @@ U0 Cube(I64 max_frames = 0)
         cube.shaders[0] = CubeShader(vert, vert_size); cube.shaders[1] = CubeShader(frag, frag_size);
         CubeTarget; CubeDraw; CubeUnlock;
         Free(vert); vert = NULL; Free(frag); frag = NULL;
+        if (cube.direct) Print("CUBE VULKAN WINDOW READY\n");
         if (cube.window) {Print("CUBE WINDOW READY\n"); GuiAddMenu(cube.window, "File"); GuiAddMenuItem(cube.window, 0, 0, "Close");}
         Print("CUBE READY\n"); last = ArchCntVct;
         while (running && (!max_frames || cube.frames < max_frames)) {
@@ -380,8 +402,8 @@ U0 Cube(I64 max_frames = 0)
     Print("CUBE CLOSED frames=%d\n", cube.frames);
 }
 
-U0 CubeWindow(I64 max_frames = 0)
+U0 CubeWindow(I64 max_frames = 0, Bool direct = TRUE)
 {
     if (!GuiNewPixel("Cube", 480, 300)) {Print("CubeWindow needs an independent GUI task. Use GuiCube;\n"); return;}
-    Cube(max_frames);
+    Cube(max_frames, direct);
 }

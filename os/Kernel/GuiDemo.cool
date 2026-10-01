@@ -20,15 +20,18 @@ U0 GuiDrawPresent()
 }
 U0 GuiDrawTask(U8 *data)
 {
-    CGuiEvent e; U8 *message;
+    CGuiEvent e; U8 *message; Bool replied;
     no_warn data;
     if (!GuiNewPixel("Drawing", 480, 256)) return;
     GuiDrawScene; GuiDrawPresent; message = MStrPrint("GUI DRAW READY%d\n", gui.count); GuiLog(message); Free(message);
     while (TRUE) {
+        replied = FALSE;
         while (GuiPoll(&e)) {
             if (e.type == GUI_EVENT_CLOSE) return;
             if (e.type == GUI_EVENT_KEY && e.key == 'q') return;
+            if (e.type == GUI_EVENT_KEY && e.key == KEY_INPUT_LOST) GuiLog("GUI DRAW INPUT LOST\n");
             if (e.type == GUI_EVENT_KEY && e.key == 'p') {
+                replied = TRUE;
                 message = MStrPrint("GUI DRAW PONG %d %d\n", TimerJiffies, TimerJiffies - e.timestamp); GuiLog(message); Free(message);
             }
             if (e.type == GUI_EVENT_RESIZE) GuiDrawScene;
@@ -37,6 +40,7 @@ U0 GuiDrawTask(U8 *data)
                 message = MStrPrint("GUI DRAW MOUSE %d %d\n", e.x, e.y); GuiLog(message); Free(message);
             }
         }
+        if (replied) {GuiDrawPresent; GuiLog("GUI DRAW PRESENTED\n");}
         Sleep(1);
     }
 }
