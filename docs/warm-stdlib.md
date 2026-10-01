@@ -323,3 +323,21 @@ requires Input and returns typed Key values. No public combined terminal token
 remains. Host/kernel capability fixtures cover attenuation, traversal, rights,
 network allow-list intersection and denied datagrams; host probes include final
 and intermediate symlinks whose outside target remains untouched.
+
+## Lessons from Top/Vim/Tmux
+
+### Top
+
+- `toInt64(Index)` compared the unsigned input against `INT64_MIN` converted to
+  unsigned, rejecting small positive values. Its lower-bound check is unnecessary;
+  only `INT64_MAX` needs checking. The conversion is now fixed.
+- Buffer/String spans and `for` ranges have inclusive end indices. Whole-string
+  output needs `length - 1`, with an explicit empty-string branch. This differs
+  from the half-open ranges normally used by terminal tools.
+- Integer remainder is `rem(a, b)`, not `%`; escape bytes must be literal bytes
+  (`\x1b` is not a Warm string escape). ANSI output and padded numbers currently
+  require application helpers because the terminal library has no formatter.
+- Record fields cannot follow a function call directly. A temporary is required
+  for `clock(...).ticks` and `nth(...).info`.
+- Updating a Buffer from one of its own elements needs a temporary before the
+  mutable borrow; this makes the evaluation and borrow lifetime explicit.

@@ -1,0 +1,19 @@
+module body Test is
+    function expect(value: Index, expected: Int64): Unit is
+        case toInt64(value) of
+            when Some(value as actual: Int64) do
+                if actual /= expected then abort("wrong conversion"); end if;
+            when None do abort("in-range index rejected");
+        end case;
+        return nil;
+    end;
+    function main(): ExitCode is
+        expect(0, 0); expect(1, 1); expect(128, 128);
+        expect(9223372036854775807, 9223372036854775807);
+        case toInt64(9223372036854775808: Index) of
+            when Some(value as n: Int64) do abort("out-of-range index accepted");
+            when None do skip;
+        end case;
+        return ExitSuccess();
+    end;
+end module body.

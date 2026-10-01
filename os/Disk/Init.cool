@@ -8,7 +8,6 @@
 #include "C:/Less.cool"
 #include "C:/Man.cool"
 #include "C:/Diff.cool"
-#include "C:/Top.cool"
 #include "C:/Warm/Warm.cool"
 #include "C:/Lua.cool"
 
@@ -21,4 +20,16 @@ U0 Cls()
 {//TempleOS's clear screen, as ANSI so the screen and the host terminal both clear.
     AnsiClear;
     AnsiHome;
+}
+
+U0 TopClose()
+{
+    AnsiReset; AnsiCursorShow; AnsiAltScreen(FALSE);
+    shell_stmt_cleanup = NULL;
+}
+U0 Top()
+{
+    shell_stmt_cleanup = &TopClose;
+    WarmRun("C:/Warm/Standard/Buffer.warmh,C:/Warm/Standard/Buffer.warm,C:/Warm/Standard/String.warmh,C:/Warm/Standard/String.warm,C:/Warm/Standard/StringBuilder.warmh,C:/Warm/Standard/StringBuilder.warm,C:/Warm/Standard/OS/Error.warm,C:/Warm/Standard/OS/Terminal.warmh,C:/Warm/Standard/OS/Terminal.warm,C:/Warm/Standard/OS/CoolOS/System.warmh,C:/Warm/Standard/OS/CoolOS/System.warm,C:/Top.warm", "TopApp:main");
+    TopClose;
 }
