@@ -117,6 +117,44 @@ I64 ExtV(...) {I64 i,s=0; for(i=0;i<argc;i++) s+=argv[i]; return s;}
     return '\n'.join(out) + '\n', count
 
 
+def liveness_source():
+    """Large generated functions in the shape of Warm's checked arithmetic.
+
+    Each function keeps one variable live across many short-lived temporaries,
+    so liveness sets reach member numbers past 64 with partial-word sizes.
+    Before FIX(11) the frontend dropped such bits and split one variable
+    into a register half and a frame half (an unwritten frame slot was read).
+    """
+    out, expected, serial = ['#include "TestBase.coolh"', 'I64 cg_live_buf[16];', 'I64 cg_live_aborts;',
+                             'U0 CGLiveAbort() {cg_live_aborts++;}'], [], 0
+    for dummies in range(0, 72, 4):
+        for ops in (10, 15):
+            body = []
+
+            def temp(ty, expr):
+                nonlocal serial
+                serial += 1
+                body.extend([f'{ty} t{serial};', f't{serial} = {expr};'])
+                return f't{serial}'
+            for d in range(dummies):
+                temp('I64', str(d))
+            keep = temp('I64', 'base + 5')
+            for k in range(ops):
+                a, b = temp('I64', 'base'), temp('I64', str(8 * k))
+                hi, lo = temp('I64', '0x7fffffffffffffff'), temp('I64', '0x8000000000000000')
+                flag = temp('U8', f'(({b} > 0) && ({a} > ({hi} - {b}))) || (({b} < 0) && ({a} < ({lo} - {b})))')
+                body.append(f'if ({flag}) CGLiveAbort();')
+                ptr = temp('I64 *', temp('I64', f'({a} + {b})'))
+                body.append(f'(*({ptr})) = {temp("I64", str(k + 1))};')
+            name = f'CGLive{dummies}_{ops}'
+            out += [f'I64 {name}(I64 base) {{'] + body + [
+                f'I64 i, s = {keep} - base - 5; for (i = 0; i < {ops}; i++) s += cg_live_buf[i] * (i + 1); return s;}}',
+                f'Print("{name}:%d\\n", {name}(cg_live_buf));']
+            expected.append(f'{name}:{sum((k + 1) ** 2 for k in range(ops))}\n')
+    out.append('Print("aborts:%d\\n", cg_live_aborts);')
+    return '\n'.join(out) + '\n', ''.join(expected) + 'aborts:0\n'
+
+
 def run(cmd, log, env=None):
     with log.open('wb') as stream:
         p = subprocess.run(cmd, cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=90)
@@ -156,6 +194,15 @@ def main():
         assert 'Fnv:5003431119771845851\n' in arithmetic
         atomic = (OUT / 'T18Misc-arm64.out').read_text()
         assert atomic.startswith('L1:1\n') and '\nL4:1\n' in atomic
+        source, expected = liveness_source()
+        (OUT / 'Liveness.cool').write_text(source)
+        for target, host in [('arm64', 'coolc'), ('x86_64', 'coolc-x86_64')]:
+            image = OUT / f'Liveness-{target}.BIN'
+            run([str(ROOT/'build/coolc'), '--target', target, str(OUT/'Liveness.cool'), str(image)], OUT/f'Liveness-{target}.compile.log', env)
+            output = OUT / f'Liveness-{target}.out'
+            run([str(ROOT/'build'/host), '--run', str(image)], output)
+            assert output.read_text() == expected, f'large-function liveness ({target}): {output}'
+        print('PASS: large-function liveness (variables past 64) on arm64 and x86_64')
         segments = OUT / 'Segments.cool'
         segments.write_text('#include "TestBase.coolh"\n' + """
 _intern 0x15 U8 *Fs(); extern U8 *__Fs();

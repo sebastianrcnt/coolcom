@@ -441,11 +441,23 @@ U0 BitSetAdd(CBitSet *bs, I64 b) {
     I64 *new;
     if (0x10000 < b) throw('Compiler');
     if (bs->body_sz <= b >> 3) {
+#ifdef COOLC_FRONTEND_FIXES
+        // FIX(11): Whole U64 words. BitSetAddAll/BitSetRemAll work a word at a time, so
+        // 8 + b >> 3 bytes left a partial last word whose bits they dropped: liveness lost
+        // variables numbered 64 and up, splitting one variable into webs that the register
+        // coloring placed apart (one in a register, one on the frame) in large functions.
+        new = CAlloc(((b >> 6) + 1) << 3);
+        MemCpy(new, bs->body, bs->body_sz);
+        Free(bs->body);
+        bs->body = new;
+        bs->body_sz = ((b >> 6) + 1) << 3;
+#else
         new = CAlloc(8 + b >> 3);
         MemCpy(new, bs->body, bs->body_sz);
         Free(bs->body);
         bs->body = new;
         bs->body_sz = 8 + b >> 3;
+#endif
     }
     Bts(bs->body, b);
 }

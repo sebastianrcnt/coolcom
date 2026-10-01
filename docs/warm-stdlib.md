@@ -480,8 +480,14 @@ Implementation notes:
   (Sync exception, FAR 0x800201138; `build/stage6-inline-first-failure.log`).
   The adopted emitter reuses typed scratch slots per generated function and
   leaves expression results distinct. Actual Vim editing/saving and large-file
-  benchmarks then passed. The general Cool backend sensitivity to large generated
-  functions is not claimed fixed; no broad body inliner was introduced.
+  benchmarks then passed. No broad body inliner was introduced.
+  Root cause, fixed later in coolc (FIX(11) in `coolc/Frontend/AIWNIOS_CodeGen.cool`):
+  liveness bit sets were sized `8 + b >> 3` bytes, but their union/difference work in
+  whole U64 words, so bits of variables numbered 64 and up in a partial last word were
+  dropped. Register coloring then split one variable into a register half and a frame
+  half; a frame slot that was never written was read (here a stale kernel address).
+  With the fix the fresh-temporary inliner passes the same Vim benchmark;
+  `make codegen-test` checks generated functions past that boundary on both targets.
 - Format's numeric output is split into small helpers; signed magnitude handles
   INT64_MIN without negating it directly. String.fromLiteral and StringBuilder's
   copy loops now use `until`, also handling empty strings without subtraction.
