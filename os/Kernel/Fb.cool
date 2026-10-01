@@ -54,6 +54,7 @@ class CFb
 };
 
 CFb fb;
+Bool gui_active; // Gui.cool owns scanout while the desktop is active.
 // The generated Vulkan layer stays on disk, owned by a resident compiler task.
 U8 *venus_frame_hook;  // U0 (*)(Bool all, I64 scroll, I64 cx, I64 cy, I64 cells)
 U8 *venus_fill_hook;   // U0 (*)(I64 x, I64 y, I64 w, I64 h, I64 rgb)
@@ -160,26 +161,26 @@ I64 FbBlend(I64 fg, I64 bg, I64 a)
     return r << 16 | g << 8 | b;
 }
 
-U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = FALSE)
+U0 FbGlyph(U8 *target, I64 stride, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = FALSE)
 {//Draw cp over cells cells at col,row (Glyph.cool). A code point the font lacks, or
     //whose glyph is not cells wide, is a '?' in each cell.
     CGlyph g;
     U8 *src, *line;
     U32 *p;
-    I64 y, x, i, bits, n = cells * font.cw, s, sw, a, y0 = row * font.ch, x0 = col * font.cw;
+    I64 y, x, i, bits, n = cells * font.cw, s, sw, a;
     if (cp == ' ') {
-        FbBackFill(x0, y0, n, font.ch, bg);
+        for (y = 0; y < font.ch; y++) {p = target + y * stride; for (x = 0; x < n; x++) p[x] = bg;}
         return;
     }
     if (!GlyphGet(cp, cells, bold, &g)) {
         for (x = 0; x < cells; x++)
-            FbBackGlyph(col + x, row, '?', 1, fg, bg, bold);
+            FbGlyph(target + x * font.cw * 4, stride, '?', 1, fg, bg, bold);
         return;
     }
     if (g.bpp == 8) {
         src = g.data;
         for (y = 0; y < font.ch; y++) {
-            p = fb.back + FbBackY(y0 + y) * fb.stride + x0 * 4;
+            p = target + y * stride;
             for (x = 0; x < n; x++) {
                 a = *src++;
                 if (!a) p[x] = bg;
@@ -193,7 +194,7 @@ U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = 
     s = g.scale;
     sw = cells * 8;
     if (g.x || g.y || sw * s != n || 16 * s != font.ch)
-        FbBackFill(x0, y0, n, font.ch, bg);
+        for (y = 0; y < font.ch; y++) {p = target + y * stride; for (x = 0; x < n; x++) p[x] = bg;}
     src = g.data;
     for (y = 0; y < 16; y++) {
         if (cells == 2) {
@@ -202,7 +203,7 @@ U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = 
         } else
             bits = *src++;
         for (i = 0; i < s; i++) {
-            line = fb.back + FbBackY(y0 + g.y + y * s + i) * fb.stride + (x0 + g.x) * 4;
+            line = target + (g.y + y * s + i) * stride + g.x * 4;
             p = line;
             for (x = sw - 1; x >= 0; x--) {
                 if ((bits >> x) & 1)
@@ -214,6 +215,11 @@ U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = 
             }
         }
     }
+}
+
+U0 FbBackGlyph(I64 col, I64 row, I64 cp, I64 cells, I64 fg, I64 bg, Bool bold = FALSE)
+{
+    FbGlyph(fb.back + FbBackY(row * font.ch) * fb.stride + col * font.cw * 4, fb.stride, cp, cells, fg, bg, bold);
 }
 
 U0 FbBackCell(I64 col, I64 row, CVtCell *c, I64 cells)
@@ -310,6 +316,7 @@ U0 FbSpan(I64 row, I64 x0, I64 x1)
 
 U0 FbRenderLocked()
 {//One frame; the caller holds fb.render_lock with IRQs masked.
+    if (gui_active) return;
     CVTerm *v = fb.vt;
     CVtCell *p, *d;
     I64 x, y, n, cols = fb.cols, rows = fb.rows, scrolled, cx = 0, cy = 0, cw = 0;
@@ -449,7 +456,7 @@ U0 FbRenderUnlock(I64 daif)
 U0 FbRender()
 {//Draw a frame now, unless another core is drawing one.
     I64 daif;
-    if (!fb.base)
+    if (!fb.base || gui_active)
         return;
     daif = ArchDaif;
     ArchIrqOff;
@@ -500,7 +507,7 @@ I64 FbIdleJiffies()
 
 U0 FbTick()
 {//From the timer interrupt on core 0.
-    if (!fb.base)
+    if (!fb.base || gui_active)
         return;
     fb.ticking = TRUE;
     if (fb.pending && (jiffies - fb.last_put >= FbIdleJiffies || jiffies - fb.last_render >= FbFrameJiffies))
@@ -512,7 +519,7 @@ U0 FbTick()
 I64 FbNextJiffy()
 {//When the renderer next wants the core-0 tick (IdleWait, Sched.cool); JIFFY_NEVER if not.
     I64 a, b;
-    if (!fb.base || !fb.pending)
+    if (!fb.base || gui_active || !fb.pending)
         return JIFFY_NEVER;
     a = fb.last_put + FbIdleJiffies;
     b = fb.last_render + FbFrameJiffies;
@@ -863,7 +870,7 @@ U0 FbDisplayTask(U8 *data)
     no_warn data;
     while (gpu.active) {
         Sleep(50);
-        if (VioRd(d, VIO_CONFIG) & 1) {
+        if (!gui_active && (VioRd(d, VIO_CONFIG) & 1)) {
             // Clear first: changes during GET_DISPLAY_INFO remain pending.
             VioWr(d, VIO_CONFIG + 4, 1); VioWr(d, VIO_ISR_ACK, 2);
             if (GpuDisplayInfo(&w, &h)) {
