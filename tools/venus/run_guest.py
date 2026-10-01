@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Run an actual guest Venus client on the real optional renderer."""
-import importlib.util
 import os
 from pathlib import Path
 import subprocess
 import sys
 import time
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'tools'))
+import testvm
 OUT = ROOT / 'build/venus-test'
 OUT.mkdir(parents=True, exist_ok=True)
 def run(args):
@@ -15,8 +16,7 @@ def guest(source, name, screenshot=False):
     image=OUT/f'{name}.png'
     if screenshot: image.unlink(missing_ok=True)
     disk=OUT/f'{name}.img'
-    with disk.open('wb') as f: f.truncate(64<<20)
-    run(['mformat','-i',disk,'-F','::'])
+    testvm.create_disk(disk)
     run(['mmd','-i',disk,'::Vulkan'])
     for p in [ROOT/'build/venus/Vulkan.cool',ROOT/'os/Vulkan/Gfx.cool']:
         run(['mcopy','-o','-i',disk,p,'::Vulkan/'])
@@ -45,9 +45,7 @@ def guest(source, name, screenshot=False):
     print(f'venus-{name}-test: guest PASS ({log})')
     if screenshot: check_triangle(image)
 def check_triangle(path):
-    spec=importlib.util.spec_from_file_location('verify',ROOT/'tools/kernel-verify.py')
-    verify=importlib.util.module_from_spec(spec); spec.loader.exec_module(verify)
-    width,height,rows=verify.read_png(path)
+    width,height,rows=testvm.read_png(path)
     assert (width,height)==(256,256), f'wrong scanout dimensions: {width}x{height}'
     checked=painted=0
     for y,row in enumerate(rows):

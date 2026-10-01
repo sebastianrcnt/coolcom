@@ -134,7 +134,7 @@ build/m1n1-payload.bin: build/kernel.Image tools/m1n1-payload.py tools/vendor-m1
 # Image linked 4 MiB higher differs from the first exactly at the table's sites.
 reloc-check: build/kernel.Image
 	python3 tools/reloc-check.py --elf build/cool.elf
-	mkdir -p build/alt
+	rm -rf build/alt; mkdir -p build/alt  # nothing tracks which base build/alt was made for
 	cp build/Kernel.BIN build/alt/Kernel.BIN
 	$(MAKE) B=build/alt IMAGE_BASE=0x800600000 build/alt/kernel.Image
 	python3 tools/reloc-check.py --elf build/alt/cool.elf

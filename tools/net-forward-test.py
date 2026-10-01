@@ -3,16 +3,18 @@
 server (HttpServe) reached from the host, and Wget from a host HTTP server to C:.
 Needs no Internet access. Usage: net-forward-test.py kernel.Image"""
 import http.server
-import pathlib
 import socket
 import subprocess
+
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import testvm
+from testvm import ROOT
+
 D = ROOT / 'build/net-forward-test'
 
 
@@ -78,9 +80,7 @@ def main():
     kernel = sys.argv[1]
     D.mkdir(parents=True, exist_ok=True)
     disk = D / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(32 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'NETFWD', '::'], check=True)
+    testvm.create_disk(disk, 32 * 1024 * 1024, label='NETFWD')
     hello = b'Hello from C: over HTTP\n' * 100
     (D / 'Hello.txt').write_bytes(hello)
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(D / 'Hello.txt'), '::Hello.txt'], check=True)
@@ -96,9 +96,8 @@ def main():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     hport, sport, wport = srv.server_address[1], free_port(), free_port()
     log = (D / 'vm.log').open('wb')
-    vm = subprocess.Popen(['build/coolvm', '--headless', '--cpus', '2', '--mem', '1024', '--timeout', '60',
-                           '--disk', str(disk), '--net-forward', f'{sport}:23', '--net-forward', f'{wport}:80',
-                           kernel], stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT)
+    vm = subprocess.Popen(testvm.vm_command(kernel, timeout=60, disk=disk,
+        extra=['--net-forward', f'{sport}:23', '--net-forward', f'{wport}:80']), stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT)
     try:
         wait_log(b'compiler loaded')
         wait_log(b'net: DHCP address')

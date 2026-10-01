@@ -1,41 +1,29 @@
 #!/usr/bin/env python3
 """Real keyboard -> Tmux -> independent JIT shells -> framebuffer pixels."""
-import importlib.util
-import pathlib
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import testvm
+from testvm import ROOT
 
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    obj = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(obj)
-    return obj
-
-vim = module('vim_test', ROOT / 'tools/vim-test.py')
-verify = module('kernel_verify', ROOT / 'tools/kernel-verify.py')
-vim.KEYS[' '] = (57, False)
-vim.KEYS[chr(92)] = (43, False)
-vim.KEYS['|'] = (43, True)
 
 def text(s):
-    return vim.typed(s)
+    return testvm.typed(s)
 
 def line(s):
-    return vim.typed(s + "\n")
+    return testvm.typed(s + "\n")
 
 def prefix(ch):
-    return '1 29 1\n' + vim.keys_of(48) + '1 29 0\n' + text(ch)
+    return '1 29 1\n' + testvm.keys_of(48) + '1 29 0\n' + text(ch)
 
 # Tmux repaints at most 30 times a second, by changed cells: text typed into a pane (its echo)
 # is not contiguous in the output, and text a statement prints is only seen if it stays on the
 # screen until the next repaint. A wait in a pane matches text printed in one piece that stays.
 
 def check_pixels(d, labels):
-    px, font = verify.screen_of(d, 'screen.png'), verify.load_font()
+    px, font = testvm.screen_of(d, 'screen.png'), testvm.load_font()
     for label, col in labels:
-        bits = verify.draw_text(font, label, len(label))
+        bits = testvm.draw_text(font, label, len(label))
         assert any(all(px(col * 8 + x, y0 * 16 + y) == ((255, 255, 255) if on else (0, 0, 0))
                        for y, row in enumerate(bits) for x, on in enumerate(row))
                    for y0 in range(28)), f'{label} absent from its pane; see {d}/vm.log and screen.png'
@@ -47,15 +35,13 @@ def vim_panes(kernel):
     d.mkdir(parents=True, exist_ok=True)
     (d / 'screen.png').unlink(missing_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'TMUXVIM', '::'], check=True)
-    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    testvm.create_disk(disk, 64 * 1024 * 1024, label='TMUXVIM')
+    testvm.install_disk_files(disk)
     for name, contents in [('Left.txt', b'abc\n'), ('Right.txt', b'xyz\n'), ('Page.txt', b'x\n' * 60)]:
         p = d / name
         p.write_bytes(contents)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
-    script = vim.BOOT + 'delay 2500\n' + line('Tmux;') + 'delay 1500\n' + prefix('%') + 'delay 1500\n'
+    script = testvm.BOOT + 'delay 2500\n' + line('Tmux;') + 'delay 1500\n' + prefix('%') + 'delay 1500\n'
     script += line('Vim("C:/Right.txt");') + 'delay 300\n' + text('iRIGHT\x1b')
     script += prefix('o') + line('Vim("C:/Left.txt");') + 'delay 300\n' + text('iLEFT\x1b')
     # Finishing the right statement and executing another must leave left Vim alive.
@@ -66,8 +52,8 @@ def vim_panes(kernel):
     script += line('I64 BreakReturned=0,FaultReturned=0;')
     script += line('U0 BreakEditor(){Vim("C:/Left.txt"); BreakReturned=1;}')
     script += line('U0 FaultEditor(){VimOpen("C:/Left.txt"); I64 *bad=0; *bad=1; FaultReturned=1;}')
-    script += 'delay 500\n' + line('Print("BRK%d\\n", 1); Sleep(200); BreakEditor;') + vim.wait('BRK1') + 'delay 1000\n'
-    script += '1 29 1\n1 56 1\n' + vim.keys_of(46) + '1 56 0\n1 29 0\n' + 'delay 300\n'
+    script += 'delay 500\n' + line('Print("BRK%d\\n", 1); Sleep(200); BreakEditor;') + testvm.wait('BRK1') + 'delay 1000\n'
+    script += '1 29 1\n1 56 1\n' + testvm.keys_of(46) + '1 56 0\n1 29 0\n' + 'delay 300\n'
     script += line('I64 Broken=vim_active || shell_stmt_cleanup || BreakReturned;')
     script += line('FaultEditor;') + 'delay 300\n'
     script += line('Broken+=vim_active || shell_stmt_cleanup || FaultReturned;')
@@ -75,20 +61,17 @@ def vim_panes(kernel):
     script += prefix('o') + text('A!\x1b:wq\n') + 'delay 200\n'
     script += line('I64 bad = ;')  # a compile error in a pane prints ERROR
     script += line('Vim("C:/Page.txt");') + 'delay 300\n'
-    script += vim.keys_of(109) + 'delay 100\n'  # PageDown: 28 text rows in a 29-row pane
-    script += '1 29 1\n' + vim.keys_of(22) + '1 29 0\n'  # Ctrl+U: back 14 rows
+    script += testvm.keys_of(109) + 'delay 100\n'  # PageDown: 28 text rows in a 29-row pane
+    script += '1 29 1\n' + testvm.keys_of(22) + '1 29 0\n'  # Ctrl+U: back 14 rows
     script += text('iPAGE\x1b:wq\n') + 'delay 200\n'
     script += line('Print("\\x1b[2J\\x1b[HRIGHT-CLEAN-%d\\n",vim_active || shell_stmt_cleanup);')
-    script += vim.finish('RIGHT-CLEAN-0', 300)
+    script += testvm.finish('RIGHT-CLEAN-0', 300)
     (d / 'input.txt').write_text(script)
-    with (d / 'vm.log').open('wb') as out:
-        proc = subprocess.run(['gtimeout', '-k', '2', '30', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2',
-                               '--mem', '1024', '--timeout', '25', '--width', '640', '--height', '480',
-                               '--input-script', str(d / 'input.txt'), '--disk', str(disk),
-                               '--screenshot', str(d / 'screen.png'), kernel], stdout=out, stderr=subprocess.STDOUT)
+    proc = testvm.run_vm(testvm.vm_command(kernel, no_venus=True, timeout=25, input_script=d / 'input.txt', disk=disk,
+        screenshot=d / 'screen.png', size=(640, 480), host_timeout=30), d / 'vm.log')
     assert proc.returncode in (0, 124), f'Vim pane VM exited {proc.returncode}; see {d}/vm.log'
     log = (d / 'vm.log').read_text(errors='replace')
-    vim.check_init_log(log)
+    testvm.check_init_log(log)
     after_boot = log.split('SELFTEST PASS', 1)[-1]
     assert 'heap overflow' not in after_boot and '*** Exception:' not in after_boot, 'kernel failure in Vim panes'
     assert 'ERROR: Expected an expression' in after_boot, 'no compile error in the pane'
@@ -109,51 +92,45 @@ def exit_panes(kernel):
     d.mkdir(parents=True, exist_ok=True)
     (d / 'screen.png').unlink(missing_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(40 * 1024 * 1024)
-    subprocess.run(['newfs_msdos', '-F', '32', '-S', '512', '-c', '1', '-s', '81920',
-                    '-h', '16', '-u', '63', '-v', 'TMUXEXIT', str(disk)], check=True, capture_output=True)
-    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    testvm.create_disk(disk, 40 * 1024 * 1024, label='TMUXEXIT', cluster_size=512, capture_output=True)
+    testvm.install_disk_files(disk)
     # Probe each new shell before sending its next operation. Markers must
     # differ from their command echo and from earlier compositor repaints.
     def ready(n):
-        return line(f'Print("READY%d\\n", {n});') + vim.wait(f'READY{n}')
+        return line(f'Print("READY%d\\n", {n});') + testvm.wait(f'READY{n}')
 
     def full_row(marker):
         # A split pane is at most 40 columns wide. Only a repaint after its
         # sibling closes can emit this marker plus 40 contiguous spaces.
-        return vim.wait(marker + ' ' * 40)
+        return testvm.wait(marker + ' ' * 40)
 
-    restored = vim.wait('\x1b[?1049l')  # Tmux restored the invoking terminal.
-    single_window = vim.wait(' tmux [1*]  ^B')  # no background window remains
-    script = vim.BOOT + line('I64 Keep=41;') + line('Tmux;') + ready(1)
+    restored = testvm.wait('\x1b[?1049l')  # Tmux restored the invoking terminal.
+    single_window = testvm.wait(' tmux [1*]  ^B')  # no background window remains
+    script = testvm.BOOT + line('I64 Keep=41;') + line('Tmux;') + ready(1)
     script += line('exit') + restored
-    script += line('Print("BACK%d-%d\\n", Keep, tm_session==NULL);') + vim.wait('BACK41-1')
+    script += line('Print("BACK%d-%d\\n", Keep, tm_session==NULL);') + testvm.wait('BACK41-1')
     # Exit() in the right pane expands the left pane to the full terminal width.
     script += line('Tmux;') + ready(2) + prefix('%') + ready(3)
     script += line('Exit();') + full_row('READY2')
-    script += line('Print("LEFT%d-%d\\n", 2, VtCurrent->cols);') + vim.wait('LEFT2-80')
+    script += line('Print("LEFT%d-%d\\n", 2, VtCurrent->cols);') + testvm.wait('LEFT2-80')
     # Closing the selected window focuses the surviving window.
     script += prefix('c') + ready(4) + line('exit') + single_window
-    script += line('Print("WIN%d\\n", 3);') + vim.wait('WIN3')
+    script += line('Print("WIN%d\\n", 3);') + testvm.wait('WIN3')
     # Wait inside the guest for focus to move away before exiting. A timed
     # Sleep can finish before the host's next key events under parallel load.
     background_exit = line('while(vt_focus==VtCurrent) Yield; Exit();')
     script += prefix('c') + ready(5) + background_exit + prefix('n') + single_window
-    script += line('Print("HIDDEN%d\\n", 4);') + vim.wait('HIDDEN4')
+    script += line('Print("HIDDEN%d\\n", 4);') + testvm.wait('HIDDEN4')
     script += prefix('%') + ready(6) + background_exit + prefix('o') + full_row('HIDDEN4')
-    script += line('Print("INACTIVE%d-%d\\n", 5, VtCurrent->cols);') + vim.wait('INACTIVE5-80')
+    script += line('Print("INACTIVE%d-%d\\n", 5, VtCurrent->cols);') + testvm.wait('INACTIVE5-80')
     script += line('Exit();') + restored
     script += line('Print("\\x1b[2J\\x1b[HBACK%d-%d\\n", Keep+1, tm_session==NULL);')
-    script += vim.finish('BACK42-1', 300)
+    script += testvm.finish('BACK42-1', 300)
     (d / 'input.txt').write_text(script)
-    with (d / 'vm.log').open('wb') as out:
-        proc = subprocess.run(['gtimeout', '-k', '2', '50', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2',
-                               '--mem', '1024', '--timeout', '45', '--width', '640', '--height', '480',
-                               '--input-script', str(d / 'input.txt'), '--disk', str(disk),
-                               '--screenshot', str(d / 'screen.png'), kernel], stdout=out, stderr=subprocess.STDOUT)
+    proc = testvm.run_vm(testvm.vm_command(kernel, no_venus=True, timeout=45, input_script=d / 'input.txt', disk=disk,
+        screenshot=d / 'screen.png', size=(640, 480), host_timeout=50), d / 'vm.log')
     log = (d / 'vm.log').read_text(errors='replace')
-    vim.check_init_log(log)
+    testvm.check_init_log(log)
     after_boot = log.split('SELFTEST PASS', 1)[-1]
     assert 'heap overflow' not in after_boot and '*** Exception:' not in after_boot, 'kernel failure'
     assert 'ERROR:' not in after_boot, 'unexpected shell exception'
@@ -169,14 +146,11 @@ def main():
     d.mkdir(parents=True, exist_ok=True)
     (d / 'screen.png').unlink(missing_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(40 * 1024 * 1024)
-    subprocess.run(['newfs_msdos', '-F', '32', '-S', '512', '-c', '1', '-s', '81920',
-                    '-h', '16', '-u', '63', '-v', 'TMUXTEST', str(disk)], check=True, capture_output=True)
-    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    testvm.create_disk(disk, 40 * 1024 * 1024, label='TMUXTEST', cluster_size=512, capture_output=True)
+    testvm.install_disk_files(disk)
     # Same symbol name in both compilers must retain different values. Left
     # sleeps while the right shell compiles and executes, then both are visible.
-    script = vim.BOOT + line('Tmux;') + 'delay 1500\n'
+    script = testvm.BOOT + line('Tmux;') + 'delay 1500\n'
     script += line('I64 Value=111;') + prefix('%') + 'delay 1500\n'
     script += line('I64 Value=222;') + prefix('"') + 'delay 1200\n'
     script += line('I64 Value=333;') + line('while (TRUE) {}') + 'delay 300\n'
@@ -185,20 +159,17 @@ def main():
     script += line('Value++;') + prefix('p') + 'delay 200\n'
     script += line('Value++;') + prefix('x') + 'delay 200\n'
     # Directional focus selects the left pane; o returns to the right later.
-    script += '1 29 1\n' + vim.keys_of(48) + '1 29 0\n' + vim.keys_of(105) + 'delay 300\n'
+    script += '1 29 1\n' + testvm.keys_of(48) + '1 29 0\n' + testvm.keys_of(105) + 'delay 300\n'
     script += line('Sleep(1500); Print("\\x1b[2J\\x1b[HLEFT-%d\\n",Value);')
     script += prefix('o') + line('Print("\\x1b[2J\\x1b[HRIGHT-%d\\n",Value);')
-    script += vim.wait('LEFT-111') + prefix('d') + 'delay 300\n' + line('Tmux;')
+    script += testvm.wait('LEFT-111') + prefix('d') + 'delay 300\n' + line('Tmux;')
     # The redraw after reattaching: row 0 holds LEFT-111, then RIGHT-223.
-    script += vim.wait('Tmux;') + vim.wait('LEFT-111') + vim.finish('RIGHT-223', 300)
+    script += testvm.wait('Tmux;') + testvm.wait('LEFT-111') + testvm.finish('RIGHT-223', 300)
     (d / 'input.txt').write_text(script)
-    with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '35', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2',
-                        '--mem', '1024', '--timeout', '23', '--width', '640', '--height', '480',
-                        '--input-script', str(d / 'input.txt'), '--disk', str(disk),
-                        '--screenshot', str(d / 'screen.png'), sys.argv[1]], stdout=out, stderr=subprocess.STDOUT)
+    testvm.run_vm(testvm.vm_command(sys.argv[1], no_venus=True, timeout=23, input_script=d / 'input.txt', disk=disk,
+        screenshot=d / 'screen.png', size=(640, 480), host_timeout=35), d / 'vm.log')
     log = (d / 'vm.log').read_text(errors='replace')
-    vim.check_init_log(log)
+    testvm.check_init_log(log)
     after_boot = log.split('SELFTEST PASS', 1)[-1]
     assert 'heap overflow' not in after_boot, 'heap corruption during shell compilation'
     assert 'ERROR:' not in after_boot and 'Exception:' not in after_boot, 'unexpected shell/kernel exception'
