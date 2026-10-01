@@ -19,10 +19,7 @@ static int coolcom_readline(lua_State *L, char *buffer, const char *prompt,
   if (firstline && end - start == 4 && strncmp(start, "exit", 4) == 0) {
     undefined = lua_getglobal(L, "exit") == LUA_TNIL;
     lua_pop(L, 1);
-    if (undefined) {
-      fputs("Use os.exit() or Ctrl+D on an empty line to exit Lua.\n", stdout);
-      buffer[0] = '\0';
-    }
+    if (undefined) return 0;  /* `exit` leaves like Ctrl+D (unless a script defined it) */
   }
   return 1;
 }

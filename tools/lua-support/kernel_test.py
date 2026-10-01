@@ -29,7 +29,8 @@ start_repl = testvm.typed_line('Lua;') + 'wait Lua 5.4.9\nwait > \n'
 script.write_text(
     'wait Cool shell\nwait C:/> \n' + testvm.typed_line('Lua("C:/x.lua");') +
     'wait LUA TEST PASS\nwait C:/> \n' + start_repl +
-    testvm.typed_line('exit') + 'wait Use os.exit() or Ctrl+D\nwait > \n' +
+    testvm.typed_line('exit') + 'wait C:/> \n' +
+    testvm.typed_line('Print("EXIT STATUS %d\\n", lua_result);') + 'wait EXIT STATUS 0\nwait C:/> \n' + start_repl +
     # Ctrl+D with pending text must not terminate the interpreter.
     testvm.typed_line('print("LUA REPL "..string.upper("ok"))', enter=False) +
     ctrl_d + testvm.typed_line('') + 'wait LUA REPL OK\nwait > \n' +
@@ -55,6 +56,6 @@ proc = testvm.run_vm(testvm.vm_command(ROOT / 'build/kernel.Image', timeout=40,
 s = log.read_text(errors='replace').split('Cool shell:', 1)[-1]
 assert proc.returncode == 0, f'Lua VM exited with status {proc.returncode}:\n{s[-6000:]}'
 assert s.count('LUA TEST PASS') == 2 and 'LUA REPL OK' in s and 'ERROR:' not in s and 'Free: bad pointer' not in s, s[-6000:]
-assert s.count('Use os.exit() or Ctrl+D') == 1 and 'EOF STATUS 0' in s, s[-6000:]
+assert 'EXIT STATUS 0' in s and 'EOF STATUS 0' in s, s[-6000:]
 assert 'EOF RESET OK' in s and 'CONTINUATION OK' in s and '<eof>' in s, s[-6000:]
-print('lua-kernel-test: files, REPL exit hint, Ctrl+D, continuation EOF and reinvocation PASS')
+print('lua-kernel-test: files, REPL exit, Ctrl+D, continuation EOF and reinvocation PASS')

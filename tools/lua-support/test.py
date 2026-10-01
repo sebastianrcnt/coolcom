@@ -28,10 +28,10 @@ try:
                          stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     os.close(slave)
     slave = None
-    os.write(master, b'exit\nprint("PTY EOF OK")\n\x04')
+    os.write(master, b'print("PTY EOF OK")\nexit\n')
     stdout, stderr = p.communicate(timeout=15)
     assert p.returncode == 0 and b'PTY EOF OK' in stdout, (p.returncode, stdout, stderr)
-    assert b'Use os.exit() or Ctrl+D' in stdout and b'\nnil\n' not in stdout, stdout
+    assert b'\nnil\n' not in stdout, stdout
 finally:
     if slave is not None:
         os.close(slave)
@@ -39,13 +39,13 @@ finally:
     if p.poll() is None:
         p.kill()
         p.wait()
-# The hint is REPL-only, and must not intercept defined globals or continuations.
-p = run('-i', input=b'  exit  \nexit = 42\nexit\nprint("exit")\n'
-                    b'x = [[\nexit\n]]\nprint(x == "exit\\n")\n')
-assert p.returncode == 0 and p.stdout.count(b'Use os.exit() or Ctrl+D') == 1, (p.stdout, p.stderr)
+# `exit` leaves the REPL, but not when a global named exit exists or inside a continuation.
+p = run('-i', input=b'exit = 42\nexit\nx = [[\nexit\n]]\nprint(x == "exit\\n")\n'
+                    b'exit = nil\n  exit  \nprint("AFTER EXIT")\n')
+assert p.returncode == 0 and b'AFTER EXIT' not in p.stdout, (p.stdout, p.stderr)
 assert b'42\n' in p.stdout and b'true\n' in p.stdout and not p.stderr, (p.stdout, p.stderr)
 p = run('-e', 'assert(exit == nil)')
 assert p.returncode == 0 and not p.stdout and not p.stderr, (p.stdout, p.stderr)
 p = run(ROOT / 'build/lua/missing-file.lua')
 assert p.returncode != 0 and b'cannot open' in p.stderr, (p.returncode, p.stdout, p.stderr)
-print('lua-test: Lua libraries, REPL exit hint, pipe/terminal EOF and file errors PASS')
+print('lua-test: Lua libraries, REPL exit, pipe/terminal EOF and file errors PASS')

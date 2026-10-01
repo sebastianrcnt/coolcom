@@ -8,11 +8,10 @@ The release includes its MIT license in doc/readme.html and the source headers.
 `tools/lua x.lua` builds and runs the translated interpreter with build/coolc;
 `tools/lua` opens its REPL. `make disk-install` installs the shared libc, the Lua
 loader and translated runtime. In the OS, use `Lua("C:/x.lua");` or `Lua;`.
-`os.exit()` or Ctrl+D on an empty input line returns to the shell. Bare `exit`
-prints this usage hint and keeps the REPL open: upstream Lua 5.4 evaluates it as
-an undefined global (`nil`), rather than an exit command. Defined `exit` globals
-and continuation lines retain their Lua meaning. The host REPL has the same hint
-and accepts terminal/pipe EOF. Invocation allocations and file streams are
+`exit`, `os.exit()` or Ctrl+D on an empty input line returns to the shell. Bare
+`exit` acts like Ctrl+D (upstream Lua 5.4 would print `nil`); a defined `exit` global
+and continuation lines keep their Lua meaning. The host REPL behaves the same and
+accepts terminal/pipe EOF. Invocation allocations and file streams are
 released by LibCRun. Each call starts a new Lua state. The large runtime is loaded
 on the first call in each shell, outside the kernel image and compiler seed.
 
@@ -30,7 +29,7 @@ The standard interpreter's options (-e, -i, -v, etc.) remain available on the ho
 C float is widened by c2hc; Lua's default lua_Number is already double.
 
 `make lua-test` runs a short host smoke test (strings, tables, closures, pcall,
-string.format, io.write, errors, exit hints and pipe/terminal EOF).
+string.format, io.write, errors, `exit` and pipe/terminal EOF).
 `make lua-kernel-test` boots the OS and checks file execution, REPL, empty-line
 Ctrl+D, continuation EOF and repeated invocation after EOF. Both are part of make test,
 as are the c2hc and stbtt comparisons.
