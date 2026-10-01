@@ -2,11 +2,15 @@ import Standard.Vector (Vector, length as vectorLength, borrowGet, slice as vect
 import OS.Gui (Window, Rect, fill, line, styledText, pattern, invert, setClip, clearClip, bitmap, blit);
 import OS.Error (IoError);
 import OS.Ui.Text (width as textWidth, wrapLine, Line, lineHeight, fit, following, rangeWidth);
-import OS.Ui.Engine (Ephemeral, sliderThumbX, caretX, thumbWidth, textInset);
+import OS.Ui.Engine (Ephemeral, State, ephemeral, sliderThumbX, caretX, thumbWidth, textInset, Bar, barOf, lineCountOf, linesOf,
+    viewLines, fullRows);
+import OS.Ui.Text (Lines, destroyLines, lineTotal, lineStart, lineEnd);
 import OS.Ui.Tree (Node, Geom, textSpan, has, enabled, intersect, maxInt, minInt, clampInt,
     kindRoot, kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindCheckbox, kindRadio,
     kindSlider, kindProgress, kindSeparator, kindImage, kindTextBox, kindToolbar, kindStatus,
-    flagDefault, flagPlain, flagWrap, flagCenter, flagSecure, defaultRing, checkSize, splitBar, toIndex64);
+    flagDefault, flagPlain, flagWrap, flagCenter, flagSecure, defaultRing, checkSize, splitBar, toIndex64, toInt,
+    kindList, kindTable, kindTreeView, kindTextView, kindScroll, kindListRow, kindHeader, kindCell, listLike, listBody,
+    headerHeight, listInset, rowHeight, scrollBarWidth);
 module body OS.Ui.Draw is
     -- The classic Macintosh look, one bit: black on white, 50% gray patterns,
     -- rounded buttons with a bold default ring, inverted pressed state. All
@@ -132,7 +136,8 @@ module body OS.Ui.Draw is
     -- Paint one node clipped to region (already the kernel clip).
     generic [R: Region]
     function paint(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool,
-        e: Ephemeral, clip: Rect, pictures: &[Vector[Picture]]): Unit is
+        state: &[State], clip: Rect, pictures: &[Vector[Picture]]): Unit is
+        let e: Ephemeral := ephemeral(state, ps[i].ident);
         let k: Int64 := ps[i].kind;
         let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
         let on: Bool := enabled(ps, i);
@@ -178,6 +183,19 @@ module body OS.Ui.Draw is
             else pattern(&~w, inner, stripes, black, white); end if;
         else if k = kindTextBox then
             paintTextBox(&~w, all, ps, gs, i, r, focused, on, e, clip);
+        else if listLike(k) then
+            paintList(&~w, all, ps, gs, i, r, focused, state);
+        else if k = kindHeader then
+            paintHeader(&~w, all, ps, gs, i, r);
+        else if k = kindListRow then
+            paintRow(&~w, all, ps, gs, i, r, pictures);
+        else if k = kindCell then
+            paintCell(&~w, all, ps, gs, i, r);
+        else if k = kindScroll then
+            box(&~w, r, black);
+            paintBar(&~w, barOf(ps, gs, i, state, 0));
+        else if k = kindTextView then
+            paintTextView(&~w, all, ps, gs, i, r, focused, on, e, clip, state);
         else if k = kindImage then
             picture(&~w, r.x + (r.width - ps[i].low) / 2, r.y + (r.height - ps[i].high) / 2, ps[i].value, black, pictures);
         else if k = kindSplit then
@@ -263,6 +281,129 @@ module body OS.Ui.Draw is
                 invert(&~w, rect(minInt(caret, other), y, maxInt(caret, other) - minInt(caret, other), lineHeight));
             end if;
         end if;
+        setClip(&~w, clip);
+        return nil;
+    end;
+    ------------------------------------------------------------------ data views
+
+    -- Arrows for scroll bars, sort marks and disclosure triangles (7x4 / 4x7).
+    function arrowUp(): Span[Nat8, Static] is return "\x10\x38\x7c\xfe"; end;
+    function arrowDown(): Span[Nat8, Static] is return "\xfe\x7c\x38\x10"; end;
+    function triangleRight(): Span[Nat8, Static] is return "\x80\xc0\xe0\xf0\xe0\xc0\x80"; end;
+    -- The classic scroll bar: arrow boxes, gray track, white square thumb;
+    -- an inactive bar (nothing to scroll) is plain white.
+    function paintBar(w: &![Window], b: Bar): Unit is
+        let r: Rect := rect(b.x, b.y, scrollBarWidth, b.length);
+        fill(&~w, r, white); box(&~w, r, black);
+        if b.length < 2 * scrollBarWidth then return nil; end if;
+        fill(&~w, rect(b.x, b.y + scrollBarWidth - 1, scrollBarWidth, 1), black);
+        fill(&~w, rect(b.x, b.y + b.length - scrollBarWidth, scrollBarWidth, 1), black);
+        bitmap(&~w, rect(b.x + 4, b.y + 5, 7, 4), arrowUp(), 1, black);
+        bitmap(&~w, rect(b.x + 4, b.y + b.length - 10, 7, 4), arrowDown(), 1, black);
+        if b.active then
+            pattern(&~w, rect(b.x + 1, b.y + scrollBarWidth, scrollBarWidth - 2, b.length - 2 * scrollBarWidth), gray, black, white);
+            let thumb: Rect := rect(b.x, b.thumb, scrollBarWidth, scrollBarWidth);
+            fill(&~w, thumb, white); box(&~w, thumb, black);
+        end if;
+        return nil;
+    end;
+    -- List frame (two pixels when focused), white body, scroll bar.
+    generic [R: Region]
+    function paintList(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, focused: Bool, state: &[State]): Unit is
+        box(&~w, r, black);
+        if focused then box(&~w, inset(r, 1), black); else box(&~w, inset(r, 1), white); end if;
+        let area: Rect := listBody(ps, gs, i);
+        fill(&~w, area, white);
+        let header: Int64 := headerHeight(ps, i);
+        if header > 0 then
+            fill(&~w, rect(r.x + listInset, r.y + listInset, r.width - 2 * listInset, header - 1), white);
+            fill(&~w, rect(r.x + listInset, r.y + listInset + header - 1, r.width - 2 * listInset, 1), black);
+        end if;
+        paintBar(&~w, barOf(ps, gs, i, state, 0));
+        return nil;
+    end;
+    -- A column title with its right rule and, when sorted, a direction mark.
+    generic [R: Region]
+    function paintHeader(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect): Unit is
+        let list: Index := ps[i].parent;
+        var column: Int64 := 0; var c: Index := ps[list].first;
+        while c /= 0 and c /= i do if ps[c].kind = kindHeader then column := column + 1; end if; c := ps[c].next; end while;
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        var room: Int64 := r.width - 8;
+        let sorted: Bool := ps[list].aux >= 0 and ps[list].aux / 2 = column;
+        if sorted then room := room - 12; end if;
+        fittedText(&~w, r.x + 4, r.y + (r.height - lineHeight) / 2, t, room, black, styleBold);
+        if sorted then
+            var mark: Span[Nat8, Static] := arrowUp(); if ps[list].aux % 2 = 1 then mark := arrowDown(); end if;
+            bitmap(&~w, rect(r.x + r.width - 13, r.y + r.height / 2 - 2, 7, 4), mark, 1, black);
+        end if;
+        if ps[i].next /= 0 and ps[ps[i].next].kind = kindHeader then fill(&~w, rect(r.x + r.width - 1, r.y, 1, r.height), black); end if;
+        return nil;
+    end;
+    -- A list or tree row: inverted when selected; trees indent and show a triangle.
+    generic [R: Region]
+    function paintRow(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, pictures: &[Vector[Picture]]): Unit is
+        let list: Index := ps[i].parent;
+        let selected: Bool := ps[list].high = ps[i].value;
+        var fg: Int64 := black; if selected then fill(&~w, r, black); fg := white; end if;
+        var x: Int64 := r.x + 4;
+        if ps[list].kind = kindTreeView then
+            x := r.x + 2 + ps[i].low * 16;
+            if (ps[i].high & 1) /= 0 then
+                if (ps[i].high & 2) /= 0 then bitmap(&~w, rect(x + 4, r.y + 7, 7, 4), arrowDown(), 1, fg);
+                else bitmap(&~w, rect(x + 5, r.y + 5, 4, 7), triangleRight(), 1, fg); end if;
+            end if;
+            x := x + 16;
+        end if;
+        if ps[i].aux >= 1000 - 5 and ps[i].aux /= 0 then
+            picture(&~w, x, r.y + 1, ps[i].aux - 1000, fg, pictures); x := x + 20;
+        end if;
+        if ps[i].first = 0 then fittedText(&~w, x, r.y + 1, textSpan(all, ps, i), r.x + r.width - x - 2, fg, 0); end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function paintCell(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect): Unit is
+        let row: Index := ps[i].parent; let list: Index := ps[row].parent;
+        var fg: Int64 := black; if ps[list].high = ps[row].value then fg := white; end if;
+        fittedText(&~w, r.x + 4, r.y + 1, textSpan(all, ps, i), r.width - 8, fg, 0);
+        return nil;
+    end;
+    -- Multi-line text: visible lines from the first, selection, caret, scroll bar.
+    generic [R: Region]
+    function paintTextView(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, focused: Bool, on: Bool,
+        e: Ephemeral, clip: Rect, state: &[State]): Unit is
+        box(&~w, r, black);
+        if focused then box(&~w, inset(r, 1), black); else box(&~w, inset(r, 1), white); end if;
+        let view: Rect := rect(r.x + listInset, r.y + listInset, maxInt(r.width - 2 * listInset - scrollBarWidth, 0), maxInt(r.height - 2 * listInset, 0));
+        fill(&~w, view, white);
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines));
+        paintBar(&~w, barOf(ps, gs, i, state, total));
+        setClip(&~w, intersect(clip, view));
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let low: Int64 := minInt(e.a, e.b); let high: Int64 := maxInt(e.a, e.b);
+        let shown: Int64 := viewLines(ps, gs, i);
+        var k: Int64 := e.c;
+        while k < total and k <= e.c + shown do
+            let start: Index := lineStart(&lines, toIndex64(k)); let stop: Index := lineEnd(&lines, toIndex64(k));
+            let y: Int64 := view.y + (k - e.c) * lineHeight;
+            let x: Int64 := view.x + textInset;
+            text(&~w, x, y, sliceSpan(t, start, stop), black, 0);
+            if focused and on and high > low then
+                let a: Int64 := maxInt(low, toInt(start)); let b: Int64 := minInt(high, toInt(stop));
+                if a < b or (high > toInt(stop) and low <= toInt(stop) and toInt(stop) >= a) then
+                    let x0: Int64 := x + rangeWidth(t, start, toIndex64(a));
+                    var x1: Int64 := x + rangeWidth(t, start, toIndex64(maxInt(b, a)));
+                    if high > toInt(stop) then x1 := x1 + 4; end if;
+                    invert(&~w, rect(x0, y, x1 - x0, lineHeight));
+                end if;
+            end if;
+            if focused and on and high = low and toInt(start) <= e.a and (e.a < toInt(stop) or (e.a = toInt(stop) and (k = total - 1 or toInt(lineStart(&lines, toIndex64(k + 1))) > e.a))) then
+                fill(&~w, rect(x + rangeWidth(t, start, toIndex64(e.a)), y, 1, lineHeight), black);
+            end if;
+            k := k + 1;
+        end while;
+        destroyLines(lines);
         setClip(&~w, clip);
         return nil;
     end;

@@ -1,5 +1,6 @@
 import Standard.String (String, length as stringLength, slice as stringSlice, destroyString);
 import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+import Standard.Vector (Vector, make as vectorMake, push, get, length as vectorLength, destroyFree);
 module body OS.Ui.Text is
     -- UTF-8 stepping and the pixel metrics of the UI font (GNU Unifont, 8 px per
     -- terminal cell, 16 px high), shared by layout, painting and text editing.
@@ -180,5 +181,49 @@ module body OS.Ui.Text is
     -- The UTF-8 bytes of one code point.
     function codepointString(cp: Int64): String is
         var builder: StringBuilder := makeStringBuilder(); writeCodepoint(&!builder, cp); return finalize(builder);
+    end;
+    -- Display lines of a text: line k shows bytes [start(k), finish(k)). Lines
+    -- end at newlines and, when wrapping, at the last space that fits.
+    record Lines: Linear is starts: Vector[Index]; ends: Vector[Index]; end;
+    function layoutLines(bytes: Span[Nat8], available: Int64, wrap: Bool): Lines is
+        var starts: Vector[Index] := vectorMake(); var ends: Vector[Index] := vectorMake();
+        let n: Index := spanLength(bytes);
+        var at: Index := 0;
+        if not wrap then
+            push(&!starts, 0);
+            for i from 0 until n do
+                if bytes[i] = 10 then push(&!ends, i); push(&!starts, i + 1); end if;
+            end for;
+            push(&!ends, n);
+            return Lines(starts => starts, ends => ends);
+        end if;
+        var more: Bool := true;
+        while more do
+            let line: Line := wrapLine(bytes, at, available);
+            push(&!starts, at); push(&!ends, line.finish);
+            if line.resume >= n then
+                -- A final newline starts one more (empty) line.
+                if line.finish < n and bytes[line.finish] = 10 then push(&!starts, n); push(&!ends, n); end if;
+                more := false;
+            else if line.resume = at then
+                more := false;
+            else at := line.resume; end if;
+        end while;
+        return Lines(starts => starts, ends => ends);
+    end;
+    function destroyLines(lines: Lines): Unit is
+        let { starts as s: Vector[Index], ends as e: Vector[Index] } := lines; destroyFree(s); destroyFree(e); return nil;
+    end;
+    function lineTotal(lines: &[Lines]): Index is return vectorLength(&(lines->starts)); end;
+    function lineStart(lines: &[Lines], k: Index): Index is return get(&(lines->starts), k); end;
+    function lineEnd(lines: &[Lines], k: Index): Index is return get(&(lines->ends), k); end;
+    -- The line holding a byte offset (the later line at a wrap boundary).
+    function lineOf(lines: &[Lines], at: Index): Index is
+        var low: Index := 0; var high: Index := vectorLength(&(lines->starts));
+        while high - low > 1 do
+            let mid: Index := (low + high) / 2;
+            if get(&(lines->starts), mid) <= at then low := mid; else high := mid; end if;
+        end while;
+        return low;
     end;
 end module body.

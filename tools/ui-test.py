@@ -23,6 +23,7 @@ VENUS = '--venus' in sys.argv
 STAGES = sys.argv[sys.argv.index('--stage') + 1].split(',') if '--stage' in sys.argv else ['U1']
 OUT = ROOT / 'build/ui-u1'
 OUT2 = ROOT / 'build/ui-u2'
+OUT3 = ROOT / 'build/ui-u3'
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
 FRAME_BUDGET_US = 16000
 LOADED_BOUND_US = 50000
@@ -47,12 +48,12 @@ def install_burst(disk, d):
     subprocess.run(['mcopy', '-o', '-i', disk, d / 'UiBurst.cool', '::UiBurst.cool'], check=True)
 
 
-def start(script, command, ready):
+def start(script, command, ready, trace=1):
     script.typed('FontSet(NULL); Gui;\n')
     script.wait('GUI WINDOWS READY')
     # The GUI shell window has its own compiler state: define test helpers there.
     script.typed('#include "C:/UiBurst.cool"\n')
-    script.typed('gui.trace=1; ' + command + '\n')
+    script.typed(f'gui.trace={trace}; ' + command + '\n')
     script.wait(ready)
     script.wait('UI FRAME 1 ')
     script.delay(200)
@@ -61,7 +62,7 @@ def start(script, command, ready):
 def layout_of(name, command, ready, window=1):
     """Phase 1: the traced layout of an app (logical, identical at every scale)."""
     s = Script()
-    start(s, command, ready)
+    start(s, command, ready, trace=2)
     s.quit()
     log, _, _ = uivm.run(name + '-layout', s, out=ROOT / 'build' / ('ui-' + name), kernel=KERNEL, prepare=install_burst)
     found, entries = nodes(log)
@@ -390,7 +391,171 @@ def run_u2():
     print('ui-test: U2 PASS', flush=True)
 
 
+
+# ---------------------------------------------------------------- U3
+
+DATA = 'GuiRun("C:/Warm/Examples/gui/UiData.warm", "UiData:main");'
+
+
+def u3_layout():
+    found, entries = layout_of('u3', DATA, 'DATA READY')
+    kinds = {}
+    for idx, kind, x, y, w, h, text in entries:
+        kinds.setdefault(kind, []).append((x, y, w, h, text))
+    found['@table'] = kinds[22][0][:4]
+    found['@list'] = kinds[21][0][:4]
+    found['@tree'] = kinds[23][0][:4]
+    found['@text'] = kinds[24][0][:4]
+    found['@headers'] = [(x, y, w, h, t) for x, y, w, h, t in kinds[27]]
+    return found, entries
+
+
+def u3_session(mode, scale, layout):
+    found, _ = layout
+    o = uivm.client_origin(1)
+    s = Script(scale=scale, size=(800 * scale, 600 * scale))
+    start(s, DATA, 'DATA READY')
+    tx, ty, tw, th = found['@table']
+    body_top = ty + 2 + 20
+    s.shot()                                             # 0: table, list, tree, text view
+    # Wheel: twenty lines down in one burst (three rows a line).
+    s.move(o[0] + tx + tw // 2, o[1] + body_top + 60)
+    for _ in range(20):
+        s.wheel(-1)
+    s.wait('DATA TABLE first=60 ')
+    # Continuous scrolling, 40 lines 20 ms apart: every frame within budget.
+    s.delay(200); s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    for _ in range(40):
+        s.wheel(-1); s.delay(20)
+    s.wait('DATA TABLE first=180 ')
+    s.delay(200); s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    # Scroll bar: drag the thumb to the bottom.
+    bar_x = o[0] + tx + tw - 2 - 8
+    thumb_y = o[1] + body_top + 16 + 5
+    s.move(bar_x, thumb_y); s.press(); s.delay(30)
+    s.move(bar_x, o[1] + ty + th - 20); s.delay(30)
+    s.release(); s.wait('DATA TABLE first=99')
+    # Sort by size (ascending, then descending) from the header.
+    headers = {h[4]: h for h in found['@headers']}
+    size = headers['Size']
+    s.click(o[0] + size[0] + size[2] // 2, o[1] + size[1] + size[3] // 2); s.wait('sort=1 descending=false')
+    s.click(o[0] + size[0] + size[2] // 2, o[1] + size[1] + size[3] // 2); s.wait('sort=1 descending=true')
+    # Select the third visible row; double click opens it.
+    row_y = o[1] + body_top + 2 * 18 + 9
+    s.click(o[0] + tx + 40, row_y); s.wait('selected=2 ')
+    s.move(o[0] + tx + 40, row_y); s.press(); s.release(); s.wait('DATA OPEN ')
+    # Keys move the selection and keep it visible.
+    s.key('down'); s.wait('selected=3 ')
+    s.key('end'); s.wait('selected=9999 ')
+    s.key('home'); s.wait('first=0 selected=0 ')
+    # Widen the Name column by dragging its rule 40 px.
+    name = headers['Name']
+    rule_x = o[0] + name[0] + name[2] - 1
+    s.move(rule_x, o[1] + name[1] + 8); s.press(); s.delay(30)
+    for dx in (10, 20, 30, 40):
+        s.move(rule_x + dx, o[1] + name[1] + 8); s.delay(20)
+    s.release(); s.delay(200)
+    s.shot()                                             # 1: sorted by size (descending), wider Name column, first row selected
+    # Tree: open Folder 0, then its Group 30.
+    rx, ry, rw, rh = found['@tree']
+    tree_top = o[1] + ry + 2
+    s.click(o[0] + rx + 2 + 2 + 8, tree_top + 9); s.wait('DATA TOGGLE 0')
+    s.click(o[0] + rx + 2 + 2 + 16 + 8, tree_top + 3 * 18 + 9); s.wait('DATA TOGGLE 30')
+    s.click(o[0] + rx + 60, tree_top + 4 * 18 + 9); s.wait('DATA TREE selected=4')
+    s.key('down'); s.wait('DATA TREE selected=5')
+    # List: select with the mouse, scroll with the wheel.
+    lx, ly, lw, lh = found['@list']
+    s.click(o[0] + lx + 50, o[1] + ly + 2 + 18 + 9); s.wait('DATA LIST selected=1')
+    s.move(o[0] + lx + 50, o[1] + ly + 40); s.wheel(-2); s.delay(150)
+    # Text view: a new line at the end, then a word; Up moves to the line above.
+    vx, vy, vw, vh = found['@text']
+    s.click(o[0] + vx + vw - 30, o[1] + vy + vh - 12); s.delay(80)
+    s.key('end', ctrl=False)
+    s.key('enter'); s.typed('hello', delay=20); s.wait('DATA TEXT 100')
+    s.key('up', shift=True); s.delay(150)
+    s.shot()                                             # 2: tree opened, list scrolled, text view with a selection
+    # Latency phase: keyboard navigation in the table.
+    s.click(o[0] + tx + 40, o[1] + body_top + 18 + 9); s.wait('selected=1 ')
+    s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    for i in range(2, 12):                               # a key every frame or two, not back to back
+        s.key('down'); s.wait(f'selected={i} '); s.delay(40)
+    s.delay(150); s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    s.quit(200)
+    name_ = f'u3-{mode}-{scale}x'
+    log, screen, shots = uivm.run(name_, s, out=OUT3, kernel=KERNEL, mode=mode, scale=scale, size=(800 * scale, 600 * scale),
+                                  prepare=install_burst, timeout=200)
+    check_log(log)
+    return name_, log, screen, shots
+
+
+def u3_check(name, log, screen, shots, scale, layout):
+    found, entries = layout
+    reports = uivm.latencies(log)
+    # Reports: [burst scroll (unused), continuous scroll, (reset by the screenshots), keyboard]
+    scroll = reports[1]
+    keys = reports[-1]
+    assert scroll['n'] >= 10, f'scroll samples {scroll}'
+    assert scroll['p50'] < FRAME_BUDGET_US and scroll['max'] < LOADED_BOUND_US, f'scrolling {scroll}'
+    assert keys['n'] >= 5 and keys['p50'] < FRAME_BUDGET_US and keys['max'] < LOADED_BOUND_US, f'table keys {keys}'
+    # Every frame painted while scrolling: paint (compare + draw) well inside a frame,
+    # and the application cycle (update + view + layout) too.
+    segment = log.split('GUI LATENCY n=', 2)[1].split('GUI LATENCY n=', 1)[0]
+    fs = frames(segment)
+    assert len(fs) >= 10, f'{len(fs)} frames while scrolling'
+    worst = max(f[2] for f in fs)
+    assert worst < FRAME_BUDGET_US, f'paint {worst} us'
+    cycles = [int(c) for c in re.findall(r'UI CYCLE app=\d+ layout=(\d+)', segment)]
+    apps = [int(c) for c in re.findall(r'UI CYCLE app=(\d+) layout=', segment) if int(c) < 1000000]
+    assert cycles and max(cycles) < FRAME_BUDGET_US, f'layout {max(cycles)} us'
+    assert apps and max(apps) < FRAME_BUDGET_US, f'update+view {max(apps)} us'
+    # Sorting by size descending puts the largest first: rows show decreasing sizes.
+    sizes = re.findall(r'sort=1 descending=true', log)
+    assert sizes, 'sorted'
+    first_states = [int(v) for v in re.findall(r'DATA TABLE first=(\d+)', log)]
+    assert max(first_states) >= 9990 - 30, f'thumb drag reached the end {max(first_states)}'
+    _, _, rest = testvm.read_png(shots[0])
+    _, _, sorted_ = testvm.read_png(shots[1])
+    o = uivm.client_origin(1)
+    tx, ty, tw, th = found['@table']
+    P = lambda rows, x, y: pixel(rows, x * scale, y * scale)
+    # The selected (first) row is inverted after Home.
+    assert P(sorted_, o[0] + tx + tw // 2, o[1] + ty + 2 + 20 + 9) == BLACK, 'selected row inverted'
+    # Classic scroll bar: gray track, white square thumb, at the top again after Home.
+    bx = o[0] + tx + tw - 2 - 16
+    assert P(rest, bx + 8, o[1] + ty + 2 + 20 + 16 + 8) == WHITE, 'thumb at the top'
+    track = [P(rest, bx + 4 + dx, o[1] + ty + th // 2) for dx in range(4)]
+    assert BLACK in track and WHITE in track, 'gray track'
+    return {'scroll_latency': scroll, 'key_latency': keys, 'scroll_frames': len(fs), 'worst_paint_us': worst,
+            'worst_layout_us': max(cycles), 'worst_view_us': max(apps)}
+
+
+def run_u3():
+    layout = u3_layout()
+    sessions = [('cpu', 1), ('cpu', 2)] + ([('venus', 1), ('venus', 2)] if VENUS else [])
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=int(os.environ.get("UI_TEST_JOBS", "1"))) as pool:
+        futures = {pool.submit(u3_session, m, sc, layout): (m, sc) for m, sc in sessions}
+        for f in concurrent.futures.as_completed(futures):
+            mode, scale = futures[f]
+            name, log, screen, shots = f.result()
+            results[(mode, scale)] = (name, screen, shots, u3_check(name, log, screen, shots, scale, layout))
+            print(f'ui-test: {name} PASS {json.dumps(results[(mode, scale)][3])}', flush=True)
+    region = (44, 58, 610, 505)
+    for i in range(3):
+        compare_scaled(results[('cpu', 1)][2][i], results[('cpu', 2)][2][i], region)
+    if VENUS:
+        for sc in (1, 2):
+            compare_equal(results[('cpu', sc)][1], results[('venus', sc)][1], sc)
+            for i in range(3):
+                compare_equal(results[('cpu', sc)][2][i], results[('venus', sc)][2][i], sc)
+    summary = {f'{m}-{sc}x': r[3] for (m, sc), r in results.items()}
+    (OUT3 / 'u3-results.json').write_text(json.dumps(summary, indent=1))
+    print('ui-test: U3 PASS', flush=True)
+
+
 if 'U1' in STAGES:
     run_u1()
 if 'U2' in STAGES:
     run_u2()
+if 'U3' in STAGES:
+    run_u3()

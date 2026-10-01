@@ -33,6 +33,8 @@ module body OS.Ui.Tree is
     constant kindTreeView: Int64 := 23;
     constant kindTextView: Int64 := 24;
     constant kindCell: Int64 := 25;
+    constant kindListRow: Int64 := 26;
+    constant kindHeader: Int64 := 27;
     constant kindTabs: Int64 := 30;
     constant kindToolbar: Int64 := 31;
     constant kindStatus: Int64 := 32;
@@ -97,6 +99,8 @@ module body OS.Ui.Tree is
     constant splitBar: Int64 := 6;
     constant scrollBarWidth: Int64 := 16;
     constant rowHeight: Int64 := 18;
+    -- Lists keep a two-pixel frame (the second line shows keyboard focus).
+    constant listInset: Int64 := 2;
 
     record Node: Free is
         kind: Int64; flags: Int64;
@@ -107,6 +111,7 @@ module body OS.Ui.Tree is
         handler: Int64; handler2: Int64;
         fixedWidth: Int64; fixedHeight: Int64; minWidth: Int64; minHeight: Int64;
         grow: Int64; align: Int64; childAlign: Int64; padding: Int64; spacing: Int64; columns: Int64;
+        fit: Int64;
     end;
     -- Layout results, kept apart from the properties the view sets so that
     -- the layout passes can read properties while writing geometry.
@@ -135,7 +140,7 @@ module body OS.Ui.Tree is
             ident => 0, key => 0, text => at, textEnd => at, extra => at, extraEnd => at,
             value => 0, low => 0, high => 0, aux => 0, handler => -1, handler2 => -1,
             fixedWidth => -1, fixedHeight => -1, minWidth => 0, minHeight => 0,
-            grow => 0, align => alignInherit, childAlign => alignInherit, padding => 0, spacing => 0, columns => 0);
+            grow => 0, align => alignInherit, childAlign => alignInherit, padding => 0, spacing => 0, columns => 0, fit => 0);
     end;
 
     function makeTree(): Tree is
@@ -359,6 +364,11 @@ module body OS.Ui.Tree is
         let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].columns := columns; return nil;
     end;
     generic [R: Region]
+    function setFit(tree: &![Tree, R], fit: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].fit := fit; return nil;
+    end;
+    generic [R: Region]
     function setKey(tree: &![Tree, R], key: Nat64): Unit is
         let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
         ns[l].key := key; ns[l].flags := ns[l].flags | flagKeyed; return nil;
@@ -446,6 +456,24 @@ module body OS.Ui.Tree is
         return kind = kindGroup or kind = kindColumn or kind = kindGrid or kind = kindScroll or kind = kindTabs or kind = kindList
             or kind = kindTable or kind = kindTreeView or kind = kindTextView;
     end;
+    -- Lists, tables and trees: rows placed by index under an optional header.
+    function listLike(kind: Int64): Bool is return kind = kindList or kind = kindTable or kind = kindTreeView; end;
+    -- Containers whose children are placed by the container itself.
+    function selfPlaced(kind: Int64): Bool is return listLike(kind) or kind = kindScroll or kind = kindListRow or kind = kindHeader; end;
+    function headerHeight(ps: Span[Node], i: Index): Int64 is
+        let c: Index := ps[i].first;
+        if c /= 0 and ps[c].kind = kindHeader then return 20; end if; return 0;
+    end;
+    -- The body of a list: inside the frame, below the header, left of the scroll bar.
+    function listBody(ps: Span[Node], gs: Span[Geom], i: Index): Rect is
+        let top: Int64 := gs[i].y + listInset + headerHeight(ps, i);
+        return Rect(x => gs[i].x + listInset, y => top, width => maxInt(gs[i].width - 2 * listInset - scrollBarWidth, 0),
+            height => maxInt(gs[i].y + gs[i].height - listInset - top, 0));
+    end;
+    -- Rows that fit in a list's body (a partly visible last row counts).
+    function rowsThatFit(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        return (listBody(ps, gs, i).height + rowHeight - 1) / rowHeight;
+    end;
     function horizontal(ps: Span[Node], i: Index): Bool is
         let k: Int64 := ps[i].kind;
         if k = kindSplit then return ps[i].value = 0; end if;
@@ -468,6 +496,7 @@ module body OS.Ui.Tree is
         if k = kindImage then return ps[i].low; end if;
         if k = kindList or k = kindTable or k = kindTreeView or k = kindTextView or k = kindScroll then return 160; end if;
         if k = kindGroup then return t + 16; end if;
+        if k = kindCell or k = kindHeader then return t + 12; end if;
         return 0;
     end;
     function intrinsicHeight(all: Span[Nat8], ps: Span[Node], i: Index, width: Int64): Int64 is
@@ -483,6 +512,8 @@ module body OS.Ui.Tree is
         if k = kindTextBox then return fieldHeight; end if;
         if k = kindImage then return ps[i].high; end if;
         if k = kindList or k = kindTable or k = kindTreeView or k = kindTextView or k = kindScroll then return 100; end if;
+        if k = kindCell or k = kindListRow then return rowHeight; end if;
+        if k = kindHeader then return 19; end if;
         if k = kindGroup then return 26; end if;
         return 0;
     end;
@@ -508,7 +539,7 @@ module body OS.Ui.Tree is
         while i > 0 do
             i := i - 1;
             let k: Int64 := ps[i].kind; var w: Int64 := 0;
-            if ps[i].first = 0 then w := intrinsicWidth(all, ps, i);
+            if ps[i].first = 0 or listLike(k) or k = kindScroll then w := intrinsicWidth(all, ps, i);
             else if k = kindGrid then
                 g := gridColumns(ps, g, i, &!columnWidths);
                 for c from 0 until length(&columnWidths) do w := w + get(&columnWidths, c); end for;
@@ -558,7 +589,13 @@ module body OS.Ui.Tree is
             if ps[i].first /= 0 then
                 let k: Int64 := ps[i].kind; let pad: Int64 := ps[i].padding;
                 let innerX: Int64 := g[i].x + pad; let inner: Int64 := maxInt(g[i].width - 2 * pad, 0);
-                if k = kindRoot then
+                if k = kindListRow or k = kindHeader then skip;
+                else if listLike(k) then g := placeListWidths(ps, g, i, splits);
+                else if k = kindScroll then
+                    -- The content gets the viewport width (a scroll bar is always reserved).
+                    let content: Index := ps[i].first;
+                    g[content].x := g[i].x + 1; g[content].width := maxInt(g[i].width - 2 - scrollBarWidth, 0);
+                else if k = kindRoot then
                     var c: Index := ps[i].first;
                     while c /= 0 do
                         if has(ps[c].flags, flagOverlay) then g[c].width := minInt(g[c].prefWidth, inner); g[c].x := innerX + (inner - g[c].width) / 2;
@@ -631,6 +668,48 @@ module body OS.Ui.Tree is
         end for;
         destroyFree(columnWidths); return g;
     end;
+    -- Column widths come from the framework (resized headers) or the view; the
+    -- last column takes the rest of the body. Cells line up under their header.
+    generic [R: Region]
+    function placeListWidths(ps: Span[Node], gs: Span![Geom, R], i: Index, sizes: &[HashMap[Nat64, Int64]]): Span![Geom, R] is
+        var g: Span![Geom, R] := gs;
+        let bodyX: Int64 := g[i].x + listInset; let bodyWidth: Int64 := maxInt(g[i].width - 2 * listInset - scrollBarWidth, 0);
+        var starts: Vector[Int64] := vectorMake(); var widths: Vector[Int64] := vectorMake();
+        var x: Int64 := bodyX; var c: Index := ps[i].first;
+        while c /= 0 do
+            if ps[c].kind = kindHeader then
+                var w: Int64 := ps[c].value;
+                case mapGet(sizes, ps[c].ident) of when Some(value as kept: Int64) do w := kept; when None do skip; end case;
+                w := maxInt(w, 16);
+                push(&!starts, x); push(&!widths, w); x := x + w;
+            end if;
+            c := ps[c].next;
+        end while;
+        let columns: Index := length(&starts);
+        -- The last column reaches the scroll bar.
+        if columns > 0 then
+            let lastStart: Int64 := get(&starts, columns - 1);
+            if lastStart + get(&widths, columns - 1) < bodyX + bodyWidth then set(&!widths, columns - 1, bodyX + bodyWidth - lastStart); end if;
+        end if;
+        var col: Index := 0;
+        c := ps[i].first;
+        while c /= 0 do
+            if ps[c].kind = kindHeader then
+                g[c].x := get(&starts, col); g[c].width := get(&widths, col); col := col + 1;
+            else
+                g[c].x := bodyX; g[c].width := bodyWidth;
+                var cell: Index := ps[c].first; var at: Index := 0;
+                while cell /= 0 do
+                    if at < columns then g[cell].x := get(&starts, at); g[cell].width := get(&widths, at);
+                    else g[cell].x := bodyX; g[cell].width := bodyWidth; end if;
+                    at := at + 1; cell := ps[cell].next;
+                end while;
+            end if;
+            c := ps[c].next;
+        end while;
+        destroyFree(starts); destroyFree(widths);
+        return g;
+    end;
     -- Size and place the children along the main axis: preferred sizes, then
     -- extra space shared by grow weight, or a deficit taken proportionally
     -- from flexible children.
@@ -694,7 +773,7 @@ module body OS.Ui.Tree is
         while i > 0 do
             i := i - 1;
             let k: Int64 := ps[i].kind; var h: Int64 := 0;
-            if ps[i].first = 0 then h := intrinsicHeight(all, ps, i, g[i].width);
+            if ps[i].first = 0 or listLike(k) or k = kindScroll then h := intrinsicHeight(all, ps, i, g[i].width);
             else if k = kindGrid then
                 let columns: Int64 := maxInt(ps[i].columns, 1);
                 var c: Index := ps[i].first; var at: Int64 := 0; var rowMax: Int64 := 0; var rows: Int64 := 0;
@@ -733,7 +812,29 @@ module body OS.Ui.Tree is
             if ps[i].first /= 0 then
                 let k: Int64 := ps[i].kind; let top: Int64 := insetTop(ps, i);
                 let innerY: Int64 := g[i].y + top; let inner: Int64 := maxInt(g[i].height - top - ps[i].padding, 0);
-                if k = kindRoot then
+                if k = kindListRow or k = kindHeader then skip;
+                else if listLike(k) then
+                    let header: Int64 := headerHeight(ps, i);
+                    let bodyY: Int64 := g[i].y + listInset + header;
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if ps[c].kind = kindHeader then g[c].y := g[i].y + listInset; g[c].height := header - 1;
+                        else
+                            g[c].y := bodyY + (ps[c].value - ps[i].value) * rowHeight; g[c].height := rowHeight;
+                            var cell: Index := ps[c].first;
+                            while cell /= 0 do g[cell].y := g[c].y; g[cell].height := rowHeight; cell := ps[cell].next; end while;
+                        end if;
+                        c := ps[c].next;
+                    end while;
+                else if k = kindScroll then
+                    let content: Index := ps[i].first;
+                    let viewport: Int64 := maxInt(g[i].height - 2, 0);
+                    let full: Int64 := maxInt(g[content].prefHeight, viewport);
+                    var offset: Int64 := 0;
+                    case mapGet(splits, ps[i].ident) of when Some(value as kept: Int64) do offset := kept; when None do skip; end case;
+                    offset := clampInt(offset, 0, maxInt(full - viewport, 0));
+                    g[content].y := g[i].y + 1 - offset; g[content].height := full;
+                else if k = kindRoot then
                     var c: Index := ps[i].first;
                     while c /= 0 do
                         if has(ps[c].flags, flagOverlay) then g[c].height := minInt(g[c].prefHeight, inner); g[c].y := innerY + (inner - g[c].height) / 2;
@@ -791,6 +892,19 @@ module body OS.Ui.Tree is
             if clips(ps[i].kind) then
                 x0 := maxInt(x0, g[i].x); y0 := maxInt(y0, g[i].y);
                 x1 := minInt(x1, g[i].x + g[i].width); y1 := minInt(y1, g[i].y + g[i].height);
+            end if;
+            -- Rows draw only in a list's body, headers only in the header strip,
+            -- scroll content only in the viewport.
+            if listLike(ps[p].kind) then
+                let header: Int64 := headerHeight(ps, p);
+                var top: Int64 := g[p].y + listInset + header; var bottom: Int64 := g[p].y + g[p].height - listInset;
+                if ps[i].kind = kindHeader then top := g[p].y + listInset; bottom := g[p].y + listInset + header - 1; end if;
+                x0 := maxInt(x0, g[p].x + listInset); x1 := minInt(x1, g[p].x + g[p].width - listInset - scrollBarWidth);
+                y0 := maxInt(y0, top); y1 := minInt(y1, bottom);
+            end if;
+            if ps[p].kind = kindScroll then
+                x0 := maxInt(x0, g[p].x + 1); x1 := minInt(x1, g[p].x + g[p].width - 1 - scrollBarWidth);
+                y0 := maxInt(y0, g[p].y + 1); y1 := minInt(y1, g[p].y + g[p].height - 1);
             end if;
             g[i].clipX := x0; g[i].clipY := y0; g[i].clipWidth := maxInt(x1 - x0, 0); g[i].clipHeight := maxInt(y1 - y0, 0);
         end for;

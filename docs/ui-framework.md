@@ -435,3 +435,116 @@ The Gallery window is full; U3 adds `warmc/examples/gui/UiData.warm` with a
 10,000-row sortable table, a list, a tree and a text view (U4's tabs bring
 them into the Gallery). Its VM test scrolls the table with wheel bursts and
 keys and asserts every frame of a scroll stays within one 16 ms frame.
+
+### U3 results
+
+Implemented as designed: `listView`/`listRow` (with `rowIcon`), `tableView`/
+`tableColumn`/`tableRow`/`cell`, `treeView`/`treeRow` with `onToggle`,
+`onOpen`, `scrollView`, `textView`/`noWrap`, and `listState()`. Only the
+visible rows exist as nodes: the 10,000-row table builds about 100 nodes a
+frame. The test application `UiData` sorts an index vector when the sort
+column changes.
+
+Two latency findings, both fixed. First, the `UI NODE` trace (every node of
+every new layout) cost about 15 ms a frame while scrolling, because each scroll
+step is a new layout. Node traces are now level 2 (`gui.trace=2`, used only by
+the tests' layout phase); level 1 keeps the per-frame `UI FRAME`/`UI CYCLE`
+lines. Second, a wake sent to the compositor while it was still composing was
+lost, so the compositor slept a full period. A present now sets a sticky flag
+that skips the next sleep, and `GuiWait` wakes the compositor when the
+window's last frame has not been composed yet (a present made while input was
+still queued does not wake it).
+
+| Session | Wheel scrolling, 40 lines 20 ms apart: p50 / max (ms) | Table keys p50 / max (ms) | Worst paint / layout / update+view (ms) |
+| --- | ---: | ---: | ---: |
+| CPU 1x | 6.9 / 9.8 | 6.5 / 9.5 | 2.9 / 2.0 / 3.5 |
+| CPU 2x | 9.2 / 12.7 | 11.0 / 15.1 | 4.7 / 2.0 / 3.2 |
+| Venus 1x | 8.0 / 11.0 | 9.9 / 12.4 | 2.4 / 2.9 / 2.7 |
+| Venus 2x | 10.7 / 15.1 | 7.8 / 13.7 | 3.5 / 1.7 / 2.8 |
+
+Every one of the 40 scroll steps produced its own frame. The scroll bar thumb
+dragged to the bottom reaches row 9,984, and header clicks sort ascending and
+then descending. Screenshots: `build/ui-u3/u3-<mode>-<scale>x/shot-000.png`
+(table, list, tree and text view), `shot-001.png` (sorted by size descending,
+Name column widened, first row selected), `shot-002.png` (tree expanded two
+levels, list scrolled, text view with a selection).
+
+## U4: window level
+
+### U4.1 Menus
+
+- **Menus drawn by the framework inside the client area**: every window would
+  carry its own bar, unlike the rest of the desktop and unlike the Mac.
+- **Menus as an App call** (`setMenus(...)` once): they could not follow the
+  model (checked items, disabled items).
+- **Menus are part of the view.** `menu(&!v, "File")`, `menuItem(&!v, title,
+  keys, msg)`, `menuSeparator`, `checkMark(&!v, on)`, `disabled(&!v, on)` …
+  `done`. After each view the App hashes the menu part of the tree and, when
+  it changed, reinstalls the window's menus in the kernel's menu bar
+  (`GuiMenuReset`, then one entry per item with its shortcut text and flags).
+  A chosen item comes back as a menu event carrying the item's ordinal; the
+  App maps it to that item's message. Shortcuts given to `menuItem` are also
+  registered like `shortcut`, so Ctrl+S works whether or not the menu is open.
+
+**Choice: menus in the view, shown by the kernel's menu bar.** The kernel menu
+bar gains shortcut text (Ctrl/Alt/Shift shown as the Mac's ⌃ ⌥ ⇧ symbols),
+separators, disabled (gray) and checked items, and a drop shadow.
+
+### U4.2 Pop-up menus and context menus
+
+A pop-up list must draw over everything, including outside the window, so it
+is a kernel overlay (`GuiPopupClear`/`GuiPopupItem`/`GuiPopupShow`) that
+reports the chosen index as a menu event with a reserved id. `popupButton(&!v,
+selected, onChoose)` with `popupItem` children shows the selected title in a
+shadowed box with a triangle and opens the list over itself, the selected item
+under the pointer. `contextMenu(&!v)` … `done` attaches items to the enclosing
+node; a right click on it (or anything inside it) opens them at the pointer.
+
+### U4.3 Dialogs
+
+- **Separate kernel windows for dialogs**: a second window needs its own App,
+  event loop and focus handling, and the parent could keep receiving input.
+- **Dialogs are part of the view.** `dialog(&!v)` … `done` (or the `alert` and
+  `confirm` helpers) is laid out centred over the window content with the
+  classic double frame. While a dialog is present it is modal: clicks outside
+  it, menu-bar items and shortcuts outside it are ignored, Tab stays inside it,
+  Return presses its default button and Escape its cancel button.
+
+**Choice: in-window modal dialogs.** The model decides when a dialog shows
+(a field in the model), so dismissing it is an ordinary message.
+
+File dialogs need directory access, which views do not have. They are a
+component: `OS.Ui.Files` (`FileDialog` in the model, holding a `Dir`
+capability; `fileDialogView`, `updateFileDialog(dialog, FileEvent)`,
+`fileDialogOutcome`, `chosenPath`). Its messages are one Free `FileEvent`
+union wrapped by the application's `Fn[FileEvent, Msg]`, so the application's
+`Msg` needs one case for the whole dialog. Open lists the directory (folders
+first) with Up and Open/Cancel; Save adds a name field.
+
+### U4.4 Tabs, toolbar and status bar
+
+`tabs(&!v, selected, onSelect)` with `tab(&!v, title)` … `done` pages: the
+view builds every page (cheap, A1), the framework lays out and paints only the
+selected one and hides the rest from focus. Tabs are the classic rounded
+folder tabs over a framed page. `toolbar` and `statusBar` are rows with a
+rule below (toolbar) or above (status bar) and the window's full width.
+
+### U4.5 System clipboard and terminals
+
+The U2 clipboard service becomes the system clipboard: dragging in a terminal
+window selects cells (inverted) and releasing copies them, as UTF-8 text with
+trailing blanks dropped, and Ctrl+Alt+V types the clipboard into the focused
+terminal. Text copied in an OS.Ui window pastes in a terminal and the reverse.
+
+### U4.6 Drag and drop within a window
+
+- **Typed payloads** (`draggable(&!v, payload: M)`): a second message type
+  per drag.
+- **An Int64 payload.** `draggable(&!v, id)` marks a node; `dropTarget(&!v,
+  onDrop: Fn[Drop, M])` marks a container. A press on a draggable node that is
+  not itself a control and a move of four pixels starts a drag: a gray outline
+  of the node follows the pointer, the target under the pointer is highlighted,
+  and releasing over a target sends `onDrop(Drop(payload, x, y))` (the
+  position inside the target). Releasing anywhere else cancels.
+
+**Choice: Int64 payloads.** The application knows what its ids mean.

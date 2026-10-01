@@ -37,7 +37,7 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 python3 tools/warm-man.py --output "$stage/Man"
 # The whole OS library list and per-application lists (C:/<EntryModule>Modules.txt,
 # walked from each example's imports), written by one process.
-python3 tools/gui-modules.py --all "$stage" Files:GuiFiles Top:GuiTop Settings:GuiSettings Widgets:Widgets Gallery:Gallery UiCheck:UiCheck
+python3 tools/gui-modules.py --all "$stage" Files:GuiFiles Top:GuiTop Settings:GuiSettings Widgets:Widgets Gallery:Gallery UiCheck:UiCheck UiData:UiData
 for list in "$stage"/*Modules.txt; do put "" "$list"; done
 sed 's|#include "\.\./\.\./coolc/|#include "C:/Cool/|g' os/Kernel/Kernel.cool >"$stage/Kernel.cool"
 for f in os/Kernel/*; do

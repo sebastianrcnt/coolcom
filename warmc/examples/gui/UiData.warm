@@ -1,0 +1,181 @@
+import OS.Gui (Gui, acquireGui, releaseGui);
+import OS.Error (IoError);
+import Standard.String (String, fromLiteral, length, slice, destroyString);
+import Standard.Vector (Vector, make, push, get, set, length as rowsLength, sliceMut, destroyFree);
+import Standard.Algorithms (sortBy);
+import Standard.Ord (Ordering, Less, Equal, Greater);
+import OS.Ui (App, View, ListState, TextEdit, openApp, closeApp, next, newView, column, row, split, done, padding, spacing, grow,
+    fixedHeight, label, append, appendInt, plain, listView, listRow, rowIcon, tableView, tableColumn, tableRow, cell, treeView, treeRow,
+    onOpen, onToggle, textView, applyEdit, iconFolder, iconDocument, listState);
+module body UiData is
+    """Data views for the VM tests (tools/ui-test.py, stage U3): a sortable
+    10,000-row table, a list with icons, a tree and a text view. Prints DATA
+    markers."""
+    constant rowTotal: Int64 := 10000;
+    record Entry: Free is index: Int64; size: Int64; end;
+    record Model: Linear is
+        table: ListState; list: ListState; tree: ListState;
+        order: Vector[Entry];
+        open: Vector[Bool];
+        text: String;
+    end;
+    union Msg: Free is
+        case Table is state: ListState;
+        case List is state: ListState;
+        case Tree is state: ListState;
+        case Opened is index: Int64;
+        case Toggled is index: Int64;
+        case Edited is edit: TextEdit;
+    end;
+    function tableState(s: ListState): Msg is return Table(state => s); end;
+    function listChanged(s: ListState): Msg is return List(state => s); end;
+    function treeChanged(s: ListState): Msg is return Tree(state => s); end;
+    function opened(i: Int64): Msg is return Opened(index => i); end;
+    function toggled(i: Int64): Msg is return Toggled(index => i); end;
+    function edited(e: TextEdit): Msg is return Edited(edit => e); end;
+    function sizeOf(i: Int64): Int64 is return (i * 7919 + 13) % 100000; end;
+    function byName(a: Entry, b: Entry): Ordering is if a.index < b.index then return Less(); end if; if a.index > b.index then return Greater(); end if; return Equal(); end;
+    function byNameDown(a: Entry, b: Entry): Ordering is return byName(b, a); end;
+    function bySize(a: Entry, b: Entry): Ordering is if a.size < b.size then return Less(); end if; if a.size > b.size then return Greater(); end if; return byName(a, b); end;
+    function bySizeDown(a: Entry, b: Entry): Ordering is return bySize(b, a); end;
+    -- The tree: five folders of four items; item 2 of each folder is itself a folder of three.
+    -- Nodes are numbered: folder f = f * 100, item = f * 100 + i * 10, subitem = + j + 1.
+    record TreeRow: Free is id: Int64; depth: Int64; children: Bool; end;
+    function openSlot(id: Int64): Index is
+        case toIndex(id / 10) of when Some(value as i: Index) do return i; when None do return 0; end case;
+    end;
+    function visibleTree(open: &[Vector[Bool]]): Vector[TreeRow] is
+        var rows: Vector[TreeRow] := make();
+        for f from 0 until 5 do
+            let fid: Int64 := toInt(f) * 100;
+            push(&!rows, TreeRow(id => fid, depth => 0, children => true));
+            if get(open, openSlot(fid)) then
+                for i from 0 until 4 do
+                    let iid: Int64 := fid + toInt(i) * 10 + 10;
+                    let folder: Bool := i = 2;
+                    push(&!rows, TreeRow(id => iid, depth => 1, children => folder));
+                    if folder and get(open, openSlot(iid)) then
+                        for j from 0 until 3 do push(&!rows, TreeRow(id => iid + toInt(j) + 1, depth => 2, children => false)); end for;
+                    end if;
+                end for;
+            end if;
+        end for;
+        return rows;
+    end;
+    function toInt(i: Index): Int64 is case toInt64(i) of when Some(value as n: Int64) do return n; when None do return 0; end case; end;
+    function toIdx(i: Int64): Index is case toIndex(i) of when Some(value as n: Index) do return n; when None do return 0; end case; end;
+    function sortRows(order: &![Vector[Entry]], n: Index, state: ListState): Unit is
+        if state.sort = 1 and state.descending then sortBy(sliceMut(order, 0, n), bySizeDown);
+        else if state.sort = 1 then sortBy(sliceMut(order, 0, n), bySize);
+        else if state.descending then sortBy(sliceMut(order, 0, n), byNameDown);
+        else sortBy(sliceMut(order, 0, n), byName); end if;
+        return nil;
+    end;
+    function update(model: Model, msg: Msg): Model is
+        let { table as table0: ListState, list as list0: ListState, tree as tree0: ListState, order as order0: Vector[Entry],
+            open as open0: Vector[Bool], text as text0: String } := model;
+        var table: ListState := table0; var list: ListState := list0; var tree: ListState := tree0;
+        var order: Vector[Entry] := order0; var open: Vector[Bool] := open0; var text: String := text0;
+        case msg of
+            when Table(state as s: ListState) do
+                if s.sort /= table.sort or s.descending /= table.descending then let n: Index := rowsLength(&order); sortRows(&!order, n, s); end if;
+                table := s;
+                print("DATA TABLE first="); print(s.first); print(" selected="); print(s.selected); print(" fit="); print(s.fit);
+                print(" sort="); print(s.sort); print(" descending="); printLn(s.descending);
+            when List(state as s: ListState) do list := s; print("DATA LIST selected="); printLn(s.selected);
+            when Tree(state as s: ListState) do tree := s; print("DATA TREE selected="); printLn(s.selected);
+            when Opened(index as i: Int64) do print("DATA OPEN "); printLn(get(&order, toIdx(i)).index);
+            when Toggled(index as i: Int64) do
+                let rows: Vector[TreeRow] := visibleTree(&open);
+                if i >= 0 and toIdx(i) < rowsLength(&rows) then
+                    let slot: Index := openSlot(get(&rows, toIdx(i)).id);
+                    let now: Bool := get(&open, slot);
+                    set(&!open, slot, not now);
+                    print("DATA TOGGLE "); printLn(get(&rows, toIdx(i)).id);
+                end if;
+                destroyFree(rows);
+            when Edited(edit as e: TextEdit) do text := applyEdit(text, e); print("DATA TEXT "); printLn(length(&text));
+        end case;
+        return Model(table => table, list => list, tree => tree, order => order, open => open, text => text);
+    end;
+    function view(model: &[Model]): View[Msg] is
+        var v: View[Msg] := newView();
+        column(&!v); padding(&!v, 8); spacing(&!v, 6);
+        split(&!v, false, 330); grow(&!v, 1);
+        tableView(&!v, model->table, rowTotal, tableState); onOpen(&!v, opened);
+        tableColumn(&!v, "Name", 120, true);
+        tableColumn(&!v, "Size", 80, true);
+        tableColumn(&!v, "Kind", 60, false);
+        let first: Int64 := model->table.first;
+        var r: Int64 := first;
+        while r < rowTotal and r <= first + model->table.fit do
+            let e: Entry := get(&(model->order), toIdx(r));
+            tableRow(&!v, r);
+            cell(&!v, "File "); appendInt(&!v, e.index);
+            cell(&!v, ""); appendInt(&!v, e.size);
+            if e.index % 7 = 0 then cell(&!v, "Folder"); else cell(&!v, "Document"); end if;
+            done(&!v);
+            r := r + 1;
+        end while;
+        done(&!v);
+        column(&!v); spacing(&!v, 6);
+        listView(&!v, model->list, 100, listChanged); grow(&!v, 1);
+        let lf: Int64 := model->list.first;
+        var l: Int64 := lf;
+        while l < 100 and l <= lf + model->list.fit do
+            listRow(&!v, l, "Item "); appendInt(&!v, l);
+            if l % 5 = 0 then rowIcon(&!v, iconFolder()); else rowIcon(&!v, iconDocument()); end if;
+            l := l + 1;
+        end while;
+        done(&!v);
+        let rows: Vector[TreeRow] := visibleTree(&(model->open));
+        treeView(&!v, model->tree, toInt(rowsLength(&rows)), treeChanged); onToggle(&!v, toggled); grow(&!v, 1);
+        for t from 0 until rowsLength(&rows) do
+            let tr: TreeRow := get(&rows, t);
+            var title: Span[Nat8, Static] := "Item";
+            if tr.depth = 0 then title := "Folder "; else if tr.children then title := "Group "; else title := "Item "; end if;
+            treeRow(&!v, toInt(t), tr.depth, tr.children, tr.children and get(&(model->open), openSlot(tr.id)), title);
+            appendInt(&!v, tr.id);
+        end for;
+        done(&!v);
+        destroyFree(rows);
+        done(&!v);
+        done(&!v);
+        textView(&!v, slice(&(model->text), 0, length(&(model->text))), edited); fixedHeight(&!v, 110);
+        row(&!v); spacing(&!v, 8);
+        label(&!v, "Row "); appendInt(&!v, model->table.selected + 1); append(&!v, " of "); appendInt(&!v, rowTotal); plain(&!v);
+        done(&!v);
+        done(&!v);
+        return v;
+    end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root);
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Data", 600, 470);
+        case opening of
+            when Ok(value as opened: App[Msg]) do
+                var app: App[Msg] := opened;
+                var order: Vector[Entry] := make();
+                for i from 0 until toIdx(rowTotal) do push(&!order, Entry(index => toInt(i), size => sizeOf(toInt(i)))); end for;
+                var open: Vector[Bool] := make();
+                for i from 0 until 60 do push(&!open, false); end for;
+                var model: Model := Model(table => listState(), list => listState(), tree => listState(), order => order, open => open,
+                    text => fromLiteral("Lines wrap at the width of the view.\nReturn starts a new line; Up and Down move between lines."));
+                printLn("DATA READY");
+                var running: Bool := true;
+                while running do
+                    case next(&!app, view(&model)) of
+                        when Some(value as msg: Msg) do model := update(model, msg);
+                        when None do running := false;
+                    end case;
+                end while;
+                let { table as t: ListState, list as l: ListState, tree as tr: ListState, order as o: Vector[Entry], open as op: Vector[Bool], text as tx: String } := model;
+                destroyFree(o); destroyFree(op); destroyString(tx);
+                closeApp(app);
+            when Err(error as e: IoError) do printLn("DATA NO GUI");
+        end case;
+        releaseGui(gui); surrenderRoot(root);
+        printLn("DATA CLOSED");
+        return ExitSuccess();
+    end;
+end module body.

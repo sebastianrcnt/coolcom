@@ -77,6 +77,8 @@ module OS.Gui is
     function wait(window: &![Window], milliseconds: Int64): Result[Unit, IoError];
     -- Kernel test switch (gui_trace) and a monotonic microsecond clock.
     function traceEnabled(): Bool;
+    -- 1: frame traces; 2: also every node of each new layout (slow; for locating controls).
+    function traceLevel(): Int64;
     function micros(): Int64;
     -- The system clipboard, shared with terminal windows (Ctrl+Shift+C/V there).
     -- copyText replaces it and returns its new serial number; clipboardText

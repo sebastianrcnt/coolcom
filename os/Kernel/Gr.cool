@@ -204,6 +204,8 @@ U0 GuiWait(I64 ms)
 {//Block until an event is queued for this task's window or ms elapse (GuiEventPush wakes it).
     CTask *t = Fs; CGuiWindow *w = t->gui_window;
     if (!w || Gs->num || ms <= 0 || GuiPending) return;
+    // A frame presented while input was still queued did not wake the compositor.
+    if (w->revision != w->presented && gui.task) {gui.present_wake = TRUE; TaskWake(gui.task);}
     t->wake_jiffy = jiffies + ms * JIFFY_FREQ / 1000;
     while (jiffies < t->wake_jiffy && !GuiPending) Yield;
     TaskBreakCheck(t);

@@ -5,7 +5,7 @@ import Standard.Eq (Eq);
 import Standard.Hash (Hash);
 import OS.Error (IoError);
 import OS.Gui (Gui, Window, Rect, Size, Event, Idle, Mouse, Key, Resize, Close, Menu, open, close as closeWindow, size, poll, present,
-    fill, setClip, clearClip, queued, wait, traceEnabled, micros, copyText, clipboardSerial, clipboardText, clipboardSize, setPointer);
+    fill, setClip, clearClip, queued, wait, traceEnabled, traceLevel, micros, copyText, clipboardSerial, clipboardText, clipboardSize, setPointer);
 import OS.Ui.Text (TextEdit, replaceRange, codepointString);
 import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open as openNode, close as closeNode, add, setText, appendText, appendNumber,
     setExtra, setFlag, setValue, setRange, setAux, setHandler, setHandler2, setSize, setMinSize, setGrow, setAlign, setChildAlign,
@@ -14,9 +14,10 @@ import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open as open
     toIndex64, toInt, parseKey, bits, mix, readDamage,
     kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindSeparator,
     kindCheckbox, kindRadio, kindSlider, kindProgress, kindImage, kindTextBox,
+    kindList, kindTable, kindTreeView, kindTextView, kindScroll, kindListRow, kindHeader, kindCell, setFit,
     kindShortcut, kindTimer, flagDisabled, flagDefault, flagCancel, flagWrap, flagPlain, flagHidden, flagCenter, flagOverlay, flagSecure);
 import OS.Ui.Engine (State, Snapshot, Action, makeState, destroyState, makeSnapshot, destroySnapshot, invalidate, compareAndRecord,
-    handle, prune, syncTimers, readState, setNow, pointerShape, current, setEphemeral, Ephemeral, actCopy, dueTimer, timeout, splitPositions, focused, ephemeral,
+    handle, prune, syncTimers, readState, setNow, pointerShape, current, setEphemeral, Ephemeral, actCopy, ListState, noList, listFix, dueTimer, timeout, splitPositions, focused, ephemeral,
     actNone, actRepaint, actRelayout, actFire, actFire2, actClose, actResize, actMenu, dragPress, dragNone);
 import OS.Ui.Draw (paint, Picture, builtinFolder, builtinDocument, builtinNote, builtinCaution, builtinStop);
 module body OS.Ui is
@@ -35,6 +36,7 @@ module body OS.Ui is
         case Send is message: M;
         case WithValue is make: Fn[Int64, M];
         case WithEdit is make: Fn[TextEdit, M];
+        case WithList is make: Fn[ListState, M];
     end;
 
     record View[M: Free]: Linear is tree: Tree; handlers: Vector[Handler[M]]; end;
@@ -120,12 +122,19 @@ module body OS.Ui is
         if app->trace then
             print("UI CYCLE app="); print(entered - app->returned); print(" layout="); printLn(micros() - entered);
         end if;
+        let fix: Action := listFix(geometryProps(&(app->trees)), geometry(treeOf(&(app->trees))), &(app->state));
+        if fix.kind = actFire then
+            case messageOf(&~app, fix.node, false, 0, noEdit(), fix.list) of
+                when Some(value as m: M) do app->returned := micros(); return Some(value => m);
+                when None do skip;
+            end case;
+        end if;
         while app->running do
             if queued(&(app->window)) = 0 then render(&~app); end if;
             -- Timers fire before waiting.
             let due: Index := dueTimer(props(treeOf(&(app->trees))), &(app->state), micros());
             if due /= 0 then
-                case messageOf(&~app, due, false, 0, noEdit()) of
+                case messageOf(&~app, due, false, 0, noEdit(), noList()) of
                     when Some(value as m: M) do return Some(value => m);
                     when None do skip;
                 end case;
@@ -135,7 +144,7 @@ module body OS.Ui is
                 when Ok(value as e: Event) do event := e;
                 when Err(error as e: IoError) do app->running := false; return None();
             end case;
-            var action: Action := Action(kind => actNone, node => 0, value => 0, aux => 0, edit => noEdit());
+            var action: Action := Action(kind => actNone, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
             case event of
                 when Idle do
                     let ms: Int64 := timeout(props(treeOf(&(app->trees))), readState(&(app->state)), micros(), 1000);
@@ -156,7 +165,7 @@ module body OS.Ui is
             end if;
             if action.kind = actFire and action.edit.paste < 0 then action := withPaste(&~app, action); end if;
             if action.kind = actFire or action.kind = actFire2 then
-                case messageOf(&~app, action.node, action.kind = actFire2, action.value, action.edit) of
+                case messageOf(&~app, action.node, action.kind = actFire2, action.value, action.edit, action.list) of
                     when Some(value as m: M) do app->returned := micros(); return Some(value => m);
                     when None do skip;
                 end case;
@@ -171,6 +180,15 @@ module body OS.Ui is
             else if action.kind = actRelayout then
                 relayout(&~app);
             end if;
+            if action.kind = actResize or action.kind = actRelayout then
+                let refit: Action := listFix(geometryProps(&(app->trees)), geometry(treeOf(&(app->trees))), &(app->state));
+                if refit.kind = actFire then
+                    case messageOf(&~app, refit.node, false, 0, noEdit(), refit.list) of
+                        when Some(value as m: M) do app->returned := micros(); return Some(value => m);
+                        when None do skip;
+                    end case;
+                end if;
+            end if;
         end while;
         return None();
     end;
@@ -178,6 +196,8 @@ module body OS.Ui is
     function readWindow(w: &![Window, R]): &[Window, R] is return (w: &[Window, R]); end;
     generic [R: Region]
     function treeOf(trees: &![Vector[Tree], R]): &[Tree, R] is return borrowGet(readVector(trees), 0); end;
+    generic [R: Region]
+    function geometryProps(trees: &![Vector[Tree], R]): Span[Node, R] is return props(treeOf(trees)); end;
     function handlerIndex(ps: Span[Node], node: Index, second: Bool): Int64 is
         if node >= spanLength(ps) then return -1; end if;
         if second then return ps[node].handler2; end if; return ps[node].handler;
@@ -230,7 +250,7 @@ module body OS.Ui is
         let caret: Int64 := toInt(edit.start) + maxInt64(pasted, 0);
         setEphemeral(&(app->state), id, Ephemeral(a => caret, b => caret, c => e.c, d => e.d));
         return Action(kind => action.kind, node => action.node, value => action.value, aux => action.aux,
-            edit => TextEdit(start => edit.start, finish => edit.finish, codepoint => -1, paste => serial));
+            edit => TextEdit(start => edit.start, finish => edit.finish, codepoint => -1, paste => serial), list => action.list);
     end;
     function maxInt64(a: Int64, b: Int64): Int64 is if a > b then return a; end if; return b; end;
     generic [M: Free]
@@ -239,13 +259,14 @@ module body OS.Ui is
         return handle(textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), &(app->state), event);
     end;
     generic [M: Free]
-    function messageOf(app: &![App[M]], node: Index, second: Bool, value: Int64, edit: TextEdit): Option[M] is
+    function messageOf(app: &![App[M]], node: Index, second: Bool, value: Int64, edit: TextEdit, list: ListState): Option[M] is
         let index: Int64 := handlerIndex(props(treeOf(&(app->trees))), node, second);
         if index < 0 or toIndex64(index) >= length(readVector(&(app->handlers))) then return None(); end if;
         case get(readVector(&(app->handlers)), toIndex64(index)) of
             when Send(message as m: M) do return Some(value => m);
             when WithValue(make as f: Fn[Int64, M]) do return Some(value => f(value));
             when WithEdit(make as f: Fn[TextEdit, M]) do return Some(value => f(edit));
+            when WithList(make as f: Fn[ListState, M]) do return Some(value => f(list));
         end case;
     end;
     -- Compare with what is on screen and repaint only the damaged regions.
@@ -263,7 +284,7 @@ module body OS.Ui is
             if app->trace then
                 let elapsed: Int64 := micros() - started;
                 let signature: Nat64 := layoutSignature(props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))));
-                if signature /= app->traced then
+                if signature /= app->traced and traceLevel() >= 2 then
                     app->traced := signature; traceNodes(textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))));
                 end if;
                 traceFrame(readDamage(&(app->damage)), app->frames, count, elapsed, app->width, app->height);
@@ -330,7 +351,7 @@ module body OS.Ui is
                             setClip(&~w, clip);
                             let id: Nat64 := ps[i].ident;
                             let pressed: Bool := state->target = id and state->drag /= dragNone and state->inside;
-                            paint(&~w, all, ps, gs, i, pressed, focused(state) = id, state->keyboard, ephemeral(state, id), clip, pictures);
+                            paint(&~w, all, ps, gs, i, pressed, focused(state) = id, state->keyboard, state, clip, pictures);
                         end if;
                     end if;
                 end if;
@@ -533,6 +554,79 @@ module body OS.Ui is
     function image(v: &![View[M]], picture: Image): Unit is
         add(&(v->tree), kindImage); setValue(&(v->tree), picture.id); setRange(&(v->tree), picture.width, picture.height); return nil;
     end;
+    ------------------------------------------------------------------ data views
+
+    -- An empty list state; the framework fills in the rows that fit.
+    function listState(): ListState is return ListState(first => 0, selected => -1, fit => 0, sort => -1, descending => false); end;
+    generic [M: Free]
+    function openList(v: &![View[M]], kind: Int64, state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit is
+        openNode(&(v->tree), kind); setValue(&(v->tree), state.first); setRange(&(v->tree), rowCount, state.selected); setFit(&(v->tree), state.fit);
+        var sort: Int64 := -1; if state.sort >= 0 then sort := state.sort * 2; if state.descending then sort := sort + 1; end if; end if;
+        setAux(&(v->tree), sort);
+        let h: Int64 := handler(&~v, WithList(make => onState)); setHandler(&(v->tree), h); return nil;
+    end;
+    -- A list of rowCount rows. Emit listRow for rows [state.first, state.first + state.fit];
+    -- scrolling, selection and size changes arrive as onState(new state).
+    generic [M: Free]
+    function listView(v: &![View[M]], state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit is
+        openList(&~v, kindList, state, rowCount, onState); return nil;
+    end;
+    -- A table: tableColumn headers, then tableRow + cell per visible row. Clicking a
+    -- sortable header sets state.sort / state.descending.
+    generic [M: Free]
+    function tableView(v: &![View[M]], state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit is
+        openList(&~v, kindTable, state, rowCount, onState); return nil;
+    end;
+    -- A tree shown as its visible rows (flattened by the model): treeRow per row.
+    generic [M: Free]
+    function treeView(v: &![View[M]], state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit is
+        openList(&~v, kindTreeView, state, rowCount, onState); return nil;
+    end;
+    -- Double click or Return on a row (lists, tables): onOpen(row index).
+    generic [M: Free]
+    function onOpen(v: &![View[M]], opened: Fn[Int64, M]): Unit is
+        let h: Int64 := handler(&~v, WithValue(make => opened)); setHandler2(&(v->tree), h); return nil;
+    end;
+    -- A tree's disclosure triangle, Return, Left/Right: onToggle(row index).
+    generic [M: Free]
+    function onToggle(v: &![View[M]], toggled: Fn[Int64, M]): Unit is
+        let h: Int64 := handler(&~v, WithValue(make => toggled)); setHandler2(&(v->tree), h); return nil;
+    end;
+    generic [M: Free]
+    function tableColumn(v: &![View[M]], title: Span[Nat8], width: Int64, sortable: Bool): Unit is
+        add(&(v->tree), kindHeader); setText(&(v->tree), title); setValue(&(v->tree), width);
+        if sortable then setRange(&(v->tree), 1, 0); end if; return nil;
+    end;
+    generic [M: Free]
+    function listRow(v: &![View[M]], index: Int64, text: Span[Nat8]): Unit is
+        add(&(v->tree), kindListRow); setValue(&(v->tree), index); setText(&(v->tree), text); keyNumber(&~v, index); return nil;
+    end;
+    -- A small (16x16) icon before the most recent row's text.
+    generic [M: Free]
+    function rowIcon(v: &![View[M]], picture: Image): Unit is setAux(&(v->tree), picture.id + 1000); return nil; end;
+    generic [M: Free]
+    function tableRow(v: &![View[M]], index: Int64): Unit is
+        openNode(&(v->tree), kindListRow); setValue(&(v->tree), index); keyNumber(&~v, index); return nil;
+    end;
+    generic [M: Free]
+    function cell(v: &![View[M]], text: Span[Nat8]): Unit is add(&(v->tree), kindCell); setText(&(v->tree), text); return nil; end;
+    generic [M: Free]
+    function treeRow(v: &![View[M]], index: Int64, depth: Int64, children: Bool, expanded: Bool, text: Span[Nat8]): Unit is
+        add(&(v->tree), kindListRow); setValue(&(v->tree), index); setText(&(v->tree), text); keyNumber(&~v, index);
+        var flags: Int64 := 0; if children then flags := 1; end if; if expanded then flags := flags | 2; end if;
+        setRange(&(v->tree), depth, flags); return nil;
+    end;
+    -- A scrolled viewport around one child (usually a column); the framework keeps the offset.
+    generic [M: Free]
+    function scrollView(v: &![View[M]]): Unit is openNode(&(v->tree), kindScroll); return nil; end;
+    -- A multi-line text editor; changes arrive as onEdit(edit) like textBox. Lines wrap unless noWrap.
+    generic [M: Free]
+    function textView(v: &![View[M]], text: Span[Nat8], onEdit: Fn[TextEdit, M]): Unit is
+        add(&(v->tree), kindTextView); setText(&(v->tree), text); setFlag(&(v->tree), flagWrap, true);
+        let h: Int64 := handler(&~v, WithEdit(make => onEdit)); setHandler(&(v->tree), h); return nil;
+    end;
+    generic [M: Free]
+    function noWrap(v: &![View[M]]): Unit is setFlag(&(v->tree), flagWrap, false); return nil; end;
     -- A keyboard shortcut such as "Ctrl+S", "Alt+Left", "F5" or "Ctrl+Shift+Z".
     generic [M: Free]
     function shortcut(v: &![View[M]], keys: Span[Nat8], message: M): Unit is

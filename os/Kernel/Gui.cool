@@ -48,6 +48,7 @@ class CGui
     CGuiWindow *windows[GUI_WINDOWS], *focus, *drag, *capture;
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
     Bool resizing, damage, input_wake;
+    Bool present_wake; // a present arrived while the compositor was running: compose again before sleeping
     I64 x0, y0, x1, y1, clock_minute;
     U32 *desktop, *canvas, *overlay, pointer[12 * 18], ibeam[9 * 16], cursor[32 * 32];
     I64 shape; // pointer shape last applied for a window (0: the arrow or a custom shape)
@@ -203,7 +204,7 @@ Bool GuiPresent(Bool explicit = FALSE)
     w->pending = FALSE;
     // Compose promptly once the app has drained its input; during a burst the
     // compositor's own cadence batches the frames.
-    if (gui.task && w->event_head == w->event_tail) TaskWake(gui.task);
+    if (gui.task && w->event_head == w->event_tail) {gui.present_wake = TRUE; TaskWake(gui.task);}
     return TRUE;
 }
 U0 GuiMove(CGuiWindow *w, I64 x, I64 y)
@@ -711,6 +712,8 @@ U0 GuiTask(U8 *data)
         }
         // Let notified producers drain input/repaint before synchronous GPU work.
         if (gui.input_wake) {gui.input_wake = FALSE; Yield;}
+        // A wake that lands while this pass runs would be lost to the Sleep below.
+        gui.present_wake = FALSE;
         for (i = 0; i < gui.count; i++) {
             w = gui.windows[i];
             if (w->closing && TimerJiffies >= w->close_deadline) GuiStopWindow(w);
@@ -729,7 +732,7 @@ U0 GuiTask(U8 *data)
         if (gui.clock_minute != Now / (60 * CDATE_FREQ)) GuiDesktop;
         if (gui.damage) GuiCompose;
         if (gui.shot_pending) {gui.shot_pending = FALSE; GuiShotNext;}
-        Sleep(8);
+        if (!gui.present_wake) Sleep(8);
     }
     // Reap detached windows after producer tasks acknowledge close.
     for (i = 0; i < gui.count; i++) {

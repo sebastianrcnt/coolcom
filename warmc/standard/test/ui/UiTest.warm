@@ -7,9 +7,10 @@ import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open, close,
     setPadding, setSpacing, setColumns, setChildAlign, setRange, setValue, setKey, setHandler, setSize, keyOf, finishBuild, layout, props,
     geometry, textBytes, nodeText, nextFocus, parseKey, makeDamage, destroyDamage, addDamage, damageRects, damageFull, readDamage,
     kindColumn, kindRow, kindGrid, kindSplit, kindLabel, kindButton, kindSpacer, kindTextBox, kindShortcut, kindSlider, kindCheckbox, setAux,
-    flagDisabled, flagDefault, flagCancel, alignCenter, keyCtrl, keyAlt, keyShift, keyLeft, keyRight, keyEnd, keyEscape, keyEnter);
+    kindTable, kindTreeView, kindListRow, kindHeader, kindCell, kindScroll, kindTextView, setFit, setHandler2, toInt,
+    flagDisabled, flagDefault, flagCancel, alignCenter, keyCtrl, keyAlt, keyShift, keyLeft, keyRight, keyEnd, keyEscape, keyEnter, keyDown);
 import OS.Ui.Engine (State, Snapshot, Action, Ephemeral, makeState, destroyState, makeSnapshot, destroySnapshot, compareAndRecord, handle,
-    readState, prune, current, setNow, actNone, actRepaint, actFire, actRelayout, actCopy);
+    readState, prune, current, setNow, actNone, actRepaint, actFire, actFire2, actRelayout, actCopy, listFix, ListState, scrollOffset, splitPositions);
 import OS.Ui.Text (TextEdit, replaceRange);
 import OS.Ui (applyEdit);
 import Standard.String (String, fromLiteral, length as stringLength, slice as stringSlice, destroyString);
@@ -324,8 +325,130 @@ module body UiTest is
         printLn("UI TEXT BOX PASS"); return nil;
     end;
 
+    -- A 1000-row table showing rows 10.. with two columns.
+    function tableTree(): Tree is
+        var t: Tree := makeTree();
+        open(&!t, kindTable); setValue(&!t, 10); setRange(&!t, 1000, 12); setAux(&!t, -1); setHandler(&!t, 0); setHandler2(&!t, 1);
+        add(&!t, kindHeader); setText(&!t, "Name"); setValue(&!t, 100); setRange(&!t, 1, 0);
+        add(&!t, kindHeader); setText(&!t, "Size"); setValue(&!t, 80); setRange(&!t, 1, 0);
+        for r from 10 until 21 do
+            open(&!t, kindListRow); setValue(&!t, toInt(r));
+            add(&!t, kindCell); setText(&!t, "name");
+            add(&!t, kindCell); setText(&!t, "size");
+            close(&!t);
+        end for;
+        close(&!t);
+        return t;
+    end;
+    function dataTests(): Unit is
+        var t: Tree := tableTree();
+        lay(&!t, 300, 200);
+        var state: State := makeState();
+        borrow r: &[Tree, Q] := &t do
+            let all: Span[Nat8, Q] := textBytes(r); let ps: Span[Node, Q] := props(r); let gs: Span[Geom, Q] := geometry(r);
+            check(same(rectIn(gs, 2), 2, 2, 100, 19) and same(rectIn(gs, 3), 102, 2, 180, 19), "headers: widths, the last reaches the scroll bar");
+            check(same(rectIn(gs, 4), 2, 22, 280, 18) and same(rectIn(gs, 7), 2, 40, 280, 18), "rows by index under the header");
+            check(same(rectIn(gs, 5), 2, 22, 100, 18) and same(rectIn(gs, 6), 102, 22, 180, 18), "cells under their columns");
+            -- The framework corrects the rows that fit (176 px of body: 10 rows) once.
+            var a: Action := listFix(ps, gs, &!state);
+            check(a.kind = actFire and a.list.fit = 10 and a.list.first = 10 and a.list.selected = 12, "fit correction");
+            a := listFix(ps, gs, &!state);
+            check(a.kind = actNone, "the correction is sent once");
+            -- Wheel: three rows a line.
+            a := handle(all, ps, gs, &!state, Mouse(x => 50, y => 60, buttons => 0, wheel => -1));
+            check(a.kind = actFire and a.list.first = 13, "wheel scrolls three rows");
+            -- Click a row: focus and selection.
+            a := handle(all, ps, gs, &!state, Mouse(x => 50, y => 22 + 18 * 3 + 5, buttons => 1, wheel => 0));
+            check(a.kind = actFire and a.list.selected = 13 and state.focus = ps[1].ident, "click selects row first + 3");
+            a := handle(all, ps, gs, &!state, Mouse(x => 50, y => 22 + 18 * 3 + 5, buttons => 0, wheel => 0));
+            -- Keys (the tree still shows selected 12): Down selects 13, End the last row.
+            a := handle(all, ps, gs, &!state, Key(code => keyDown));
+            check(a.kind = actFire and a.list.selected = 13, "Down");
+            a := handle(all, ps, gs, &!state, Key(code => keyEnd));
+            check(a.kind = actFire and a.list.selected = 999 and a.list.first = 1000 - 9, "End keeps the selection visible");
+            a := handle(all, ps, gs, &!state, Key(code => keyEnter));
+            check(a.kind = actFire2 and a.value = 12, "Return opens the selected row");
+            -- Header: sort by Size.
+            a := handle(all, ps, gs, &!state, Mouse(x => 150, y => 10, buttons => 1, wheel => 0));
+            check(a.kind = actFire and a.list.sort = 1 and not a.list.descending and a.list.first = 0, "header click sorts");
+            a := handle(all, ps, gs, &!state, Mouse(x => 150, y => 10, buttons => 0, wheel => 0));
+            -- Scroll bar: a click below the thumb pages down; the thumb drags.
+            a := handle(all, ps, gs, &!state, Mouse(x => 290, y => 150, buttons => 1, wheel => 0));
+            check(a.kind = actFire and a.list.first = 10 + 9, "track click pages");
+            a := handle(all, ps, gs, &!state, Mouse(x => 290, y => 150, buttons => 0, wheel => 0));
+            -- Dragging the Name rule resizes the column (framework state, relayout).
+            a := handle(all, ps, gs, &!state, Mouse(x => 101, y => 10, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => 131, y => 10, buttons => 1, wheel => 0));
+            check(a.kind = actRelayout, "column rule drag relayouts");
+            a := handle(all, ps, gs, &!state, Mouse(x => 131, y => 10, buttons => 0, wheel => 0));
+        end borrow;
+        layout(&!t, 300, 200, splitPositions(&state));
+        borrow r: &[Tree, Q] := &t do
+            check(rectIn(geometry(r), 2).width = 129 and rectIn(geometry(r), 3).x = 131, "column widths are kept by the framework");
+        end borrow;
+        destroyTree(t);
+        -- Trees: the triangle toggles; Right opens a closed row.
+        var tree: Tree := makeTree();
+        open(&!tree, kindTreeView); setValue(&!tree, 0); setRange(&!tree, 3, 0); setAux(&!tree, -1); setFit(&!tree, 10); setHandler(&!tree, 0); setHandler2(&!tree, 1);
+        add(&!tree, kindListRow); setValue(&!tree, 0); setText(&!tree, "Folder"); setRange(&!tree, 0, 1);
+        add(&!tree, kindListRow); setValue(&!tree, 1); setText(&!tree, "Open"); setRange(&!tree, 0, 3);
+        add(&!tree, kindListRow); setValue(&!tree, 2); setText(&!tree, "Child"); setRange(&!tree, 1, 0);
+        close(&!tree);
+        lay(&!tree, 300, 200);
+        borrow r: &[Tree, Q] := &tree do
+            let all: Span[Nat8, Q] := textBytes(r); let ps: Span[Node, Q] := props(r); let gs: Span[Geom, Q] := geometry(r);
+            var a: Action := handle(all, ps, gs, &!state, Mouse(x => 2 + 2 + 8, y => 2 + 9, buttons => 1, wheel => 0));
+            check(a.kind = actFire2 and a.value = 0, "triangle toggles row 0");
+            a := handle(all, ps, gs, &!state, Mouse(x => 2 + 2 + 8, y => 2 + 9, buttons => 0, wheel => 0));
+            a := handle(all, ps, gs, &!state, Key(code => keyRight));
+            check(a.kind = actFire2 and a.value = 0, "Right opens the selected closed row");
+            a := handle(all, ps, gs, &!state, Key(code => keyLeft));
+            check(a.kind = actNone, "Left on a closed row does nothing");
+        end borrow;
+        destroyTree(tree);
+        -- Scroll view: the wheel moves the content (framework offset, relayout).
+        var sv: Tree := makeTree();
+        open(&!sv, kindScroll);
+        open(&!sv, kindColumn);
+        for k from 0 until 30 do add(&!sv, kindLabel); setText(&!sv, "line"); end for;
+        close(&!sv);
+        close(&!sv);
+        lay(&!sv, 300, 200);
+        borrow r: &[Tree, Q] := &sv do
+            let all: Span[Nat8, Q] := textBytes(r); let ps: Span[Node, Q] := props(r); let gs: Span[Geom, Q] := geometry(r);
+            check(rectIn(gs, 2).height = 480 and rectIn(gs, 2).y = 1, "content at its preferred height");
+            let a: Action := handle(all, ps, gs, &!state, Mouse(x => 50, y => 50, buttons => 0, wheel => -1));
+            check(a.kind = actRelayout and scrollOffset(&!state, ps[1].ident) = 54, "wheel scrolls three rows of pixels");
+        end borrow;
+        layout(&!sv, 300, 200, splitPositions(&state));
+        check(rectOf(&sv, 2).y = 1 - 54, "scrolled content");
+        destroyTree(sv);
+        -- Text view: lines, Down keeps the column, Return inserts a newline.
+        var tv: Tree := makeTree();
+        add(&!tv, kindTextView); setText(&!tv, "one\ntwo words\nthree"); setHandler(&!tv, 0);
+        lay(&!tv, 300, 200);
+        borrow r: &[Tree, Q] := &tv do
+            let all: Span[Nat8, Q] := textBytes(r); let ps: Span[Node, Q] := props(r); let gs: Span[Geom, Q] := geometry(r);
+            var a: Action := handle(all, ps, gs, &!state, Mouse(x => 2 + 4 + 8 * 2 + 2, y => 2 + 3, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => 2 + 4 + 8 * 2 + 2, y => 2 + 3, buttons => 0, wheel => 0));
+            let e1: Ephemeral := current(&!state, ps[1].ident);
+            check(e1.a = 2, "click in the first line");
+            a := handle(all, ps, gs, &!state, Key(code => keyDown));
+            let e2: Ephemeral := current(&!state, ps[1].ident);
+            check(e2.a = 6, "Down keeps the column");
+            a := handle(all, ps, gs, &!state, Key(code => keyDown));
+            let e3: Ephemeral := current(&!state, ps[1].ident);
+            check(e3.a = 16, "Down again");
+            a := handle(all, ps, gs, &!state, Key(code => keyEnter));
+            check(a.kind = actFire and a.edit.codepoint = 10 and a.edit.start = 16, "Return inserts a newline");
+        end borrow;
+        destroyTree(tv);
+        destroyState(state);
+        printLn("UI DATA PASS"); return nil;
+    end;
+
     function main(): ExitCode is
-        editTests(); textBoxTests();
+        dataTests(); editTests(); textBoxTests();
         textTests(); layoutTests(); identityTests(); keyTests(); damageTests(); interactionTests();
         printLn("UI HOST PASS");
         return ExitSuccess();

@@ -361,6 +361,7 @@ module body OS.Gui is
         if held(window->pending) > 0 then return Ok(value => nil); end if;
         return status(rawWait(window->handle, milliseconds)); end;
     function traceEnabled(): Bool is return rawTrace() /= 0; end;
+    function traceLevel(): Int64 is return rawTrace(); end;
     function micros(): Int64 is return rawMicros(); end;
     pragma Foreign_Import(External_Name => "WgClipWrite");
     private function rawClipWrite(handle: Int64, bytes: Pointer[Nat8], byteCount: Index): Int64 is end;
