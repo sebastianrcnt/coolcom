@@ -1,4 +1,4 @@
-#include "../../../os/Kernel/KernelA.coolh"
+#include "../../Frontend/KernelA.coolh"
 // coolc --vet reports these (tools/native/checks.sh compares them with Vet.expected); compiling reports nothing.
 U0 AssignCond(I64 n)
 {

@@ -104,18 +104,18 @@ for name, (success, source) in cases.items():
 
     want = expected[name]
     opts = ['compile', *paths, '--entrypoint=Test:main', '--error-format=json']
-    actual = run([ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN', *opts,
+    actual = run([ROOT / 'tools/warm', 'compile', *opts,
                   '--target-type=hc', '--output=' + str(dest / 'out.cool')], 'cool')
     reason = None
     if success:
         if actual.returncode:
             reason = 'cool-' + comparison.error_kind(actual)
         else:
-            hc = run([ROOT / 'build/coolc', dest / 'out.cool', dest / 'out.BIN'], 'coolc')
-            if hc.returncode or b'Errs:0 ' not in hc.stdout:
+            hc = run([ROOT / 'tools/warm', 'build', dest / 'out.cool', '-o', dest / 'out.BIN'], 'coolc')
+            if hc.returncode:
                 reason = 'native-build'
             else:
-                ap = run([ROOT / 'build/coolc', '--run', dest / 'out.BIN'], 'cool-run')
+                ap = run([ROOT / 'tools/warm', 'run', dest / 'out.BIN'], 'cool-run')
                 if (ap.returncode, ap.stdout.decode(), ap.stderr.decode()) != (want['exit'], want['stdout'], want['stderr']):
                     reason = 'runtime-mismatch'
     elif actual.returncode != 1 or comparison.error_kind(actual) != want['kind']:

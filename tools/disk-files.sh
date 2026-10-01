@@ -71,6 +71,7 @@ tree() {
     done
 }
 tree warmc/standard/src Warm/Standard
+tree os/Warm/standard/src Warm/Standard
 tree warmc/builtin Warm/Standard/builtin
 tree warmc/examples Warm/Examples
 tree "$stage/Man" Man

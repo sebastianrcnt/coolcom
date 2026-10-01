@@ -85,7 +85,7 @@ strings; it does not translate the compiler logic. `build.sh` invokes native
 coolc and checks both the binary and `Errs:0`, since compiler status alone is
 not sufficient to detect an HC error.
 
-`package_kernel.py` flattens includes and appends `Kernel.cool` to make one file
+`os/Warm/package_kernel.py` flattens includes and appends `os/Warm/Kernel.cool` to make one file
 loadable by the TempleOS frontend. The kernel adapter loads FAT sources and
 calls the same passes. For `WarmRun`, generated HolyC is sent to `ShellExe` on
 the compiler/shell task. Runtime services replace native imports; Print format

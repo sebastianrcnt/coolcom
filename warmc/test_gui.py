@@ -17,12 +17,12 @@ probes = [
 for name, body, success, diagnostic in probes:
     path = OUT / (name + '.warm')
     path.write_text(imports + 'module body Probe is function main(initial: RootCapability): ExitCode is var root: RootCapability := initial; ' + body + ' surrenderRoot(root); return ExitSuccess(); end; end module body.\n')
-    p = subprocess.run([ROOT / 'build/warmc', 'compile', *os_modules(ROOT), path, '--check'], capture_output=True, text=True)
+    p = subprocess.run([ROOT / 'tools/warm', 'compile', *os_modules(ROOT), path, '--check'], capture_output=True, text=True)
     assert (p.returncode == 0) == success and diagnostic in p.stdout + p.stderr, (name,p.stdout,p.stderr)
     print('gui: ' + name + ' PASS')
 # Compile all widget bodies and the example, including the host's unsupported ABI.
-subprocess.run([ROOT / 'build/warmc','compile',*os_modules(ROOT),ROOT / 'warmc/examples/gui/Widgets.warm',
+subprocess.run([ROOT / 'tools/warm','compile',*os_modules(ROOT),ROOT / 'warmc/examples/gui/Widgets.warm',
     '--entrypoint=Widgets:main','--output=' + str(OUT / 'Widgets.cool')],check=True)
-p = subprocess.run([ROOT / 'build/coolc',OUT / 'Widgets.cool', OUT / 'Widgets.BIN'],capture_output=True,text=True)
-assert p.returncode == 0 and 'Errs:0 ' in p.stdout, p.stdout + p.stderr
+p = subprocess.run([ROOT / 'tools/warm', 'build', OUT / 'Widgets.cool', '-o', OUT / 'Widgets.BIN'],capture_output=True,text=True)
+assert p.returncode == 0, p.stdout + p.stderr
 print('gui: widget host ABI PASS')

@@ -9,8 +9,8 @@ import testvm
 from testvm import ROOT
 
 MODULE = ROOT / "warmc/standard/src/OS"
-sys.path.insert(0, str(ROOT / "warmc"))
-from os_modules import os_modules
+sys.path.insert(0, str(ROOT / "os/Warm"))
+from modules import os_modules, disk_path
 
 def run(*args):
     p = subprocess.run(list(map(str, args)), cwd=ROOT, capture_output=True)
@@ -25,14 +25,6 @@ def install(disk):
     assert b"Warm.cool" in run("mdir", "-b", "-i", disk, "::Warm/Warm.cool").stdout
     for old in ("::Warm.cool", "::coolc", "::Compiler"):
         assert subprocess.run(["mdir", "-i", str(disk), old], capture_output=True).returncode
-
-def disk_path(source):
-    path = Path(source).relative_to(ROOT / "warmc")
-    if path.parts[:2] == ("standard", "src"):
-        return "C:/Warm/Standard/" + "/".join(path.parts[2:])
-    if path.parts[0] == "examples":
-        return "C:/Warm/Examples/" + "/".join(path.parts[1:])
-    raise ValueError(source)
 
 def warm_run(paths, entry):
     # GetLine holds 511 bytes, but the guest key queue holds only 255 events.
@@ -149,7 +141,7 @@ def main():
                              ("SystemForge", "callable named System"),
                              ("SystemNoCapability", "Type Error"),
                              ("SnapshotLeak", "not consumed")):
-        result = subprocess.run([str(ROOT / "build/warmc"), "compile",
+        result = subprocess.run([str(ROOT / "tools/warm"), "compile",
             *os_modules(ROOT),
             str(ROOT / "warmc/test-programs/kernel" / (name + ".warm")),
             "--entrypoint=" + name + ":main", "--target-type=hc",
@@ -161,23 +153,21 @@ def main():
     # Exercise Unit/U0, scalar and decayed-span foreign calls directly.
     foreign_hc = OUT / "ForeignUnit.cool"
     foreign_bin = OUT / "ForeignUnit.BIN"
-    run(ROOT / "build/warmc", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.warm",
+    run(ROOT / "tools/warm", "compile", ROOT / "warmc/test-programs/kernel/ForeignUnit.warm",
         "--entrypoint=ForeignUnit:main", "--target-type=hc", "--output=" + str(foreign_hc))
-    compiled = run("env", "COOLC_COMPILER_BIN=" + str(ROOT / "coolc/seed/Compiler.BIN"),
-                   ROOT / "build/coolc", foreign_hc, foreign_bin)
-    assert b"Errs:0 " in compiled.stdout, compiled.stdout
-    assert run(ROOT / "build/coolc", "--run", foreign_bin).stdout == b"FOREIGN UNIT PASS\n"
+    run(ROOT / "tools/warm", "build", foreign_hc, "-o", foreign_bin)
+    assert run(ROOT / "tools/warm", "run", foreign_bin).stdout == b"FOREIGN UNIT PASS\n"
     print("warm-kernel: native foreign Unit/scalar/span PASS", flush=True)
     disk = OUT / "disk.img"
     testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     adapter = OUT / "Adapter.cool"
-    adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool", "OSNetCommon.cool", "OSNetKernel.cool", "OSTaskKernel.cool"]))
+    adapter.write_text("".join(((ROOT / "os/Warm" if "Kernel" in n else ROOT / "warmc") / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool", "OSNetCommon.cool", "OSNetKernel.cool", "OSTaskKernel.cool"]))
     run("mcopy", "-o", "-i", disk, adapter, "::Adapter.cool")
     for name in ("Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "System"):
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
-        run(ROOT / "build/warmc", "compile",
+        run(ROOT / "tools/warm", "compile",
             *os_modules(ROOT),
             ROOT / "warmc/examples/kernel" / (name + ".warm"),
             "--entrypoint=" + name + ":main", "--target-type=hc", "--output=" + str(hc))

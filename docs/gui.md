@@ -150,7 +150,7 @@ Widgets launcher. Pixel close requests allow one second for app cleanup.
 
 `GuiWidgets;` compiles/runs the Warm example in an independent core-0 task;
 `GuiRun(program, entry)` uses the generated guest OS module list shared with
-`warmc/os_modules.py`. Widgets exercise every basic control and a File menu.
+`os/Warm/modules.py`. Widgets exercise every basic control and a File menu.
 Man pages were regenerated with `tools/warm-man.py` into `build/gui-man/`; the
 production installer regenerates them from `.warmh` plus the prose notes.
 
@@ -289,3 +289,36 @@ sizes at 2x include the last partial logical pixel; tests compare a Vulkan clien
 clipped at both right/bottom screen edges. Screenshots were visually reviewed.
 Artifacts: `build/gui-vulkan-test/`. `make -j test` passed (exit 0;
 `build/g5-test.log`).
+
+
+### Post-G5 Warm toolchain integration and input backlog — complete
+
+Merged `main` Warm CLI/toolchain isolation (`bfbd7f5`); CoolOS kernel bindings
+now live in `os/Warm/`, while portable OS.Gui remains in the standard library.
+The Warm terminal-application integration section and all GUI stages are kept.
+
+The reported 63-of-80 key failure was reproduced on both CPU and Venus with a
+single 80-key raw-input backlog, waiting for completed presentation before VM
+shutdown. The 64-slot window event ring has 63 usable entries; the compositor
+pumped the complete source backlog before a consumer could run, dropped 17 keys,
+and reported `KEY_INPUT_LOST`. Reproduction log: `build/burst-repro.log`.
+
+Window event capacity now matches the 1024-slot raw-input ring. The compositor
+yields to notified pixel-window producers before synchronous GPU composition,
+so they drain input and paint before the frame. Actual overflow remains explicit.
+The drawing demo reports lost input and acknowledges completed presentation.
+Its regression test covers both 80 host keys and a deterministic 80-key queued
+backlog with five windows, all 160 responses, no loss, CPU/Venus pixel equality,
+and the existing 100 ms dispatch/burst bounds. Tests wait for every response and
+completed presentation before exiting. Acceptance results are recorded below.
+
+`make -j test` passed three consecutive times on the same implementation (exit
+0 each), including the merged Warm CLI tests, G1–G5, hardware cursors and the
+existing terminal applications. Each CPU/Venus drawing run delivered all 160
+keys without overflow and satisfied both the 100 ms event-age and burst bounds.
+
+| Full suite run / log | CPU host / queued burst | Venus host / queued burst |
+| --- | --- | --- |
+| `build/post-g5-test-1.log` | 67 / 13 ms | 48 / 8 ms |
+| `build/post-g5-test-2.log` | 58 / 15 ms | 52 / 11 ms |
+| `build/post-g5-test-3.log` | 77 / 13 ms | 64 / 10 ms |

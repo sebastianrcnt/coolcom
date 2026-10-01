@@ -1,4 +1,4 @@
-#include "../../../os/Kernel/KernelA.coolh"
+#include "../../Frontend/KernelA.coolh"
 // Every construct here is a compile error (tools/native/checks.sh compares the messages with Errors.expected).
 U0 StringCompare(U8 *s)
 {

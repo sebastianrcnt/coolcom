@@ -16,7 +16,7 @@
 #define GUI_MENU_ITEMS 8
 class CGuiMenuItem {I64 id; U8 label[64];};
 class CGuiMenu {U8 title[32]; I64 count; CGuiMenuItem items[GUI_MENU_ITEMS];};
-#define GUI_EVENTS 64
+#define GUI_EVENTS GUI_INPUT // one complete compositor input backlog fits a window
 class CGuiEvent {I64 type, key, x, y, buttons, wheel, timestamp;};
 class CGuiWindow
 {
@@ -38,7 +38,7 @@ class CGui
 {
     CGuiWindow *windows[GUI_WINDOWS], *focus, *drag, *capture;
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
-    Bool resizing, damage;
+    Bool resizing, damage, input_wake;
     I64 x0, y0, x1, y1, clock_minute;
     U32 *desktop, *canvas, *overlay, pointer[12 * 18], cursor[32 * 32];
     I64 cursor_w, cursor_h, hot_x, hot_y; Bool cursor_visible;
@@ -297,7 +297,7 @@ U0 GuiEventPush(CGuiWindow *w, CGuiEvent *e)
     I64 next = (w->event_tail + 1) % GUI_EVENTS;
     if (next == w->event_head) w->event_lost = TRUE;
     else {MemCpy(&w->events[w->event_tail], e, sizeof(CGuiEvent)); w->event_tail = next;}
-    if (w->owner) TaskWake(w->owner);
+    if (w->owner) {TaskWake(w->owner); if (w->pixel) gui.input_wake = TRUE;}
 }
 U0 GuiInputPush(CGuiEvent *e)
 {
@@ -557,6 +557,8 @@ U0 GuiTask(U8 *data)
             if (action == 5) i = gui.w;
             GuiResize(w, i - 2 * GUI_PAD - 3, gui.h - GUI_MENU - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER - 3);
         }
+        // Let notified producers drain input/repaint before synchronous GPU work.
+        if (gui.input_wake) {gui.input_wake = FALSE; Yield;}
         for (i = 0; i < gui.count; i++) {
             w = gui.windows[i];
             if (w->closing && TimerJiffies >= w->close_deadline) GuiStopWindow(w);
@@ -596,7 +598,7 @@ Bool Gui()
     if (fb.gpu) GpuCursorHide;
     gui.buttons = mouse.buttons; gui.wheel = mouse.wheel;
     gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
-    gui.input_head = gui.input_tail = 0; gui.input_lost = FALSE;
+    gui.input_head = gui.input_tail = 0; gui.input_lost = gui.input_wake = FALSE;
     gui_active = TRUE; gui_key_hook = &GuiKey; gui_mouse_hook = &GuiMouseInput;
     gui.menu_open = FALSE; gui.menu_window = NULL; gui.overlay_revision++;
     GuiPointerInit; GuiPointerSet(gui.pointer, 12, 18); GuiDesktop;

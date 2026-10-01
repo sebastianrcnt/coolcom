@@ -7,7 +7,7 @@ cat > "$tmp/Probe.cool" <<'EOF'
 I64i g = 7;
 I64i CoolCProbe() { return g + 35; }
 EOF
-make -C "$ROOT" build/coolc
+make -C "$ROOT" -f tools/toolchain.mk build/coolc
 COOLC_COMPILER_BIN="$ROOT/coolc/seed/Compiler.BIN" \
   gtimeout 25 "$ROOT/build/coolc" "$tmp/Probe.cool" "$tmp/Probe.BIN"
 result=$(gtimeout 5 "$ROOT/build/coolc" --probe "$tmp/Probe.BIN" CoolCProbe)

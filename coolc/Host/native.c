@@ -18,6 +18,10 @@
 #include <unistd.h>
 #include <stdarg.h>
 
+#ifdef WARM_PROGRAM_HEADER
+#include WARM_PROGRAM_HEADER
+#endif
+
 #ifdef __x86_64__
 void *NativeHostGS, *NativeCoolGS;
 extern uint64_t NativeX86Call(uintptr_t fn, size_t argc, const uint64_t *args);
@@ -719,18 +723,11 @@ static void resolve_imports(Module *m) {
     }
 }
 
-static Module load_bin(const char *path) {
-    FILE *input = fopen(path, "rb");
-    if (!input) {
-        perror(path);
-        exit(1);
-    }
-    if (fseek(input, 0, SEEK_END) || ftell(input) < 32)
+static Module load_bin_data(const uint8_t *data, size_t length) {
+    if (length < 32)
         fail("invalid BIN file size");
-    long length = ftell(input);
-    rewind(input);
     size_t pages = (size_t)sysconf(_SC_PAGESIZE);
-    size_t mapped = ((size_t)length + pages - 1) & ~(pages - 1);
+    size_t mapped = (length + pages - 1) & ~(pages - 1);
     uint8_t *memory = mmap(NULL, mapped, PROT_READ | PROT_WRITE | PROT_EXEC,
                            MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
     if (memory == MAP_FAILED) {
@@ -738,17 +735,7 @@ static Module load_bin(const char *path) {
         exit(1);
     }
     pthread_jit_write_protect_np(0);
-    // macOS read(2) cannot DMA into a MAP_JIT page even while this thread
-    // has JIT writes enabled. Read into ordinary memory and copy from user space.
-    uint8_t *staging = malloc((size_t)length);
-    if (!staging)
-        fail("out of memory reading BIN file");
-    size_t bytes_read = fread(staging, 1, (size_t)length, input);
-    if (bytes_read != (size_t)length)
-        fail("could not read complete BIN file");
-    memcpy(memory, staging, (size_t)length);
-    free(staging);
-    fclose(input);
+    memcpy(memory, data, length);
     uint32_t signature = u32(memory + 4);
 #ifdef __x86_64__
     if (signature != UINT32_C(0x363858)) fail("BIN architecture mismatch: x86_64 runner requires X86");
@@ -766,6 +753,28 @@ static Module load_bin(const char *path) {
     resolve_imports(&module);
     __builtin___clear_cache((char *)module.code, (char *)module.code + module.code_size);
     pthread_jit_write_protect_np(1);
+    return module;
+}
+
+static Module load_bin(const char *path) {
+    FILE *input = fopen(path, "rb");
+    if (!input) {
+        perror(path);
+        exit(1);
+    }
+    if (fseek(input, 0, SEEK_END) || ftell(input) < 32)
+        fail("invalid BIN file size");
+    size_t length = (size_t)ftell(input);
+    rewind(input);
+    // macOS read(2) cannot DMA into a MAP_JIT page. Stage in ordinary memory.
+    uint8_t *staging = malloc(length);
+    if (!staging)
+        fail("out of memory reading BIN file");
+    if (fread(staging, 1, length, input) != length)
+        fail("could not read complete BIN file");
+    fclose(input);
+    Module module = load_bin_data(staging, length);
+    free(staging);
     return module;
 }
 
@@ -802,6 +811,16 @@ int main(int argc, char **argv) {
     NativeCoolGS = native_tls;
 #else
     __asm__ volatile("mov x28, %0" : : "r"(native_tls));
+#endif
+#ifdef WARM_PROGRAM_HEADER
+    // A Warm build contains its BIN and the host services in one executable.
+    // argv[0] is the executable path, just as BIN runs use the BIN path.
+    native_argc = argc;
+    native_argv = argv;
+    Module program = load_bin_data(warm_program, sizeof(warm_program));
+    active_module = &program;
+    run_initializers(&program);
+    return 0;
 #endif
     if (argc >= 3 && !strcmp(argv[1], "--run")) {
         native_argc = argc - 2;

@@ -85,11 +85,11 @@ rest of the stack (ARP cache, sockets, TCP state machine) stays in Cool and only
   dropped and counted as a parser abort, and `NetRep` shows the count and the check's message. `EthRx`,
   `IpRx`, `ArpRx`, `IcmpRx`, `UdpRx` and `TcpRx` take the `CNetPkt` and the buffer; they keep the
   policy (is it for us, counters, sockets) and read payloads only at the offsets it gives.
-- **The build.** `make` compiles NetParse.warm with `build/warmc --kernel-module=NetParse` into
-  `os/Kernel/NetParse.cool`, which `Kernel.cool` includes before `Net.cool`. The file is generated (in
+- **The build.** `make` compiles NetParse.warm with `tools/warm compile --kernel-module=NetParse` into
+  `os/Kernel/NetParse.cool`, which `os/Kernel/Kernel.cool` includes before `Net.cool`. The file is generated (in
   `.gitignore`), but `tools/disk-files.sh` copies it to `C:/Kernel` with the other sources, so
   `MakeKernel` in the OS compiles the same text and still reproduces the Image byte for byte. Every
-  generated name, and the small module runtime (`warmc/ModuleRuntime.cool`), starts with `NetParse_`.
+  generated name, and the small module runtime (`warmc/targets/coolos/ModuleRuntime.cool`), starts with `NetParse_`.
 - **Speed**, per packet in the kernel under coolvm on an M1 (the old Cool checks and field reads vs
   `NetParsePkt`): a 1514-byte TCP segment 0.3 us vs 2.2 us, a TCP ACK or SYN 30 ns vs 230 ns, a
   134-byte UDP datagram 40 ns vs 310 ns. About 70 ns of the Warm time is the `try`. Most of the rest
