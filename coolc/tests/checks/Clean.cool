@@ -1,4 +1,4 @@
-#include "../../../os/Kernel/KernelA.coolh"
+#include "../../Frontend/KernelA.coolh"
 // Look like the errors of Errors.cool but are fine: tools/native/checks.sh expects Errs:0.
 U0 Fine(U8 *s, I64 n, F64 f)
 {

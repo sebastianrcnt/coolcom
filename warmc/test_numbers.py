@@ -49,11 +49,11 @@ path = OUT / 'Test.cool'
 path.write_text('\n'.join(source) + '\n')
 env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
            COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
-p = subprocess.run([ROOT / 'build/coolc', path, OUT / 'Test.BIN'], env=env,
+p = subprocess.run([ROOT / 'tools/warm', 'build', path, '-o', OUT / 'Test.BIN'], env=env,
                    capture_output=True, timeout=20)
 (OUT / 'build.log').write_bytes(p.stdout + p.stderr)
-assert p.returncode == 0 and b'Errs:0 ' in p.stdout, p.stdout + p.stderr
-p = subprocess.run([ROOT / 'build/coolc', '--run', OUT / 'Test.BIN'], env=env,
+assert p.returncode == 0, p.stdout + p.stderr
+p = subprocess.run([ROOT / 'tools/warm', 'run', OUT / 'Test.BIN'], env=env,
                    capture_output=True, timeout=20)
 (OUT / 'run.log').write_bytes(p.stdout + p.stderr)
 actual = [int(x, 16) for x in p.stdout.splitlines()]

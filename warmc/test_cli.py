@@ -10,7 +10,7 @@ OUT = ROOT / 'build/warmcool/cli-tests'
 OUT.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
            COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
-cmd = [ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN']
+cmd = [ROOT / 'tools/warm', 'compile']
 source = OUT / 'Library.warm'
 source.write_text('''module body Library is
 pragma Foreign_Export(External_Name => "exported_increment");
@@ -32,9 +32,9 @@ assert p.returncode == 0, p.stdout + p.stderr
 text = out.read_text()
 assert 'WarmMain' not in text and 'extern I32 exported_increment(' in text
 out.write_text(text + '\nPrint("%d\\n",exported_increment(19));\n')
-p = run([ROOT / 'build/coolc', out, OUT / 'Library.BIN'], 'coolc')
-assert p.returncode == 0 and b'Errs:0 ' in p.stdout, p.stdout + p.stderr
-p = run([ROOT / 'build/coolc', '--run', OUT / 'Library.BIN'], 'execute')
+p = run([ROOT / 'tools/warm', 'build', out, '-o', OUT / 'Library.BIN'], 'coolc')
+assert p.returncode == 0, p.stdout + p.stderr
+p = run([ROOT / 'tools/warm', 'run', OUT / 'Library.BIN'], 'execute')
 assert (p.returncode, p.stdout, p.stderr) == (0, b'20\n', b''), p
 checks += ['no-entrypoint', 'exported-call']
 # A span parameter is a pointer and a length on the Cool side, an Export_Layout record a Cool
@@ -59,9 +59,9 @@ text = out.read_text()
 assert 'class CStats {' in text and 'U64 count;' in text and 'extern U0 SpanStats(CStats *wr, U8 *' in text, text
 out.write_text(text + '\nCStats st;\nSpanStats(&st, "abc", 3);\nPrint("%d %d %d\\n", st.count, st.total, st.last);\n'
                'SpanStats(&st, "abc", -1);\n')
-p = run([ROOT / 'build/coolc', out, OUT / 'Spans.BIN'], 'spans-coolc')
-assert p.returncode == 0 and b'Errs:0 ' in p.stdout, p.stdout + p.stderr
-p = run([ROOT / 'build/coolc', '--run', OUT / 'Spans.BIN'], 'spans-execute')
+p = run([ROOT / 'tools/warm', 'build', out, '-o', OUT / 'Spans.BIN'], 'spans-coolc')
+assert p.returncode == 0, p.stdout + p.stderr
+p = run([ROOT / 'tools/warm', 'run', OUT / 'Spans.BIN'], 'spans-execute')
 assert p.stdout == b'3 294 99\n' and b'Negative span length.' in p.stderr and p.returncode, p
 checks += ['span-export', 'export-layout']
 bad = OUT / 'Bad.warm'

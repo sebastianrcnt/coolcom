@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'build/warmcool/kernel-test'
 OUT.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'))
@@ -13,7 +13,7 @@ env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'))
 def run(cmd, **kwargs):
     return subprocess.run(list(map(str, cmd)), cwd=ROOT, env=env, check=True, **kwargs)
 
-run(['python3', ROOT / 'warmc/package_kernel.py'])
+run(['python3', ROOT / 'os/Warm/package_kernel.py'])
 disk = OUT / 'disk.img'
 with disk.open('wb') as f:
     f.truncate(64 * 1024 * 1024)

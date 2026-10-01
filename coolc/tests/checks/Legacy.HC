@@ -1,4 +1,4 @@
-#include "../../../os/Kernel/KernelA.coolh"
+#include "../../Frontend/KernelA.coolh"
 // Legacy TempleOS/Aiwnios code: the strict errors of Errors.cool are only Vet findings in .HC/.HH files
 // (tools/native/checks.sh compiles this as Legacy.HC, as a .cool with and without --compat).
 U0 Unused()

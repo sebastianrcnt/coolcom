@@ -20,7 +20,7 @@ with out.open('w') as f:
 
 # WRuntime: a program's runtime; WModuleRuntime: a kernel module's (--kernel-module).
 with (root / 'build/warmcool/RuntimeText.cool').open('w') as f:
-    for fn, src in (('WRuntime', 'Runtime.cool'), ('WModuleRuntime', 'ModuleRuntime.cool')):
+    for fn, src in (('WRuntime', 'Runtime.cool'), ('WModuleRuntime', 'targets/coolos/ModuleRuntime.cool')):
         text = (root / 'warmc' / src).read_text()
         text = text.replace('// @shared-libc: expanded from coolc/LibC/LibC.cool by the packagers.',
                             (root / 'coolc/LibC/LibC.cool').read_text())

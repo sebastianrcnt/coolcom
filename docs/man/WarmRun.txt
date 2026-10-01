@@ -18,18 +18,20 @@ Example without library dependencies:
     WarmRun("C:/Warm/Examples/hello-world/HelloWorld.warm", "Example.HelloWorld:main");
 
 Mac host, from repository root:
-    make build/warmc
+    make -f tools/toolchain.mk warm-host
     tools/warm run Foo.warm
-    tools/warm run --entrypoint=Main:main Api.warmh,Api.warm Main.warm -- arguments
-tools/warm run defaults to the last body's Module:main, saves intermediate
-files under build/warm-run/, and compiles, builds and runs. tools/warm compile
-stops after Cool source. A library input is Interface.warmh,Body.warm; a
-body-only module is one .warm file. List all dependencies.
+    tools/warm build Foo.warm -o foo
+    tools/warm check Foo.warm
+Imports are discovered recursively from the source directory, -I directories,
+and the portable standard library. --coolos enables OS.CoolOS modules.
+Run uses temporary intermediates; build creates a standalone Mac executable.
+An explicit --entrypoint=Module:main chooses between multiple main functions.
+Program arguments follow the source or an explicit -- separator.
 
-Separate compilation steps:
-    build/warmc compile Api.warmh,Api.warm Main.warm --entrypoint=Main:main --target-type=hc --output=build/Main.cool
-    COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" build/coolc build/Main.cool build/Main.BIN
-    build/coolc --run build/Main.BIN
+Compiler/interop steps (explicit input list, no discovery):
+    tools/warm compile Api.warmh,Api.warm Main.warm --entrypoint=Main:main --target-type=hc --output=build/Main.cool
+    tools/warm build build/Main.cool -o build/Main.BIN
+    tools/warm run build/Main.BIN
 
 Compiler options: --parse, --dump-ast, --check (no emission),
 --error-format=plain|json, --no-entrypoint, --output=path, --target-type=hc.
@@ -38,7 +40,7 @@ build/warmc's default entry is Test:main, unlike tools/warm run's inference.
 Cool source is the only target. Generated internal aggregate ABI is private;
 Foreign_Export wrappers are the supported bridge to Cool.
 
-Formatting: tools/warmfmt [--check] files on host; WarmFmt("C:/x.warm")
+Formatting: tools/warm fmt [--check] files on host; WarmFmt("C:/x.warm")
 in the OS. WarmFmt(path, TRUE) reports without writing.
 
 OS programs with imports: Man("WarmModules") supplies generated shell

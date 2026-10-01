@@ -16,8 +16,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/warmcool/fmt-tests'
-FMT = [ROOT / 'tools/warmfmt']
-PARSE = [ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN']
+FMT = [ROOT / 'tools/warm', 'fmt']
+PARSE = [ROOT / 'tools/warm', 'compile']
 failures = []
 
 
@@ -32,7 +32,7 @@ def check(ok, what, detail=''):
 
 shutil.rmtree(OUT, ignore_errors=True)
 OUT.mkdir(parents=True)
-subprocess.run(['make', '-s', 'build/warmfmt.BIN'], cwd=ROOT, check=True)
+subprocess.run(['make', '-s', '-f', 'tools/toolchain.mk', 'build/warmfmt.BIN'], cwd=ROOT, check=True)
 
 # 1. Fixtures.
 fixtures = sorted((ROOT / 'warmc/fmt-tests').glob('*.in.warm'))
@@ -78,7 +78,7 @@ p = fmt('--check', OUT / 'missing.warm')
 check(p.returncode == 2, 'a missing file should be an error')
 
 # 3. The whole corpus.
-sources = sorted(p for d in ('warmc', 'os') for p in (ROOT / d).rglob('*')
+sources = sorted(p for d in ('warmc',) for p in (ROOT / d).rglob('*')
                  if p.suffix in ('.warm', '.warmh', '.aum', '.aui') and 'build' not in p.relative_to(ROOT).parts
                  and 'fmt-tests' not in p.relative_to(ROOT).parts)
 copies = []

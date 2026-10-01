@@ -268,7 +268,7 @@ absolute paths, other drives, other hosts).
 ## Implementation notes
 
 Stage 1: portable `OS.Terminal`, `OS.File`, and `OS.Error` use `OSHost.cool`
-and `OSKernel.cool`. `Warm.Kernel` has been removed. The temporary `OS.Raw`
+and `os/Warm/OSKernel.cool`. `Warm.Kernel` has been removed. The temporary `OS.Raw`
 module was removed in stage 5 after migrating its final users. CoolOS extensions are in
 `OS.CoolOS.*`. The upstream `Standard.IO` compatibility module uses the same
 terminal boundary. Tests include host round trips and kernel shell examples.

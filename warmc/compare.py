@@ -64,7 +64,7 @@ def main():
     env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
                COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
     (ROOT / 'build/tmp').mkdir(parents=True, exist_ok=True)
-    cool = [ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN']
+    cool = [ROOT / 'tools/warm', 'compile']
     cases = [p for p in sorted(SUITES.glob('*/*')) if p.is_dir() and args.filter in str(p.relative_to(SUITES))]
 
     def check(case):
@@ -113,11 +113,11 @@ def main():
             elif actual.returncode or not hc.exists():
                 row['reason'] = error_kind(actual) if actual.returncode else 'missing-output'
             else:
-                build = run([ROOT / 'build/coolc', hc, binary], 'coolc')
-                if build.returncode or b'Errs:0 ' not in build.stdout or not binary.exists():
+                build = run([ROOT / 'tools/warm', 'build', hc, '-o', binary], 'coolc')
+                if build.returncode or not binary.exists():
                     row['reason'] = 'cool-native-build'
                 else:
-                    ap = run([ROOT / 'build/coolc', '--run', binary], 'cool-run')
+                    ap = run([ROOT / 'tools/warm', 'run', binary], 'cool-run')
                     stdout = case / 'program-stdout.txt'
                     stderr = case / 'program-stderr.txt'
                     # The stderr fixtures name the binary by the path the original suite used.

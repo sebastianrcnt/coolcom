@@ -14,7 +14,7 @@ ROOT = manual.ROOT
 
 
 def ast(path):
-    return subprocess.run([ROOT / 'build/warmc', 'compile', path, '--parse', '--dump-ast'],
+    return subprocess.run([ROOT / 'tools/warm', 'compile', path, '--parse', '--dump-ast'],
                           check=True, capture_output=True, text=True).stdout
 
 
