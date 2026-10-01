@@ -7,7 +7,7 @@ import json
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/warmcool/frontend-tests'
 OUT.mkdir(parents=True, exist_ok=True)
-CMD = [str(ROOT / 'build/coolc'), '--run', str(ROOT / 'build/warmcool/Warm.BIN')]
+CMD = [str(ROOT / 'tools/warm'), 'compile']
 
 
 def run(path, dump=False):

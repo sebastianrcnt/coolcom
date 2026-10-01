@@ -16,7 +16,7 @@ paths = [','.join(str(standard / name) for name in pair.split(',')) for pair in 
 paths += os_modules(ROOT)[3:]
 env = dict(os.environ, TMPDIR=str(ROOT / 'build/tmp'),
            COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
-cmd = [ROOT / 'build/coolc', '--run', ROOT / 'build/warmcool/Warm.BIN', '--check', *paths]
+cmd = [ROOT / 'tools/warm', 'compile', '--check', *paths]
 p = subprocess.run(list(map(str, cmd)), cwd=OUT, env=env, capture_output=True, timeout=30)
 (OUT / 'cool.stdout').write_bytes(p.stdout)
 (OUT / 'cool.stderr').write_bytes(p.stderr)

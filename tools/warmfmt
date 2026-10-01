@@ -1,13 +1,5 @@
 #!/bin/sh
-# Format Warm source (.warm/.warmh) with warmc/Format.cool, which uses the lexer of the Warm compiler.
-#   tools/warmfmt file.warm...            rewrite the files that change
-#   tools/warmfmt --check file.warm...    only report; exit status 1 when a file would change
-# Exit status 2 is an error (unreadable file, source that does not lex).
+# Compatibility name; Warm's host command owns formatting and toolchain setup.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-[ $# -gt 0 ] || {
-  echo 'usage: warmfmt [--check] file.warm...' >&2
-  exit 2
-}
-make -s -C "$ROOT" build/warmfmt.BIN || exit 2
-exec "$ROOT/build/coolc" --run "$ROOT/build/warmfmt.BIN" "$@"
+exec "$ROOT/tools/warm" fmt "$@"

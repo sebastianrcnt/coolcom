@@ -9,7 +9,6 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-STD=warmc/standard/src
 OUT=build/warm-examples
 mkdir -p "$OUT"
 failed=0
@@ -17,10 +16,7 @@ failed=0
 # compile DIR MODULE EXPECTED [STDIN]: compile, run and compare the output
 function compile() {
     local dir=warmc/examples/$1 module=$2 expected=$3 input=${4:-}
-    local modules=("$STD/Buffer.warmh,$STD/Buffer.warm" "$STD/String.warmh,$STD/String.warm"
-        "$STD/StringBuilder.warmh,$STD/StringBuilder.warm" "$STD/IO/IO.warmh,$STD/IO/IO.warm"
-        "$STD/IO/Terminal.warmh,$STD/IO/Terminal.warm" "$STD/OS/Error.warm" "$STD/OS/Terminal.warmh,$STD/OS/Terminal.warm" "$dir/$module.warmh,$dir/$module.warm")
-    if printf '%b' "$input" | tools/warm run "${modules[@]}" --entrypoint="Example.$module:main" >"$OUT/$module.actual" 2>"$OUT/$module.err" \
+    if printf '%b' "$input" | tools/warm run "$dir/$module.warm" --entrypoint="Example.$module:main" >"$OUT/$module.actual" 2>"$OUT/$module.err" \
         && printf '%b' "$expected" | cmp -s - "$OUT/$module.actual"; then
         echo "PASS $1"
     else

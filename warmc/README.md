@@ -29,9 +29,9 @@ with the Cool implementation; it does not invoke upstream Austral.
 | `Core.cool` `Lexer.cool` `Parser.cool` `Resolve.cool` `Types.cool` `Fold.cool` `Check.cool` `Linear.cool` `Emit.cool` `Diagnostic.cool` | the compiler (`Warm.cool` includes the passes) |
 | `Format.cool` `FmtNative.cool` | the formatter (`WFmt`, `WarmFmt`) and its host command line (built into `build/warmfmt.BIN`) |
 | `Runtime.cool` | the runtime that every generated program starts with |
-| `ModuleRuntime.cool` | the smaller runtime of a kernel module (`--kernel-module`) |
+| `targets/coolos/ModuleRuntime.cool` | the smaller runtime of a kernel module (`--kernel-module`) |
 | `Native.cool` | the host command line (built into `build/warmcool/Warm.BIN`) |
-| `Kernel.cool` | `WarmRun` and `WarmCompile` for the kernel shell (`package_kernel.py` makes `C:/Warm/Warm.cool`) |
+| `os/Warm/Kernel.cool` | `WarmRun` and `WarmCompile` for the kernel shell (`os/Warm/package_kernel.py` makes `C:/Warm/Warm.cool`) |
 | `builtin/` | Pervasive and Memory, original Warm source that is embedded into the compiler (`embed_builtins.py`) |
 | `standard/` `examples/` | the standard library and example programs; `standard/src/OS` contains portable OS APIs |
 | `test-programs/` | the end-to-end test suites |
@@ -46,25 +46,31 @@ For editor support, use the [Cool/Warm Zed extension](../tools/zed-coolcom/READM
 From the repository root:
 
 ```sh
-make build/warmc                  # Warm.BIN (warmc/build.sh) and the wrapper build/warmc
-tools/warm run Foo.warm           # compile, build and run in one step
+make -j -f tools/toolchain.mk warm-host
+export PATH="$PWD/build:$PATH"
+warm run Foo.warm                 # imports are discovered automatically
+warm build Foo.warm -o foo         # standalone macOS executable
+warm check Foo.warm
+warm fmt Foo.warm
+warm test tests/
 ```
 
-`build/warmc` is a wrapper script that runs `build/coolc --run build/warmcool/Warm.BIN`
-with its arguments, so it works like a compiler command:
+The host command works from project directories outside this repository.
+Directory inputs and repeated `-I` paths support multiple modules without a
+manifest. See [toolchain boundaries and module rules](../docs/toolchain.md).
+
+For compiler diagnostics, foreign exports, and OS integration, `warm compile`
+accepts the explicit compiler protocol (all input modules must be listed):
 
 ```sh
-build/warmc compile Api.warmh,Api.warm Main.warm --entrypoint=Main:main \
+warm compile Api.warmh,Api.warm Main.warm --entrypoint=Main:main \
   --target-type=hc --output=build/Main.cool
-COOLC_COMPILER_BIN="$PWD/coolc/seed/Compiler.BIN" build/coolc build/Main.cool build/Main.BIN
-build/coolc --run build/Main.BIN
+warm build build/Main.cool -o build/Main.BIN
+warm run build/Main.BIN
 ```
 
-`tools/warm run [--entrypoint=Module:main] FILES [-- program arguments]` does the three
-steps, keeping the files under `build/warm-run/`; `tools/warm compile` stops after the
-Cool file. The entrypoint defaults to `Module:main` of the last file's `module body`.
-Supply modules as `path/Module.warmh,path/Module.warm` or a lone `path/Module.warm`; all
-dependencies must be listed. Pervasive and Memory are embedded. Options of `compile`:
+`build/warmc` remains the internal wrapper around the Warm compiler's BIN.
+Options of `compile`:
 
 - `--parse`: lexer/parser only; `--dump-ast`: print the parsed tree.
 - `--check`: all semantic checks, without generating code.
@@ -99,7 +105,7 @@ in the shell symbol table; the compilation arena is released after every operati
 
 ## Formatting
 
-`tools/warmfmt [--check] files` formats `.warm`/`.warmh` files in place (`--check` only reports and exits 1 when a
+`warm fmt [--check] files` formats `.warm`/`.warmh` files in place (`--check` only reports and exits 1 when a
 file would change; 2 is an error). In the OS, `WarmFmt("C:/x.warm");` does the same to a file (`WarmFmt(path, TRUE)`
 only reports); it comes with `C:/Warm/Warm.cool`. `make fmt` and `make fmt-check` cover the tracked Warm files too, next to
 the HolyC ones (`tools/hcfmt.sh`), and the pre-commit hook (`make hooks`) refuses staged Warm files that are not
@@ -172,7 +178,7 @@ and `os/Kernel/Kernel.cool` includes the result. The output lives in the kernel'
   the runtime (`NetParse_au_span_t`, `NetParse_wh_abort`). Only `Foreign_Export` functions keep the
   name they declare, and `Export_Layout` records the class name they declare; together they are the
   module's interface (see "Crossing to Cool" below).
-- The runtime is `ModuleRuntime.cool`, not `Runtime.cool`: spans, abort, and allocation through
+- The runtime is `targets/coolos/ModuleRuntime.cool`, not `Runtime.cool`: spans, abort, and allocation through
   `CAlloc`/`Free`. It has no `#define`s, no output, input, arguments or Float32 helpers; a module that
   uses those does not compile into the kernel.
 - An abort (a failed index, overflow or division check, or `abort`) does not exit: it keeps the
@@ -278,7 +284,7 @@ python3 warmc/test_numbers.py     # exact numeric representation checks
 python3 warmc/test_cli.py         # entrypoint, export, CLI and diagnostic checks
 python3 warmc/test_standard.py    # the standard library and its tests, semantic checking
 python3 warmc/test_fmt.py         # the formatter (tools/warmfmt): fixtures, idempotence, same parse trees
-python3 warmc/test_kernel.py      # compile and run inside the kernel shell (make build/kernel.Image first)
+python3 os/Warm/test_kernel.py      # compile and run inside the kernel shell (make build/kernel.Image first)
 warmc/run-examples.sh             # compile and run the examples
 ```
 
@@ -329,13 +335,13 @@ These additions return an unsupported Other error on the host backend.
 `examples/kernel/System.warm` exercises these APIs, including a worker on core 1
 and copied data after its termination; run `tools/warm-kernel-test.py --filter System`.
 
-The scalar ABI is implemented in `OSHost.cool` and `OSKernel.cool`, packaged
+The scalar ABI is implemented in `OSHost.cool` and `os/Warm/OSKernel.cool`, packaged
 with the corresponding runtime. The temporary `OS.Raw` binding has been removed;
 new applications should use the typed modules. The former `Warm.Kernel` is
 removed. `Standard.IO` remains a compatibility facade over the same terminal
 boundary for upstream library tests.
 
-To list the dependencies for a program, see `warmc/os_modules.py`. The same
+To list the dependencies for a program, see `warmc/os_modules.py` for portable modules and `os/Warm/modules.py` for CoolOS integration. The same
 sources run with `tools/warm run` on macOS and `WarmRun` in the kernel shell.
 Whole-file reads own a detached snapshot; release it exactly once using
 `OS.File.closeBytes`. Indexing outside its bounds is a programmer error.

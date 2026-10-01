@@ -9,7 +9,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 def probe(name, declarations, body, success, diagnostic=''):
     source = OUT / (name + '.warm')
     source.write_text('module body Test is\n' + declarations + '\nfunction main(root: RootCapability): ExitCode is\n' + body + '\nend; end module body.\n')
-    p = subprocess.run([ROOT / 'build/warmc', 'compile', source, '--check'], capture_output=True, text=True)
+    p = subprocess.run([ROOT / 'tools/warm', 'compile', source, '--check'], capture_output=True, text=True)
     assert (p.returncode == 0) == success and diagnostic in p.stdout + p.stderr, (name, p.stdout, p.stderr)
     print('tasks: ' + name + ' PASS')
 require = 'generic [T: Type(Sendable)] function transfer(arg: T): T is return arg; end;'
@@ -28,12 +28,12 @@ for name, declarations, body, success, diagnostic in [
 ]:
     source = OUT / (name + '.warm')
     source.write_text(('pragma Unsafe_Module; import Austral.Memory (Address as RawAddress, nullPointer, codeAddress); module body Test is\n' if name == 'raw-pointer-alias' else 'pragma Unsafe_Module; import Austral.Memory (Address, nullPointer, codeAddress); module body Test is\n') + declarations + '\nfunction main(root: RootCapability): ExitCode is\n' + (body.replace('Address[Nat8]', 'RawAddress[Nat8]') if name == 'raw-pointer-alias' else body) + '\nsurrenderRoot(root); return ExitSuccess(); end; end module body.')
-    p = subprocess.run([ROOT / 'build/warmc', 'compile', source, '--check'], capture_output=True, text=True)
+    p = subprocess.run([ROOT / 'tools/warm', 'compile', source, '--check'], capture_output=True, text=True)
     assert (p.returncode == 0) == success and diagnostic in p.stdout + p.stderr, (name, p.stdout, p.stderr)
     print('tasks: ' + name + ' PASS')
 # A linear completion value cannot be detached.
 source = OUT / 'detach-linear.warm'
 source.write_text('import OS.Task (Task, detach); import OS.Dir (Dir); module body Test is function forbidden(task: Task[Dir]): Unit is detach(task); return nil; end; function main(): ExitCode is return ExitSuccess(); end; end module body.')
-p = subprocess.run([ROOT / 'build/warmc', 'compile', *os_modules(ROOT), source, '--check'], capture_output=True, text=True)
+p = subprocess.run([ROOT / 'tools/warm', 'compile', *os_modules(ROOT), source, '--check'], capture_output=True, text=True)
 assert p.returncode and 'Type Error' in p.stdout + p.stderr, (p.stdout, p.stderr)
 print('tasks: detach-linear PASS')

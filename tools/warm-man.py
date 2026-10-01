@@ -13,8 +13,8 @@ import textwrap
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OS = ROOT / 'warmc/standard/src/OS'
 NOTES = ROOT / 'docs/man'
-sys.path.insert(0, str(ROOT / 'warmc'))
-from os_modules import os_modules
+sys.path.insert(0, str(ROOT / 'os/Warm'))
+from modules import os_modules, disk_path
 
 
 def body_interface(source):
@@ -38,7 +38,7 @@ def body_interface(source):
 
 
 def module_sources():
-    for body in sorted(OS.rglob('*.warm')):
+    for body in sorted([*OS.rglob('*.warm'), *(ROOT / 'os/Warm/standard/src/OS').rglob('*.warm')]):
         header = body.with_suffix('.warmh')
         yield header if header.exists() else body
 
@@ -53,7 +53,7 @@ def pages():
         notes = (NOTES / (name + '.txt')).read_text()
         interface = text if source.suffix == '.warmh' else body_interface(text)
         relative = source.relative_to(ROOT)
-        disk_source = 'C:/Warm/Standard/' + str(source.relative_to(OS.parent))
+        disk_source = disk_path(source)
         result[name] = (f'{name} - Warm standard library\n\n{notes.rstrip()}\n\n'
                         f'PUBLIC API (generated from {relative})\n'
                         f'Installed source: {disk_source}\n\n{interface}\n'
@@ -65,11 +65,11 @@ def pages():
         'return Err(Other). See each module for its capability and ownership.\n')
     paths = []
     for group in os_modules(ROOT):
-        paths.extend('C:/Warm/Standard/' + str(pathlib.Path(p).relative_to(OS.parent))
+        paths.extend(disk_path(p)
                      for p in group.split(','))
     assert len(','.join(paths)) + 100 < 4096
     result['WarmModules'] = ('WarmModules - OS library inputs for WarmRun\n\n'
-        'Generated from warmc/os_modules.py, the dependency list used by OS tests.\n'
+        'Generated from os/Warm/modules.py, the dependency list used by OS tests.\n'
         'Run these shell statements to build the full OS library input list.\n'
         'Each statement fits the shell input limit; do not join all lines.\n\n'
         '    U8 wm_paths[4096]; wm_paths[0] = 0;\n' +

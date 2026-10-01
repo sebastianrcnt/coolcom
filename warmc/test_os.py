@@ -21,12 +21,11 @@ env = dict(os.environ, COOLC_COMPILER_BIN=str(ROOT / 'coolc/seed/Compiler.BIN'))
 for name in ['Files', 'Streams', 'Sockets', 'Tasks', 'Capabilities']:
     code = OUT / (name + '.cool')
     binary = OUT / (name + '.BIN')
-    subprocess.run([ROOT / 'build/warmc', 'compile', *os_modules(ROOT),
+    subprocess.run([ROOT / 'tools/warm', 'compile', *os_modules(ROOT),
         ROOT / ('warmc/examples/kernel/' + name + '.warm'), '--entrypoint=' + name + ':main',
         '--output=' + str(code)], check=True, env=env)
-    p = subprocess.run([ROOT / 'build/coolc', code, binary], check=True, capture_output=True, env=env)
-    assert b'Errs:0 ' in p.stdout, p.stdout
-    p = subprocess.run([ROOT / 'build/coolc', '--run', binary], cwd=OUT, check=True, capture_output=True)
+    p = subprocess.run([ROOT / 'tools/warm', 'build', code, '-o', binary], check=True, capture_output=True, env=env)
+    p = subprocess.run([ROOT / 'tools/warm', 'run', binary], cwd=OUT, check=True, capture_output=True)
     assert p.stdout == ('WARM ' + ('FILE' if name == 'Files' else name.upper()) + ' PASS\n').encode(), p.stdout
     assert (OUT / 'Warm.txt').read_bytes() == b'Warm FAT32\n'
 assert (outside / 'secret').read_bytes() == b'outside sentinel'

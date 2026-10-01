@@ -2,7 +2,7 @@
 """Build a single source file for #include in the running kernel shell."""
 from pathlib import Path
 import json
-root = Path(__file__).resolve().parents[1]
+root = Path(__file__).resolve().parents[2]
 source = root / 'warmc'
 out = root / 'build/warmcool/Kernel.cool'
 runtime = (source / 'Runtime.cool').read_text()
@@ -18,7 +18,7 @@ for line in runtime.splitlines():
 runtime = '\n'.join(lines) + '\n'
 runtime = runtime.replace('// @shared-libc: expanded from coolc/LibC/LibC.cool by the packagers.',
                           (root / 'coolc/LibC/LibC.cool').read_text())
-runtime = ''.join((source / n).read_text() for n in ['OSKernel.cool', 'OSCommon.cool', 'OSDirKernel.cool', 'OSNetCommon.cool', 'OSNetKernel.cool', 'OSTaskKernel.cool', 'OSGuiKernel.cool']).replace('#define WARM_KERNEL 1', '') + runtime
+runtime = ''.join(((root / 'os/Warm' if 'Kernel' in n else source) / n).read_text() for n in ['OSKernel.cool', 'OSCommon.cool', 'OSDirKernel.cool', 'OSNetCommon.cool', 'OSNetKernel.cool', 'OSTaskKernel.cool', 'OSGuiKernel.cool']).replace('#define WARM_KERNEL 1', '') + runtime
 for name, adapter in [('NativeExit', 'WKernelExit'), ('NativeErrPutS', 'WKernelErrPutS'),
                       ('NativeArgCount', 'WKernelArgCount'), ('NativeGetChar', 'WKernelGetChar'), ('NativeArg', 'WKernelArg')]:
     runtime = runtime.replace(name, adapter)
@@ -38,5 +38,5 @@ with out.open('w') as f:
         f.write(f'MemCpy(text+{offset},{json.dumps(line)},{len(line.encode())});\n')
         offset += len(line.encode())
     f.write('return text;\n}\n')
-    f.write((source / 'Kernel.cool').read_text())
+    f.write((root / 'os/Warm/Kernel.cool').read_text())
 print(out)

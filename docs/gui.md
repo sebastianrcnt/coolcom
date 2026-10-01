@@ -150,7 +150,7 @@ Widgets launcher. Pixel close requests allow one second for app cleanup.
 
 `GuiWidgets;` compiles/runs the Warm example in an independent core-0 task;
 `GuiRun(program, entry)` uses the generated guest OS module list shared with
-`warmc/os_modules.py`. Widgets exercise every basic control and a File menu.
+`os/Warm/modules.py`. Widgets exercise every basic control and a File menu.
 Man pages were regenerated with `tools/warm-man.py` into `build/gui-man/`; the
 production installer regenerates them from `.warmh` plus the prose notes.
 
