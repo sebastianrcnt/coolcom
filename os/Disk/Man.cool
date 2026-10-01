@@ -1,6 +1,6 @@
 // Man("Name"): show where a function, class, global variable or #define is defined.
 // The shell compiler's symbol table says what Name is. A symbol defined in a file the shell
-// compiled (Vim.cool, your own #include) carries its file and line, and Vim opens there. The
+// compiled (WarmPrograms.cool, your own #include) carries its file and line, and Vim opens there. The
 // kernel's own symbols come from the compiler's prelude, so their source is looked up in
 // the kernel sources on the disk (C:/Kernel: os/Kernel; C:/Cool: the shared library files) by
 // the shape of a definition: a function is a line with a return type and Name(, a class is
@@ -40,7 +40,7 @@ I64 ManKind(CHashSrcSym *h)
 }
 
 Bool ManSrcLink(CHashSrcSym *h, U8 *file, I64 *_line)
-{//"FL:C:/Vim.cool,803" -> file (at least 200 bytes) and line, if it is a real file.
+{//"FL:C:/WarmPrograms.cool,803" -> file (at least 200 bytes) and line, if it is a real file.
     U8 *s = h->src_link, *comma = NULL;
     if (!s || StrNCmp(s, "FL:", 3)) return FALSE;
     s += 3;

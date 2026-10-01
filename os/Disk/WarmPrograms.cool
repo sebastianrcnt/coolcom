@@ -1,6 +1,7 @@
 // Compile once per shell; Warm owns all editor state and behavior.
 // The shell preserves its familiar API and registers its statement-recovery callback.
 Bool warm_vim_ready = WarmRun("C:/Warm/Standard/OS/CoolOS/Editor.warmh,C:/Warm/Standard/OS/CoolOS/Editor.warm,C:/Vim.warm", "VimApp:main");
+#define VIM_HIST 33 // Shell-visible journal limit; matches the Warm editor.
 I64 vim_state, vim_active, vim_pos, vim_top, vim_left;
 U0 VimClose()
 {
@@ -33,3 +34,21 @@ U0 Vim(U8 *name, I64 line = 0)
 
 Bool VimKey(I64 event) {if (!vim_active) return FALSE; return WvimKey(vim_state, event);}
 U0 VimDraw() {if (vim_active) WvimPaint(vim_state);}
+
+Bool warm_tmux_ready = WarmRun("C:/Warm/Standard/OS/CoolOS/Editor.warmh,C:/Warm/Standard/OS/CoolOS/Editor.warm,C:/Warm/Standard/OS/CoolOS/VirtualTerminal.warmh,C:/Warm/Standard/OS/CoolOS/VirtualTerminal.warm,C:/Tmux.warm", "TmuxApp:main");
+I64 tm_session;
+U0 TmuxCleanup()
+{
+    if (tm_session) WtmDetach(tm_session);
+    shell_stmt_cleanup = NULL;
+}
+U0 Tmux()
+{
+    if (!warm_tmux_ready) {Print("Tmux: Warm loading failed\n"); return;}
+    if (!tm_session) tm_session = WtmCreate;
+    if (!tm_session) {Print("Tmux: out of memory\n"); return;}
+    shell_stmt_cleanup = &TmuxCleanup;
+    WtmRun(tm_session);
+    if (WtmEmpty(tm_session)) {WtmDestroy(tm_session); tm_session = 0;}
+    TmuxCleanup;
+}

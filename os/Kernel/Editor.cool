@@ -20,7 +20,7 @@ I64 EditorSrcKind(CHashSrcSym *h)
 }
 
 Bool EditorSrcSrcLink(CHashSrcSym *h, U8 *file, I64 *_line)
-{//"FL:C:/Vim.cool,803" -> file (at least 200 bytes) and line, if it is a real file.
+{//"FL:C:/WarmPrograms.cool,20" -> file (at least 200 bytes) and line, if it is a real file.
     U8 *s = h->src_link, *comma = NULL;
     if (!s || StrNCmp(s, "FL:", 3)) return FALSE;
     s += 3;

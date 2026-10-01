@@ -7483,3 +7483,24 @@ extern I64 EditorFileSize(U8 *name);
 extern U0 EditorFormat(U8 *into, U8 *format, I64 a, I64 b, I64 c, I64 d);
 extern U0 EditorPrint(U8 *format, I64 a);
 #endif
+
+#ifdef COOLCOM_KERNEL
+// Opaque virtual terminals for Warm compositors.
+extern I64 VTermNewShell(I64 a0, I64 a1);
+extern U0 VTermResize(I64 a0, I64 a1, I64 a2);
+extern U0 VTermStopRelease(I64 a0);
+extern U0 VTermFocus(I64 a0);
+extern I64 VTermGetFocus();
+extern Bool VTermAlive(I64 a0);
+extern Bool VTermDirty(I64 a0);
+extern U0 VTermDraw(I64 a0, I64 a1, I64 a2);
+extern U0 VTermPushKey(I64 a0, I64 a1);
+extern I64 VTermCursorX(I64 a0);
+extern I64 VTermCursorY(I64 a0);
+extern Bool VTermCursorHidden(I64 a0);
+extern I64 VTermReadPhysical();
+extern I64 VTermTime();
+extern I64 VTermFrameTicks();
+extern U0 VTermWait();
+extern U0 VTermYield();
+#endif

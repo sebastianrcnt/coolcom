@@ -5,7 +5,7 @@
 | File | What |
 |---|---|
 | `Vim.warm` | `Vim("name", line)`: modal UTF-8 editor on the alternate ANSI screen, whole file in memory (a gap buffer, no size limit), syntax highlighting by file extension (`Syntax.cool` in the kernel; `:set ft=cool\|warm\|text`, `:hi group color`). `:q` refuses a modified buffer, `:q!` discards. See `Vim.md`. |
-| `Tmux.cool` | `Tmux;`: independent shells in virtual terminals (Ctrl-B `%` `"` `o` arrows `c` `n` `p` `x` `d`). |
+| `Tmux.warm` | `Tmux;`: independent shells in virtual terminals (Ctrl-B `%` `"` `o` arrows `c` `n` `p` `x` `d`). |
 | `Nyan.cool` | `Nyan;`: animation, any key stops it. |
 | `Find.cool` | `Find("text", "*.cool")`: search files recursively, print `file,line: text` (third argument TRUE: ignore case). |
 | `Less.cool` | `Less("file")`: pager with wrapping by terminal columns (UTF-8, wide characters), Space/b/d/u/j/k/g/G, `/text` `?text` `n` `N`, `q`. |

@@ -3,7 +3,7 @@
 by typed shell statements; results from the UART stream, the disk files and one screenshot.
 
 Man opens Vim at the symbol's file and line, found from the
-compiler's symbol table (Vim.cool's own functions) or the kernel sources on the disk (C:/Kernel).
+compiler's symbol table (WarmPrograms.cool's own functions) or the kernel sources on the disk (C:/Kernel).
 """
 import pathlib
 import re
@@ -113,12 +113,12 @@ def main():
     if merged != B:
         failures.append(f'merged C.TXT is {merged!r}, expected {B!r}')
     man = {i: strip(part(f'MAN{i}', f'MAN{i + 1}' if i < 6 else 'DOC0')).replace('\r', '') for i in range(7)}
-    need(man[0], 'VimOpen: function, C:/Vim.cool:')
-    m = re.search(r'VimOpen: function, C:/Vim.cool:(\d+)', man[0])
+    need(man[0], 'VimOpen: function, C:/WarmPrograms.cool:')
+    m = re.search(r'VimOpen: function, C:/WarmPrograms.cool:(\d+)', man[0])
     if m:
         # Vim's first screen holds that line, numbered, near the top.
         need(man[0], f'{int(m.group(1)):5d} ')
-        src = (ROOT / 'os/Disk/Vim.cool').read_text().split('\n')
+        src = (ROOT / 'os/Disk/WarmPrograms.cool').read_text().split('\n')
         if not src[int(m.group(1)) - 1].startswith('Bool VimOpen('):
             failures.append(f'VimOpen line {m.group(1)} is {src[int(m.group(1)) - 1]!r}')
     def line_of(path, pattern):
@@ -134,7 +134,7 @@ def main():
             failures.append(f'Man({sym}): expected {kind} at {path}:{want}; got {man[i][:200]!r}')
         else:
             need(man[i], f'{want:5d} ')
-    need(man[3], 'VIM_HIST: #define, C:/Vim.cool:4\n')
+    need(man[3], 'VIM_HIST: #define, C:/WarmPrograms.cool:4\n')
     need(man[4], 'CTask: type, C:/Kernel/KernelA.coolh:')
     need(man[4], 'class CTask')
     need(man[5], 'I64 is a built-in type')

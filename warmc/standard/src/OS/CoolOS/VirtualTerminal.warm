@@ -1,0 +1,36 @@
+module body OS.CoolOS.VirtualTerminal is
+    pragma Foreign_Import(External_Name => "VTermNewShell");
+    function VTermNewShell(a0: Int64, a1: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermResize");
+    function VTermResize(a0: Int64, a1: Int64, a2: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "VTermStopRelease");
+    function VTermStopRelease(a0: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "VTermFocus");
+    function VTermFocus(a0: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "VTermGetFocus");
+    function VTermGetFocus(): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermAlive");
+    function VTermAlive(a0: Int64): Bool is end;
+    pragma Foreign_Import(External_Name => "VTermDirty");
+    function VTermDirty(a0: Int64): Bool is end;
+    pragma Foreign_Import(External_Name => "VTermDraw");
+    function VTermDraw(a0: Int64, a1: Int64, a2: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "VTermPushKey");
+    function VTermPushKey(a0: Int64, a1: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "VTermCursorX");
+    function VTermCursorX(a0: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermCursorY");
+    function VTermCursorY(a0: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermCursorHidden");
+    function VTermCursorHidden(a0: Int64): Bool is end;
+    pragma Foreign_Import(External_Name => "VTermReadPhysical");
+    function VTermReadPhysical(): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermTime");
+    function VTermTime(): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermFrameTicks");
+    function VTermFrameTicks(): Int64 is end;
+    pragma Foreign_Import(External_Name => "VTermWait");
+    function VTermWait(): Unit is end;
+    pragma Foreign_Import(External_Name => "VTermYield");
+    function VTermYield(): Unit is end;
+end module body.

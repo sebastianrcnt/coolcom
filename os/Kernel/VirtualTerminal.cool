@@ -1,0 +1,26 @@
+// Opaque virtual-terminal services. Warm owns its pane tree, never CVTerm/CTask.
+I64 VTermNewShell(I64 cols, I64 rows)
+{
+    CVTerm *v = VtNew(cols, rows);
+    CTask *t = ShellStart;
+    VtBind(t, v);
+    v->owner = t;
+    return v(I64);
+}
+U0 VTermResize(I64 handle, I64 cols, I64 rows) {VtResize(handle(CVTerm *), cols, rows);}
+U0 VTermStopRelease(I64 handle) {VtStop(handle(CVTerm *)); VtRelease(handle(CVTerm *));}
+U0 VTermFocus(I64 handle) {vt_focus = handle(CVTerm *);}
+I64 VTermGetFocus() {return vt_focus(I64);}
+Bool VTermAlive(I64 handle) {return handle(CVTerm *)->owner != NULL;}
+Bool VTermDirty(I64 handle) {return handle(CVTerm *)->dirty;}
+U0 VTermDraw(I64 handle, I64 x, I64 y) {VtDraw(handle(CVTerm *), x, y);}
+U0 VTermPushKey(I64 handle, I64 key) {VtKeyPush(handle(CVTerm *), key);}
+I64 VTermCursorX(I64 handle) {return handle(CVTerm *)->cx;}
+I64 VTermCursorY(I64 handle) {return handle(CVTerm *)->cy;}
+Bool VTermCursorHidden(I64 handle) {return handle(CVTerm *)->cursor_off;}
+// The compositor consumes physical input; pane shells consume their own queues.
+I64 VTermReadPhysical() {return KeyPop;}
+I64 VTermTime() {return TimerJiffies;}
+I64 VTermFrameTicks() {return JIFFY_FREQ / 30;}
+U0 VTermWait() {Sleep(10);}
+U0 VTermYield() {Yield;}

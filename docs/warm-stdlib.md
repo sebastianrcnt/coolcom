@@ -374,3 +374,32 @@ and intermediate symlinks whose outside target remains untouched.
   port took about 21 ms for the large jump versus 8 ms in Cool; the gap-byte and
   newline scans and viewport positioning above removed that visible-risk
   regression. These are VM measurements, not a hardware latency guarantee.
+
+### Tmux
+
+- Virtual-terminal creation, resize, focus, lifetime, cursor and dirty-state APIs
+  were absent. `OS.CoolOS.VirtualTerminal` now exposes opaque handles and kernel
+  functions; Warm owns only its pane tree and window/session records. Closing a
+  pane stops its task group and releases the compositor reference in the kernel.
+- Free records have no convenient nullable heap-reference/container syntax for
+  a mutable tree. The private unsafe boundary uses typed allocation and explicit
+  casts for application-owned nodes and an eight-slot window table. Record
+  allocations still use `deallocate`; scratch buffers use the kernel allocator.
+- `for` binds an `Index`, even when both endpoints are integer literals. The fixed
+  eight-window loop needs an explicit conversion before signed layout arithmetic.
+  `else if` is a single chain, with just one closing `end if`.
+- WarmRun installs libc symbols in the shell's compiler. libc's `exit(status)`
+  shadowed the shell command `exit`, so a bare command now resolves explicitly to
+  the kernel's `Exit`; explicit `exit(status)` calls retain their C meaning.
+- The unchanged Man source-location checks now point at `WarmPrograms.cool`,
+  which retains `VimOpen` and the shell-visible `VIM_HIST` limit. Only the fixture's
+  relocated source path changed; symbol kinds, line validation, numbered editor
+  output and all other oracles are retained.
+- Session scratch storage survives detach, and recovery restores the invoking
+  terminal's focus/alternate screen. The compositor retains 30 Hz batching and
+  delegates changed-cell drawing to the kernel rather than redrawing per key.
+- Same-kernel VM comparison of two vertical panes: Cool/Warm key forwarding
+  averaged 0.042/0.121 microseconds, and forced compositor repaint 12.69/12.57 ms.
+  Both fit the existing 33 ms refresh budget; no noticeable slowdown appeared
+  in this measurement. The benchmark checks saved Vim edits and restored focus
+  and writes logs plus results under `build/program-perf`.
