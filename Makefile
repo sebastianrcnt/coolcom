@@ -1,11 +1,22 @@
 # Kernel parts written in Warm: warmc --kernel-module turns each into a Cool file in os/Kernel
 # that Kernel.cool includes (generated, not committed; see the rule below).
 WARM_KMODS := os/Kernel/NetParse.cool
-KSRC    := $(sort $(wildcard os/Kernel/*.cool os/Kernel/*.coolh coolc/Runtime/*.cool) $(WARM_KMODS)) coolc/Fmt/HCTok.cool
+KERNEL_HEADER := os/Kernel/KernelA.coolh
+KSRC    := $(sort $(wildcard os/Kernel/*.cool os/Kernel/*.coolh coolc/Runtime/*.cool) $(WARM_KMODS) $(KERNEL_HEADER)) coolc/Fmt/HCTok.cool
 COOLC_SEED := $(abspath coolc/seed/Compiler.BIN)
 
 .PHONY: c2hc-test stbtt-test all run test kernel-test kernel-test-reloc vim-test key-test tmux-test ansi-test syntax-test disk-install disk-seed reloc-check clean fmt fmt-check hooks native-host native-kernel seed font selfhost-test m1n1-payload text-test ime-test kernel-rebuild-test top-test cmdline-test checks-test
 all: build/kernel.Image
+
+# Select the canonical header's explicit kernel branches for
+# compilation, shell prelude generation and guest source installation.
+$(KERNEL_HEADER): coolc/Frontend/KernelA.coolh tools/mkkernela.py
+	python3 tools/mkkernela.py > $@.tmp
+	mv $@.tmp $@
+
+.PHONY: kernela-test
+kernela-test: $(KERNEL_HEADER)
+	python3 tools/test_mkkernela.py
 
 # Native macOS BIN loader and checked-in self-hosted compiler image.
 native-host: build/coolc
@@ -255,7 +266,7 @@ syntax-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/syntax-test.py $<
 
 # The compiler's checks: errors for definite bugs, the vet findings (coolc/tests/checks).
-checks-test: build/coolc
+checks-test: build/coolc $(KERNEL_HEADER)
 	tools/native/checks.sh
 
 # The OS compiles its own compiler: Cmp in the shell must reproduce the seed.
@@ -301,7 +312,7 @@ font-test: build/kernel.Image coolvm $(if $(RUN_VENUS),build/coolvm-venus venus-
 # Every check boots its own VMs with its own disk images and output directory, so
 # `make -j test` runs them side by side. The input scripts sync on the guest's output
 # (coolvm `wait`) instead of fixed delays, which keeps them right under that load.
-test: venus-gen-test venus-transport-test font-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
+test: kernela-test venus-gen-test venus-transport-test font-test codegen-test input-limits-test disk-layout-test gpu-resize-test gpu-pixel-test scroll-test checks-test warm-test reloc-check vim-test key-test tmux-test ansi-test syntax-test warm-kernel-test selfhost-test text-test ime-test top-test kernel-rebuild-test cmdline-test net-forward-test kernel-test kernel-test-reloc qemu-test lua-test lua-kernel-test c2hc-test stbtt-test
 
 # The device and shell self-tests (DevTest.cool), at the link address and 4 MiB higher.
 kernel-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
@@ -314,6 +325,7 @@ $(B):
 
 clean:
 	rm -rf build
+	rm -f $(KERNEL_HEADER)
 
 # HolyC formatting (coolc/Fmt) and Warm formatting (warmc/Format.cool). The pre-commit hook runs
 # fmt-check on staged files. The suites and the formatter's own fixtures keep their layout

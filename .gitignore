@@ -6,3 +6,6 @@ __pycache__/
 vendor/
 # Generated from Warm (Makefile, WARM_KMODS)
 os/Kernel/NetParse.cool
+# Generated kernel projection of coolc/Frontend/KernelA.coolh
+os/Kernel/KernelA.coolh
+os/Kernel/KernelA.coolh.tmp
