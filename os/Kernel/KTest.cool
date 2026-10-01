@@ -246,12 +246,85 @@ U0 KTestHeap()
         Print("  misuse detection: PASS\n");
 }
 
+#define KT_BIGS 256
+
+// Fragmentation: fill the heap with big blocks separated by small ones, free
+// the big ones, then ask for more than any hole. The contiguous heap cannot
+// serve it; the big region assembles it from the holes' pages.
+U0 KTestBig()
+{
+    U8 *big[KT_BIGS], *small[KT_BIGS], *p;
+    I64 i, n, b, req, largest, j = kt_fails, errs0 = heap_errs;
+    b = (HeapFreeBytes(&sys_heap) / (KT_BIGS - 40)) & ~(MEM_PAGE - 1);
+    if (b < 2 * BIG_MIN)
+        b = 2 * BIG_MIN;
+    for (n = 0; n < KT_BIGS; n++) {
+        p = MAlloc(b);
+        if (p && !BigHas(p)) {   // the heap's own fallback: the big region is full
+            Free(p);
+            p = NULL;
+        }
+        if (!p)
+            break;
+        big[n] = p;
+        small[n] = MAlloc(20000);   // more than an alignment remainder, so it sits between runs
+        if (BigHas(small[n]))
+            KTFail("small placement");
+        big[n][0] = n;
+        big[n][b - 1] = n;
+    }
+    if (n < 8 || n == KT_BIGS)
+        KTFail("big fill");
+    for (i = 0; i < n; i++) {
+        if (big[i][0] != (i & 255) || big[i][b - 1] != (i & 255))
+            KTFail("big content");
+        Free(big[i]);
+    }
+    HeapCheck(&sys_heap, NULL, NULL, &largest);
+    req = largest + 2 * b;
+    if (req > HeapFreeBytes(&sys_heap) / 2)
+        KTFail("fragmentation setup");
+    if ((p = HeapAlloc(&sys_heap, req)))
+        KTFail("contiguous alloc larger than every hole");
+    Free(p);
+    p = MAlloc(req);
+    if (!p || !BigHas(p) || MSize(p) != req)
+        KTFail("big alloc across holes");
+    else {
+        if (MemPhysRun(p, req) >= req)
+            KTFail("expected several physical runs");
+        for (i = 0; i < req; i += 4093)
+            p[i] = i * 13;
+        for (i = 0; i < req; i += 4093)
+            if (p[i] != ((i * 13) & 255))
+                KTFail("big content across runs");
+        if (!BigCheck || !HeapCheck(&sys_heap))
+            KTFail("check with a scattered block");
+        p = ReAlloc(p, req + 3 * MEM_PAGE);   // grows in place: the window after it is free
+        if (!p || !BigHas(p) || p[4093] != ((4093 * 13) & 255))
+            KTFail("big ReAlloc grow");
+        Free(p);
+        Free(p);   // double free: reported, ignored
+        if (heap_errs != errs0 + 1)
+            KTFail("big double free not detected");
+        heap_errs = errs0;
+    }
+    for (i = 0; i < n; i++)
+        Free(small[i]);
+    if (!BigCheck(&i) || i)
+        KTFail("big region not empty");
+    if (kt_fails == j)
+        Print("  big region fragmentation (%d holes of %d KB, %d KB block): PASS\n",
+                n, b >> 10, req >> 10);
+}
+
 U0 KTest()
 {
     I64 nf, free0 = HeapFreeBytes(&sys_heap);
     Print("kernel self-test:\n");
     KTestStr();
     KTestHeap();
+    KTestBig();
     HeapCheck(&sys_heap, NULL, &nf);
     if (nf != 1 || HeapFreeBytes(&sys_heap) != free0 || heap_errs)
         KTFail("heap not back to initial state");

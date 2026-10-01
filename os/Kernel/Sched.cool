@@ -351,7 +351,7 @@ CTask *Spawn(U0 (*fp_start_addr)(U8 *data), U8 *data = NULL, U8 *task_name = NUL
         return NULL;
     }
     stk_size = (stk_size + 16383) & ~16383;
-    t->stack_alloc = MAlloc(stk_size + 32768);
+    t->stack_alloc = MAllocDma(stk_size + 32768);  // identity mapped: StackPage edits the guard by address
     if (!t->stack_alloc) {
         TaskFree(t);
         return NULL;

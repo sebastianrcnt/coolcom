@@ -82,7 +82,7 @@ CGpuBlob *GpuBlobCreate(I64 size, I64 mem, I64 blob_id = 0, I64 flags = GPU_BLOB
         p[0] = b->id; p[1] = mem; p[2] = flags;
         p[4] = blob_id; p[5] = blob_id >> 32; p[6] = size; p[7] = size >> 32;
         if (mem == GPU_BLOB_GUEST) {
-            b->guest = CAlloc(size); p[3] = 1;
+            b->guest = CAllocDma(size); p[3] = 1;
             p[8] = b->guest(I64); p[9] = b->guest(I64) >> 32; p[10] = size;
         }
         if (!GpuCommand(0, 0x10C, p, 8 + (mem == GPU_BLOB_GUEST) * 4, NULL, 0, 0, venus.ctx)) {
@@ -101,7 +101,7 @@ Bool GpuBlobPages(I64 start, I64 size, I64 cache, Bool install)
         entry = l2[addr >> 25];
         if (entry && (entry & 3) != 3) return FALSE;
         if (!entry && install) {
-            raw = CAlloc(32768);
+            raw = CAllocDma(32768);
             l3 = (raw(I64) + 16383) & ~16383;
             l2[addr >> 25] = l3(I64) | 3;
             entry = l2[addr >> 25];
