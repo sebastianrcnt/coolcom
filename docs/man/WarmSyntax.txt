@@ -1,0 +1,61 @@
+WarmSyntax - syntax quick reference
+
+Small body-only program (C:/HelloWarm.warm):
+    module body Test is
+        function main(): ExitCode is
+            printLn("Hello from Warm!");
+            return ExitSuccess();
+        end;
+    end module body.
+
+Interface form: module Name is ... end module.
+Import named declarations before the module:
+    import OS.Terminal (Output, acquireOutput, releaseOutput, writeLine);
+An interface function has a signature ending in ; rather than an is body.
+
+Bindings and control flow:
+    let x: Nat64 := 1;             -- immutable
+    var y: Nat64 := x + 2;         -- mutable; y := 4 assigns
+    if y > x then ... else ... end if;
+    while condition do ... end while;
+    for i from 0 to count do ... end for;
+    case result of
+        when Ok(value as v: Index) do ...
+        when Err(error as e: IoError) do ...
+    end case;
+
+Types include Bool, Unit (nil), Nat8/16/32/64, Int8/16/32/64, Index,
+ByteSize, Float32/64, Option[T], Result[T, E], Span[T, R], Fn[A, R].
+Records and unions:
+    record Pair: Free is left: Nat64; right: Nat64; end;
+    union Choice: Free is case Empty; case Number is value: Nat64; end;
+    let p: Pair := Pair(left => 1, right => 2);
+    generic [T: Free]
+    function identity(x: T): T is return x; end;
+Use Linear for owned resources. Consume them or return them on every branch.
+Use typeclass constraints such as T: Type(Sendable) where required.
+&x is a read borrow; &!x is a mutable borrow; p->field accesses a reference.
+Explicit borrow blocks and region examples live in the borrowing test suite.
+
+Operator precedence, loose to tight:
+    and or             (mixing them requires parentheses)
+    = /= < <= > >=     (comparison chains are rejected)
+    |                  bitwise OR
+    ^                  bitwise XOR
+    &                  bitwise AND
+    << >>              shifts
+    + -
+    * /
+    prefix - not ~
+Arithmetic/bitwise chains associate left. Bitwise operations bind tighter
+than comparisons: flags & 2 /= 0 means (flags & 2) /= 0.
+Shift operands have the same integer type; amounts outside the bit width abort.
+Integer +, - and * check overflow; narrowing conversions return Option.
+widenToNat64/widenToIndex are infallible for supported source types.
+
+-- starts a line comment. private hides a body-only declaration.
+Foreign_Import/Foreign_Export and Export_Layout bridge to Cool; see the full
+compiler README for supported scalar/span/record ABI and unsafe restrictions.
+There is no anonymous closure syntax. See Man("OS.Task").
+
+Source: warmc/README.md (C:/Warm/Docs/README.md).

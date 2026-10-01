@@ -1,0 +1,14 @@
+Directory handles carry a subtree and read/write/create/delete rights.
+openRoot borrows Filesystem; openDir borrows a parent and returns a child
+with inherited restrictions. closeDir consumes the handle.
+narrow consumes a Dir and intersects its rights with the supplied Rights;
+it cannot restore removed rights. readOnly/allRights construct common sets.
+Paths must be relative, with no dot components, drive prefix or backslash.
+The host denies symlink traversal; CoolOS FAT32 has no symlinks.
+
+entries returns an owned Entries iterator. next mutably borrows it and
+returns Some(Entry) or None. Entry.name is an owned Standard.String;
+destructure the Entry and destroyString its name. closeEntries consumes the
+iterator. Entry also supplies size, isDir and modified metadata.
+adapterHandle is low-level scalar adapter access, not additional authority.
+Example: C:/Warm/Examples/kernel/Streams.warm.

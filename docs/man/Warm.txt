@@ -1,0 +1,39 @@
+Warm - language overview
+
+Warm is coolcom's Austral-compatible language with linear types, borrowing,
+regions, capabilities, generics and typeclasses. The compiler is written in
+Cool and emits Cool source for the host compiler or the OS shell JIT.
+
+Files: .warmh is a module's public interface; .warm is its implementation.
+A body-only module exports declarations unless marked private. With a .warmh,
+only interface declarations are public. Pervasive and Memory are embedded;
+all other module dependencies must be supplied to the compiler explicitly.
+
+Free values can be copied. Linear values must be consumed exactly once:
+close handles, release capabilities and destroy owned buffers/strings.
+&[T, R] borrows read-only; &![T, R] borrows mutably in region R. Span[T, R]
+and Span![T, R] are checked borrowed views, not owned allocations.
+Function parameter regions may be elided; shared or result regions are explicit.
+
+OS APIs take capabilities derived from RootCapability, normally received by
+main(initial: RootCapability): ExitCode. Authority is passed explicitly to
+helpers. Terminal splits Input/Output; directories and networks can be narrowed.
+Unsafe Warm and Cool are outside this capability model.
+
+Environment failures are Result[T, IoError]: Ok(value) or Err(error).
+An Err from resource creation has no resource to close. Option[T] represents
+ordinary absence. Bounds, arithmetic overflow and contract failures abort.
+Text is bytes, UTF-8 by convention; owned String needs destroyString.
+
+Fn[A, R] values refer to named top-level functions; they capture nothing.
+OS.Task.spawn passes one typed owned argument. Sendable forbids non-Static
+borrows/spans, raw pointers and RootCapability crossing tasks. Closures with
+captures are a future design, not implemented language syntax.
+
+Start with Man("WarmSyntax"), Man("WarmRun"), Man("WarmExamples").
+Man("index") lists OS.* APIs generated from their current declarations.
+
+Sources: warmc/README.md, docs/warm-stdlib.md, docs/warm-closures.md.
+On disk: C:/Warm/Docs/README.md, C:/Warm/Docs/warm-stdlib.md,
+C:/Warm/Docs/warm-closures.md. Design proposals in those documents are not
+API promises; generated module pages show the implemented signatures.

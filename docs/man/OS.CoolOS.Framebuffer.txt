@@ -1,0 +1,7 @@
+CoolOS screen operations borrow mutable OS.Terminal.Output and return Result.
+clear clears the screen; cursorHide/cursorShow change cursor visibility.
+fillRect draws a pixel rectangle using x/y/w/h and 0xRRGGBB color.
+scroll scrolls the screen; screenCodepoint writes a Unicode codepoint.
+alternate(output, on) switches the alternate screen. The caller retains its
+Output token and must release it. Unsupported host operations return Other.
+Example: C:/Warm/Examples/kernel/Screen.warm.

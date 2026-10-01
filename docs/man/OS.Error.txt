@@ -1,0 +1,9 @@
+Common environmental failure values. Result[T, IoError] is Ok(value) or
+Err(error); failed acquisition returns no linear resource to release.
+IoError cases below distinguish missing/existing files, invalid names,
+denied authority, storage exhaustion, closed handles and network failures.
+Other(code) preserves an unmapped adapter code. ioErrorCode/fromCode convert
+between typed errors and scalar codes; ioErrorText gives a borrowed Static
+name for display. status converts a negative code to Err and success to Ok(nil).
+Aborts represent programmer bugs such as bounds or arithmetic failures.
+Source is a body-only module; no private implementation is exposed below.

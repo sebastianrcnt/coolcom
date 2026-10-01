@@ -7,6 +7,10 @@
 // "class Name", a global is a declaration at the start of a line, a #define is #define Name.
 // Vim has no file size limit, so a big file (KernelA.coolh) opens the same way.
 //   Man("StrLen");   Man("CTask");   Man("VimOpen");   Man("jiffies");
+// Manual pages are generated from docs/man and Warm's public declarations by
+// tools/warm-man.py and installed in C:/Man by tools/disk-files.sh.
+//   Man;   Man("Warm");   Man("OS.Terminal");   Man("WarmRun");
+#define MAN_PAGES "C:/Man/"
 #define MAN_SRC   "C:/Kernel/*"
 #define MAN_SRC2  "C:/Cool/*"
 #define MAN_FUN   1
@@ -149,11 +153,32 @@ U0 ManOpen(U8 *file, I64 line)
     Vim(file, line);
 }
 
-U0 Man(U8 *name)
+Bool ManPage(U8 *name)
 {
-    CHashSrcSym *h = ManHash(name);
+    U8 file[208];
+    I64 i, n = StrLen(name);
+    if (!n || !StrCmp(name, "index") || !StrCmp(name, "Man")) name = "index";
+    else {
+        if (n > 160) return FALSE;
+        // A page name is a basename, never a path supplied by the caller.
+        for (i = 0; i < n; i++)
+            if (!ManIsId(name[i]) && name[i] != '.' && name[i] != '-') return FALSE;
+        if (name[0] == '.' || TextFind(name, 0, n, "..", 2) >= 0) return FALSE;
+    }
+    StrPrint(file, "%s%s.txt", MAN_PAGES, name);
+    if (!FileFind(file)) return FALSE;
+    Print("%s: manual, %s:1\n", name, file);
+    ManOpen(file, 1);
+    return TRUE;
+}
+
+U0 Man(U8 *name = "")
+{
+    CHashSrcSym *h;
     U8 file[208], *what = "symbol";
     I64 line = 0, kind = 0, n;
+    if (ManPage(name)) return;
+    h = ManHash(name);
     if (HCTIsType(name, StrLen(name))) {
         Print("%s is a built-in type\n", name);
         return;

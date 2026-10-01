@@ -221,6 +221,12 @@ disk-seed: build/disk.img build/ShellPrelude.coolh build/BootStub.BIN
 disk-layout-test: build/warmcool/Kernel.cool os/Kernel/NetParse.cool build/lua/LuaRuntime.cool
 	tools/disk-layout-test.sh
 
+.PHONY: warm-man-test
+warm-man-test: build/warmc
+	python3 tools/test_warm_man.py
+
+test: warm-man-test
+
 .PHONY: run-qemu qemu-test
 # QEMU virt uses the same relocatable arm64 Image and modern virtio-MMIO devices.
 # QEMU_ACCEL=auto (default) probes HVF and falls back to TCG; see tools/qemu.py.

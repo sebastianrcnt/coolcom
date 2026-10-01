@@ -11,7 +11,7 @@ FLAG=-o
 cd "$ROOT"
 # Build once, and refresh only when the compiler or its embedded sources change.
 make build/warmcool/Kernel.cool os/Kernel/NetParse.cool os/Kernel/KernelA.coolh build/lua/LuaRuntime.cool  # (and the kernel's Warm parts)
-for d in Kernel Cool Cool/Runtime Cool/Fmt Cool/LibC Warm Warm/Standard Warm/Examples; do
+for d in Kernel Cool Cool/Runtime Cool/Fmt Cool/LibC Man Warm Warm/Standard Warm/Examples Warm/Docs; do
     # mmd asks on the terminal when the directory exists, so only make missing ones.
     mdir -i "$IMG" ::$d >/dev/null 2>&1 || mmd -i "$IMG" ::$d </dev/null
 done
@@ -34,6 +34,7 @@ fi
 # Stage only the include mapping; do not change repository sources or binaries.
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
+python3 tools/warm-man.py --output "$stage/Man"
 sed 's|#include "\.\./\.\./coolc/|#include "C:/Cool/|g' os/Kernel/Kernel.cool >"$stage/Kernel.cool"
 for f in os/Kernel/*; do
     [ "$f" != os/Kernel/Kernel.cool ] || f=$stage/Kernel.cool
@@ -70,6 +71,8 @@ tree() {
 tree warmc/standard/src Warm/Standard
 tree warmc/builtin Warm/Standard/builtin
 tree warmc/examples Warm/Examples
+tree "$stage/Man" Man
+put Warm/Docs/ warmc/README.md docs/warm-stdlib.md docs/warm-closures.md
 
 # An explicit install replaces Init.cool and the mapped kernel sources above,
 # so the old layout can now be removed. Seeding keeps old files and user edits.
