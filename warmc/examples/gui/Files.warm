@@ -1,181 +1,436 @@
-import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button, List, TextInput,
-    present, buttonNeedsRedraw, listSelection, listNeedsRedraw, textInputNeedsRedraw, acquireGui, releaseGui, close, fill, text, textClipped, button, listFrame, listItem, makeTextInput, destroyTextInput,
-    inputText, textInput, addMenu, addMenuItem);
-import GuiSupport (openWindow, nextEvent, shouldClose, drawString, drawNumber, copy, joinPath, parentPath, matches, index64);
-import OS.File (Filesystem, Bytes, acquireFilesystem, releaseFilesystem, readAll, byteSize, nth, closeBytes);
-import OS.Dir (Dir, Entries, Entry, openRoot, openDir, closeDir, entries, next, closeEntries, narrow, readOnly);
-import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
+import OS.Gui (Gui, acquireGui, releaseGui);
 import OS.Error (IoError);
-import Standard.String (String, length, getSpan, nthByte, destroyString);
-import Standard.Buffer (Buffer, allocateEmpty, insertBack, removeLast, destroyEmpty, destroyFree, length as bufferLength, slice as bufferSlice, nth as bufferNth);
+import OS.File (Filesystem, Bytes, acquireFilesystem, releaseFilesystem, readAll, byteSize, nth, closeBytes);
+import OS.Dir (Dir, Entries, Entry, openRoot, openDir, closeDir, entries, next as nextEntry, closeEntries, narrow, readOnly);
+import Standard.String (String, fromLiteral, length as stringLength, slice as stringSlice, destroyString);
 import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+import Standard.Vector (Vector, make, push, pop, get, set, borrowGet, length as count, destroyFree, destroyEmpty);
+import OS.Ui (App, View, ListState, TextEdit, openApp, closeApp, next, newView, column, split, done, padding, grow, fixedWidth,
+    label, append, appendInt, plain, button, defaultButton, disabled, textBox, placeholder, tableView, tableColumn, tableRow, cell,
+    rowIcon, onOpen, textView, toolbar, statusBar, spacer, menu, menuItem, menuSeparator, checkMark, applyEdit, iconFolder, iconDocument);
 module body GuiFiles is
-    private function listing(dir: &[Dir]): Entries is
-        case entries(dir) of when Ok(value as list: Entries) do return list; when Err(error as e: IoError) do abort("Directory listing failed"); end case; end;
-    -- Own directory names and display titles until navigation. Filtering builds
-    -- indices into this cache; scrolling touches only the eleven visible rows.
-    record CachedRow: Linear is name: String; title: String; isDir: Bool; end;
+    """Files: browse the disk read-only. A sortable, filterable table of the
+    current folder beside a preview of the chosen file, built on OS.Ui: only
+    the visible rows become nodes, so a folder of 10,000 files costs no more
+    per frame than a small one. Prints GUI FILES markers for the VM tests."""
+    record Model: Linear is
+        fs: Filesystem;
+        folder: Dir;
+        path: String;
+        names: Vector[String];
+        sizes: Vector[Int64];
+        folders: Vector[Bool];
+        order: Vector[Index];     -- every entry in table order (sorted once per folder or sort change)
+        shown: Vector[Index];     -- the entries of order that match the filter
+        table: ListState;
+        filter: String;
+        preview: String;
+        previewBytes: Int64;
+    end;
+    union Msg: Free is
+        case Table is state: ListState;
+        case Opened is row: Int64;
+        case OpenSelected;
+        case Up;
+        case Reload;
+        case Filter is edit: TextEdit;
+        case Preview is edit: TextEdit;
+        case SortBy is column: Int64;
+        case Quit;
+    end;
+    function tableState(s: ListState): Msg is return Table(state => s); end;
+    function opened(r: Int64): Msg is return Opened(row => r); end;
+    function filterEdited(e: TextEdit): Msg is return Filter(edit => e); end;
+    function previewEdited(e: TextEdit): Msg is return Preview(edit => e); end;
+    function int(i: Index): Int64 is case toInt64(i) of when Some(value as n: Int64) do return n; when None do return 0; end case; end;
+    function idx(i: Int64): Index is case toIndex(i) of when Some(value as n: Index) do return n; when None do return 0; end case; end;
     generic [R: Region]
-    private function readCache(cache: &![Buffer[CachedRow], R]): &[Buffer[CachedRow], R] is return (cache: &[Buffer[CachedRow], R]); end;
-    private function clearCache(cache: &![Buffer[CachedRow]]): Unit is
-        while bufferLength(readCache(&~cache)) > 0 do
-            let { name: String, title: String, isDir: Bool } := removeLast(&~cache);
-            destroyString(name); destroyString(title);
-        end while; return nil; end;
-    private function loadCache(dir: &[Dir]): Buffer[CachedRow] is
-        var cache: Buffer[CachedRow] := allocateEmpty(); var iterator: Entries := listing(dir); var more: Bool := true;
-        while more do case next(&!iterator) of
-                when Some(value as row: Entry) do
-                    let { name: String, size: Index, isDir: Bool, modified: Int64 } := row;
-                    let title: String := rowTitle(&name, isDir);
-                    insertBack(&!cache, CachedRow(name => name, title => title, isDir => isDir));
-                when None do more := false;
-            end case; end while; closeEntries(iterator); return cache; end;
+    function bytes(s: &[String, R]): Span[Nat8, R] is return stringSlice(s, 0, stringLength(s)); end;
+
+    ------------------------------------------------------------------ reading the model
+
     generic [R: Region]
-    private function filtered(cache: &[Buffer[CachedRow], R], filter: Span[Nat8]): Buffer[Index] is
-        var result: Buffer[Index] := allocateEmpty();
-        let items: Span[CachedRow, R] := bufferSlice(cache, 0, bufferLength(cache)); var i: Index := 0;
-        while i < spanLength(items) do
-            let row: &[CachedRow, R] := &(items[i]);
-            if matches(&(row->name), filter) then insertBack(&!result, i); end if; i := i + 1;
-        end while; return result; end;
-    private function asIndex(value: Int64): Index is
-        case toIndex(value) of when Some(value as i: Index) do return i; when None do abort("Invalid row"); end case; end;
-    private function readPreview(bytes: &[Bytes]): String is
-        var builder: StringBuilder := makeStringBuilder(); var at: Index := 0;
-        while at < byteSize(bytes) and at < 1024 do
-            let b: Nat8 := nth(bytes, at); if b >= 32 or b = 10 then writeByte(&!builder, b); else if b /= 13 then writeByte(&!builder, 46); end if; at := at + 1;
-        end while; return finalize(builder); end;
-    private function preview(window: &![Window], string: &[String]): Unit is
-        var at: Index := 0; var row: Int64 := 0;
-        while at < length(string) and row < 10 do
-            let start: Index := at; var columns: Int64 := 0;
-            while at < length(string) and columns < 28 and nthByte(string, at) /= 10 do at := at + 1; columns := columns + 1; end while;
-            if at > start then textClipped(&~window, 272, 84 + row * 20, getSpan(string, start, at - 1), 0, Rect(x => 272, y => 84 + row * 20, width => 224, height => 20)); end if;
-            if at < length(string) and nthByte(string, at) = 10 then at := at + 1; end if; row := row + 1;
-        end while; return nil; end;
-    private function rowTitle(name: &[String], isDir: Bool): String is
-        var builder: StringBuilder := makeStringBuilder();
-        if isDir then writeByte(&!builder, 91); writeByte(&!builder, 68); writeByte(&!builder, 93); writeByte(&!builder, 32); end if;
-        var at: Index := 0; while at < length(name) do writeByte(&!builder, nthByte(name, at)); at := at + 1; end while; return finalize(builder); end;
-    record Selection: Linear is name: String; isDir: Bool; end;
+    function pathOf(m: &[Model, R]): Span[Nat8, R] is return bytes(&(m->path)); end;
     generic [R: Region]
-    private function choose(cache: &[Buffer[CachedRow], R], index: Index): Selection is
-        let items: Span[CachedRow, R] := bufferSlice(cache, 0, bufferLength(cache));
-        let row: &[CachedRow, R] := &(items[index]);
-        return Selection(name => copy(getSpan(&(row->name), 0, length(&(row->name)) - 1)), isDir => row->isDir); end;
+    function filterOf(m: &[Model, R]): Span[Nat8, R] is return bytes(&(m->filter)); end;
     generic [R: Region]
-    private function paintRows(window: &![Window], rows: &![List], cache: &[Buffer[CachedRow], R], visible: &[Buffer[Index]], total: Int64, e: Event): Unit is
-        let items: Span[CachedRow, R] := bufferSlice(cache, 0, bufferLength(cache)); var i: Int64 := rows->first;
-        while i < total and i < rows->first + 11 do
-            let row: &[CachedRow, R] := &(items[bufferNth(visible, asIndex(i))]);
-            let y: Int64 := 79 + (i - rows->first) * 20;
-            case listItem(&~window, &~rows, Rect(x => 13, y => y, width => 226, height => 20), i, getSpan(&(row->title), 0, length(&(row->title)) - 1), e) of
-                when Ok(value as clicked: Bool) do skip;
-                when Err(error as error: IoError) do skip;
-            end case; i := i + 1;
+    function previewOf(m: &[Model, R]): Span[Nat8, R] is return bytes(&(m->preview)); end;
+    generic [R: Region]
+    function nameOf(m: &[Model, R], e: Index): Span[Nat8, R] is return bytes(borrowGet(&(m->names), e)); end;
+    generic [R: Region]
+    function folderOf(m: &[Model, R]): &[Dir, R] is return &(m->folder); end;
+    function tableOf(m: &[Model]): ListState is return m->table; end;
+    function shownCount(m: &[Model]): Int64 is return int(count(&(m->shown))); end;
+    function entryCount(m: &[Model]): Int64 is return int(count(&(m->names))); end;
+    function shownAt(m: &[Model], r: Int64): Index is return get(&(m->shown), idx(r)); end;
+    function isFolder(m: &[Model], e: Index): Bool is return get(&(m->folders), e); end;
+    function sizeAt(m: &[Model], e: Index): Int64 is return get(&(m->sizes), e); end;
+    function atRoot(m: &[Model]): Bool is return stringLength(&(m->path)) = 0; end;
+
+    ------------------------------------------------------------------ listing, filtering, sorting
+
+    function clearNames(names: Vector[String]): Unit is
+        var v: Vector[String] := names; var more: Bool := true;
+        while more do case pop(&!v) of when Some(value as s: String) do destroyString(s); when None do more := false; end case; end while;
+        destroyEmpty(v); return nil;
+    end;
+    function lower(b: Nat8): Nat8 is if b >= 65 and b <= 90 then return b + 32; end if; return b; end;
+    -- Case-insensitive byte order of two names: -1, 0 or 1.
+    function nameOrder(a: Span[Nat8], b: Span[Nat8]): Int64 is
+        var i: Index := 0;
+        while i < spanLength(a) and i < spanLength(b) do
+            if lower(a[i]) /= lower(b[i]) then if lower(a[i]) < lower(b[i]) then return -1; end if; return 1; end if;
+            i := i + 1;
         end while;
-        return nil; end;
-    function main(initial: RootCapability): ExitCode is
-        var root: RootCapability := initial; var gui: Gui := acquireGui(&!root); let tasks: Tasks := acquireTasks(&!root);
-        var fs: Filesystem := acquireFilesystem(&!root); let rootDir: Dir := narrow(openRoot(&!fs), readOnly()); var dir: Dir := narrow(openRoot(&!fs), readOnly());
-        var path: String := copy(""); var selected: String := copy(""); var selectedDir: Bool := false; var content: String := copy(""); var fileBytes: Int64 := 0;
-        var w: Window := openWindow(&!gui, "Files", 520, 340); var filter: TextInput := makeTextInput();
-        var rows: List := List(selected => -1, first => 0); var up: Button := Button(pressed => false); var openButton: Button := Button(pressed => false);
-        case addMenu(&!w, "File") of when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 0, "Close"); when Err(error as e: IoError) do skip; end case;
-        var cache: Buffer[CachedRow] := loadCache(&dir); var visible: Buffer[Index] := filtered(&cache, inputText(&filter));
-        var running: Bool := true; var redraw: Bool := true; var reload: Bool := false;
-        while running do
-            let e: Event := nextEvent(&!w); running := not shouldClose(e);
-            case e of when Resize(width as width: Int64, height as height: Int64) do redraw := true;
-                when Idle do skip; when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do skip;
-                when Key(code as code: Int64) do skip; when Close do skip; when Menu(id as id: Int64) do skip;
-            end case;
-            if reload then
-                clearCache(&!cache); destroyEmpty(cache); cache := loadCache(&dir);
-                destroyFree(visible); visible := filtered(&cache, inputText(&filter)); reload := false;
-            end if;
-            var total: Int64 := index64(bufferLength(&visible));
-            let inputDraw: Bool := redraw or textInputNeedsRedraw(&filter, Rect(x => 72, y => 36, width => 232, height => 28), e);
-            let upDraw: Bool := redraw or buttonNeedsRedraw(&up, Rect(x => 424, y => 36, width => 72, height => 28), e, false);
-            let openDraw: Bool := redraw or buttonNeedsRedraw(&openButton, Rect(x => 336, y => 36, width => 72, height => 28), e, true);
-            var listDraw: Bool := redraw or listNeedsRedraw(&rows, Rect(x => 12, y => 78, width => 244, height => 222), total, 226, e);
-            let draw: Bool := running and (inputDraw or upDraw or openDraw or listDraw);
-            if draw then
-                if redraw then
-                    fill(&!w, Rect(x => 0, y => 0, width => 520, height => 340), 16777215);
-                    text(&!w, 12, 12, "C:/", 0); drawString(&!w, 36, 12, &path); text(&!w, 12, 42, "Filter", 0);
-                end if;
-                if inputDraw then
-                    case textInput(&!w, &!filter, Rect(x => 72, y => 36, width => 232, height => 28), e) of
-                        when Ok(value as changed: Bool) do if changed then
-                                rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy("");
-                                destroyString(content); content := copy(""); fileBytes := 0;
-                                fill(&!w, Rect(x => 272, y => 78, width => 224, height => 250), 16777215);
-                                destroyFree(visible); visible := filtered(&cache, inputText(&filter)); total := index64(bufferLength(&visible));
-                                listDraw := true; printLn("GUI FILES FILTER");
-                            end if;
-                        when Err(error as error: IoError) do skip;
+        if spanLength(a) < spanLength(b) then return -1; end if;
+        if spanLength(a) > spanLength(b) then return 1; end if;
+        return 0;
+    end;
+    function contains(text: Span[Nat8], needle: Span[Nat8]): Bool is
+        if spanLength(needle) = 0 then return true; end if;
+        if spanLength(needle) > spanLength(text) then return false; end if;
+        for start from 0 until spanLength(text) - spanLength(needle) + 1 do
+            var same: Bool := true; var k: Index := 0;
+            while same and k < spanLength(needle) do if lower(text[start + k]) /= lower(needle[k]) then same := false; end if; k := k + 1; end while;
+            if same then return true; end if;
+        end for;
+        return false;
+    end;
+    -- Order of entries a and b by a column (0 name, 1 size, 2 kind: folders first); ties by name.
+    function compare(m: &[Model], a: Index, b: Index, by: Int64): Int64 is
+        if by = 1 then
+            if sizeAt(m, a) < sizeAt(m, b) then return -1; end if;
+            if sizeAt(m, a) > sizeAt(m, b) then return 1; end if;
+        else if by = 2 then
+            if isFolder(m, a) and not isFolder(m, b) then return -1; end if;
+            if isFolder(m, b) and not isFolder(m, a) then return 1; end if;
+        end if;
+        return nameOrder(nameOf(m, a), nameOf(m, b));
+    end;
+    -- Every entry in table order (a bottom-up merge sort).
+    function sortAll(m: &[Model]): Vector[Index] is
+        let sortColumn: Int64 := m->table.sort;
+        let descending: Bool := m->table.descending;
+        var keep: Vector[Index] := make();
+        for i from 0 until count(&(m->names)) do push(&!keep, i); end for;
+        let n: Index := count(&keep);
+        var scratch: Vector[Index] := make();
+        for i from 0 until n do push(&!scratch, i); end for;
+        var width: Index := 1;
+        while width < n do
+            var low: Index := 0;
+            while low < n do
+                var middle: Index := low + width; if middle > n then middle := n; end if;
+                var high: Index := low + 2 * width; if high > n then high := n; end if;
+                var i: Index := low; var j: Index := middle; var k: Index := low;
+                while k < high do
+                    var left: Bool := j >= high;
+                    if i < middle and j < high then
+                        var order: Int64 := compare(m, get(&keep, i), get(&keep, j), sortColumn);
+                        if descending then order := 0 - order; end if;
+                        left := order <= 0;
+                    end if;
+                    if i < middle and left then set(&!scratch, k, get(&keep, i)); i := i + 1;
+                    else set(&!scratch, k, get(&keep, j)); j := j + 1; end if;
+                    k := k + 1;
+                end while;
+                low := high;
+            end while;
+            for c from 0 until n do set(&!keep, c, get(&scratch, c)); end for;
+            width := width * 2;
+        end while;
+        destroyFree(scratch);
+        return keep;
+    end;
+    -- The entries of the sorted order whose names contain the filter.
+    function filtered(m: &[Model]): Vector[Index] is
+        var keep: Vector[Index] := make();
+        for i from 0 until count(&(m->order)) do
+            let e: Index := get(&(m->order), i);
+            if contains(nameOf(m, e), filterOf(m)) then push(&!keep, e); end if;
+        end for;
+        return keep;
+    end;
+    -- Sort the cached listing again (a new folder or sort column), then filter it.
+    function resort(m: Model): Model is
+        var current: Model := m;
+        let sorted: Vector[Index] := sortAll(&current);
+        let { fs as fs: Filesystem, folder as folder: Dir, path as path: String, names as names: Vector[String], sizes as sizes: Vector[Int64],
+            folders as folders: Vector[Bool], order as old: Vector[Index], shown as shown: Vector[Index], table as table: ListState,
+            filter as filter: String, preview as preview: String, previewBytes as pb: Int64 } := current;
+        destroyFree(old);
+        return refilter(Model(fs => fs, folder => folder, path => path, names => names, sizes => sizes, folders => folders, order => sorted,
+            shown => shown, table => table, filter => filter, preview => preview, previewBytes => pb));
+    end;
+    -- Filter the sorted listing again (the filter changed); no sorting.
+    function refilter(m: Model): Model is
+        var current: Model := m;
+        let keep: Vector[Index] := filtered(&current);
+        let { fs as fs: Filesystem, folder as folder: Dir, path as path: String, names as names: Vector[String], sizes as sizes: Vector[Int64],
+            folders as folders: Vector[Bool], order as order: Vector[Index], shown as old: Vector[Index], table as table: ListState,
+            filter as filter: String, preview as preview: String, previewBytes as pb: Int64 } := current;
+        destroyFree(old);
+        return Model(fs => fs, folder => folder, path => path, names => names, sizes => sizes, folders => folders, order => order,
+            shown => keep, table => table, filter => filter, preview => preview, previewBytes => pb);
+    end;
+    -- Read the folder's entries (once per folder: filtering and sorting reuse them).
+    function readListing(folder: &[Dir], names: &![Vector[String]], sizes: &![Vector[Int64]], folders: &![Vector[Bool]]): Unit is
+        case entries(folder) of
+            when Ok(value as listing: Entries) do
+                var iterator: Entries := listing; var more: Bool := true;
+                while more do
+                    case nextEntry(&!iterator) of
+                        when Some(value as entry: Entry) do
+                            let { name as name: String, size as size: Index, isDir as dir: Bool, modified as modified: Int64 } := entry;
+                            push(&~names, name); push(&~sizes, int(size)); push(&~folders, dir);
+                        when None do more := false;
                     end case;
-                end if;
-                if listDraw then
-                    let previous: Int64 := rows.selected;
-                    rows.selected := listSelection(&rows, Rect(x => 12, y => 78, width => 244, height => 222), total, 226, e);
-                    if rows.selected /= previous and rows.selected >= 0 then
-                        let { name: String, isDir: Bool } := choose(&cache, bufferNth(&visible, asIndex(rows.selected)));
-                        destroyString(selected); selected := name; selectedDir := isDir; printLn("GUI FILES SELECTED");
-                    end if;
-                    listFrame(&!w, &!rows, Rect(x => 12, y => 78, width => 244, height => 222), total, e);
-                    paintRows(&!w, &!rows, &cache, &visible, total, e);
-                end if;
-                if redraw or inputDraw then
-                    fill(&!w, Rect(x => 12, y => 312, width => 240, height => 20), 16777215);
-                    text(&!w, 12, 312, "Items", 0); drawNumber(&!w, 60, 312, total);
-                end if;
-                var goUp: Bool := false; var goOpen: Bool := false;
-                if upDraw then case button(&!w, &!up, Rect(x => 424, y => 36, width => 72, height => 28), "Up", e, false) of
-                        when Ok(value as clicked: Bool) do goUp := clicked; when Err(error as error: IoError) do skip; end case; end if;
-                if openDraw then case button(&!w, &!openButton, Rect(x => 336, y => 36, width => 72, height => 28), "Open", e, true) of
-                        when Ok(value as clicked: Bool) do goOpen := clicked; when Err(error as error: IoError) do skip; end case; end if;
-                let fullPaint: Bool := redraw; redraw := false;
-                if goUp then
-                    var moved: Bool := false;
-                    let parent: String := parentPath(&path);
-                    if length(&parent) = 0 then
-                        if length(&path) > 0 then closeDir(dir); dir := narrow(openRoot(&!fs), readOnly()); destroyString(path); path := parent; moved := true;
-                        else destroyString(parent); end if;
-                    else case openDir(&rootDir, getSpan(&parent, 0, length(&parent) - 1)) of
-                            when Ok(value as nextDir: Dir) do closeDir(dir); dir := nextDir; destroyString(path); path := parent; moved := true;
-                            when Err(error as error: IoError) do destroyString(parent);
-                        end case; end if;
-                    if moved then
-                        rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy(""); destroyTextInput(filter); filter := makeTextInput(); destroyString(content); content := copy(""); fileBytes := 0; redraw := true; reload := true; printLn("GUI FILES UP");
-                    end if;
-                else if goOpen and length(&selected) > 0 then
-                    if selectedDir then
-                        var moved: Bool := false;
-                        let nextPath: String := joinPath(&path, &selected);
-                        case openDir(&rootDir, getSpan(&nextPath, 0, length(&nextPath) - 1)) of
-                            when Ok(value as nextDir: Dir) do closeDir(dir); dir := nextDir; destroyString(path); path := nextPath; moved := true;
-                            when Err(error as error: IoError) do destroyString(nextPath);
-                        end case;
-                        if moved then
-                            rows.first := 0; rows.selected := -1; destroyString(selected); selected := copy(""); destroyTextInput(filter); filter := makeTextInput(); destroyString(content); content := copy(""); fileBytes := 0; redraw := true; reload := true; printLn("GUI FILES DIRECTORY");
-                        end if;
-                    else
-                        case readAll(&dir, getSpan(&selected, 0, length(&selected) - 1)) of
-                            when Ok(value as bytes: Bytes) do destroyString(content); content := readPreview(&bytes); fileBytes := index64(byteSize(&bytes)); closeBytes(bytes); printLn("GUI FILES PREVIEW");
-                            when Err(error as error: IoError) do destroyString(content); content := copy("Unable to read file"); fileBytes := 0;
-                        end case;
-                    end if;
-                end if;
-                if fullPaint or (goOpen and not selectedDir) then
-                    fill(&!w, Rect(x => 272, y => 78, width => 224, height => 250), 16777215);
-                    preview(&!w, &content); if fileBytes > 0 then text(&!w, 272, 312, "Bytes", 0); drawNumber(&!w, 320, 312, fileBytes); end if; end if;
-                present(&!w); printLn("GUI FILES PAINTED");
-            end if; case e of when Idle do if not redraw then sleep(&tasks, 1); end if;
-                when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do skip;
-                when Key(code as code: Int64) do skip; when Resize(width as width: Int64, height as height: Int64) do skip; when Close do skip; when Menu(id as id: Int64) do skip; end case;
-        end while; clearCache(&!cache); destroyEmpty(cache); destroyFree(visible); destroyTextInput(filter); destroyString(path); destroyString(selected); destroyString(content); closeDir(dir); closeDir(rootDir); releaseFilesystem(fs);
-        close(w); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI FILES CLOSED"); return ExitSuccess(); end;
+                end while;
+                closeEntries(iterator);
+            when Err(error as e: IoError) do skip;
+        end case;
+        return nil;
+    end;
+
+    ------------------------------------------------------------------ navigation
+
+    function joined(path: Span[Nat8], name: Span[Nat8]): String is
+        var b: StringBuilder := makeStringBuilder();
+        for i from 0 until spanLength(path) do writeByte(&!b, path[i]); end for;
+        if spanLength(path) > 0 then writeByte(&!b, 47); end if;
+        for i from 0 until spanLength(name) do writeByte(&!b, name[i]); end for;
+        return finalize(b);
+    end;
+    function parentOf(path: Span[Nat8]): String is
+        var cut: Index := 0;
+        for i from 0 until spanLength(path) do if path[i] = 47 then cut := i; end if; end for;
+        var b: StringBuilder := makeStringBuilder();
+        for i from 0 until cut do writeByte(&!b, path[i]); end for;
+        return finalize(b);
+    end;
+    function emptyText(): String is return fromLiteral(""); end;
+    function copyOf(text: Span[Nat8]): String is
+        var b: StringBuilder := makeStringBuilder();
+        for i from 0 until spanLength(text) do writeByte(&!b, text[i]); end for;
+        return finalize(b);
+    end;
+    -- The folder at a path relative to the root ("" is the root), read-only.
+    function openTarget(fs: &![Filesystem], target: Span[Nat8]): Option[Dir] is
+        let top: Dir := narrow(openRoot(&~fs), readOnly());
+        if spanLength(target) = 0 then return Some(value => top); end if;
+        case openDir(&top, target) of
+            when Ok(value as d: Dir) do closeDir(top); return Some(value => d);
+            when Err(error as e: IoError) do closeDir(top); return None();
+        end case;
+    end;
+    -- Enter the folder at a path relative to the root ("" is the root); stay if it cannot be opened.
+    function enter(m: Model, target: String): Model is
+        let { fs as fs0: Filesystem, folder as folder: Dir, path as path: String, names as names: Vector[String], sizes as sizes: Vector[Int64],
+            folders as folders: Vector[Bool], order as order: Vector[Index], shown as shown: Vector[Index], table as table: ListState, filter as filter: String,
+            preview as preview: String, previewBytes as pb: Int64 } := m;
+        var fs: Filesystem := fs0;
+        case openTarget(&!fs, bytes(&target)) of
+            when Some(value as d: Dir) do
+                closeDir(folder); destroyString(path); destroyString(filter); destroyString(preview);
+                clearNames(names); destroyFree(sizes); destroyFree(folders);
+                var freshNames: Vector[String] := make(); var freshSizes: Vector[Int64] := make(); var freshFolders: Vector[Bool] := make();
+                readListing(&d, &!freshNames, &!freshSizes, &!freshFolders);
+                var loaded: Model := resort(Model(fs => fs, folder => d, path => target, names => freshNames, sizes => freshSizes, folders => freshFolders,
+                    order => order, shown => shown, table => ListState(first => 0, selected => -1, fit => table.fit, sort => table.sort, descending => table.descending),
+                    filter => emptyText(), preview => emptyText(), previewBytes => 0));
+                print("GUI FILES LOADED "); printLn(entryCount(&loaded));
+                return loaded;
+            when None do
+                destroyString(target);
+                return Model(fs => fs, folder => folder, path => path, names => names, sizes => sizes, folders => folders, order => order, shown => shown,
+                    table => table, filter => filter, preview => preview, previewBytes => pb);
+        end case;
+    end;
+    -- Up to 4 KB of a file as text (control bytes shown as dots).
+    function readPreview(folder: &[Dir], name: Span[Nat8]): String is
+        var b: StringBuilder := makeStringBuilder();
+        case readAll(folder, name) of
+            when Ok(value as data: Bytes) do
+                var at: Index := 0;
+                while at < byteSize(&data) and at < 4096 do
+                    let c: Nat8 := nth(&data, at);
+                    if c >= 32 or c = 10 then writeByte(&!b, c); else if c /= 13 then writeByte(&!b, 46); end if;
+                    at := at + 1;
+                end while;
+                closeBytes(data);
+            when Err(error as e: IoError) do
+                let message: Span[Nat8, Static] := "Unable to read the file.";
+                for i from 0 until spanLength(message) do writeByte(&!b, message[i]); end for;
+        end case;
+        return finalize(b);
+    end;
+    -- Open table row r: a folder is entered, a file previewed.
+    function openRow(m: Model, r: Int64): Model is
+        var current: Model := m;
+        if r < 0 or r >= shownCount(&current) then return current; end if;
+        let e: Index := shownAt(&current, r);
+        if isFolder(&current, e) then
+            let target: String := joined(pathOf(&current), nameOf(&current, e));
+            printLn("GUI FILES DIRECTORY");
+            return enter(current, target);
+        end if;
+        let text: String := readPreview(folderOf(&current), nameOf(&current, e));
+        let n: Int64 := sizeAt(&current, e);
+        let { fs as fs: Filesystem, folder as folder: Dir, path as path: String, names as names: Vector[String], sizes as sizes: Vector[Int64],
+            folders as folders: Vector[Bool], order as order: Vector[Index], shown as shown: Vector[Index], table as table: ListState, filter as filter: String,
+            preview as old: String, previewBytes as pb: Int64 } := current;
+        destroyString(old);
+        printLn("GUI FILES PREVIEW");
+        return Model(fs => fs, folder => folder, path => path, names => names, sizes => sizes, folders => folders, order => order, shown => shown,
+            table => table, filter => filter, preview => text, previewBytes => n);
+    end;
+    function withTable(m: Model, s: ListState): Model is
+        let { fs as fs: Filesystem, folder as folder: Dir, path as path: String, names as names: Vector[String], sizes as sizes: Vector[Int64],
+            folders as folders: Vector[Bool], order as order: Vector[Index], shown as shown: Vector[Index], table as old: ListState, filter as filter: String,
+            preview as preview: String, previewBytes as pb: Int64 } := m;
+        let changed: Model := Model(fs => fs, folder => folder, path => path, names => names, sizes => sizes, folders => folders, order => order, shown => shown,
+            table => s, filter => filter, preview => preview, previewBytes => pb);
+        if s.sort /= old.sort or s.descending /= old.descending then
+            let sorted: Model := resort(changed); printLn("GUI FILES SORTED"); return sorted;
+        end if;
+        return changed;
+    end;
+    function withFilter(m: Model, e: TextEdit): Model is
+        let { fs as fs: Filesystem, folder as folder: Dir, path as path: String, names as names: Vector[String], sizes as sizes: Vector[Int64],
+            folders as folders: Vector[Bool], order as order: Vector[Index], shown as shown: Vector[Index], table as table: ListState, filter as filter: String,
+            preview as preview: String, previewBytes as pb: Int64 } := m;
+        return refilter(Model(fs => fs, folder => folder, path => path, names => names, sizes => sizes, folders => folders, order => order, shown => shown,
+            table => ListState(first => 0, selected => -1, fit => table.fit, sort => table.sort, descending => table.descending),
+            filter => applyEdit(filter, e), preview => preview, previewBytes => pb));
+    end;
+
+    ------------------------------------------------------------------ the application
+
+    function update(model: Model, msg: Msg): Model is
+        var current: Model := model;
+        let table: ListState := tableOf(&current);
+        case msg of
+            when Table(state as s: ListState) do
+                if s.selected /= table.selected and s.selected >= 0 then printLn("GUI FILES SELECTED"); end if;
+                return withTable(current, s);
+            when Opened(row as r: Int64) do return openRow(current, r);
+            when OpenSelected do return openRow(current, table.selected);
+            when Up do
+                if atRoot(&current) then return current; end if;
+                let target: String := parentOf(pathOf(&current));
+                printLn("GUI FILES UP");
+                return enter(current, target);
+            when Reload do
+                let target: String := copyOf(pathOf(&current));
+                printLn("GUI FILES RELOAD");
+                return enter(current, target);
+            when Filter(edit as e: TextEdit) do printLn("GUI FILES FILTER"); return withFilter(current, e);
+            when Preview(edit as e: TextEdit) do return current;
+            when SortBy(column as c: Int64) do
+                var descending: Bool := false; if table.sort = c then descending := not table.descending; end if;
+                return withTable(current, ListState(first => 0, selected => table.selected, fit => table.fit, sort => c, descending => descending));
+            when Quit do return current;
+        end case;
+    end;
+    function view(model: &[Model]): View[Msg] is
+        var v: View[Msg] := newView();
+        let table: ListState := tableOf(model);
+        let total: Int64 := shownCount(model);
+        menu(&!v, "File");
+        menuItem(&!v, "Open", "Ctrl+O", OpenSelected()); disabled(&!v, table.selected < 0);
+        menuItem(&!v, "Enclosing Folder", "Ctrl+U", Up()); disabled(&!v, atRoot(model));
+        menuItem(&!v, "Reload", "Ctrl+R", Reload());
+        menuSeparator(&!v);
+        menuItem(&!v, "Close", "Ctrl+W", Quit());
+        done(&!v);
+        menu(&!v, "View");
+        menuItem(&!v, "By Name", "", SortBy(column => 0)); checkMark(&!v, table.sort <= 0);
+        menuItem(&!v, "By Size", "", SortBy(column => 1)); checkMark(&!v, table.sort = 1);
+        menuItem(&!v, "By Kind", "", SortBy(column => 2)); checkMark(&!v, table.sort = 2);
+        done(&!v);
+        column(&!v);
+        toolbar(&!v);
+        button(&!v, "Up", Up()); disabled(&!v, atRoot(model));
+        button(&!v, "Open", OpenSelected()); defaultButton(&!v); disabled(&!v, table.selected < 0);
+        button(&!v, "Reload", Reload());
+        label(&!v, "C:/"); append(&!v, pathOf(model)); grow(&!v, 1);
+        label(&!v, "Filter");
+        textBox(&!v, filterOf(model), filterEdited); placeholder(&!v, "Name contains"); fixedWidth(&!v, 150);
+        done(&!v);
+        column(&!v); padding(&!v, 8); grow(&!v, 1);
+        split(&!v, false, 310); grow(&!v, 1);
+        tableView(&!v, table, total, tableState); onOpen(&!v, opened);
+        tableColumn(&!v, "Name", 160, true);
+        tableColumn(&!v, "Size", 72, true);
+        tableColumn(&!v, "Kind", 56, true);
+        var r: Int64 := table.first;
+        while r < total and r <= table.first + table.fit do
+            let e: Index := shownAt(model, r);
+            tableRow(&!v, r);
+            cell(&!v, nameOf(model, e));
+            if isFolder(model, e) then rowIcon(&!v, iconFolder()); else rowIcon(&!v, iconDocument()); end if;
+            if isFolder(model, e) then cell(&!v, "--"); else cell(&!v, ""); appendInt(&!v, sizeAt(model, e)); end if;
+            if isFolder(model, e) then cell(&!v, "Folder"); else cell(&!v, "File"); end if;
+            done(&!v);
+            r := r + 1;
+        end while;
+        done(&!v);
+        textView(&!v, previewOf(model), previewEdited);
+        done(&!v);
+        done(&!v);
+        statusBar(&!v);
+        label(&!v, ""); appendInt(&!v, total); if total = 1 then append(&!v, " item"); else append(&!v, " items"); end if; plain(&!v);
+        if total /= entryCount(model) then label(&!v, "of "); appendInt(&!v, entryCount(model)); plain(&!v); end if;
+        spacer(&!v);
+        if model->previewBytes > 0 then label(&!v, ""); appendInt(&!v, model->previewBytes); append(&!v, " bytes"); plain(&!v); end if;
+        done(&!v);
+        done(&!v);
+        return v;
+    end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root);
+        var fs: Filesystem := acquireFilesystem(&!root);
+        let here: Dir := narrow(openRoot(&!fs), readOnly());
+        var names: Vector[String] := make(); var sizes: Vector[Int64] := make(); var folders: Vector[Bool] := make();
+        readListing(&here, &!names, &!sizes, &!folders);
+        var model: Model := resort(Model(fs => fs, folder => here, path => emptyText(), names => names, sizes => sizes, folders => folders,
+            order => make(), shown => make(), table => ListState(first => 0, selected => -1, fit => 0, sort => 0, descending => false),
+            filter => emptyText(), preview => emptyText(), previewBytes => 0));
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Files", 560, 380);
+        case opening of
+            when Ok(value as app0: App[Msg]) do
+                var app: App[Msg] := app0;
+                printLn("GUI FILES PAINTED");
+                var running: Bool := true;
+                while running do
+                    case next(&!app, view(&model)) of
+                        when Some(value as msg: Msg) do
+                            case msg of
+                                when Quit do running := false;
+                                when Table(state as s: ListState) do skip;
+                                when Opened(row as r: Int64) do skip;
+                                when OpenSelected do skip;
+                                when Up do skip;
+                                when Reload do skip;
+                                when Filter(edit as e: TextEdit) do skip;
+                                when Preview(edit as e: TextEdit) do skip;
+                                when SortBy(column as c: Int64) do skip;
+                            end case;
+                            model := update(model, msg);
+                        when None do running := false;
+                    end case;
+                end while;
+                closeApp(app);
+            when Err(error as e: IoError) do printLn("GUI FILES NO GUI");
+        end case;
+        let { fs as f: Filesystem, folder as d: Dir, path as p: String, names as n: Vector[String], sizes as s: Vector[Int64],
+            folders as fo: Vector[Bool], order as od: Vector[Index], shown as sh: Vector[Index], table as t: ListState, filter as fi: String,
+            preview as pr: String, previewBytes as pb: Int64 } := model;
+        closeDir(d); destroyString(p); clearNames(n); destroyFree(s); destroyFree(fo); destroyFree(od); destroyFree(sh);
+        destroyString(fi); destroyString(pr);
+        releaseFilesystem(f); releaseGui(gui); surrenderRoot(root);
+        printLn("GUI FILES CLOSED");
+        return ExitSuccess();
+    end;
 end module body.

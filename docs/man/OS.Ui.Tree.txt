@@ -1,0 +1,5 @@
+The flat node tree behind OS.Ui: building, identity, layout and hit testing.
+
+Applications use OS.Ui; this module is the monomorphic engine it is built on.
+Node 0 is the root and index 0 in a link means none. Layout is axis separated:
+preferred widths, widths, preferred heights for those widths, then heights.

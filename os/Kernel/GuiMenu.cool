@@ -1,68 +1,199 @@
 // Server-side menu bar and popup overlay; applications register labels/actions.
+// Items can show a shortcut (right-aligned), be separators, disabled (gray) or checked.
+// A window's popup list (OS.Ui pop-up buttons and context menus) opens at a point
+// in its client area; choosing sends GUI_POPUP_ID | index, dismissing sends -1.
+#define GUI_ITEM_DISABLED 1
+#define GUI_ITEM_CHECKED 2
+#define GUI_ITEM_SEPARATOR 4
+#define GUI_POPUP_ID 0x40000000
+#define GUI_ROW 22
+#define GUI_SEPARATOR_ROW 10
+I64 GuiTextWidth(U8 *text)
+{//Logical width of UTF-8 chrome text (8 per cell, 16 for wide characters).
+    I64 w = 0, len, i;
+    while (*text) {len = Utf8Len(*text); if (!len) len = 1; for (i = 1; i < len; i++) if (!text[i]) {len = 1; break;} w += Utf8Width(Utf8Cp(text, len)) * 8; text += len;}
+    return w;
+}
+CGuiMenu *GuiMenuCurrent()
+{
+    if (!gui.menu_window) return NULL;
+    if (gui.menu_index == -2) return &gui.menu_window->popup;
+    if (gui.menu_index >= 0) return &gui.menu_window->menus[gui.menu_index];
+    return NULL;
+}
 I64 GuiMenuX(I64 index)
 {
     I64 i, x = 68;
+    if (index == -2) {if (gui.menu_window) return gui.menu_window->popup_x; return 0;}
     if (index < 0) return 0;
-    if (gui.menu_window) for (i = 0; i < index; i++) x += StrLen(gui.menu_window->menus[i].title) * 8 + 16;
+    if (gui.menu_window) for (i = 0; i < index; i++) x += GuiTextWidth(gui.menu_window->menus[i].title) + 16;
     return x;
 }
-I64 GuiMenuCount() {if (gui.menu_index < 0) return 8; if (!gui.menu_window) return 0; return gui.menu_window->menus[gui.menu_index].count;}
+I64 GuiMenuCount()
+{
+    CGuiMenu *m;
+    if (gui.menu_index == -1) return 9;
+    m = GuiMenuCurrent; if (!m) return 0;
+    return m->count;
+}
+I64 GuiMenuTop() {if (gui.menu_index == -2 && gui.menu_window) return gui.menu_window->popup_y; return GUI_MENU;}
+I64 GuiMenuFlags(I64 item)
+{
+    CGuiMenu *m = GuiMenuCurrent;
+    if (!m || item < 0 || item >= m->count) return 0;
+    return m->items[item].flags;
+}
+I64 GuiMenuRowH(I64 item) {if (GuiMenuFlags(item) & GUI_ITEM_SEPARATOR) return GUI_SEPARATOR_ROW; return GUI_ROW;}
+I64 GuiMenuItemY(I64 item)
+{//Top of an item, relative to the popup's first row.
+    I64 i, y = 0;
+    for (i = 0; i < item; i++) y += GuiMenuRowH(i);
+    return y;
+}
+I64 GuiMenuHeight() {return GuiMenuItemY(GuiMenuCount);}
+Bool GuiMenuEnabled(I64 item) {return item >= 0 && item < GuiMenuCount && !(GuiMenuFlags(item) & (GUI_ITEM_DISABLED | GUI_ITEM_SEPARATOR));}
+Bool GuiMenuChecks()
+{
+    I64 i;
+    for (i = 0; i < GuiMenuCount; i++) if (GuiMenuFlags(i) & GUI_ITEM_CHECKED) return TRUE;
+    return FALSE;
+}
+I64 GuiMenuWidth()
+{
+    CGuiMenu *m = GuiMenuCurrent; I64 i, w = 176, need;
+    if (!m) return w;
+    for (i = 0; i < m->count; i++) {
+        need = GuiTextWidth(m->items[i].label) + 24;
+        if (GuiMenuChecks) need += 12;
+        if (m->items[i].keys[0]) need += GuiTextWidth(m->items[i].keys) + 24;
+        w = MaxI64(w, need);
+    }
+    return w;
+}
+U0 GuiCheckMark(I64 x, I64 y)
+{//The classic menu check mark, two pixels thick (the font has no U+2713).
+    I64 i, s = gui.scale, rows = 0x000103068CD87020; // eight rows, top row in the high byte
+    for (i = 0; i < 64; i++) if ((rows >> ((7 - i / 8) * 8)) & (0x80 >> (i % 8))) GuiFill(gui.overlay, fb.w, fb.h, s, x + i % 8, y + i / 8, 1, 1, 0);
+}
+U0 GuiTextDim(U32 *p, I64 pw, I64 ph, I64 scale, I64 x, I64 y, U8 *text)
+{//Chrome text through the 50% gray pattern (disabled menu items).
+    U8 *glyph; I64 row, col, bits, cells, len, cp, i, w;
+    while (*text) {
+        len = Utf8Len(*text); if (!len) len = 1; for (i = 1; i < len; i++) if (!text[i]) {len = 1; break;}
+        cp = Utf8Cp(text, len); text += len; glyph = FontGlyph(cp, &cells); w = Utf8Width(cp) * 8;
+        if (glyph && cells == 1) for (row = 0; row < 16; row++) {
+                bits = glyph[row]; bits |= bits >> 1;
+                for (col = 0; col < 8; col++) if ((bits & (128 >> col)) && !((x + col + y + row) & 1)) GuiFill(p, pw, ph, scale, x + col, y + row, 1, 1, 0);
+            }
+        x += w;
+    }
+}
 U0 GuiMenuPaint()
 {
-    I64 x = GuiMenuX(gui.menu_index), i, y, px, py, s = gui.scale, width = 176, count = GuiMenuCount;
-    U8 *title, *text;
+    I64 x = GuiMenuX(gui.menu_index), i, y, px, py, s = gui.scale, width, count = GuiMenuCount, top = GuiMenuTop, height, indent = 8;
+    U8 *title, *text, *keys; I64 flags; CGuiMenu *m = GuiMenuCurrent;
     MemSet(gui.overlay, 0, fb.w * fb.h * 4);
     if (gui.menu_open) {
-        title = "System"; if (gui.menu_index >= 0) title = gui.menu_window->menus[gui.menu_index].title;
-        GuiFill(gui.overlay, fb.w, fb.h, s, x, 0, StrLen(title) * 8 + 16, GUI_MENU - 1, GUI_WHITE);
-        GuiText(gui.overlay, fb.w, fb.h, s, x + 8, 3, title);
-        for (py = 0; py < (GUI_MENU - 1) * s; py++) for (px = x * s; px < MinI64(fb.w, (x + StrLen(title) * 8 + 16) * s); px++) gui.overlay[py * fb.w + px] = 0xFF000000 | (gui.overlay[py * fb.w + px] ^ GUI_WHITE);
-        GuiFill(gui.overlay, fb.w, fb.h, s, x, GUI_MENU, width, count * 22 + 2, GUI_WHITE);
-        GuiBox(gui.overlay, fb.w, fb.h, s, x, GUI_MENU, width, count * 22 + 2);
-        for (i = 0; i < count; i++) {
-            y = GUI_MENU + 1 + i * 22;
-            if (gui.menu_index < 0) {text = "New Shell"; if (i == 1) text = "Drawing"; if (i == 2) text = "Widgets"; if (i == 3) text = "Files"; if (i == 4) text = "Top"; if (i == 5) text = "Settings"; if (i == 6) text = "Cube"; if (i == 7) text = "Terminal";}
-            else text = gui.menu_window->menus[gui.menu_index].items[i].label;
-            GuiText(gui.overlay, fb.w, fb.h, s, x + 8, y + 3, text);
-            if (i == gui.menu_hover) for (py = y * s; py < (y + 22) * s; py++) for (px = (x + 1) * s; px < MinI64(fb.w, (x + width - 1) * s); px++) gui.overlay[py * fb.w + px] ^= GUI_WHITE;
+        width = GuiMenuWidth; height = GuiMenuHeight;
+        if (gui.menu_index >= -1) {
+            title = "System"; if (gui.menu_index >= 0) title = gui.menu_window->menus[gui.menu_index].title;
+            GuiFill(gui.overlay, fb.w, fb.h, s, x, 0, GuiTextWidth(title) + 16, GUI_MENU - 1, GUI_WHITE);
+            GuiText(gui.overlay, fb.w, fb.h, s, x + 8, 3, title);
+            for (py = 0; py < (GUI_MENU - 1) * s; py++) for (px = x * s; px < MinI64(fb.w, (x + GuiTextWidth(title) + 16) * s); px++) gui.overlay[py * fb.w + px] = 0xFF000000 | (gui.overlay[py * fb.w + px] ^ GUI_WHITE);
         }
-        for (py = GUI_MENU * s; py < MinI64(fb.h, (GUI_MENU + count * 22 + 2) * s); py++)
-            for (px = x * s; px < MinI64(fb.w, (x + width) * s); px++) gui.overlay[py * fb.w + px] |= 0xFF000000;
+        if (gui.menu_index >= 0 || gui.menu_index == -2) if (GuiMenuChecks) indent = 20;
+        GuiFill(gui.overlay, fb.w, fb.h, s, x, top, width, height + 2, GUI_WHITE);
+        GuiBox(gui.overlay, fb.w, fb.h, s, x, top, width, height + 2);
+        // The classic menu shadow: one pixel right and below.
+        GuiFill(gui.overlay, fb.w, fb.h, s, x + width, top + 1, 1, height + 2, 0);
+        GuiFill(gui.overlay, fb.w, fb.h, s, x + 1, top + height + 2, width, 1, 0);
+        for (i = 0; i < count; i++) {
+            y = top + 1 + GuiMenuItemY(i); flags = 0; keys = NULL;
+            if (gui.menu_index == -1) {text = "New Shell"; if (i == 1) text = "Drawing"; if (i == 2) text = "Widgets"; if (i == 3) text = "Files"; if (i == 4) text = "Top"; if (i == 5) text = "Settings"; if (i == 6) text = "Cube"; if (i == 7) text = "Gallery"; if (i == 8) text = "Terminal";}
+            else {text = m->items[i].label; flags = m->items[i].flags; if (m->items[i].keys[0]) keys = m->items[i].keys;}
+            if (flags & GUI_ITEM_SEPARATOR) {
+                for (px = x + 1; px < x + width - 1; px += 2) GuiFill(gui.overlay, fb.w, fb.h, s, px, y + 4, 1, 1, 0);
+            } else {
+                if (flags & GUI_ITEM_DISABLED) {
+                    GuiTextDim(gui.overlay, fb.w, fb.h, s, x + indent, y + 3, text);
+                    if (keys) GuiTextDim(gui.overlay, fb.w, fb.h, s, x + width - 8 - GuiTextWidth(keys), y + 3, keys);
+                } else {
+                    GuiText(gui.overlay, fb.w, fb.h, s, x + indent, y + 3, text);
+                    if (keys) GuiText(gui.overlay, fb.w, fb.h, s, x + width - 8 - GuiTextWidth(keys), y + 3, keys);
+                }
+                if (flags & GUI_ITEM_CHECKED) GuiCheckMark(x + 5, y + 6);
+                if (i == gui.menu_hover && !(flags & GUI_ITEM_DISABLED)) for (py = y * s; py < (y + GUI_ROW) * s; py++) for (px = (x + 1) * s; px < MinI64(fb.w, (x + width - 1) * s); px++) gui.overlay[py * fb.w + px] ^= GUI_WHITE;
+            }
+        }
+        for (py = top * s; py < MinI64(fb.h, (top + height + 3) * s); py++)
+            for (px = x * s; px < MinI64(fb.w, (x + width + 1) * s); px++) gui.overlay[py * fb.w + px] |= 0xFF000000;
     }
     gui.overlay_revision++; GuiDamage(0, 0, gui.w, gui.h);
 }
-U0 GuiMenuDismiss() {gui.menu_open = FALSE; gui.menu_window = NULL; GuiMenuPaint;}
+U0 GuiMenuDismiss()
+{
+    CGuiEvent e; CGuiWindow *w = gui.menu_window;
+    // A popup that closes without a choice tells its window (pop-up buttons reset).
+    if (gui.menu_open && gui.menu_index == -2 && w && !w->closed) {
+        MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MENU; e.key = -1; GuiEventPush(w, &e);
+    }
+    gui.menu_open = FALSE; gui.menu_window = NULL; GuiMenuPaint;
+}
 U0 GuiMenuSelect(I64 item)
 {
-    CGuiEvent e;
-    if (item >= 0 && item < GuiMenuCount) {
-        if (gui.menu_index < 0) {gui.action = 1; if (item == 1) gui.action = 7; if (item == 2) gui.action = 8; if (item == 3) gui.action = 9; if (item == 4) gui.action = 10; if (item == 5) gui.action = 11; if (item == 6) gui.action = 12; if (item == 7) gui.action = 2;}
-        else if (gui.menu_window && !gui.menu_window->closed) {
-            MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MENU; e.key = gui.menu_window->menus[gui.menu_index].items[item].id;
-            GuiEventPush(gui.menu_window, &e);
+    CGuiEvent e; CGuiWindow *w = gui.menu_window;
+    if (item >= 0 && item < GuiMenuCount && (gui.menu_index == -1 || GuiMenuEnabled(item))) {
+        if (gui.menu_index == -1) {gui.action = 1; if (item == 1) gui.action = 7; if (item == 2) gui.action = 8; if (item == 3) gui.action = 9; if (item == 4) gui.action = 10; if (item == 5) gui.action = 11; if (item == 6) gui.action = 12; if (item == 7) gui.action = 13; if (item == 8) gui.action = 2;}
+        else if (w && !w->closed) {
+            MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MENU;
+            if (gui.menu_index == -2) e.key = GUI_POPUP_ID | item;
+            else e.key = w->menus[gui.menu_index].items[item].id;
+            GuiEventPush(w, &e);
+            gui.menu_open = FALSE; gui.menu_window = NULL; GuiMenuPaint; return;
         }
     }
     GuiMenuDismiss;
 }
+U0 GuiMenuStep(I64 delta)
+{//Keyboard: the next selectable item.
+    I64 i, n = GuiMenuCount, item = gui.menu_hover;
+    if (!n) return;
+    for (i = 0; i < n; i++) {
+        item = (item + delta + n) % n;
+        if (gui.menu_index == -1 || GuiMenuEnabled(item)) {gui.menu_hover = item; GuiMenuPaint; return;}
+    }
+}
 Bool GuiMenuMouse(I64 x, I64 y, I64 buttons)
 {
-    I64 i, mx, width, hover = -1;
+    I64 i, mx, width, hover = -1, top, k;
     Bool down = (buttons & 1) && !(gui.buttons & 1), up = !(buttons & 1) && (gui.buttons & 1);
+    if (gui.menu_open && gui.menu_index == -2) {
+        mx = GuiMenuX(-2); top = GuiMenuTop; width = GuiMenuWidth;
+        if (mx <= x && x < mx + width && top + 1 <= y && y < top + 1 + GuiMenuHeight)
+            for (k = 0; k < GuiMenuCount; k++) if (GuiMenuItemY(k) <= y - top - 1 && y - top - 1 < GuiMenuItemY(k) + GuiMenuRowH(k)) hover = k;
+        if (hover >= 0 && !GuiMenuEnabled(hover)) hover = -1;
+        if (hover != gui.menu_hover) {gui.menu_hover = hover; GuiMenuPaint;}
+        if (down && hover < 0) GuiMenuDismiss;
+        else if (up && hover >= 0) GuiMenuSelect(hover);
+        return TRUE;
+    }
     if (down && y < GUI_MENU) {
         if (gui.menu_open) GuiMenuDismiss;
         gui.menu_window = gui.focus; gui.menu_index = -1;
         if (x >= 68 && gui.focus) {
             for (i = 0; i < gui.focus->menu_count; i++) {
-                mx = GuiMenuX(i); width = StrLen(gui.focus->menus[i].title) * 8 + 16;
-                if (mx <= x < mx + width) {gui.menu_index = i; break;}
+                mx = GuiMenuX(i); width = GuiTextWidth(gui.focus->menus[i].title) + 16;
+                if (mx <= x && x < mx + width) {gui.menu_index = i; break;}
             }
             if (gui.menu_index < 0) {gui.menu_window = NULL; return TRUE;}
         }
         gui.menu_open = TRUE; gui.menu_hover = -1; GuiMenuPaint; return TRUE;
     }
     if (!gui.menu_open) return FALSE;
-    mx = GuiMenuX(gui.menu_index);
-    if (mx <= x < mx + 176 && GUI_MENU + 1 <= y < GUI_MENU + 1 + GuiMenuCount * 22) hover = (y - GUI_MENU - 1) / 22;
+    mx = GuiMenuX(gui.menu_index); width = GuiMenuWidth;
+    if (mx <= x && x < mx + width && GUI_MENU + 1 <= y && y < GUI_MENU + 1 + GuiMenuHeight)
+        for (k = 0; k < GuiMenuCount; k++) if (GuiMenuItemY(k) <= y - GUI_MENU - 1 && y - GUI_MENU - 1 < GuiMenuItemY(k) + GuiMenuRowH(k)) hover = k;
+    if (hover >= 0 && gui.menu_index >= 0 && !GuiMenuEnabled(hover)) hover = -1;
     if (hover != gui.menu_hover) {gui.menu_hover = hover; GuiMenuPaint;}
     if (down && y >= GUI_MENU && hover < 0) GuiMenuDismiss;
     else if (up && hover >= 0) GuiMenuSelect(hover);
@@ -71,16 +202,58 @@ Bool GuiMenuMouse(I64 x, I64 y, I64 buttons)
 I64 GuiAddMenu(CGuiWindow *w, U8 *title)
 {
     I64 i, len = StrLen(title), index;
-    if (!w || w->owner != Fs || w->menu_count == GUI_MENUS || len < 1 || len > 20) return -12;
+    if (!w || w->owner != Fs || w->menu_count == GUI_MENUS || len < 1 || len > 30) return -12;
     index = w->menu_count++; for (i = 0; i <= len; i++) w->menus[index].title[i] = title[i];
+    w->menus[index].count = 0;
     if (gui.focus == w) GuiDesktop;
     return index;
 }
-I64 GuiAddMenuItem(CGuiWindow *w, I64 menu, I64 id, U8 *label)
+I64 GuiMenuItemSet(CGuiMenuItem *item, I64 id, U8 *label, U8 *keys, I64 flags)
 {
-    I64 i, len = StrLen(label), index;
-    if (!w || w->owner != Fs || menu < 0 || menu >= w->menu_count || len < 1 || len > 20 || w->menus[menu].count == GUI_MENU_ITEMS) return -12;
-    index = w->menus[menu].count++; w->menus[menu].items[index].id = id;
-    for (i = 0; i <= len; i++) w->menus[menu].items[index].label[i] = label[i];
+    I64 i, len = StrLen(label), klen = 0;
+    if (keys) klen = StrLen(keys);
+    if (len > 60 || klen > 22 || flags < 0 || flags > 7 || (len < 1 && !(flags & GUI_ITEM_SEPARATOR))) return -12;
+    item->id = id; item->flags = flags;
+    for (i = 0; i <= len; i++) item->label[i] = label[i];
+    item->keys[0] = 0; for (i = 0; i < klen; i++) item->keys[i] = keys[i]; item->keys[klen] = 0;
+    return 0;
+}
+I64 GuiAddMenuItem(CGuiWindow *w, I64 menu, I64 id, U8 *label, U8 *keys = NULL, I64 flags = 0)
+{
+    I64 result;
+    if (!w || w->owner != Fs || menu < 0 || menu >= w->menu_count || w->menus[menu].count == GUI_MENU_ITEMS) return -12;
+    if (!keys && (StrLen(label) < 1 || StrLen(label) > 20)) return -12; // the original OS.Gui limits
+    result = GuiMenuItemSet(&w->menus[menu].items[w->menus[menu].count], id, label, keys, flags);
+    if (!result) w->menus[menu].count++;
+    return result;
+}
+I64 GuiMenuReset(CGuiWindow *w)
+{//Remove every menu of a window (OS.Ui rebuilds them when its view changes).
+    if (!w || w->owner != Fs) return -12;
+    if (gui.menu_open && gui.menu_window == w && gui.menu_index >= 0) GuiMenuDismiss;
+    w->menu_count = 0;
+    if (gui.focus == w) GuiDesktop;
+    return 0;
+}
+I64 GuiPopupItem(CGuiWindow *w, U8 *label, U8 *keys, I64 flags)
+{
+    I64 result;
+    if (!w || w->owner != Fs || w->popup.count == GUI_MENU_ITEMS) return -12;
+    result = GuiMenuItemSet(&w->popup.items[w->popup.count], w->popup.count, label, keys, flags);
+    if (!result) w->popup.count++;
+    return result;
+}
+I64 GuiPopupClear(CGuiWindow *w) {if (!w || w->owner != Fs) return -12; w->popup.count = 0; return 0;}
+I64 GuiPopupShow(CGuiWindow *w, I64 x, I64 y, I64 current)
+{//Open the popup at client (x, y) with item current under it; the result arrives as a menu event.
+    if (!w || w->owner != Fs || !w->popup.count || gui.focus != w) return -12;
+    if (gui.menu_open) GuiMenuDismiss;
+    gui.menu_window = w; gui.menu_index = -2; gui.menu_open = TRUE;
+    if (current < 0 || current >= w->popup.count) current = -1;
+    gui.menu_hover = current;
+    w->popup_x = ClampI64(w->x + 1 + GUI_PAD + x, 0, MaxI64(gui.w - GuiMenuWidth - 2, 0));
+    w->popup_y = w->y + GUI_TITLE + GUI_PAD + y - 1; if (current > 0) w->popup_y -= GuiMenuItemY(current);
+    w->popup_y = ClampI64(w->popup_y, GUI_MENU, MaxI64(gui.h - GuiMenuHeight - 4, GUI_MENU));
+    GuiMenuPaint;
     return 0;
 }

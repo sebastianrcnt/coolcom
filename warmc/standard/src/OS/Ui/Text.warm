@@ -1,0 +1,229 @@
+import Standard.String (String, length as stringLength, slice as stringSlice, destroyString);
+import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
+import Standard.Vector (Vector, make as vectorMake, push, get, length as vectorLength, destroyFree);
+module body OS.Ui.Text is
+    -- UTF-8 stepping and the pixel metrics of the UI font (GNU Unifont, 8 px per
+    -- terminal cell, 16 px high), shared by layout, painting and text editing.
+    -- Strings are bytes by convention: an invalid byte counts as one U+FFFD cell.
+    constant lineHeight: Int64 := 16;
+    constant cellWidth: Int64 := 8;
+    record Decoded: Free is codepoint: Int64; size: Index; end;
+    -- A change to a text value: replace bytes [start, finish) with one code
+    -- point (codepoint >= 0), with the clipboard snapshot numbered paste
+    -- (paste > 0), or with nothing.
+    record TextEdit: Free is start: Index; finish: Index; codepoint: Int64; paste: Int64; end;
+    -- Decode one code point at a byte offset (at < length).
+    function decode(bytes: Span[Nat8], at: Index): Decoded is
+        let lead: Nat8 := bytes[at]; let available: Index := spanLength(bytes) - at;
+        if lead < 128 then return Decoded(codepoint => toInt(lead), size => 1); end if;
+        var size: Index := 0; var cp: Int64 := 0;
+        if lead >= 240 and lead < 248 then size := 4; cp := toInt(lead & 7);
+        else if lead >= 224 then size := 3; cp := toInt(lead & 15);
+        else if lead >= 192 then size := 2; cp := toInt(lead & 31);
+        end if;
+        if size = 0 or size > available then return Decoded(codepoint => 65533, size => 1); end if;
+        for i from 1 until size do
+            let b: Nat8 := bytes[at + i];
+            if (b & 192) /= 128 then return Decoded(codepoint => 65533, size => 1); end if;
+            cp := cp << 6 | toInt(b & 63);
+        end for;
+        return Decoded(codepoint => cp, size => size);
+    end;
+    function toInt(b: Nat8): Int64 is
+        case toInt64(widenToNat64(b)) of when Some(value as n: Int64) do return n; when None do return 0; end case;
+    end;
+    -- Terminal cells of a code point: 2 for Hangul, CJK and fullwidth forms,
+    -- 0 for combining marks (the kernel's Utf8Width and GrTextStyle agree).
+    function cells(cp: Int64): Int64 is
+        if (cp >= 768 and cp <= 879) or (cp >= 8203 and cp <= 8207) or (cp >= 65024 and cp <= 65039) then return 0; end if;
+        if (cp >= 4352 and cp <= 4447) or (cp >= 11904 and cp <= 42191) or (cp >= 44032 and cp <= 55203)
+            or (cp >= 63744 and cp <= 64255) or (cp >= 65072 and cp <= 65135) or (cp >= 65280 and cp <= 65376)
+            or (cp >= 65504 and cp <= 65510) or (cp >= 131072 and cp <= 262141) then return 2; end if;
+        return 1;
+    end;
+    -- Width in logical pixels of the whole span.
+    function width(bytes: Span[Nat8]): Int64 is
+        var total: Int64 := 0; var at: Index := 0; let n: Index := spanLength(bytes);
+        while at < n do
+            let b: Nat8 := bytes[at];
+            if b < 128 then total := total + 8; at := at + 1;
+            else let d: Decoded := decode(bytes, at); total := total + cells(d.codepoint) * 8; at := at + d.size; end if;
+        end while;
+        return total;
+    end;
+    -- Width of bytes [start, finish).
+    function rangeWidth(bytes: Span[Nat8], start: Index, finish: Index): Int64 is
+        return width(sliceSpan(bytes, start, finish));
+    end;
+    -- The start of the code point before at (0 stays 0).
+    function previous(bytes: Span[Nat8], at: Index): Index is
+        if at = 0 then return 0; end if;
+        var p: Index := at - 1;
+        while p > 0 and (bytes[p] & 192) = 128 and at - p < 4 do p := p - 1; end while;
+        let d: Decoded := decode(bytes, p);
+        if p + d.size = at then return p; end if;
+        return at - 1;
+    end;
+    -- The start of the code point after at (the length stays the length).
+    function following(bytes: Span[Nat8], at: Index): Index is
+        if at >= spanLength(bytes) then return spanLength(bytes); end if;
+        return at + decode(bytes, at).size;
+    end;
+    -- Snap a byte offset to a code point boundary at or before it.
+    function boundary(bytes: Span[Nat8], at: Index): Index is
+        if at >= spanLength(bytes) then return spanLength(bytes); end if;
+        var p: Index := at;
+        while p > 0 and (bytes[p] & 192) = 128 and at - p < 3 do p := p - 1; end while;
+        if (bytes[p] & 192) = 128 then return at; end if;
+        if p + decode(bytes, p).size > at then return p; end if;
+        return at;
+    end;
+    -- The longest prefix of bytes [start, n) whose width fits, as an end offset.
+    function fit(bytes: Span[Nat8], start: Index, available: Int64): Index is
+        var at: Index := start; var used: Int64 := 0; let n: Index := spanLength(bytes);
+        while at < n do
+            let d: Decoded := decode(bytes, at); let w: Int64 := cells(d.codepoint) * 8;
+            if used + w > available then return at; end if;
+            used := used + w; at := at + d.size;
+        end while;
+        return n;
+    end;
+    -- The byte offset closest to a pixel offset from the start of the span.
+    function offsetAt(bytes: Span[Nat8], x: Int64): Index is
+        var at: Index := 0; var used: Int64 := 0; let n: Index := spanLength(bytes);
+        while at < n do
+            let d: Decoded := decode(bytes, at); let w: Int64 := cells(d.codepoint) * 8;
+            if x < used + w / 2 then return at; end if;
+            used := used + w; at := at + d.size;
+        end while;
+        return n;
+    end;
+    -- Word characters for double click and Ctrl+arrows: letters, digits, _ and non-ASCII.
+    function isWord(cp: Int64): Bool is
+        return (cp >= 48 and cp <= 57) or (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or cp = 95 or cp >= 128;
+    end;
+    function wordStart(bytes: Span[Nat8], at: Index): Index is
+        var p: Index := at;
+        while p > 0 and not isWord(decode(bytes, previous(bytes, p)).codepoint) do p := previous(bytes, p); end while;
+        while p > 0 and isWord(decode(bytes, previous(bytes, p)).codepoint) do p := previous(bytes, p); end while;
+        return p;
+    end;
+    function wordEnd(bytes: Span[Nat8], at: Index): Index is
+        var p: Index := at; let n: Index := spanLength(bytes);
+        while p < n and not isWord(decode(bytes, p).codepoint) do p := following(bytes, p); end while;
+        while p < n and isWord(decode(bytes, p).codepoint) do p := following(bytes, p); end while;
+        return p;
+    end;
+    -- One wrapped line: [start, finish) is drawn, the next line starts at resume.
+    record Line: Free is finish: Index; resume: Index; end;
+    -- Break at the last space that fits, or inside a word that is wider than
+    -- the line; a newline always ends a line.
+    function wrapLine(bytes: Span[Nat8], start: Index, available: Int64): Line is
+        let n: Index := spanLength(bytes);
+        var at: Index := start; var used: Int64 := 0; var space: Index := n + 1;
+        while at < n do
+            let d: Decoded := decode(bytes, at);
+            if d.codepoint = 10 then return Line(finish => at, resume => at + 1); end if;
+            let w: Int64 := cells(d.codepoint) * 8;
+            if used + w > available and at > start then
+                if d.codepoint = 32 then return Line(finish => at, resume => at + 1); end if;
+                if space <= n then return Line(finish => space, resume => space + 1); end if;
+                return Line(finish => at, resume => at);
+            end if;
+            if d.codepoint = 32 then space := at; end if;
+            used := used + w; at := at + d.size;
+        end while;
+        return Line(finish => n, resume => n);
+    end;
+    -- Number of wrapped lines (at least one).
+    function lineCount(bytes: Span[Nat8], available: Int64): Int64 is
+        var count: Int64 := 1; var at: Index := 0; let n: Index := spanLength(bytes);
+        while at < n do
+            let line: Line := wrapLine(bytes, at, available);
+            if line.resume >= n then
+                if line.resume > line.finish and line.finish < n and bytes[line.finish] = 10 then count := count + 1; end if;
+                return count;
+            end if;
+            count := count + 1; at := line.resume;
+        end while;
+        return count;
+    end;
+    -- Encode a code point as UTF-8 into a builder.
+    function writeCodepoint(builder: &![StringBuilder], cp: Int64): Unit is
+        if cp < 128 then writeByte(&~builder, byte(cp));
+        else if cp < 2048 then writeByte(&~builder, byte(192 | cp >> 6)); writeByte(&~builder, byte(128 | cp & 63));
+        else if cp < 65536 then writeByte(&~builder, byte(224 | cp >> 12)); writeByte(&~builder, byte(128 | cp >> 6 & 63)); writeByte(&~builder, byte(128 | cp & 63));
+        else writeByte(&~builder, byte(240 | cp >> 18)); writeByte(&~builder, byte(128 | cp >> 12 & 63)); writeByte(&~builder, byte(128 | cp >> 6 & 63)); writeByte(&~builder, byte(128 | cp & 63));
+        end if;
+        return nil;
+    end;
+    function byte(value: Int64): Nat8 is
+        case toNat8(value & 255) of when Some(value as b: Nat8) do return b; when None do return 0; end case;
+    end;
+    -- Bytes a code point takes in UTF-8.
+    function encodedSize(cp: Int64): Index is
+        if cp < 128 then return 1; else if cp < 2048 then return 2; else if cp < 65536 then return 3; end if; return 4;
+    end;
+    -- A copy of text with bytes [start, finish) replaced by insert (the range is
+    -- clamped to the text).
+    generic [R: Region]
+    function replaceRange(text: &[String, R], start: Index, finish: Index, insert: Span[Nat8]): String is
+        let n: Index := stringLength(text);
+        var a: Index := start; if a > n then a := n; end if;
+        var b: Index := finish; if b > n then b := n; end if; if b < a then b := a; end if;
+        var builder: StringBuilder := makeStringBuilder();
+        let bytes: Span[Nat8, R] := stringSlice(text, 0, n);
+        for i from 0 until a do writeByte(&!builder, bytes[i]); end for;
+        for i from 0 until spanLength(insert) do writeByte(&!builder, insert[i]); end for;
+        for i from b until n do writeByte(&!builder, bytes[i]); end for;
+        return finalize(builder);
+    end;
+    -- The UTF-8 bytes of one code point.
+    function codepointString(cp: Int64): String is
+        var builder: StringBuilder := makeStringBuilder(); writeCodepoint(&!builder, cp); return finalize(builder);
+    end;
+    -- Display lines of a text: line k shows bytes [start(k), finish(k)). Lines
+    -- end at newlines and, when wrapping, at the last space that fits.
+    record Lines: Linear is starts: Vector[Index]; ends: Vector[Index]; end;
+    function layoutLines(bytes: Span[Nat8], available: Int64, wrap: Bool): Lines is
+        var starts: Vector[Index] := vectorMake(); var ends: Vector[Index] := vectorMake();
+        let n: Index := spanLength(bytes);
+        var at: Index := 0;
+        if not wrap then
+            push(&!starts, 0);
+            for i from 0 until n do
+                if bytes[i] = 10 then push(&!ends, i); push(&!starts, i + 1); end if;
+            end for;
+            push(&!ends, n);
+            return Lines(starts => starts, ends => ends);
+        end if;
+        var more: Bool := true;
+        while more do
+            let line: Line := wrapLine(bytes, at, available);
+            push(&!starts, at); push(&!ends, line.finish);
+            if line.resume >= n then
+                -- A final newline starts one more (empty) line.
+                if line.finish < n and bytes[line.finish] = 10 then push(&!starts, n); push(&!ends, n); end if;
+                more := false;
+            else if line.resume = at then
+                more := false;
+            else at := line.resume; end if;
+        end while;
+        return Lines(starts => starts, ends => ends);
+    end;
+    function destroyLines(lines: Lines): Unit is
+        let { starts as s: Vector[Index], ends as e: Vector[Index] } := lines; destroyFree(s); destroyFree(e); return nil;
+    end;
+    function lineTotal(lines: &[Lines]): Index is return vectorLength(&(lines->starts)); end;
+    function lineStart(lines: &[Lines], k: Index): Index is return get(&(lines->starts), k); end;
+    function lineEnd(lines: &[Lines], k: Index): Index is return get(&(lines->ends), k); end;
+    -- The line holding a byte offset (the later line at a wrap boundary).
+    function lineOf(lines: &[Lines], at: Index): Index is
+        var low: Index := 0; var high: Index := vectorLength(&(lines->starts));
+        while high - low > 1 do
+            let mid: Index := (low + high) / 2;
+            if get(&(lines->starts), mid) <= at then low := mid; else high := mid; end if;
+        end while;
+        return low;
+    end;
+end module body.

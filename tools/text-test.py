@@ -64,7 +64,8 @@ def main():
     for i, sym in enumerate(('VimOpen', 'StrLen', 'jiffies', 'VIM_HIST', 'CTask', 'I64', 'NoSuchSymbol')):
         script += line(f'Print("\\nSTEP-MAN{i}\\n"); Man("{sym}");', 700)
         if sym not in ('I64', 'NoSuchSymbol'):
-            script += keys(':q\n')
+            # Vim compiles on first use: wait for its status line rather than racing it.
+            script += testvm.wait('NORMAL ') + keys(':q\n')
     # Default index and every generated page must be usable in the installed OS.
     for i, (page, title) in enumerate(PAGES):
         call = 'Man;' if page == 'index' else f'Man("{page}");'

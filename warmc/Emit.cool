@@ -2,7 +2,8 @@
 class CWBuffer {U8 *data; I64 size, capacity;};
 class CWGen {
     CWUnit *unit;
-    CWBuffer *types_text, *body;
+    CWBuffer *types_text, *forward_text, *body;
+    CWNode *deferred; I64 type_depth;
     CWNode *types, *names, *functions, *last_function, *current, *bindings, *address_dependencies, *scratch, *ranges;
     I64 serial; Bool native;
 };
@@ -67,13 +68,9 @@ Bool WGAggregate(CWNode *t)
     d = WCanon(t->resolved); return d && (WEq(d->tag, "record") || WEq(d->tag, "union") || WEq(d->name, "RootCapability"));
 }
 extern U8 *WGType(CWGen *g, CWNode *t);
-U8 *WGType(CWGen *g, CWNode *t)
-{
+U8 *WGScalarType(CWGen *g, CWNode *t)
+{//The Cool spelling of a non-aggregate type, or NULL for records and unions.
     CWUnit *u = g->unit;
-    CWNode *d, *n, *slot, *c, *env, *fieldty;
-    CWBuffer *buf;
-    U8 *name, *field, *case_name;
-    if (!t) {WFail(u, NULL, "Unsupported Feature", "Missing concrete type during emission"); return "I64";}
     if (WEq(t->name, "Unit") || WEq(t->name, "Bool") || WEq(t->name, "Nat8")) return "U8";
     if (WEq(t->name, "Nat16")) return "U16";
     if (WEq(t->name, "Nat32")) return "U32";
@@ -85,28 +82,38 @@ U8 *WGType(CWGen *g, CWNode *t)
     if (WEq(t->name, "Float64")) return "F64";
     if (WEq(t->name, "Float32")) return "U32";
     if (WEq(t->name, "Span") || WEq(t->name, "Span!")) return "au_span_t";
-    if (WEq(t->name, "&") || WEq(t->name, "&!") || WGMemoryPointer(t)) return WGCat(u, WGType(g, t->first), " *");
     if (WEq(t->name, "Fn")) return "U8 *";
-    for (n = g->types; n; n = n->next) if (WTypeEq(n->ty, t)) return n->name;
-    d = WCanon(t->resolved);
-    if (!d || (!WEq(d->tag, "record") && !WEq(d->tag, "union") && !WEq(d->name, "RootCapability"))) {
-        WFail(u, t->token, "Unsupported Feature", "Cannot emit an unconcretized or opaque type"); return "I64";
-    }
+    no_warn u;
+    return NULL;
+}
+CWNode *WGTypeRegister(CWGen *g, CWNode *t, CWNode *d)
+{//Name a record or union class (and declare it up front); its body is emitted separately.
+    CWUnit *u = g->unit; CWNode *n, *slot, *fieldty;
     n = WNode(u, "emitted-type", t->token); n->ty = t; n->name = WGFresh(g, "WT"); n->next = g->types; g->types = n;
     // pragma Export_Layout(Name => "CFoo"): the record is the Cool class CFoo, fields and all.
     if (WGPragma(d, "Export_Layout")) {
         n->name = WGPragma(d, "Export_Layout");
         if (!WEq(d->tag, "record") || WChild(d, "type-parameter") || !*n->name) {
-            WFail(u, d->token, "Unsupported Feature", "Export_Layout needs a non-generic record and a Cool class name"); return "I64";
+            WFail(u, d->token, "Unsupported Feature", "Export_Layout needs a non-generic record and a Cool class name"); return n;
         }
         for (slot = d->first; slot; slot = slot->next) if (WEq(slot->role, "slot")) {
                 fieldty = WChild(slot, "type");
                 if (WGAggregate(fieldty) || WEq(fieldty->name, "Fn") || WEq(fieldty->name, "Float32")) {
-                    WFail(u, slot->token, "Unsupported Feature", "Export_Layout fields must be integers, booleans, Float64 or pointers"); return "I64";
+                    WFail(u, slot->token, "Unsupported Feature", "Export_Layout fields must be integers, booleans, Float64 or pointers"); return n;
                 }
             }
-    }
-    name = n->name; env = WTypeParameters(u, t); buf = WAlloc(u, sizeof(CWBuffer));
+    } else // A class can be named through a pointer before its definition (recursive types).
+        WGPut(u, g->forward_text, WG3(u, "extern class ", n->name, ";\n"));
+    return n;
+}
+U0 WGTypeBody(CWGen *g, U8 *name, CWNode *t, CWNode *d)
+{//Emit the class of a registered record or union after the classes its fields embed.
+    CWUnit *u = g->unit;
+    CWNode *slot, *c, *env, *fieldty;
+    CWBuffer *buf;
+    U8 *field, *case_name;
+    env = WTypeParameters(u, t); buf = WAlloc(u, sizeof(CWBuffer));
+    g->type_depth++;
     WGPut(u, buf, WG3(u, "class ", name, " {\n"));
     if (WEq(d->tag, "union")) {
         WGPut(u, buf, "I64 tag;\nunion {\n");
@@ -130,7 +137,63 @@ U8 *WGType(CWGen *g, CWNode *t)
                 WGPut(u, buf, WG3(u, field, " ", WGCat(u, WGName(g, slot), ";\n")));
             }
     }
-    WGPut(u, buf, "};\n"); WGPut(u, g->types_text, buf->data); return name;
+    WGPut(u, buf, "};\n"); WGPut(u, g->types_text, buf->data);
+    g->type_depth--;
+}
+U0 WGTypeDrain(CWGen *g)
+{//Bodies of classes first named through pointers, once no other body is open.
+    CWNode *p;
+    while (!g->type_depth && g->deferred) {
+        p = g->deferred; g->deferred = p->next;
+        WGTypeBody(g, p->name, p->ty, WCanon(p->ty->resolved));
+    }
+}
+CWNode *WGTypeDecl(CWGen *g, CWNode *t)
+{//The resolved record/union declaration of t, or NULL with a diagnostic.
+    CWNode *d = WCanon(t->resolved);
+    if (!d || (!WEq(d->tag, "record") && !WEq(d->tag, "union") && !WEq(d->name, "RootCapability"))) {
+        WFail(g->unit, t->token, "Unsupported Feature", "Cannot emit an unconcretized or opaque type"); return NULL;
+    }
+    return d;
+}
+U8 *WGTypeName(CWGen *g, CWNode *t)
+{//Spelling of a pointer's target: an aggregate is only named here; its body is deferred.
+    CWNode *n, *d, *p; U8 *scalar;
+    if (!t) return WGType(g, t);
+    if ((scalar = WGScalarType(g, t)) || WEq(t->name, "&") || WEq(t->name, "&!") || WGMemoryPointer(t)) return WGType(g, t);
+    for (n = g->types; n; n = n->next) if (WTypeEq(n->ty, t)) return n->name;
+    if (!(d = WGTypeDecl(g, t))) return "I64";
+    n = WGTypeRegister(g, t, d);
+    p = WNode(g->unit, "deferred-type", t->token); p->ty = t; p->name = n->name; p->next = g->deferred; g->deferred = p;
+    return n->name;
+}
+U8 *WGType(CWGen *g, CWNode *t)
+{
+    CWUnit *u = g->unit;
+    CWNode *d, *n;
+    U8 *scalar;
+    if (!t) {WFail(u, NULL, "Unsupported Feature", "Missing concrete type during emission"); return "I64";}
+    if (scalar = WGScalarType(g, t)) return scalar;
+    if (WEq(t->name, "&") || WEq(t->name, "&!") || WGMemoryPointer(t)) {
+        // Inside a class body, a pointer must not force its target's body first: the
+        // target may embed this class by value (Vector[T] inside a union T).
+        if (g->type_depth) return WGCat(u, WGTypeName(g, t->first), " *");
+        return WGCat(u, WGType(g, t->first), " *");
+    }
+    for (n = g->types; n; n = n->next) if (WTypeEq(n->ty, t)) {
+            // Named earlier through a pointer but needed by value now: emit its body first.
+            CWNode *p, **link = &g->deferred;
+            for (p = g->deferred; p; link = &p->next, p = p->next) if (WTypeEq(p->ty, t)) {
+                    *link = p->next; WGTypeBody(g, p->name, p->ty, WCanon(p->ty->resolved)); break;
+                }
+            return n->name;
+        }
+    if (!(d = WGTypeDecl(g, t))) return "I64";
+    n = WGTypeRegister(g, t, d);
+    if (u->error_kind) return "I64";
+    WGTypeBody(g, n->name, t, d);
+    WGTypeDrain(g);
+    return n->name;
 }
 U8 *WGTemp(CWGen *g, CWNode *t)
 {
@@ -1021,7 +1084,7 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
     CWGen *g = WAlloc(u, sizeof(CWGen)); CWNode *m, *d, *f, *p, *ty, *entryfun = NULL;
     CWBuffer *result = WAlloc(u, sizeof(CWBuffer)), *protos = WAlloc(u, sizeof(CWBuffer));
     U8 *mn, *fn, *sig, *value, *call; I64 i = 0;
-    g->unit = u; g->native = native; g->serial = u->symbol_base; g->types_text = WAlloc(u, sizeof(CWBuffer));
+    g->unit = u; g->native = native; g->serial = u->symbol_base; g->types_text = WAlloc(u, sizeof(CWBuffer)); g->forward_text = WAlloc(u, sizeof(CWBuffer));
     if (entry && *entry) {
         while (entry[i] && entry[i] != ':') i++;
         if (!entry[i]) {WFail(u, NULL, "Entrypoint Definition Error", "Expected Module:function entrypoint"); return NULL;}
@@ -1069,7 +1132,8 @@ U8 *WEmit(CWUnit *u, U8 *entry, U8 *runtime, Bool native)
         WGLine(g, WG3(u, "}\n", mainname, "();"));
     }
     if (u->error_kind) return NULL;
-    WGPut(u, result, runtime); if (g->types_text->data) WGPut(u, result, g->types_text->data);
+    WGPut(u, result, runtime); if (g->forward_text->data) WGPut(u, result, g->forward_text->data);
+    if (g->types_text->data) WGPut(u, result, g->types_text->data);
     if (protos->data) WGPut(u, result, protos->data);
     for (f = g->functions; f; f = f->next) WGWriteFunction(g, result, f);
     if (g->body->data) WGPut(u, result, g->body->data);

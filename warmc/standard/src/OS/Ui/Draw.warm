@@ -1,0 +1,505 @@
+import Standard.Vector (Vector, length as vectorLength, borrowGet, slice as vectorSlice);
+import OS.Gui (Window, Rect, fill, line, styledText, pattern, invert, setClip, clearClip, bitmap, blit);
+import OS.Error (IoError);
+import OS.Ui.Text (width as textWidth, wrapLine, Line, lineHeight, fit, following, rangeWidth);
+import OS.Ui.Engine (Ephemeral, State, ephemeral, sliderThumbX, caretX, thumbWidth, textInset, Bar, barOf, lineCountOf, linesOf,
+    viewLines, fullRows);
+import OS.Ui.Text (Lines, destroyLines, lineTotal, lineStart, lineEnd);
+import OS.Ui.Tree (Node, Geom, textSpan, has, enabled, intersect, maxInt, minInt, clampInt,
+    kindRoot, kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindCheckbox, kindRadio,
+    kindSlider, kindProgress, kindSeparator, kindImage, kindTextBox, kindToolbar, kindStatus,
+    flagDefault, flagPlain, flagWrap, flagCenter, flagSecure, defaultRing, checkSize, splitBar, toIndex64, toInt,
+    kindList, kindTable, kindTreeView, kindTextView, kindScroll, kindListRow, kindHeader, kindCell, listLike, listBody,
+    headerHeight, listInset, rowHeight, scrollBarWidth,
+    kindPopup, kindTabs, kindTabPage, kindDialog, kindMenuItem, flagHidden, flagDropTarget, tabStrip);
+module body OS.Ui.Draw is
+    -- The classic Macintosh look, one bit: black on white, 50% gray patterns,
+    -- rounded buttons with a bold default ring, inverted pressed state. All
+    -- coordinates are logical pixels; the kernel scales every pixel by an
+    -- integer, so 2x stays crisp.
+    constant black: Int64 := 0;
+    constant white: Int64 := 16777215;
+    -- 8x8 patterns: byte (y mod 8), bit 7 = column 0.
+    constant gray: Nat64 := 12273903644374837845;      -- 0xAA55AA55AA55AA55
+    constant lightGray: Nat64 := 9259542123273814144;  -- 0x8080...: sparse
+    constant styleBold: Int64 := 1;
+    constant styleDim: Int64 := 2;
+    constant styleUnderline: Int64 := 4;
+    -- Diagonal stripes for indeterminate progress.
+    constant stripes: Nat64 := 9782911238504455695;    -- rows 0F 1E 3C 78 F0 E1 C3 87
+
+    -- A registered image: one-bit (set bits black) or BGRA, logical size.
+    record Picture: Linear is width: Int64; height: Int64; oneBit: Bool; stride: Int64; pixels: Vector[Nat8]; end;
+    -- Built-in one-bit images (negative image ids).
+    constant builtinFolder: Int64 := -1;
+    constant builtinDocument: Int64 := -2;
+    constant builtinNote: Int64 := -3;
+    constant builtinCaution: Int64 := -4;
+    constant builtinStop: Int64 := -5;
+
+    function rect(x: Int64, y: Int64, width: Int64, height: Int64): Rect is return Rect(x => x, y => y, width => width, height => height); end;
+    function inset(r: Rect, by: Int64): Rect is return Rect(x => r.x + by, y => r.y + by, width => maxInt(r.width - 2 * by, 0), height => maxInt(r.height - 2 * by, 0)); end;
+    function box(w: &![Window], r: Rect, color: Int64): Unit is
+        if r.width <= 0 or r.height <= 0 then return nil; end if;
+        fill(&~w, rect(r.x, r.y, r.width, 1), color); fill(&~w, rect(r.x, r.y + r.height - 1, r.width, 1), color);
+        fill(&~w, rect(r.x, r.y, 1, r.height), color); fill(&~w, rect(r.x + r.width - 1, r.y, 1, r.height), color);
+        return nil;
+    end;
+    -- A one-pixel frame drawn through the gray pattern (disabled, dotted).
+    function grayBox(w: &![Window], r: Rect): Unit is
+        if r.width <= 0 or r.height <= 0 then return nil; end if;
+        pattern(&~w, rect(r.x, r.y, r.width, 1), gray, black, -1); pattern(&~w, rect(r.x, r.y + r.height - 1, r.width, 1), gray, black, -1);
+        pattern(&~w, rect(r.x, r.y, 1, r.height), gray, black, -1); pattern(&~w, rect(r.x + r.width - 1, r.y, 1, r.height), gray, black, -1);
+        return nil;
+    end;
+    function isqrt(v: Int64): Int64 is
+        if v <= 0 then return 0; end if;
+        var r: Int64 := 0; while (r + 1) * (r + 1) <= v do r := r + 1; end while; return r;
+    end;
+    -- Inset of row k (from the top or bottom edge) of a rounded corner.
+    function cornerInset(radius: Int64, k: Int64): Int64 is
+        if k >= radius then return 0; end if;
+        let d: Int64 := radius - k; return radius - isqrt(radius * radius - d * d);
+    end;
+    -- A filled rounded rectangle.
+    function roundFill(w: &![Window], r: Rect, radius: Int64, color: Int64): Unit is
+        if r.width <= 0 or r.height <= 0 then return nil; end if;
+        let rad: Int64 := minInt(radius, minInt(r.width, r.height) / 2);
+        for row from 0 until 64 do
+            let k: Int64 := rowInt(row);
+            if k < rad then
+                let s: Int64 := cornerInset(rad, k);
+                fill(&~w, rect(r.x + s, r.y + k, r.width - 2 * s, 1), color);
+                fill(&~w, rect(r.x + s, r.y + r.height - 1 - k, r.width - 2 * s, 1), color);
+            end if;
+        end for;
+        fill(&~w, rect(r.x, r.y + rad, r.width, r.height - 2 * rad), color);
+        return nil;
+    end;
+    function rowInt(i: Index): Int64 is case toInt64(i) of when Some(value as v: Int64) do return v; when None do return 0; end case; end;
+    -- A rounded rectangle with a one-pixel outline.
+    function roundRect(w: &![Window], r: Rect, radius: Int64, outline: Int64, inside: Int64): Unit is
+        roundFill(&~w, r, radius, outline);
+        roundFill(&~w, inset(r, 1), maxInt(radius - 1, 0), inside);
+        return nil;
+    end;
+    -- A rounded outline of the given thickness (the default button ring).
+    function roundRing(w: &![Window], r: Rect, radius: Int64, thickness: Int64, outline: Int64, inside: Int64): Unit is
+        roundFill(&~w, r, radius, outline);
+        roundFill(&~w, inset(r, thickness), maxInt(radius - thickness, 0), inside);
+        return nil;
+    end;
+    function text(w: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, style: Int64): Int64 is
+        case styledText(&~w, x, y, value, color, style) of when Ok(value as advance: Int64) do return advance; when Err(error as e: IoError) do return 0; end case;
+    end;
+    -- Text fitted into a width, ending with an ellipsis when it does not fit.
+    function fittedText(w: &![Window], x: Int64, y: Int64, value: Span[Nat8], room: Int64, color: Int64, style: Int64): Unit is
+        if textWidth(value) <= room then text(&~w, x, y, value, color, style); return nil; end if;
+        let stop: Index := fit(value, 0, maxInt(room - 8, 0));
+        let advance: Int64 := text(&~w, x, y, sliceSpan(value, 0, stop), color, style);
+        text(&~w, x + advance, y, "\u{2026}", color, style);
+        return nil;
+    end;
+    -- Dotted keyboard focus rectangle.
+    function focusRing(w: &![Window], r: Rect): Unit is grayBox(&~w, r); return nil; end;
+
+    function radioRing(): Span[Nat8, Static] is return "\x0f\x00\x30\xc0\x40\x20\x40\x20\x80\x10\x80\x10\x80\x10\x80\x10\x40\x20\x40\x20\x30\xc0\x0f\x00"; end;
+    function radioHeld(): Span[Nat8, Static] is return "\x0f\x00\x3f\xc0\x70\xe0\x60\x60\xc0\x30\xc0\x30\xc0\x30\xc0\x30\x60\x60\x70\xe0\x3f\xc0\x0f\x00"; end;
+    function radioDot(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x00\x0f\x00\x1f\x80\x1f\x80\x1f\x80\x1f\x80\x0f\x00\x00\x00\x00\x00\x00\x00"; end;
+    function iconFolderBits(): Span[Nat8, Static] is return "\x00\x00\x7c\x00\x82\x00\x81\xfc\xff\xfe\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\xff\xfe\x00\x00\x00\x00"; end;
+    function iconDocumentBits(): Span[Nat8, Static] is return "\x3f\x80\x20\xc0\x20\xa0\x20\x90\x20\xf8\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x3f\xf8\x00\x00"; end;
+    function iconCautionBits(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x80\x00\x00\x03\xc0\x00\x00\x03\xc0\x00\x00\x06\x60\x00\x00\x06\x60\x00\x00\x0c\x30\x00\x00\x0c\x30\x00\x00\x18\x18\x00\x00\x19\x98\x00\x00\x31\x8c\x00\x00\x31\x8c\x00\x00\x61\x86\x00\x00\xc1\x83\x00\x00\xc1\x83\x00\x01\x81\x81\x80\x01\x81\x81\x80\x03\x01\x80\xc0\x03\x01\x80\xc0\x06\x01\x80\x60\x06\x01\x80\x60\x0c\x00\x00\x30\x18\x00\x00\x18\x18\x01\x80\x18\x30\x01\x80\x0c\x30\x00\x00\x0c\x7f\xff\xff\xfe\x7f\xff\xff\xfe\x00\x00\x00\x00\x00\x00\x00\x00"; end;
+    function iconStopBits(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x7f\xfe\x00\x00\xff\xff\x00\x01\xff\xff\x80\x03\xff\xff\xc0\x07\xff\xff\xe0\x0f\xff\xff\xf0\x1f\xfc\x3f\xf8\x3f\xfc\x3f\xfc\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xff\xff\xfe\x7f\xff\xff\xfe\x7f\xfc\x3f\xfe\x3f\xfc\x3f\xfc\x1f\xfc\x3f\xf8\x0f\xff\xff\xf0\x07\xff\xff\xe0\x03\xff\xff\xc0\x01\xff\xff\x80\x00\xff\xff\x00\x00\x7f\xfe\x00\x00\x00\x00\x00"; end;
+    function iconNoteBits(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x00\x00\x00\x03\xff\xff\xc0\x1f\xff\xff\xf8\x30\x00\x00\x0c\x60\x00\x00\x06\x40\x00\x00\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x00\x00\x02\x40\x00\x00\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x03\xc0\x02\x60\x00\x00\x06\x30\x00\x00\x0c\x1f\xff\xff\xf8\x03\xff\xff\xc0\x00\xf0\x00\x00\x01\xc0\x00\x00\x03\x00\x00\x00\x06\x00\x00\x00\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"; end;
+
+    function builtinWidth(id: Int64): Int64 is if id = builtinFolder or id = builtinDocument then return 16; end if; return 32; end;
+    function builtinBits(id: Int64): Span[Nat8, Static] is
+        if id = builtinFolder then return iconFolderBits(); end if;
+        if id = builtinDocument then return iconDocumentBits(); end if;
+        if id = builtinNote then return iconNoteBits(); end if;
+        if id = builtinCaution then return iconCautionBits(); end if;
+        return iconStopBits();
+    end;
+    -- Draw an image: built-in icons in color, registered pictures as stored.
+    generic [R: Region]
+    function picture(w: &![Window], x: Int64, y: Int64, id: Int64, color: Int64, pictures: &[Vector[Picture], R]): Unit is
+        if id < 0 then
+            let size: Int64 := builtinWidth(id);
+            bitmap(&~w, rect(x, y, size, size), builtinBits(id), size / 8, color); return nil;
+        end if;
+        if toIndex64(id) >= vectorLength(pictures) then return nil; end if;
+        let p: &[Picture, R] := borrowGet(pictures, toIndex64(id));
+        if p->oneBit then bitmap(&~w, rect(x, y, p->width, p->height), vectorSlice(&(p->pixels), 0, vectorLength(&(p->pixels))), p->stride, color);
+        else blit(&~w, rect(x, y, p->width, p->height), vectorSlice(&(p->pixels), 0, vectorLength(&(p->pixels))), p->stride); end if;
+        return nil;
+    end;
+
+    -- Paint one node clipped to region (already the kernel clip).
+    generic [R: Region]
+    function paint(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool,
+        state: &[State], clip: Rect, pictures: &[Vector[Picture]]): Unit is
+        paintNode(&~w, all, ps, gs, i, pressed, focused, keyboard, state, clip, pictures);
+        -- A drop target under a dragged item: a two-pixel frame.
+        if state->dropOver /= 0 and state->dropOver = ps[i].ident then
+            let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
+            box(&~w, r, black); box(&~w, inset(r, 1), black);
+        end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function paintNode(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool,
+        state: &[State], clip: Rect, pictures: &[Vector[Picture]]): Unit is
+        let e: Ephemeral := ephemeral(state, ps[i].ident);
+        let k: Int64 := ps[i].kind;
+        let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
+        let on: Bool := enabled(ps, i);
+        var style: Int64 := styleBold; if has(ps[i].flags, flagPlain) then style := 0; end if;
+        if not on then style := style | styleDim; end if;
+        if k = kindLabel then
+            let t: Span[Nat8, R] := textSpan(all, ps, i);
+            if has(ps[i].flags, flagWrap) then
+                var at: Index := 0; var y: Int64 := r.y;
+                while at < spanLength(t) and y < r.y + r.height do
+                    let l: Line := wrapLine(t, at, maxInt(r.width - 1, 8));
+                    text(&~w, r.x, y, sliceSpan(t, at, l.finish), black, style);
+                    y := y + lineHeight;
+                    if l.resume = at then at := spanLength(t); else at := l.resume; end if;
+                end while;
+            else
+                var x: Int64 := r.x; if has(ps[i].flags, flagCenter) then x := r.x + (r.width - textWidth(t)) / 2; end if;
+                fittedText(&~w, x, r.y + (r.height - lineHeight) / 2, t, r.width, black, style);
+            end if;
+        else if k = kindButton then
+            paintButton(&~w, all, ps, i, r, pressed, focused and keyboard, on, style);
+        else if k = kindGroup then
+            let t: Span[Nat8, R] := textSpan(all, ps, i);
+            let frame: Rect := rect(r.x, r.y + 8, r.width, maxInt(r.height - 8, 0));
+            if on then box(&~w, frame, black); else grayBox(&~w, frame); end if;
+            if spanLength(t) > 0 then
+                fill(&~w, rect(r.x + 6, r.y, textWidth(t) + 5, 16), white);
+                text(&~w, r.x + 8, r.y, t, black, style);
+            end if;
+        else if k = kindSeparator then
+            if gs[i].width >= gs[i].height then pattern(&~w, rect(r.x, r.y + r.height / 2, r.width, 1), gray, black, -1);
+            else pattern(&~w, rect(r.x + r.width / 2, r.y, 1, r.height), gray, black, -1); end if;
+        else if k = kindCheckbox or k = kindRadio then
+            paintChoice(&~w, all, ps, i, r, pressed, focused and keyboard, on, style);
+        else if k = kindSlider then
+            paintSlider(&~w, ps, gs, i, r, pressed, focused and keyboard, on);
+        else if k = kindProgress then
+            box(&~w, r, black);
+            let inner: Rect := inset(r, 1);
+            if ps[i].high > 0 then
+                let filled: Int64 := inner.width * clampInt(ps[i].value, 0, ps[i].high) / ps[i].high;
+                fill(&~w, rect(inner.x, inner.y, filled, inner.height), black);
+            else pattern(&~w, inner, stripes, black, white); end if;
+        else if k = kindTextBox then
+            paintTextBox(&~w, all, ps, gs, i, r, focused, on, e, clip);
+        else if listLike(k) then
+            paintList(&~w, all, ps, gs, i, r, focused, state);
+        else if k = kindHeader then
+            paintHeader(&~w, all, ps, gs, i, r);
+        else if k = kindListRow then
+            paintRow(&~w, all, ps, gs, i, r, pictures);
+        else if k = kindCell then
+            paintCell(&~w, all, ps, gs, i, r);
+        else if k = kindScroll then
+            box(&~w, r, black);
+            paintBar(&~w, barOf(ps, gs, i, state, 0));
+        else if k = kindTextView then
+            paintTextView(&~w, all, ps, gs, i, r, focused, on, e, clip, state);
+        else if k = kindTabs then
+            paintTabs(&~w, all, ps, gs, i, r, focused and keyboard, on);
+        else if k = kindPopup then
+            paintPopup(&~w, all, ps, gs, i, r, pressed or state->popup = ps[i].ident, focused and keyboard, on);
+        else if k = kindDialog then
+            -- The classic modal frame: a black line, a white line, a two-pixel black ring.
+            fill(&~w, r, white); box(&~w, r, black); box(&~w, inset(r, 3), black); box(&~w, inset(r, 4), black);
+        else if k = kindToolbar then
+            fill(&~w, rect(r.x, r.y + r.height - 1, r.width, 1), black);
+        else if k = kindStatus then
+            fill(&~w, rect(r.x, r.y, r.width, 1), black);
+        else if k = kindImage then
+            picture(&~w, r.x + (r.width - ps[i].low) / 2, r.y + (r.height - ps[i].high) / 2, ps[i].value, black, pictures);
+        else if k = kindSplit then
+            let first: Index := ps[i].first;
+            if first /= 0 then
+                if ps[i].value = 0 then
+                    let bx: Int64 := gs[first].x + gs[first].width;
+                    fill(&~w, rect(bx, r.y, 1, r.height), black); fill(&~w, rect(bx + splitBar - 1, r.y, 1, r.height), black);
+                    pattern(&~w, rect(bx + 1, r.y, splitBar - 2, r.height), gray, black, white);
+                else
+                    let by: Int64 := gs[first].y + gs[first].height;
+                    fill(&~w, rect(r.x, by, r.width, 1), black); fill(&~w, rect(r.x, by + splitBar - 1, r.width, 1), black);
+                    pattern(&~w, rect(r.x, by + 1, r.width, splitBar - 2), gray, black, white);
+                end if;
+            end if;
+        end if;
+        return nil;
+    end;
+    -- Checkbox (box with an X) and radio button (circle with a dot) with title.
+    generic [R: Region]
+    function paintChoice(w: &![Window], all: Span[Nat8, R], ps: Span[Node], i: Index, r: Rect, pressed: Bool, ring: Bool, on: Bool, style: Int64): Unit is
+        let bx: Int64 := r.x; let by: Int64 := r.y + (r.height - checkSize) / 2;
+        if ps[i].kind = kindCheckbox then
+            fill(&~w, rect(bx, by, checkSize, checkSize), white);
+            if on then box(&~w, rect(bx, by, checkSize, checkSize), black); else grayBox(&~w, rect(bx, by, checkSize, checkSize)); end if;
+            if pressed then box(&~w, rect(bx + 1, by + 1, checkSize - 2, checkSize - 2), black); end if;
+            if ps[i].value /= 0 then
+                line(&~w, bx + 1, by + 1, bx + checkSize - 2, by + checkSize - 2, black);
+                line(&~w, bx + checkSize - 2, by + 1, bx + 1, by + checkSize - 2, black);
+            end if;
+        else
+            if pressed then bitmap(&~w, rect(bx, by, 12, 12), radioHeld(), 2, black); else bitmap(&~w, rect(bx, by, 12, 12), radioRing(), 2, black); end if;
+            if ps[i].value /= 0 then bitmap(&~w, rect(bx, by, 12, 12), radioDot(), 2, black); end if;
+        end if;
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let tx: Int64 := bx + checkSize + 6; let ty: Int64 := r.y + (r.height - lineHeight) / 2;
+        fittedText(&~w, tx, ty, t, r.x + r.width - tx, black, style);
+        if ring then focusRing(&~w, rect(tx - 2, ty - 1, minInt(textWidth(t) + 5, r.x + r.width - tx + 2), lineHeight + 2)); end if;
+        return nil;
+    end;
+    function paintSlider(w: &![Window], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, pressed: Bool, ring: Bool, on: Bool): Unit is
+        let cy: Int64 := r.y + r.height / 2;
+        let track: Rect := rect(r.x + thumbWidth / 2 - 2, cy - 2, r.width - thumbWidth + 4, 5);
+        roundFill(&~w, track, 2, black);
+        let inner: Rect := inset(track, 1);
+        if on then pattern(&~w, inner, gray, black, white); else fill(&~w, inner, white); end if;
+        if not on then return nil; end if;
+        let tx: Int64 := sliderThumbX(ps, gs, i);
+        let thumb: Rect := rect(tx, cy - 8, thumbWidth, 16);
+        var face: Int64 := white; if pressed then face := black; end if;
+        roundRect(&~w, thumb, 2, black, face);
+        var mark: Int64 := black; if pressed then mark := white; end if;
+        fill(&~w, rect(tx + thumbWidth / 2, cy - 4, 1, 9), mark);
+        if ring then focusRing(&~w, rect(r.x, r.y, r.width, r.height)); end if;
+        return nil;
+    end;
+    -- Text field: frame, text scrolled to the caret, inverted selection, caret,
+    -- dimmed placeholder; bullets in password fields.
+    generic [R: Region]
+    function paintTextBox(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, focused: Bool, on: Bool, e: Ephemeral, clip: Rect): Unit is
+        if on then box(&~w, r, black); else grayBox(&~w, r); end if;
+        let inner: Rect := inset(r, 1);
+        fill(&~w, inner, white);
+        let view: Rect := intersect(clip, rect(r.x + 2, r.y + 1, r.width - 4, r.height - 2));
+        setClip(&~w, view);
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let x: Int64 := r.x + textInset - e.c; let y: Int64 := r.y + (r.height - lineHeight) / 2;
+        var style: Int64 := 0; if not on then style := styleDim; end if;
+        if spanLength(t) = 0 and not focused then
+            -- Dimmed through the 50% pattern like classic gray text: bold strokes stay legible.
+            text(&~w, r.x + textInset, y, sliceSpan(all, ps[i].extra, ps[i].extraEnd), black, styleDim | styleBold);
+        else if has(ps[i].flags, flagSecure) then
+            var at: Index := 0; var cx: Int64 := x;
+            while at < spanLength(t) do text(&~w, cx, y, "\u{2022}", black, style); cx := cx + 8; at := following(t, at); end while;
+        else
+            text(&~w, x, y, t, black, style);
+        end if;
+        if focused and on then
+            let caret: Int64 := x + caretX(t, ps, i, e.a);
+            if e.a = e.b then fill(&~w, rect(caret, y, 1, lineHeight), black);
+            else
+                let other: Int64 := x + caretX(t, ps, i, e.b);
+                invert(&~w, rect(minInt(caret, other), y, maxInt(caret, other) - minInt(caret, other), lineHeight));
+            end if;
+        end if;
+        setClip(&~w, clip);
+        return nil;
+    end;
+    ------------------------------------------------------------------ window parts
+
+    -- Folder tabs: each a box with rounded top corners; the selected one is taller
+    -- and opens into the page frame below.
+    generic [R: Region]
+    function paintTabs(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, ring: Bool, on: Bool): Unit is
+        let stripBase: Int64 := r.y + tabStrip - 1;
+        let frame: Rect := rect(r.x, stripBase, r.width, r.height - tabStrip + 1);
+        fill(&~w, frame, white); box(&~w, frame, black);
+        var tx: Int64 := r.x + 4; var c: Index := ps[i].first; var index: Int64 := 0;
+        while c /= 0 do
+            if ps[c].kind = kindTabPage then
+                let t: Span[Nat8, R] := sliceSpan(all, ps[c].text, ps[c].textEnd);
+                let tw: Int64 := textWidth(t) + 20;
+                let selected: Bool := index = ps[i].value;
+                var top: Int64 := r.y + 3; if selected then top := r.y; end if;
+                let tab: Rect := rect(tx, top, tw, stripBase - top + 1);
+                fill(&~w, rect(tab.x + 2, tab.y, tab.width - 4, 1), black);
+                fill(&~w, rect(tab.x + 1, tab.y + 1, 1, 1), black); fill(&~w, rect(tab.x + tab.width - 2, tab.y + 1, 1, 1), black);
+                fill(&~w, rect(tab.x, tab.y + 2, 1, tab.height - 2), black); fill(&~w, rect(tab.x + tab.width - 1, tab.y + 2, 1, tab.height - 2), black);
+                fill(&~w, rect(tab.x + 1, tab.y + 2, tab.width - 2, tab.height - 2), white);
+                fill(&~w, rect(tab.x + 2, tab.y + 1, tab.width - 4, 1), white);
+                if selected then fill(&~w, rect(tab.x + 1, stripBase, tab.width - 2, 1), white); end if;
+                var style: Int64 := styleBold; if not on then style := style | styleDim; end if;
+                text(&~w, tab.x + 10, top + (stripBase - top - lineHeight) / 2 + 1, t, black, style);
+                if selected and ring then focusRing(&~w, rect(tab.x + 7, top + 3, tw - 14, stripBase - top - 4)); end if;
+                tx := tx + tw; index := index + 1;
+            end if;
+            c := ps[c].next;
+        end while;
+        return nil;
+    end;
+    -- Classic pop-up menu button: a framed box with a one-pixel shadow, the chosen
+    -- item, and a downward triangle; inverted while its list is open.
+    generic [R: Region]
+    function paintPopup(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, open: Bool, ring: Bool, on: Bool): Unit is
+        let face: Rect := rect(r.x, r.y, r.width - 1, r.height - 1);
+        var fg: Int64 := black; var bg: Int64 := white; if open then fg := white; bg := black; end if;
+        fill(&~w, face, bg); box(&~w, face, black);
+        fill(&~w, rect(r.x + 2, r.y + r.height - 1, r.width - 2, 1), black); fill(&~w, rect(r.x + r.width - 1, r.y + 2, 1, r.height - 2), black);
+        var index: Int64 := 0; var c: Index := ps[i].first;
+        while c /= 0 do
+            if ps[c].kind = kindMenuItem then
+                if index = ps[i].value then
+                    var style: Int64 := styleBold; if not on then style := style | styleDim; end if;
+                    fittedText(&~w, face.x + 8, face.y + (face.height - lineHeight) / 2, sliceSpan(all, ps[c].text, ps[c].textEnd), face.width - 30, fg, style);
+                end if;
+                index := index + 1;
+            end if;
+            c := ps[c].next;
+        end while;
+        bitmap(&~w, rect(face.x + face.width - 16, face.y + face.height / 2 - 2, 7, 4), arrowDown(), 1, fg);
+        if ring then focusRing(&~w, inset(face, 2)); end if;
+        return nil;
+    end;
+
+    ------------------------------------------------------------------ data views
+
+    -- Arrows for scroll bars, sort marks and disclosure triangles (7x4 / 4x7).
+    function arrowUp(): Span[Nat8, Static] is return "\x10\x38\x7c\xfe"; end;
+    function arrowDown(): Span[Nat8, Static] is return "\xfe\x7c\x38\x10"; end;
+    function triangleRight(): Span[Nat8, Static] is return "\x80\xc0\xe0\xf0\xe0\xc0\x80"; end;
+    -- The classic scroll bar: arrow boxes, gray track, white square thumb;
+    -- an inactive bar (nothing to scroll) is plain white.
+    function paintBar(w: &![Window], b: Bar): Unit is
+        let r: Rect := rect(b.x, b.y, scrollBarWidth, b.length);
+        fill(&~w, r, white); box(&~w, r, black);
+        if b.length < 2 * scrollBarWidth then return nil; end if;
+        fill(&~w, rect(b.x, b.y + scrollBarWidth - 1, scrollBarWidth, 1), black);
+        fill(&~w, rect(b.x, b.y + b.length - scrollBarWidth, scrollBarWidth, 1), black);
+        bitmap(&~w, rect(b.x + 4, b.y + 5, 7, 4), arrowUp(), 1, black);
+        bitmap(&~w, rect(b.x + 4, b.y + b.length - 10, 7, 4), arrowDown(), 1, black);
+        if b.active then
+            pattern(&~w, rect(b.x + 1, b.y + scrollBarWidth, scrollBarWidth - 2, b.length - 2 * scrollBarWidth), gray, black, white);
+            let thumb: Rect := rect(b.x, b.thumb, scrollBarWidth, scrollBarWidth);
+            fill(&~w, thumb, white); box(&~w, thumb, black);
+        end if;
+        return nil;
+    end;
+    -- List frame (two pixels when focused), white body, scroll bar.
+    generic [R: Region]
+    function paintList(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, focused: Bool, state: &[State]): Unit is
+        box(&~w, r, black);
+        if focused then box(&~w, inset(r, 1), black); else box(&~w, inset(r, 1), white); end if;
+        let area: Rect := listBody(ps, gs, i);
+        fill(&~w, area, white);
+        let header: Int64 := headerHeight(ps, i);
+        if header > 0 then
+            fill(&~w, rect(r.x + listInset, r.y + listInset, r.width - 2 * listInset, header - 1), white);
+            fill(&~w, rect(r.x + listInset, r.y + listInset + header - 1, r.width - 2 * listInset, 1), black);
+        end if;
+        paintBar(&~w, barOf(ps, gs, i, state, 0));
+        return nil;
+    end;
+    -- A column title with its right rule and, when sorted, a direction mark.
+    generic [R: Region]
+    function paintHeader(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect): Unit is
+        let list: Index := ps[i].parent;
+        var column: Int64 := 0; var c: Index := ps[list].first;
+        while c /= 0 and c /= i do if ps[c].kind = kindHeader then column := column + 1; end if; c := ps[c].next; end while;
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        var room: Int64 := r.width - 8;
+        let sorted: Bool := ps[list].aux >= 0 and ps[list].aux / 2 = column;
+        if sorted then room := room - 12; end if;
+        fittedText(&~w, r.x + 4, r.y + (r.height - lineHeight) / 2, t, room, black, styleBold);
+        if sorted then
+            var mark: Span[Nat8, Static] := arrowUp(); if ps[list].aux % 2 = 1 then mark := arrowDown(); end if;
+            bitmap(&~w, rect(r.x + r.width - 13, r.y + r.height / 2 - 2, 7, 4), mark, 1, black);
+        end if;
+        if ps[i].next /= 0 and ps[ps[i].next].kind = kindHeader then fill(&~w, rect(r.x + r.width - 1, r.y, 1, r.height), black); end if;
+        return nil;
+    end;
+    -- A list or tree row: inverted when selected; trees indent and show a triangle.
+    generic [R: Region]
+    function paintRow(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, pictures: &[Vector[Picture]]): Unit is
+        let list: Index := ps[i].parent;
+        let selected: Bool := ps[list].high = ps[i].value;
+        var fg: Int64 := black; if selected then fill(&~w, r, black); fg := white; end if;
+        var x: Int64 := r.x + 4;
+        if ps[list].kind = kindTreeView then
+            x := r.x + 2 + ps[i].low * 16;
+            if (ps[i].high & 1) /= 0 then
+                if (ps[i].high & 2) /= 0 then bitmap(&~w, rect(x + 4, r.y + 7, 7, 4), arrowDown(), 1, fg);
+                else bitmap(&~w, rect(x + 5, r.y + 5, 4, 7), triangleRight(), 1, fg); end if;
+            end if;
+            x := x + 16;
+        end if;
+        if ps[i].aux >= 1000 - 5 and ps[i].aux /= 0 then
+            picture(&~w, x, r.y + 1, ps[i].aux - 1000, fg, pictures); x := x + 20;
+        end if;
+        if ps[i].first = 0 then fittedText(&~w, x, r.y + 1, textSpan(all, ps, i), r.x + r.width - x - 2, fg, 0); end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function paintCell(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect): Unit is
+        let row: Index := ps[i].parent; let list: Index := ps[row].parent;
+        var fg: Int64 := black; if ps[list].high = ps[row].value then fg := white; end if;
+        fittedText(&~w, r.x + 4, r.y + 1, textSpan(all, ps, i), r.width - 8, fg, 0);
+        return nil;
+    end;
+    -- Multi-line text: visible lines from the first, selection, caret, scroll bar.
+    generic [R: Region]
+    function paintTextView(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, focused: Bool, on: Bool,
+        e: Ephemeral, clip: Rect, state: &[State]): Unit is
+        box(&~w, r, black);
+        if focused then box(&~w, inset(r, 1), black); else box(&~w, inset(r, 1), white); end if;
+        let view: Rect := rect(r.x + listInset, r.y + listInset, maxInt(r.width - 2 * listInset - scrollBarWidth, 0), maxInt(r.height - 2 * listInset, 0));
+        fill(&~w, view, white);
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines));
+        paintBar(&~w, barOf(ps, gs, i, state, total));
+        setClip(&~w, intersect(clip, view));
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let low: Int64 := minInt(e.a, e.b); let high: Int64 := maxInt(e.a, e.b);
+        let shown: Int64 := viewLines(ps, gs, i);
+        var k: Int64 := e.c;
+        while k < total and k <= e.c + shown do
+            let start: Index := lineStart(&lines, toIndex64(k)); let stop: Index := lineEnd(&lines, toIndex64(k));
+            let y: Int64 := view.y + (k - e.c) * lineHeight;
+            let x: Int64 := view.x + textInset;
+            text(&~w, x, y, sliceSpan(t, start, stop), black, 0);
+            if focused and on and high > low then
+                let a: Int64 := maxInt(low, toInt(start)); let b: Int64 := minInt(high, toInt(stop));
+                if a < b or (high > toInt(stop) and low <= toInt(stop) and toInt(stop) >= a) then
+                    let x0: Int64 := x + rangeWidth(t, start, toIndex64(a));
+                    var x1: Int64 := x + rangeWidth(t, start, toIndex64(maxInt(b, a)));
+                    if high > toInt(stop) then x1 := x1 + 4; end if;
+                    invert(&~w, rect(x0, y, x1 - x0, lineHeight));
+                end if;
+            end if;
+            if focused and on and high = low and toInt(start) <= e.a and (e.a < toInt(stop) or (e.a = toInt(stop) and (k = total - 1 or toInt(lineStart(&lines, toIndex64(k + 1))) > e.a))) then
+                fill(&~w, rect(x + rangeWidth(t, start, toIndex64(e.a)), y, 1, lineHeight), black);
+            end if;
+            k := k + 1;
+        end while;
+        destroyLines(lines);
+        setClip(&~w, clip);
+        return nil;
+    end;
+    generic [R: Region]
+    function paintButton(w: &![Window], all: Span[Nat8, R], ps: Span[Node], i: Index, r: Rect, pressed: Bool, ring: Bool, on: Bool, style: Int64): Unit is
+        var face: Rect := r;
+        if has(ps[i].flags, flagDefault) then
+            roundRing(&~w, r, 8, 3, black, white);
+            face := inset(r, defaultRing);
+        end if;
+        var fg: Int64 := black; var bg: Int64 := white;
+        if pressed then fg := white; bg := black; end if;
+        roundRect(&~w, face, 4, black, bg);
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let tw: Int64 := textWidth(t);
+        fittedText(&~w, face.x + maxInt((face.width - tw) / 2, 4), face.y + (face.height - lineHeight) / 2, t, face.width - 8, fg, style);
+        if ring then focusRing(&~w, inset(face, 3)); end if;
+        return nil;
+    end;
+end module body.

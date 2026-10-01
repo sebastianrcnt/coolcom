@@ -35,10 +35,10 @@ fi
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
 python3 tools/warm-man.py --output "$stage/Man"
-python3 tools/gui-modules.py >"$stage/GuiModules.txt"
-put "" "$stage/GuiModules.txt"
-python3 tools/gui-modules.py --files >"$stage/GuiFilesModules.txt"
-put "" "$stage/GuiFilesModules.txt"
+# The whole OS library list and per-application lists (C:/<EntryModule>Modules.txt,
+# walked from each example's imports), written by one process.
+python3 tools/gui-modules.py --all "$stage" Files:GuiFiles Top:GuiTop Settings:GuiSettings Widgets:Widgets Gallery:Gallery UiCheck:UiCheck UiData:UiData
+for list in "$stage"/*Modules.txt; do put "" "$list"; done
 sed 's|#include "\.\./\.\./coolc/|#include "C:/Cool/|g' os/Kernel/Kernel.cool >"$stage/Kernel.cool"
 for f in os/Kernel/*; do
     [ "$f" != os/Kernel/Kernel.cool ] || f=$stage/Kernel.cool
@@ -77,7 +77,7 @@ tree os/Warm/standard/src Warm/Standard
 tree warmc/builtin Warm/Standard/builtin
 tree warmc/examples Warm/Examples
 tree "$stage/Man" Man
-put Warm/Docs/ warmc/README.md docs/warm-stdlib.md docs/warm-closures.md
+put Warm/Docs/ warmc/README.md docs/warm-stdlib.md docs/warm-closures.md docs/ui-framework.md
 
 # An explicit install replaces Init.cool and the mapped kernel sources above,
 # so the old layout can now be removed. Seeding keeps old files and user edits.

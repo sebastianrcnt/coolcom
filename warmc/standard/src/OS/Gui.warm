@@ -310,6 +310,108 @@ module body OS.Gui is
     pragma Foreign_Import(External_Name => "WgFont");
     private function rawFont(choice: Int64, pointSize: Int64): Int64 is end;
     function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError] is return status(rawScale(scale)); end;
+    function displayScale(gui: &[Gui]): Int64 is let s: Int64 := rawScale(0); if s < 1 then return 1; end if; return s; end;
+    function systemMonoFont(gui: &[Gui]): Bool is return rawFont(-1, 0) = 1; end;
     function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError] is
         var choice: Int64 := 0; if systemMono then choice := 1; end if; return status(rawFont(choice, pointSize)); end;
+    pragma Foreign_Import(External_Name => "WgClip");
+    private function rawClip(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPattern");
+    private function rawPattern(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64, bits: Nat64, fg: Int64, bg: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgInvert");
+    private function rawInvert(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgTextStyle");
+    private function rawTextStyle(handle: Int64, x: Int64, y: Int64, value: Pointer[Nat8], byteCount: Index, color: Int64, style: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgBits");
+    private function rawBits(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64, bits: Pointer[Nat8], byteCount: Index, stride: Int64, color: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgBlit");
+    private function rawBlit(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64, pixels: Pointer[Nat8], byteCount: Index, stride: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPending");
+    private function rawPending(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgWait");
+    private function rawWait(handle: Int64, milliseconds: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgTrace");
+    private function rawTrace(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgMicros");
+    private function rawMicros(): Int64 is end;
+    function setClip(window: &![Window], rect: Rect): Result[Unit, IoError] is
+        return status(rawClip(window->handle, rect.x, rect.y, rect.width, rect.height)); end;
+    function clearClip(window: &![Window]): Result[Unit, IoError] is return status(rawClip(window->handle, 0, 0, -1, -1)); end;
+    function pattern(window: &![Window], rect: Rect, bits: Nat64, foreground: Int64, background: Int64): Result[Unit, IoError] is
+        return status(rawPattern(window->handle, rect.x, rect.y, rect.width, rect.height, bits, foreground, background)); end;
+    function invert(window: &![Window], rect: Rect): Result[Unit, IoError] is
+        return status(rawInvert(window->handle, rect.x, rect.y, rect.width, rect.height)); end;
+    function styledText(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, style: Int64): Result[Int64, IoError] is
+        if spanLength(value) = 0 then return Ok(value => 0); end if;
+        let advance: Int64 := rawTextStyle(window->handle, x, y, spanToPointer(value), spanLength(value), color, style);
+        if advance < 0 then return Err(error => fromCode(advance)); end if; return Ok(value => advance); end;
+    function bitmap(window: &![Window], rect: Rect, bits: Span[Nat8], stride: Int64, color: Int64): Result[Unit, IoError] is
+        return status(rawBits(window->handle, rect.x, rect.y, rect.width, rect.height, spanToPointer(bits), spanLength(bits), stride, color)); end;
+    function blit(window: &![Window], rect: Rect, pixels: Span[Nat8], stride: Int64): Result[Unit, IoError] is
+        return status(rawBlit(window->handle, rect.x, rect.y, rect.width, rect.height, spanToPointer(pixels), spanLength(pixels), stride)); end;
+    private function held(event: Event): Int64 is
+        case event of when Idle do return 0;
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do return 1;
+            when Key(code as code: Int64) do return 1; when Resize(width as w: Int64, height as h: Int64) do return 1;
+            when Close do return 1; when Menu(id as id: Int64) do return 1;
+        end case;
+    end;
+    function queued(window: &![Window]): Int64 is
+        let count: Int64 := rawPending(window->handle); if count < 0 then return held(window->pending); end if;
+        return count + held(window->pending); end;
+    function wait(window: &![Window], milliseconds: Int64): Result[Unit, IoError] is
+        if held(window->pending) > 0 then return Ok(value => nil); end if;
+        return status(rawWait(window->handle, milliseconds)); end;
+    function traceEnabled(): Bool is return rawTrace() /= 0; end;
+    function traceLevel(): Int64 is return rawTrace(); end;
+    function micros(): Int64 is return rawMicros(); end;
+    pragma Foreign_Import(External_Name => "WgClipWrite");
+    private function rawClipWrite(handle: Int64, bytes: Pointer[Nat8], byteCount: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClipSerial");
+    private function rawClipSerial(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClipSize");
+    private function rawClipSize(serial: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClipRead");
+    private function rawClipRead(serial: Int64, into: Pointer[Nat8], capacity: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPointer");
+    private function rawPointer(handle: Int64, shape: Int64): Int64 is end;
+    function copyText(window: &![Window], value: Span[Nat8]): Result[Int64, IoError] is
+        let serial: Int64 := rawClipWrite(window->handle, spanToPointer(value), spanLength(value));
+        if serial < 0 then return Err(error => fromCode(serial)); end if;
+        return Ok(value => serial); end;
+    function clipboardSerial(): Int64 is return rawClipSerial(); end;
+    function clipboardSize(serial: Int64): Int64 is return rawClipSize(serial); end;
+    function clipboardText(serial: Int64): Option[String] is
+        let bytes: Int64 := rawClipSize(serial);
+        if bytes < 0 then return None(); end if;
+        case toIndex(bytes) of
+            when Some(value as n: Index) do
+                if n = 0 then return Some(value => makeString(0, 0)); end if;
+                var s: String := makeString(n, 0);
+                let got: Int64 := rawClipRead(serial, spanToPointer(getSpan(&s, 0, 0)), n);
+                if got /= bytes then destroyString(s); return None(); end if;
+                return Some(value => s);
+            when None do return None();
+        end case; end;
+    function setPointer(window: &![Window], shape: Int64): Result[Unit, IoError] is
+        return status(rawPointer(window->handle, shape)); end;
+    constant popupChoice: Int64 := 1073741824;
+    pragma Foreign_Import(External_Name => "WgMenuReset");
+    private function rawMenuReset(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgMenuEntry");
+    private function rawMenuEntry(handle: Int64, menu: Int64, id: Int64, name: Pointer[Nat8], nameSize: Index, keys: Pointer[Nat8], keySize: Index, flags: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPopupClear");
+    private function rawPopupClear(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPopupItem");
+    private function rawPopupItem(handle: Int64, name: Pointer[Nat8], nameSize: Index, keys: Pointer[Nat8], keySize: Index, flags: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPopupShow");
+    private function rawPopupShow(handle: Int64, x: Int64, y: Int64, current: Int64): Int64 is end;
+    function resetMenus(window: &![Window]): Result[Unit, IoError] is return status(rawMenuReset(window->handle)); end;
+    function addMenuEntry(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError] is
+        return status(rawMenuEntry(window->handle, menu, id, spanToPointer(value), spanLength(value), spanToPointer(keys), spanLength(keys), flags)); end;
+    function popupClear(window: &![Window]): Result[Unit, IoError] is return status(rawPopupClear(window->handle)); end;
+    function popupAdd(window: &![Window], value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError] is
+        return status(rawPopupItem(window->handle, spanToPointer(value), spanLength(value), spanToPointer(keys), spanLength(keys), flags)); end;
+    function popupShow(window: &![Window], x: Int64, y: Int64, current: Int64): Result[Unit, IoError] is
+        return status(rawPopupShow(window->handle, x, y, current)); end;
 end module body.

@@ -75,7 +75,8 @@ cpu = boot('cpu')
 w, h, rows = cpu
 px = lambda x, y: tuple(rows[y][3*x:3*x+3])
 assert px(700, 300) == (0, 0, 0) and px(701, 300) == (255, 255, 255), 'desktop dither'
-assert px(750, 10) == (255, 255, 255) and px(750, 21) == (0, 0, 0), 'menu bar'
+# x=720: left of the clock (drawn from x=748), whose digits change with the time of day.
+assert px(720, 10) == (255, 255, 255) and px(750, 21) == (0, 0, 0), 'menu bar'
 assert px(80, 90) == (0, 0, 0) and px(81, 91) == (255, 255, 255), 'window border'
 assert px(104, 94) == (0, 0, 0), 'active title stripes'
 assert px(70, 150) == (32, 64, 96), 'background window has independent blue content'

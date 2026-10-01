@@ -1,0 +1,299 @@
+import OS.Error (IoError);
+import Standard.String (String);
+import OS.Gui (Gui);
+import OS.Ui.Text (TextEdit);
+import OS.Ui.Engine (ListState);
+module OS.Ui is
+    """Declarative UI for OS.Gui windows: an application keeps a Model, describes
+    the whole window from it in view (a View[Msg] built with the functions
+    below), and changes it in update with the messages next returns. Only what
+    changed is repainted. See C:/Warm/Docs/ui-framework.md and
+    C:/Warm/Examples/gui/Gallery.warm."""
+
+    -- Cross-axis alignment (align, alignChildren).
+    constant leading: Int64;
+    constant centered: Int64;
+    constant trailing: Int64;
+    constant stretch: Int64;
+
+    -- A view under construction: next consumes it.
+    type View[M: Free]: Linear;
+    -- An open application window with the framework's state (focus, scroll offsets, carets).
+    type App[M: Free]: Linear;
+    -- An image registered with the App (or a built-in icon): views refer to it
+    -- by this handle and never copy pixels.
+    record Image: Free is id: Int64; width: Int64; height: Int64; end;
+    -- A drop: the dragged node's payload and the pointer inside the target.
+    record Drop: Free is payload: Int64; x: Int64; y: Int64; end;
+    -- What happens inside a file dialog (OS.Ui.Files): its list, a row opened,
+    -- Up, Open/Save, Cancel, or an edit of the file name.
+    union FileEvent: Free is
+        case Rows is state: ListState;
+        case Pick is index: Int64;
+        case Up;
+        case Choose;
+        case Cancel;
+        case Name is edit: TextEdit;
+    end;
+
+    ---------------------------------------------------------------- The application
+
+    generic [M: Free]
+    function openApp(gui: &![Gui], title: Span[Nat8], width: Int64, height: Int64): Result[App[M], IoError];
+    generic [M: Free]
+    function closeApp(app: App[M]): Unit;
+    generic [M: Free]
+    function isOpen(app: &[App[M]]): Bool;
+    -- Frames painted so far (tests and diagnostics).
+    generic [M: Free]
+    function framesPainted(app: &[App[M]]): Int64;
+    -- Show a new view, then wait for input. Returns the next message, or
+    -- None once the window has been closed. Input that only changes framework
+    -- state (focus, a held button, a split bar) is handled here.
+    generic [M: Free]
+    function next(app: &![App[M]], v: View[M]): Option[M];
+
+    ---------------------------------------------------------------- Text
+
+    -- Apply a text box edit to the model's text (consumes it, returns the new
+    -- text). A paste inserts exactly the clipboard snapshot it names, or nothing
+    -- if the clipboard changed since the keystroke.
+    function applyEdit(text: String, edit: TextEdit): String;
+
+    ---------------------------------------------------------------- Images
+
+    -- One-bit image (most significant bit first, stride = ceil(width / 8)); set bits are black.
+    generic [M: Free]
+    function oneBitImage(app: &![App[M]], width: Int64, height: Int64, data: Span[Nat8]): Image;
+    -- BGRA pixels, 4 bytes each, rows of width pixels.
+    generic [M: Free]
+    function colorImage(app: &![App[M]], width: Int64, height: Int64, bgra: Span[Nat8]): Image;
+    -- Built-in classic icons: 16x16 folder and document, 32x32 alert icons.
+    function iconFolder(): Image;
+    function iconDocument(): Image;
+    function iconNote(): Image;
+    function iconCaution(): Image;
+    function iconStop(): Image;
+
+    ---------------------------------------------------------------- Containers and layout
+
+    generic [M: Free]
+    function newView(): View[M];
+    -- Containers: children follow until done.
+    generic [M: Free]
+    function column(v: &![View[M]]): Unit;
+    generic [M: Free]
+    function row(v: &![View[M]]): Unit;
+    generic [M: Free]
+    function grid(v: &![View[M]], columns: Int64): Unit;
+    -- Two panes and a draggable bar; firstSize <= 0 splits evenly.
+    generic [M: Free]
+    function split(v: &![View[M]], vertical: Bool, firstSize: Int64): Unit;
+    -- A titled frame around its children.
+    generic [M: Free]
+    function group(v: &![View[M]], title: Span[Nat8]): Unit;
+    generic [M: Free]
+    function done(v: &![View[M]]): Unit;
+    generic [M: Free]
+    function spacer(v: &![View[M]]): Unit;
+    -- Modifiers of the most recent node (for a container: right after it opens).
+    generic [M: Free]
+    function padding(v: &![View[M]], amount: Int64): Unit;
+    generic [M: Free]
+    function spacing(v: &![View[M]], amount: Int64): Unit;
+    generic [M: Free]
+    function grow(v: &![View[M]], weight: Int64): Unit;
+    generic [M: Free]
+    function fixedWidth(v: &![View[M]], pixels: Int64): Unit;
+    generic [M: Free]
+    function fixedHeight(v: &![View[M]], pixels: Int64): Unit;
+    generic [M: Free]
+    function minimumSize(v: &![View[M]], w: Int64, h: Int64): Unit;
+    generic [M: Free]
+    function align(v: &![View[M]], alignment: Int64): Unit;
+    generic [M: Free]
+    function alignChildren(v: &![View[M]], alignment: Int64): Unit;
+    generic [M: Free]
+    function disabled(v: &![View[M]], off: Bool): Unit;
+    generic [M: Free]
+    function hidden(v: &![View[M]], gone: Bool): Unit;
+    -- Stable identity for framework state (focus, carets) of a moving item.
+    generic [M: Free]
+    function key(v: &![View[M]], name: Span[Nat8]): Unit;
+    generic [M: Free]
+    function keyNumber(v: &![View[M]], n: Int64): Unit;
+
+    ---------------------------------------------------------------- Text and controls
+
+    -- Text in the bold system font; plain switches to the regular face.
+    generic [M: Free]
+    function label(v: &![View[M]], text: Span[Nat8]): Unit;
+    -- Wrapped text whose height follows its width.
+    generic [M: Free]
+    function paragraph(v: &![View[M]], text: Span[Nat8]): Unit;
+    generic [M: Free]
+    function plain(v: &![View[M]]): Unit;
+    generic [M: Free]
+    function centerText(v: &![View[M]]): Unit;
+    -- Extend the most recent node's text.
+    generic [M: Free]
+    function append(v: &![View[M]], text: Span[Nat8]): Unit;
+    generic [M: Free]
+    function appendInt(v: &![View[M]], n: Int64): Unit;
+    generic [M: Free]
+    function button(v: &![View[M]], title: Span[Nat8], message: M): Unit;
+    -- Return activates the default button; Escape the cancel button.
+    generic [M: Free]
+    function defaultButton(v: &![View[M]]): Unit;
+    generic [M: Free]
+    function cancelButton(v: &![View[M]]): Unit;
+    generic [M: Free]
+    function separator(v: &![View[M]]): Unit;
+    -- A checkbox: message is sent when the user toggles it (the model flips its value).
+    generic [M: Free]
+    function checkbox(v: &![View[M]], title: Span[Nat8], checked: Bool, message: M): Unit;
+    -- A radio button: message is sent when it is chosen.
+    generic [M: Free]
+    function radio(v: &![View[M]], title: Span[Nat8], selected: Bool, message: M): Unit;
+    -- A horizontal slider over [low, high] in steps; onChange gets each new value while dragging.
+    generic [M: Free]
+    function slider(v: &![View[M]], value: Int64, low: Int64, high: Int64, step: Int64, onChange: Fn[Int64, M]): Unit;
+    -- A progress bar; total <= 0 shows an indeterminate (striped) bar.
+    generic [M: Free]
+    function progress(v: &![View[M]], value: Int64, total: Int64): Unit;
+    -- A single-line text field showing text; every change arrives as onEdit(edit),
+    -- to be applied to the model's String with applyEdit.
+    generic [M: Free]
+    function textBox(v: &![View[M]], text: Span[Nat8], onEdit: Fn[TextEdit, M]): Unit;
+    -- A text field showing bullets; copying is disabled.
+    generic [M: Free]
+    function password(v: &![View[M]], text: Span[Nat8], onEdit: Fn[TextEdit, M]): Unit;
+    -- Dimmed text shown in an empty, unfocused text field.
+    generic [M: Free]
+    function placeholder(v: &![View[M]], text: Span[Nat8]): Unit;
+    generic [M: Free]
+    function image(v: &![View[M]], picture: Image): Unit;
+
+    ---------------------------------------------------------------- Lists, tables and trees
+
+    -- An empty list state; the framework fills in the rows that fit.
+    function listState(): ListState;
+    -- A list of rowCount rows. Emit listRow for rows [state.first, state.first + state.fit];
+    -- scrolling, selection and size changes arrive as onState(new state).
+    generic [M: Free]
+    function listView(v: &![View[M]], state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit;
+    -- A table: tableColumn headers, then tableRow + cell per visible row. Clicking a
+    -- sortable header sets state.sort / state.descending.
+    generic [M: Free]
+    function tableView(v: &![View[M]], state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit;
+    -- A tree shown as its visible rows (flattened by the model): treeRow per row.
+    generic [M: Free]
+    function treeView(v: &![View[M]], state: ListState, rowCount: Int64, onState: Fn[ListState, M]): Unit;
+    -- Double click or Return on a row (lists, tables): onOpen(row index).
+    generic [M: Free]
+    function onOpen(v: &![View[M]], opened: Fn[Int64, M]): Unit;
+    -- A tree's disclosure triangle, Return, Left/Right: onToggle(row index).
+    generic [M: Free]
+    function onToggle(v: &![View[M]], toggled: Fn[Int64, M]): Unit;
+    generic [M: Free]
+    function tableColumn(v: &![View[M]], title: Span[Nat8], width: Int64, sortable: Bool): Unit;
+    generic [M: Free]
+    function listRow(v: &![View[M]], index: Int64, text: Span[Nat8]): Unit;
+    -- A small (16x16) icon before the most recent row's text.
+    generic [M: Free]
+    function rowIcon(v: &![View[M]], picture: Image): Unit;
+    generic [M: Free]
+    function tableRow(v: &![View[M]], index: Int64): Unit;
+    generic [M: Free]
+    function cell(v: &![View[M]], text: Span[Nat8]): Unit;
+    generic [M: Free]
+    function treeRow(v: &![View[M]], index: Int64, depth: Int64, children: Bool, expanded: Bool, text: Span[Nat8]): Unit;
+
+    ---------------------------------------------------------------- Scrolling and text views
+
+    -- A scrolled viewport around one child (usually a column); the framework keeps the offset.
+    generic [M: Free]
+    function scrollView(v: &![View[M]]): Unit;
+    -- A multi-line text editor; changes arrive as onEdit(edit) like textBox. Lines wrap unless noWrap.
+    generic [M: Free]
+    function textView(v: &![View[M]], text: Span[Nat8], onEdit: Fn[TextEdit, M]): Unit;
+    generic [M: Free]
+    function noWrap(v: &![View[M]]): Unit;
+
+    ---------------------------------------------------------------- Menus
+
+    -- A menu in the menu bar: menuItem, menuSeparator ... done.
+    generic [M: Free]
+    function menu(v: &![View[M]], title: Span[Nat8]): Unit;
+    -- Items shown when the parent node (or an ancestor) is clicked with the right button.
+    generic [M: Free]
+    function contextMenu(v: &![View[M]]): Unit;
+    -- A menu item with an optional shortcut ("" for none), shown as the Mac's symbols.
+    generic [M: Free]
+    function menuItem(v: &![View[M]], title: Span[Nat8], keys: Span[Nat8], message: M): Unit;
+    generic [M: Free]
+    function menuSeparator(v: &![View[M]]): Unit;
+    -- A check mark on the most recent menu item.
+    generic [M: Free]
+    function checkMark(v: &![View[M]], on: Bool): Unit;
+
+    ---------------------------------------------------------------- Pop-up buttons
+
+    -- A classic pop-up menu button showing item selected; popupItem per choice ... done.
+    generic [M: Free]
+    function popupButton(v: &![View[M]], selected: Int64, onChoose: Fn[Int64, M]): Unit;
+    generic [M: Free]
+    function popupItem(v: &![View[M]], title: Span[Nat8]): Unit;
+
+    ---------------------------------------------------------------- Dialogs
+
+    -- A modal dialog over the window (classic double frame); children follow until done.
+    generic [M: Free]
+    function dialog(v: &![View[M]]): Unit;
+    -- An alert: an icon, a message and one default button.
+    generic [M: Free]
+    function alert(v: &![View[M]], icon: Image, message: Span[Nat8], okTitle: Span[Nat8], ok: M): Unit;
+    -- A question: Cancel (Escape) and a default button (Return).
+    generic [M: Free]
+    function confirm(v: &![View[M]], icon: Image, message: Span[Nat8], cancelTitle: Span[Nat8], cancel: M, okTitle: Span[Nat8], ok: M): Unit;
+
+    ---------------------------------------------------------------- Window parts
+
+    -- Tabs: tab(title) pages ... done; only page selected is shown.
+    generic [M: Free]
+    function tabs(v: &![View[M]], selected: Int64, onSelect: Fn[Int64, M]): Unit;
+    generic [M: Free]
+    function tab(v: &![View[M]], title: Span[Nat8]): Unit;
+    -- A row of tool buttons above the content, with a rule below.
+    generic [M: Free]
+    function toolbar(v: &![View[M]]): Unit;
+    -- A row of plain status text below the content, with a rule above.
+    generic [M: Free]
+    function statusBar(v: &![View[M]]): Unit;
+
+    ---------------------------------------------------------------- Drag and drop
+
+    -- The most recent node can be dragged; payload identifies it to the drop target.
+    generic [M: Free]
+    function draggable(v: &![View[M]], payload: Int64): Unit;
+    -- The most recent node accepts drops (its frame thickens while an item is over it).
+    generic [M: Free]
+    function dropTarget(v: &![View[M]], onDrop: Fn[Drop, M]): Unit;
+
+    ---------------------------------------------------------------- File dialogs (used by OS.Ui.Files)
+
+    -- For OS.Ui.Files: a list and a text box whose events go through a file dialog's wrapper.
+    generic [M: Free]
+    function fileList(v: &![View[M]], state: ListState, rowCount: Int64, wrap: Fn[FileEvent, M]): Unit;
+    generic [M: Free]
+    function fileName(v: &![View[M]], text: Span[Nat8], wrap: Fn[FileEvent, M]): Unit;
+
+    ---------------------------------------------------------------- Keyboard and timers
+
+    -- A keyboard shortcut such as "Ctrl+S", "Alt+Left", "F5" or "Ctrl+Shift+Z".
+    generic [M: Free]
+    function shortcut(v: &![View[M]], keys: Span[Nat8], message: M): Unit;
+    -- A message every interval while this node is in the view.
+    generic [M: Free]
+    function every(v: &![View[M]], milliseconds: Int64, message: M): Unit;
+end module.

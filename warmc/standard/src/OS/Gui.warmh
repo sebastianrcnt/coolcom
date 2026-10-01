@@ -57,4 +57,50 @@ module OS.Gui is
     -- Desktop authority changes terminal fonts; chrome remains bitmap art.
     function setScale(gui: &![Gui], scale: Int64): Result[Unit, IoError];
     function setFont(gui: &![Gui], systemMono: Bool, pointSize: Int64): Result[Unit, IoError];
+    -- The display scale now (1 or 2) and whether the terminal uses System Mono (else the bitmap font).
+    function displayScale(gui: &[Gui]): Int64;
+    function systemMonoFont(gui: &[Gui]): Bool;
+    -- Drawing support for OS.Ui. Every Gr operation honours the clip rectangle.
+    function setClip(window: &![Window], rect: Rect): Result[Unit, IoError];
+    function clearClip(window: &![Window]): Result[Unit, IoError];
+    -- An 8x8 one-bit pattern aligned to client coordinates: byte (y mod 8),
+    -- bit 7 is column (x mod 8) = 0. A negative background is transparent.
+    function pattern(window: &![Window], rect: Rect, bits: Nat64, foreground: Int64, background: Int64): Result[Unit, IoError];
+    -- Exchange black and white inside rect.
+    function invert(window: &![Window], rect: Rect): Result[Unit, IoError];
+    -- Style bits: 1 bitmap bold, 2 dimmed (50% gray mask), 4 underline. Returns the advance.
+    function styledText(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64, style: Int64): Result[Int64, IoError];
+    -- One-bit image, most significant bit first; set bits are drawn in color.
+    function bitmap(window: &![Window], rect: Rect, bits: Span[Nat8], stride: Int64, color: Int64): Result[Unit, IoError];
+    -- BGRA pixels with a byte stride, at logical size.
+    function blit(window: &![Window], rect: Rect, pixels: Span[Nat8], stride: Int64): Result[Unit, IoError];
+    -- Queued input events, including one held back by poll's folding.
+    function queued(window: &![Window]): Int64;
+    -- Sleep until an event is queued or the time elapses.
+    function wait(window: &![Window], milliseconds: Int64): Result[Unit, IoError];
+    -- Kernel test switch (gui_trace) and a monotonic microsecond clock.
+    function traceEnabled(): Bool;
+    -- 1: frame traces; 2: also every node of each new layout (slow; for locating controls).
+    function traceLevel(): Int64;
+    function micros(): Int64;
+    -- The system clipboard, shared with terminal windows (Ctrl+Shift+C/V there).
+    -- copyText replaces it and returns its new serial number; clipboardText
+    -- returns the bytes of one snapshot, None once it has been replaced.
+    function copyText(window: &![Window], value: Span[Nat8]): Result[Int64, IoError];
+    function clipboardSerial(): Int64;
+    function clipboardText(serial: Int64): Option[String];
+    -- Byte size of snapshot serial, or -1 once it has been replaced.
+    function clipboardSize(serial: Int64): Int64;
+    -- The pointer over this window's client area: 0 arrow, 1 I-beam.
+    function setPointer(window: &![Window], shape: Int64): Result[Unit, IoError];
+    -- Menus with keyboard shortcuts shown at the right (keys, e.g. "\u{2303}S"), and
+    -- flags 1 disabled, 2 checked, 4 separator. resetMenus removes every menu.
+    function resetMenus(window: &![Window]): Result[Unit, IoError];
+    function addMenuEntry(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError];
+    -- A pop-up list at client (x, y) with item current under the pointer. The choice
+    -- arrives as Menu(id => popupChoice + index); Menu(id => -1) when dismissed.
+    constant popupChoice: Int64;
+    function popupClear(window: &![Window]): Result[Unit, IoError];
+    function popupAdd(window: &![Window], value: Span[Nat8], keys: Span[Nat8], flags: Int64): Result[Unit, IoError];
+    function popupShow(window: &![Window], x: Int64, y: Int64, current: Int64): Result[Unit, IoError];
 end module.

@@ -52,6 +52,17 @@ Shutdown;
         result = run(*vm, "--input-script", script, ROOT / "build/kernel.Image", timeout=20)
         text = (result.stdout + result.stderr).decode(errors="replace")
         assert result.returncode == 2 and expected in text, (result.returncode, text)
+    # A guest that stops taking interrupts for a second (as a descheduled vCPU on a
+    # loaded host looks to the feeder) loses no scripted input: the feeder waits.
+    init.write_text('''U8 stall_line[256]; I64 stall_t = ArchCntVct, stall_daif = ArchDaif;
+Print("FIFO-STALL\\n"); ArchIrqOff; while (ArchCntVct - stall_t < cnt_freq) {} ArchIntRestore(stall_daif);
+GetLine(stall_line, 256); Print("STALL-LINE:%d\\n", StrLen(stall_line)); Shutdown;
+''')
+    assert run("mcopy", "-o", "-i", disk, init, "::Init.cool").returncode == 0
+    script.write_text("wait FIFO-STALL\n" + "1 45 1\n0 0 0\n1 45 0\n0 0 0\n" * 100 + "1 28 1\n0 0 0\n1 28 0\n0 0 0\n")
+    result = run(*vm, "--input-script", script, ROOT / "build/kernel.Image", timeout=20)
+    text = (result.stdout + result.stderr).decode(errors="replace")
+    assert result.returncode == 0 and "STALL-LINE:100" in text and "input FIFO overflow" not in text, (result.returncode, text)
     # Runtime FIFO overflow must also fail, even for syntactically valid scripts.
     init.write_text('Print("FIFO-BLOCKED\\n"); ArchIrqOff; while (TRUE) {}\n')
     assert run("mcopy", "-o", "-i", disk, init, "::Init.cool").returncode == 0
@@ -59,4 +70,4 @@ Shutdown;
     result = run(*vm, "--input-script", script, ROOT / "build/kernel.Image", timeout=20)
     text = (result.stdout + result.stderr).decode(errors="replace")
     assert result.returncode == 2 and "input FIFO overflow" in text, (result.returncode, text)
-print("input-limits-test: queue/line overflow rejects input, next line recovers; script limits fail PASS")
+print("input-limits-test: queue/line overflow rejects input, next line recovers; a stalled guest loses no scripted input; script limits fail PASS")

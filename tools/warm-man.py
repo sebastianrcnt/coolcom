@@ -35,6 +35,9 @@ def body_interface(source):
         generic, declaration = match.groups()
         if declaration.startswith('function '):
             declaration = declaration[:-2].rstrip() + ';'
+        elif declaration.startswith('constant '):
+            # An interface declares a constant's type; its value stays in the body.
+            declaration = re.sub(r'\s*:=.*;$', ';', declaration, flags=re.S)
         declarations.append('    ' + (generic or '') + declaration)
     return f'module {module} is\n' + '\n'.join(declarations) + '\nend module.\n'
 

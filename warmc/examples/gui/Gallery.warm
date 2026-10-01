@@ -1,0 +1,339 @@
+import OS.Gui (Gui, acquireGui, releaseGui);
+import OS.Error (IoError);
+import OS.File (Filesystem, acquireFilesystem, releaseFilesystem);
+import OS.Dir (Dir, openRoot, narrow, readOnly, closeDir);
+import Standard.String (String, fromLiteral, fromSpan, length, slice, destroyString);
+import Standard.Vector (Vector, make, push, get, set, length as count, remove, insert, destroyFree);
+import OS.Ui (App, View, Image, TextEdit, ListState, FileEvent, Drop, openApp, closeApp, next, newView, column, row, grid, group, done,
+    spacer, padding, spacing, grow, fixedWidth, fixedHeight, label, paragraph, append, appendInt, button, defaultButton, cancelButton,
+    separator, shortcut, every, plain, checkbox, radio, slider, progress, textBox, password, placeholder, image, applyEdit, iconNote,
+    iconCaution, iconStop, iconFolder, iconDocument, menu, menuItem, menuSeparator, checkMark, disabled, popupButton, popupItem,
+    contextMenu, alert, confirm, tabs, tab, toolbar, statusBar, draggable, dropTarget, tableView, tableColumn, tableRow, cell, treeView,
+    treeRow, onToggle, onOpen, textView, listState, listView, listRow, rowIcon, centerText);
+import OS.Ui.Files (FileDialog, makeFileDialog, showFileDialog, fileDialogView, updateFileDialog, fileDialogActive, fileDialogSaving, fileDialogOutcome,
+    chosenPath, hideFileDialog, closeFileDialog, dialogChosen, dialogCancelled);
+module body Gallery is
+    """The OS.Ui control gallery: every control, container and window part,
+    driven by messages. Prints GALLERY markers for the VM tests."""
+    record Model: Linear is
+        page: Int64; clicks: Int64; last: Int64; ticks: Int64;
+        bold: Bool; italic: Bool; size: Int64; volume: Int64; zoom: Int64;
+        name: String; secret: String; notes: String;
+        table: ListState; tree: ListState; open: Vector[Bool];
+        basket: Vector[Int64]; shelf: Vector[Int64];
+        toolbarShown: Bool; statusShown: Bool;
+        question: Int64;       -- 0 none, 1 alert, 2 confirm
+        files: FileDialog;
+        status: String;
+    end;
+    union Msg: Free is
+        case Page is index: Int64;
+        case Clicked is which: Int64;
+        case Tick;
+        case Reset;
+        case ToggleBold;
+        case ToggleItalic;
+        case Size is choice: Int64;
+        case Volume is value: Int64;
+        case Zoom is choice: Int64;
+        case NameEdited is edit: TextEdit;
+        case SecretEdited is edit: TextEdit;
+        case NotesEdited is edit: TextEdit;
+        case Table is state: ListState;
+        case Tree is state: ListState;
+        case Toggled is index: Int64;
+        case Opened is index: Int64;
+        case Dropped is drop: Drop;
+        case Remove is item: Int64;
+        case ShowToolbar;
+        case ShowStatus;
+        case Ask is kind: Int64;
+        case Answer is ok: Bool;
+        case OpenFile;
+        case SaveFile;
+        case File is event: FileEvent;
+        case Close;
+    end;
+    function page(i: Int64): Msg is return Page(index => i); end;
+    function volume(value: Int64): Msg is return Volume(value => value); end;
+    function zoom(i: Int64): Msg is return Zoom(choice => i); end;
+    function nameEdited(edit: TextEdit): Msg is return NameEdited(edit => edit); end;
+    function secretEdited(edit: TextEdit): Msg is return SecretEdited(edit => edit); end;
+    function notesEdited(edit: TextEdit): Msg is return NotesEdited(edit => edit); end;
+    function tableState(s: ListState): Msg is return Table(state => s); end;
+    function treeState(s: ListState): Msg is return Tree(state => s); end;
+    function toggled(i: Int64): Msg is return Toggled(index => i); end;
+    function opened(i: Int64): Msg is return Opened(index => i); end;
+    function dropped(d: Drop): Msg is return Dropped(drop => d); end;
+    function file(e: FileEvent): Msg is return File(event => e); end;
+    generic [R: Region]
+    function span(s: &[String, R]): Span[Nat8, R] is return slice(s, 0, length(s)); end;
+    function idx(i: Int64): Index is case toIndex(i) of when Some(value as n: Index) do return n; when None do return 0; end case; end;
+    function int(i: Index): Int64 is case toInt64(i) of when Some(value as n: Int64) do return n; when None do return 0; end case; end;
+    function fruit(i: Int64): Span[Nat8, Static] is
+        if i = 0 then return "Apple"; else if i = 1 then return "Pear"; else if i = 2 then return "Plum"; end if; return "Fig";
+    end;
+    function update(model: Model, msg: Msg): Model is
+        let { page as pg: Int64, clicks as clicks0: Int64, last as last0: Int64, ticks as ticks0: Int64, bold as bold0: Bool, italic as italic0: Bool,
+            size as size0: Int64, volume as volume0: Int64, zoom as zoom0: Int64, name as name0: String, secret as secret0: String,
+            notes as notes0: String, table as table0: ListState, tree as tree0: ListState, open as open0: Vector[Bool], basket as basket0: Vector[Int64],
+            shelf as shelf0: Vector[Int64], toolbarShown as tool0: Bool, statusShown as stat0: Bool, question as q0: Int64, files as files0: FileDialog,
+            status as status0: String } := model;
+        var current: Int64 := pg; var clicks: Int64 := clicks0; var last: Int64 := last0; var ticks: Int64 := ticks0; var bold: Bool := bold0;
+        var italic: Bool := italic0; var size: Int64 := size0; var level: Int64 := volume0; var scale: Int64 := zoom0;
+        var name: String := name0; var secret: String := secret0; var notes: String := notes0; var table: ListState := table0;
+        var tree: ListState := tree0; var open: Vector[Bool] := open0; var basket: Vector[Int64] := basket0; var shelf: Vector[Int64] := shelf0;
+        var toolbarShown: Bool := tool0; var statusShown: Bool := stat0; var question: Int64 := q0; var files: FileDialog := files0;
+        var status: String := status0; var said: Span[Nat8, Static] := "";
+        case msg of
+            when Page(index as i: Int64) do current := i; print("GALLERY PAGE "); printLn(i);
+            when Clicked(which as w: Int64) do clicks := clicks + 1; last := w; print("GALLERY CLICK "); printLn(w); said := "Clicked";
+            when Tick do ticks := ticks + 1; if ticks <= 2 then print("GALLERY TICK "); printLn(ticks); end if;
+            when Reset do clicks := 0; last := 0; printLn("GALLERY RESET"); said := "Reset";
+            when ToggleBold do bold := not bold; print("GALLERY BOLD "); printLn(bold);
+            when ToggleItalic do italic := not italic; print("GALLERY ITALIC "); printLn(italic);
+            when Size(choice as c: Int64) do size := c; print("GALLERY SIZE "); printLn(c);
+            when Volume(value as v: Int64) do level := v; print("GALLERY VOLUME "); printLn(v);
+            when Zoom(choice as c: Int64) do scale := c; print("GALLERY ZOOM "); printLn(c); said := "Zoom changed";
+            when NameEdited(edit as e: TextEdit) do name := applyEdit(name, e); print("GALLERY NAME ["); print(span(&name)); printLn("]");
+            when SecretEdited(edit as e: TextEdit) do secret := applyEdit(secret, e); print("GALLERY SECRET "); printLn(length(&secret));
+            when NotesEdited(edit as e: TextEdit) do notes := applyEdit(notes, e); print("GALLERY NOTES "); printLn(length(&notes));
+            when Table(state as s: ListState) do table := s; print("GALLERY TABLE selected="); printLn(s.selected);
+            when Tree(state as s: ListState) do tree := s;
+            when Toggled(index as i: Int64) do
+                if i >= 0 and idx(i) < count(&open) then let now: Bool := get(&open, idx(i)); set(&!open, idx(i), not now); end if;
+                print("GALLERY TOGGLE "); printLn(i);
+            when Opened(index as i: Int64) do print("GALLERY ROW "); printLn(i);
+            when Dropped(drop as d: Drop) do
+                -- Move the item from the shelf into the basket.
+                var at: Index := 0; var found: Bool := false;
+                for k from 0 until count(&shelf) do if not found and get(&shelf, k) = d.payload then at := k; found := true; end if; end for;
+                if found then let item: Int64 := remove(&!shelf, at); push(&!basket, item); end if;
+                print("GALLERY DROP "); printLn(d.payload); said := "Dropped";
+            when Remove(item as item: Int64) do
+                var at: Index := 0; var found: Bool := false;
+                for k from 0 until count(&basket) do if not found and get(&basket, k) = item then at := k; found := true; end if; end for;
+                if found then let gone: Int64 := remove(&!basket, at); push(&!shelf, gone); end if;
+                print("GALLERY REMOVE "); printLn(item);
+            when ShowToolbar do toolbarShown := not toolbarShown; print("GALLERY TOOLBAR "); printLn(toolbarShown);
+            when ShowStatus do statusShown := not statusShown;
+            when Ask(kind as k: Int64) do question := k;
+            when Answer(ok as ok: Bool) do
+                if question = 1 then printLn("GALLERY ALERT OK"); else if ok then printLn("GALLERY CONFIRM OK"); else printLn("GALLERY CONFIRM CANCEL"); end if;
+                question := 0;
+            when OpenFile do files := showFileDialog(files, false, "");
+            when SaveFile do files := showFileDialog(files, true, "Untitled.txt");
+            when File(event as e: FileEvent) do
+                files := updateFileDialog(files, e);
+                if fileDialogOutcome(&files) = dialogChosen and not fileDialogActive(&files) then
+                    let path: String := chosenPath(&files); print("GALLERY FILE "); printLn(span(&path)); destroyString(path);
+                    files := hideFileDialog(files);
+                else if fileDialogOutcome(&files) = dialogCancelled then printLn("GALLERY FILE CANCELLED"); end if;
+            when Close do printLn("GALLERY CLOSE");
+        end case;
+        if spanLength(said) > 0 then destroyString(status); status := fromSpan(said); end if;
+        return Model(page => current, clicks => clicks, last => last, ticks => ticks, bold => bold, italic => italic, size => size, volume => level,
+            zoom => scale, name => name, secret => secret, notes => notes, table => table, tree => tree, open => open, basket => basket,
+            shelf => shelf, toolbarShown => toolbarShown, statusShown => statusShown, question => question, files => files, status => status);
+    end;
+    function controlsPage(v: &![View[Msg]], model: &[Model]): Unit is
+        row(&~v); spacing(&~v, 8);
+        group(&~v, "Buttons"); grow(&~v, 1);
+        row(&~v); spacing(&~v, 8);
+        button(&~v, "One", Clicked(which => 1));
+        button(&~v, "Two", Clicked(which => 2));
+        button(&~v, "Three", Clicked(which => 3));
+        done(&~v);
+        grid(&~v, 2); spacing(&~v, 4);
+        label(&~v, "Clicks"); label(&~v, ""); appendInt(&~v, model->clicks); plain(&~v);
+        label(&~v, "Last"); label(&~v, "Button "); appendInt(&~v, model->last); plain(&~v);
+        done(&~v);
+        done(&~v);
+        group(&~v, "Style");
+        checkbox(&~v, "Bold", model->bold, ToggleBold());
+        checkbox(&~v, "Italic", model->italic, ToggleItalic());
+        separator(&~v);
+        radio(&~v, "Small", model->size = 1, Size(choice => 1));
+        radio(&~v, "Medium", model->size = 2, Size(choice => 2));
+        radio(&~v, "Large", model->size = 3, Size(choice => 3));
+        done(&~v);
+        done(&~v);
+        group(&~v, "Values");
+        grid(&~v, 3); spacing(&~v, 6);
+        label(&~v, "Volume"); slider(&~v, model->volume, 0, 100, 5, volume); grow(&~v, 1);
+        label(&~v, ""); appendInt(&~v, model->volume); plain(&~v); fixedWidth(&~v, 32);
+        label(&~v, "Level"); progress(&~v, model->volume, 100); label(&~v, "");
+        label(&~v, "Busy"); progress(&~v, 0, 0); label(&~v, "");
+        done(&~v);
+        done(&~v);
+        group(&~v, "Text");
+        grid(&~v, 2); spacing(&~v, 6);
+        label(&~v, "Name"); textBox(&~v, span(&(model->name)), nameEdited); placeholder(&~v, "Your name"); grow(&~v, 1);
+        label(&~v, "Password"); password(&~v, span(&(model->secret)), secretEdited);
+        done(&~v);
+        done(&~v);
+        row(&~v); spacing(&~v, 8);
+        image(&~v, iconFolder()); image(&~v, iconDocument()); image(&~v, iconCaution()); image(&~v, iconStop());
+        spacer(&~v);
+        button(&~v, "Reset", Reset()); cancelButton(&~v);
+        button(&~v, "OK", Clicked(which => 9)); defaultButton(&~v);
+        done(&~v);
+        return nil;
+    end;
+    function dataPage(v: &![View[Msg]], model: &[Model]): Unit is
+        row(&~v); spacing(&~v, 8); grow(&~v, 1);
+        tableView(&~v, model->table, 1000, tableState); onOpen(&~v, opened); grow(&~v, 1);
+        tableColumn(&~v, "Name", 110, true); tableColumn(&~v, "Size", 70, true);
+        var r: Int64 := model->table.first;
+        while r < 1000 and r <= model->table.first + model->table.fit do
+            tableRow(&~v, r); cell(&~v, "File "); appendInt(&~v, r); cell(&~v, ""); appendInt(&~v, (r * 7919) % 10000); done(&~v);
+            r := r + 1;
+        end while;
+        done(&~v);
+        treeView(&~v, model->tree, treeRows(&(model->open)), treeState); onToggle(&~v, toggled); fixedWidth(&~v, 170);
+        var t: Int64 := 0;
+        for f from 0 until 3 do
+            let isOpen: Bool := get(&(model->open), f);
+            treeRow(&~v, t, 0, true, isOpen, "Folder "); appendInt(&~v, int(f)); t := t + 1;
+            if isOpen then for k from 0 until 3 do treeRow(&~v, t, 1, false, false, "Item "); appendInt(&~v, int(k)); t := t + 1; end for; end if;
+        end for;
+        done(&~v);
+        done(&~v);
+        textView(&~v, span(&(model->notes)), notesEdited); fixedHeight(&~v, 90);
+        return nil;
+    end;
+    function treeRows(open: &[Vector[Bool]]): Int64 is
+        var n: Int64 := 0;
+        for f from 0 until 3 do n := n + 1; if get(open, f) then n := n + 3; end if; end for;
+        return n;
+    end;
+    function dragPage(v: &![View[Msg]], model: &[Model]): Unit is
+        paragraph(&~v, "Drag a fruit from the shelf into the basket; right-click a fruit in the basket to put it back.");
+        row(&~v); spacing(&~v, 12); grow(&~v, 1);
+        group(&~v, "Shelf"); grow(&~v, 1);
+        for k from 0 until count(&(model->shelf)) do
+            let item: Int64 := get(&(model->shelf), k);
+            label(&~v, fruit(item)); draggable(&~v, item);
+        end for;
+        done(&~v);
+        group(&~v, "Basket"); grow(&~v, 1); dropTarget(&~v, dropped);
+        for k from 0 until count(&(model->basket)) do
+            let item: Int64 := get(&(model->basket), k);
+            label(&~v, fruit(item));
+            contextMenu(&~v); menuItem(&~v, "Put Back", "", Remove(item => item)); done(&~v);
+        end for;
+        done(&~v);
+        done(&~v);
+        return nil;
+    end;
+    function dialogsPage(v: &![View[Msg]], model: &[Model]): Unit is
+        paragraph(&~v, "Modal dialogs cover the window; Return presses the default button and Escape the cancel button.");
+        row(&~v); spacing(&~v, 8);
+        button(&~v, "Alert\u{2026}", Ask(kind => 1));
+        button(&~v, "Confirm\u{2026}", Ask(kind => 2));
+        button(&~v, "Open\u{2026}", OpenFile());
+        button(&~v, "Save\u{2026}", SaveFile());
+        done(&~v);
+        row(&~v); spacing(&~v, 8);
+        label(&~v, "Zoom"); popupButton(&~v, model->zoom, zoom); popupItem(&~v, "50%"); popupItem(&~v, "100%"); popupItem(&~v, "200%"); done(&~v);
+        done(&~v);
+        return nil;
+    end;
+    function view(model: &[Model]): View[Msg] is
+        var v: View[Msg] := newView();
+        menu(&!v, "File");
+        menuItem(&!v, "Open\u{2026}", "Ctrl+O", OpenFile());
+        menuItem(&!v, "Save\u{2026}", "Ctrl+S", SaveFile());
+        menuSeparator(&!v);
+        menuItem(&!v, "Close", "Ctrl+W", Close());
+        done(&!v);
+        menu(&!v, "Edit");
+        menuItem(&!v, "Undo", "Ctrl+Z", Reset()); disabled(&!v, true);
+        menuSeparator(&!v);
+        menuItem(&!v, "Reset Counter", "Ctrl+R", Reset());
+        done(&!v);
+        menu(&!v, "View");
+        menuItem(&!v, "Toolbar", "", ShowToolbar()); checkMark(&!v, model->toolbarShown);
+        menuItem(&!v, "Status Bar", "", ShowStatus()); checkMark(&!v, model->statusShown);
+        done(&!v);
+        column(&!v);
+        if model->toolbarShown then
+            toolbar(&!v);
+            button(&!v, "Open", OpenFile()); button(&!v, "Save", SaveFile()); spacer(&!v);
+            label(&!v, "Page "); appendInt(&!v, model->page + 1); plain(&!v);
+            done(&!v);
+        end if;
+        column(&!v); padding(&!v, 8); grow(&!v, 1);
+        tabs(&!v, model->page, page); grow(&!v, 1);
+        tab(&!v, "Controls"); controlsPage(&!v, model); done(&!v);
+        tab(&!v, "Data"); dataPage(&!v, model); done(&!v);
+        tab(&!v, "Drag & Drop"); dragPage(&!v, model); done(&!v);
+        tab(&!v, "Dialogs"); dialogsPage(&!v, model); done(&!v);
+        done(&!v);
+        done(&!v);
+        if model->statusShown then
+            statusBar(&!v);
+            label(&!v, span(&(model->status))); plain(&!v); spacer(&!v);
+            label(&!v, "Clicks "); appendInt(&!v, model->clicks); plain(&!v);
+            done(&!v);
+        end if;
+        done(&!v);
+        if model->question = 1 then alert(&!v, iconNote(), "This is an alert. It has one button.", "OK", Answer(ok => true)); end if;
+        if model->question = 2 then
+            confirm(&!v, iconCaution(), "Discard the changes?", "Cancel", Answer(ok => false), "Discard", Answer(ok => true));
+        end if;
+        if fileDialogActive(&(model->files)) then
+            var title: Span[Nat8, Static] := "Open a file:";
+            if fileDialogSaving(&(model->files)) then title := "Save as:"; end if;
+            fileDialogView(&!v, &(model->files), title, file);
+        end if;
+        every(&!v, 400, Tick());
+        return v;
+    end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root);
+        var fs: Filesystem := acquireFilesystem(&!root);
+        let dir: Dir := narrow(openRoot(&!fs), readOnly());
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Gallery", 620, 480);
+        var open: Vector[Bool] := make(); push(&!open, true); push(&!open, false); push(&!open, false);
+        var shelf: Vector[Int64] := make(); push(&!shelf, 0); push(&!shelf, 1); push(&!shelf, 2); push(&!shelf, 3);
+        var model: Model := Model(page => 0, clicks => 0, last => 0, ticks => 0, bold => true, italic => false, size => 2, volume => 40, zoom => 1,
+            name => fromLiteral(""), secret => fromLiteral(""), notes => fromLiteral("Notes wrap at the width of the view."),
+            table => listState(), tree => listState(), open => open, basket => make(), shelf => shelf, toolbarShown => true, statusShown => true,
+            question => 0, files => makeFileDialog(dir), status => fromLiteral("Ready"));
+        case opening of
+            when Ok(value as opened: App[Msg]) do
+                var app: App[Msg] := opened;
+                printLn("GALLERY READY");
+                var running: Bool := true;
+                while running do
+                    case next(&!app, view(&model)) of
+                        when Some(value as msg: Msg) do
+                            case msg of when Close do running := false; when Page(index as i: Int64) do skip; when Clicked(which as w: Int64) do skip;
+                                when Tick do skip; when Reset do skip; when ToggleBold do skip; when ToggleItalic do skip; when Size(choice as c: Int64) do skip;
+                                when Volume(value as vv: Int64) do skip; when Zoom(choice as z: Int64) do skip; when NameEdited(edit as e: TextEdit) do skip;
+                                when SecretEdited(edit as e: TextEdit) do skip; when NotesEdited(edit as e: TextEdit) do skip; when Table(state as s: ListState) do skip;
+                                when Tree(state as s: ListState) do skip; when Toggled(index as i: Int64) do skip; when Opened(index as i: Int64) do skip;
+                                when Dropped(drop as d: Drop) do skip; when Remove(item as it: Int64) do skip; when ShowToolbar do skip; when ShowStatus do skip;
+                                when Ask(kind as k: Int64) do skip; when Answer(ok as ok: Bool) do skip; when OpenFile do skip; when SaveFile do skip;
+                                when File(event as fe: FileEvent) do skip;
+                            end case;
+                            model := update(model, msg);
+                        when None do running := false;
+                    end case;
+                end while;
+                closeApp(app);
+            when Err(error as e: IoError) do printLn("GALLERY NO GUI");
+        end case;
+        let { page as pg: Int64, clicks as c: Int64, last as l: Int64, ticks as t: Int64, bold as b: Bool, italic as it: Bool, size as sz: Int64,
+            volume as vol: Int64, zoom as z: Int64, name as n: String, secret as sec: String, notes as nt: String, table as tb: ListState,
+            tree as tr: ListState, open as op: Vector[Bool], basket as bk: Vector[Int64], shelf as sh: Vector[Int64], toolbarShown as ts: Bool,
+            statusShown as ss: Bool, question as q: Int64, files as f: FileDialog, status as st: String } := model;
+        destroyString(n); destroyString(sec); destroyString(nt); destroyString(st); destroyFree(op); destroyFree(bk); destroyFree(sh);
+        closeDir(closeFileDialog(f));
+        releaseFilesystem(fs); releaseGui(gui); surrenderRoot(root);
+        printLn("GALLERY CLOSED");
+        return ExitSuccess();
+    end;
+end module body.

@@ -297,6 +297,23 @@ the same options. QEMU uses PSCI `SYSTEM_OFF` / `SYSTEM_RESET` for these command
 finisher feature is unavailable on QEMU. On a real M1 both only
 flush the disks and halt, because the SMC power interface is not implemented.
 
+## The desktop
+
+`Gui;` switches from the full-screen terminal to the desktop: floating windows,
+a menu bar with the System menu (New Shell, Drawing, Widgets, Files, Top,
+Settings, Cube, Gallery, Terminal) and each window's own menus. Ctrl+Alt+N opens
+a shell window, Ctrl+Alt+Tab cycles focus, Ctrl+Alt+Left/Right/Up tile the
+focused window. Dragging in a shell window selects text and copies it; Ctrl+Alt+V
+pastes the clipboard into a shell, and Ctrl+C/Ctrl+V work in text fields.
+
+- **Files** browses the disk read-only: a sortable, filterable table of the folder
+  with a preview of the selected file (Return or a double click opens).
+- **Top** lists the tasks on every core with their CPU share; Kill asks first.
+- **Settings** switches the display between 1x and 2x and the terminal font
+  between the bitmap font and System Mono.
+- **Gallery** shows every control of OS.Ui, the framework these applications
+  are written with; [ui-framework.md](ui-framework.md) explains how to write one.
+
 ## Warm
 
 Warm is our fork of Austral, a language with linear types and capabilities, meant for safe code such as

@@ -507,11 +507,22 @@ gui-redraw-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN
 
 test: gui-redraw-test
 
-.PHONY: gui-files-test host-scroll-test
+# (gui-files-test profiled the immediate-mode Files; OS.Ui's Files is measured by ui-test U5.)
+.PHONY: host-scroll-test
 host-scroll-test:
 	mkdir -p build
 	clang -Wall -Wextra tools/coolvm/test/scroll-test.c -o build/host-scroll-test
 	build/host-scroll-test
-gui-files-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
-	python3 tools/gui-files-test.py $< $(if $(RUN_VENUS),--venus)
-test: host-scroll-test gui-files-test
+test: host-scroll-test
+
+# OS.Ui declarative framework: gallery/app scenarios, CPU/Venus at 1x/2x (docs/ui-framework.md).
+.PHONY: ui-test
+UI_STAGES ?= U1,U2,U3,U4,U5
+# Order-only: under make -j test, run after every other suite. Its many VM sessions
+# (1x/2x, CPU/Venus) would otherwise starve the timing-sensitive suites running
+# beside them; alone at the end it adds no contention.
+UI_TEST_AFTER := $(if $(filter test,$(MAKECMDGOALS)),$(filter-out ui-test,$(shell sed -n 's/^test: *//p' Makefile | tr ' ' '\n' | grep -v '[$$()]')) \
+    $(if $(RUN_VENUS),gui-cube-test gui-vulkan-test))
+ui-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal) | $(UI_TEST_AFTER)
+	python3 tools/ui-test.py $(word 1,$^) $(if $(RUN_VENUS),--venus) --stage $(UI_STAGES)
+test: ui-test

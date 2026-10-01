@@ -13,9 +13,10 @@ FromCoolcom.txt and Sub/Inner.TXT (os/Kernel/DevTest.cool DevTestFs); afterwards
 mtools must read them back and fsck_msdos must find the volume clean.
 Input: mouse +5,-3, wheel +2, left button down, then the keys
 h x BACKSPACE i LSHIFT+a ENTER, which GetStr turns into "hiA", then the
-SHELL lines (the shell's output is checked by kernel-test.sh). A BREAK entry is
-"wait <the line before>" (coolvm waits for the shell's echo of it), "delay MS",
-then Ctrl+Alt+C, so a slow boot cannot make a break arrive early.
+SHELL lines (the shell's output is checked by kernel-test.sh). Each line is
+followed by "wait <the line>" (coolvm waits for the shell's echo of it), so a
+guest slowed by a loaded host never gets more keys than its input FIFO holds;
+a BREAK entry adds "delay MS" and Ctrl+Alt+C, so a break cannot arrive early.
 Shell UART: a plain shell boot is fed a Korean line (UTF-8, with a Hangul typed and deleted
 by DEL): the screenshot must show it echoed and then printed, as Unifont wide glyphs.
 Screen: rows 0..4 of Unifont text (8x16 cells, wide glyphs two cells, white on
@@ -233,11 +234,13 @@ def prepare(d):
         elif isinstance(line, tuple) and line[0] == "key":
             text += keys_of(line[1])
         elif isinstance(line, tuple):  # Ctrl+Alt+C a delay after the shell echoed the line before
-            text += f"wait {last}\ndelay {line[1]}\n"
+            text += f"delay {line[1]}\n"  # the line before already waited for its echo
             keys = [LCTRL, LALT, KEY_C]
             text += "".join(f"1 {k} 1\n" for k in keys) + "".join(f"1 {k} 0\n" for k in reversed(keys))
         else:
-            text += typed(line)
+            # Each later line waits for the shell's echo of this one, so a guest slowed
+            # by a loaded host is never handed more keys than its input FIFO holds.
+            text += typed(line) + f"wait {line}\n"
             last = line
     (d / "input.txt").write_text(text)
     (d / "shell.in").write_bytes(SHELL_KO_IN)

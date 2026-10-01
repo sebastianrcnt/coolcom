@@ -1,0 +1,1165 @@
+import Standard.Vector (Vector, make as vectorMake, push, pop, get, set, length, slice, destroyFree);
+import Standard.HashMap (HashMap, make as mapMake, get as mapGet, insert as mapInsert, remove as mapRemove, nextKey, destroyFree as mapDestroy);
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import OS.Gui (Rect, Event, Idle, Mouse, Key, Resize, Close, Menu);
+import OS.Ui.Text (TextEdit, Decoded, decode, previous, following, boundary, offsetAt, wordStart, wordEnd, encodedSize, rangeWidth, width as textWidth,
+    Lines, layoutLines, destroyLines, lineTotal, lineStart, lineEnd, lineOf, lineHeight);
+import OS.Ui.Tree (Tree, Node, Geom, Damage, props, geometry, textBytes, textSpan, has, find, hit, visible, enabled,
+    focusable, nextFocus, special, shortcut, topOverlay, within, contains, visibleRect, addDamage, setFull, mix, bits, hashBytes,
+    readVector, maxInt, minInt, clampInt, toInt, toIndex64,
+    kindRoot, kindButton, kindCheckbox, kindRadio, kindSlider, kindTextBox, kindSplit, kindList, kindTable, kindTreeView, kindTextView,
+    kindTimer, kindShortcut, kindMenuItem, kindTabs, kindScroll,
+    flagDisabled, flagDefault, flagCancel, flagFocusable, flagClickFocus, flagSecure,
+    keyCodeMask, keyShift, keyCtrl, keyAlt, keyTab, keyEnter, keyEscape, keyInputLost, keyBackspace, keyDelete,
+    keyLeft, keyRight, keyUp, keyDown, keyHome, keyEnd, keyPageUp, keyPageDown, splitBar,
+    kindListRow, kindHeader, kindCell, listLike, listBody, headerHeight, rowsThatFit, listInset, rowHeight, scrollBarWidth, flagWrap,
+    kindPopup, kindTabPage, kindMenu, flagDraggable, flagDropTarget, flagContext, flagHidden, tabStrip);
+module body OS.Ui.Engine is
+    -- Framework-owned interaction state (focus, the control under the mouse,
+    -- drags, per-node state such as carets and split positions), visual
+    -- hashes, snapshots of what is on screen, and the translation of one input
+    -- event into one action. Pure: tested on the host.
+
+    -- Per-identity framework state; the meaning of a..d depends on the kind
+    -- (text box: caret, anchor, scroll; scroll view: x and y offsets).
+    record Ephemeral: Free is a: Int64; b: Int64; c: Int64; d: Int64; end;
+
+    -- What the mouse is doing.
+    constant dragNone: Int64 := 0;
+    constant dragPress: Int64 := 1;   -- a button-like control is held
+    constant dragSplit: Int64 := 2;   -- a split bar
+    constant dragValue: Int64 := 3;   -- a slider thumb
+    constant dragText: Int64 := 4;    -- selecting text
+    constant dragScroll: Int64 := 5;  -- a scroll bar thumb
+    constant dragItem: Int64 := 6;    -- drag and drop
+    constant dragColumn: Int64 := 7;  -- a table column rule
+
+    record State: Linear is
+        store: HashMap[Nat64, Ephemeral];
+        splits: HashMap[Nat64, Int64];
+        timers: HashMap[Nat64, Int64];
+        focus: Nat64;
+        keyboard: Bool;
+        drag: Int64; target: Nat64; inside: Bool;
+        startX: Int64; startY: Int64; startValue: Int64;
+        mouseX: Int64; mouseY: Int64; buttons: Int64;
+        clickTime: Int64; clickCount: Int64; clickTarget: Nat64;
+        now: Int64;
+        pointer: Int64;
+        popup: Nat64;     -- the pop-up button or context menu whose list is open
+        dropOver: Nat64;  -- the drop target under a dragged item
+    end;
+    function makeState(): State is
+        return State(store => mapMake(), splits => mapMake(), timers => mapMake(), focus => 0, keyboard => false,
+            drag => dragNone, target => 0, inside => false, startX => 0, startY => 0, startValue => 0,
+            mouseX => -1, mouseY => -1, buttons => 0, clickTime => 0, clickCount => 0, clickTarget => 0, now => 0, pointer => 0, popup => 0, dropOver => 0);
+    end;
+    function destroyState(state: State): Unit is
+        let { store as s: HashMap[Nat64, Ephemeral], splits as p: HashMap[Nat64, Int64], timers as t: HashMap[Nat64, Int64],
+            focus as f: Nat64, keyboard as k: Bool, drag as d: Int64, target as g: Nat64, inside as i: Bool,
+            startX as sx: Int64, startY as sy: Int64, startValue as sv: Int64, mouseX as mx: Int64, mouseY as my: Int64,
+            buttons as b: Int64, clickTime as ct: Int64, clickCount as cc: Int64, clickTarget as cg: Nat64, now as n: Int64, pointer as pt: Int64, popup as pu: Nat64, dropOver as dov: Nat64 } := state;
+        mapDestroy(s); mapDestroy(p); mapDestroy(t); return nil;
+    end;
+    generic [K: Free(Eq, Hash), V: Type, R: Region]
+    function readMap(m: &![HashMap[K, V], R]): &[HashMap[K, V], R] is return (m: &[HashMap[K, V], R]); end;
+    generic [R: Region]
+    function readState(s: &![State, R]): &[State, R] is return (s: &[State, R]); end;
+    function ephemeral(state: &[State], ident: Nat64): Ephemeral is
+        case mapGet(&(state->store), ident) of
+            when Some(value as e: Ephemeral) do return e;
+            when None do return Ephemeral(a => 0, b => 0, c => 0, d => 0);
+        end case;
+    end;
+    function setEphemeral(state: &![State], ident: Nat64, e: Ephemeral): Unit is
+        mapInsert(&(state->store), ident, e); return nil;
+    end;
+    generic [R: Region]
+    function splitPositions(state: &[State, R]): &[HashMap[Nat64, Int64], R] is return &(state->splits); end;
+    function focused(state: &[State]): Nat64 is return state->focus; end;
+    function setFocus(state: &![State], ident: Nat64): Unit is state->focus := ident; return nil; end;
+    function setNow(state: &![State], micros: Int64): Unit is state->now := micros; return nil; end;
+    function pointerShape(state: &[State]): Int64 is return state->pointer; end;
+    function current(state: &![State], ident: Nat64): Ephemeral is return ephemeral(readState(&~state), ident); end;
+
+    -- Forget framework state of nodes that are gone and move focus off nodes
+    -- that can no longer take it.
+    generic [R: Region]
+    function prune(state: &![State], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom]): Unit is
+        var gone: Vector[Nat64] := vectorMake();
+        var cursor: Index := 0; var more: Bool := true;
+        while more do
+            case nextKey(readMap(&(state->store)), &!cursor) of
+                when Some(value as k: Nat64) do if find(ps, k) = 0 then push(&!gone, k); end if;
+                when None do more := false;
+            end case;
+        end while;
+        while length(&gone) > 0 do
+            case pop(&!gone) of
+                when Some(value as k: Nat64) do
+                    case mapRemove(&(state->store), k) of when Some(value as e: Ephemeral) do skip; when None do skip; end case;
+                when None do skip;
+            end case;
+        end while;
+        cursor := 0; more := true;
+        while more do
+            case nextKey(readMap(&(state->splits)), &!cursor) of
+                when Some(value as k: Nat64) do if find(ps, k) = 0 then push(&!gone, k); end if;
+                when None do more := false;
+            end case;
+        end while;
+        while length(&gone) > 0 do
+            case pop(&!gone) of
+                when Some(value as k: Nat64) do
+                    case mapRemove(&(state->splits), k) of when Some(value as e: Int64) do skip; when None do skip; end case;
+                when None do skip;
+            end case;
+        end while;
+        destroyFree(gone);
+        let f: Index := find(ps, state->focus);
+        if state->focus /= 0 and (f = 0 or not focusable(ps, f)) then state->focus := 0; end if;
+        if state->drag /= dragNone and find(ps, state->target) = 0 then state->drag := dragNone; state->target := 0; end if;
+        -- Carets and anchors stay inside the text the model now has (it may
+        -- have rejected or changed an edit), at code point boundaries.
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTextBox or ps[i].kind = kindTextView then
+                let e: Ephemeral := current(&~state, ps[i].ident);
+                let t: Span[Nat8, R] := textSpan(all, ps, i);
+                let caret: Int64 := snap(t, e.a); let anchor: Int64 := snap(t, e.b);
+                var scroll: Int64 := 0;
+                if ps[i].kind = kindTextView then
+                    let lines: Lines := linesOf(all, ps, gs, i);
+                    scroll := followLine(&lines, caret, e.c, viewLines(ps, gs, i)); destroyLines(lines);
+                else scroll := visibleScroll(t, ps, gs, i, caret, e.c); end if;
+                if caret /= e.a or anchor /= e.b or scroll /= e.c then
+                    setEphemeral(&~state, ps[i].ident, Ephemeral(a => caret, b => anchor, c => scroll, d => e.d));
+                end if;
+            end if;
+        end for;
+        return nil;
+    end;
+    function snap(t: Span[Nat8], at: Int64): Int64 is
+        if at <= 0 then return 0; end if;
+        let n: Int64 := toInt(spanLength(t));
+        if at >= n then return n; end if;
+        return toInt(boundary(t, toIndex64(at)));
+    end;
+
+    ------------------------------------------------------------------ visuals
+
+    -- Everything that changes how a node is drawn, including framework state.
+    function visualHash(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, state: &[State]): Nat64 is
+        var h: Nat64 := mix(bits(ps[i].kind), bits(ps[i].flags));
+        h := mix(h, bits(ps[i].value)); h := mix(h, bits(ps[i].low)); h := mix(h, bits(ps[i].aux));
+        -- A list's selection is drawn by its rows and cells: moving it repaints two rows,
+        -- not the whole list.
+        if not listLike(ps[i].kind) then h := mix(h, bits(ps[i].high)); end if;
+        if ps[i].kind = kindListRow and ps[ps[i].parent].high = ps[i].value then h := mix(h, 19); end if;
+        if ps[i].kind = kindCell and ps[ps[ps[i].parent].parent].high = ps[ps[i].parent].value then h := mix(h, 19); end if;
+        h := mix(h, bits(gs[i].x)); h := mix(h, bits(gs[i].y)); h := mix(h, bits(gs[i].width)); h := mix(h, bits(gs[i].height));
+        h := mix(h, bits(gs[i].clipX)); h := mix(h, bits(gs[i].clipY)); h := mix(h, bits(gs[i].clipWidth)); h := mix(h, bits(gs[i].clipHeight));
+        h := hashBytes(h, textSpan(all, ps, i));
+        h := hashBytes(h, sliceSpan(all, ps[i].extra, ps[i].extraEnd));
+        if not enabled(ps, i) then h := mix(h, 3); end if;
+        let id: Nat64 := ps[i].ident;
+        if state->focus = id then h := mix(h, 5); if state->keyboard then h := mix(h, 6); end if; end if;
+        if state->target = id and state->drag /= dragNone then h := mix(h, bits(state->drag)); if state->inside then h := mix(h, 11); end if; end if;
+        if state->popup = id then h := mix(h, 13); end if;
+        if state->dropOver = id then h := mix(h, 17); end if;
+        let e: Ephemeral := ephemeral(state, id);
+        h := mix(h, bits(e.a)); h := mix(h, bits(e.b)); h := mix(h, bits(e.c)); h := mix(h, bits(e.d));
+        return h;
+    end;
+
+    -- What is on screen: identities, rectangles and visual hashes.
+    record Snapshot: Linear is idents: Vector[Nat64]; rects: Vector[Rect]; visuals: Vector[Nat64]; valid: Bool; end;
+    function makeSnapshot(): Snapshot is return Snapshot(idents => vectorMake(), rects => vectorMake(), visuals => vectorMake(), valid => false); end;
+    function destroySnapshot(s: Snapshot): Unit is
+        let { idents as i: Vector[Nat64], rects as r: Vector[Rect], visuals as v: Vector[Nat64], valid as ok: Bool } := s;
+        destroyFree(i); destroyFree(r); destroyFree(v); return nil;
+    end;
+    function invalidate(s: &![Snapshot]): Unit is s->valid := false; return nil; end;
+    -- Compute the visual hashes of the current frame, compare them with the
+    -- snapshot, add damage, and replace the snapshot.
+    function compareAndRecord(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &[State], shown: &![Snapshot], d: &![Damage]): Unit is
+        var visuals: Vector[Nat64] := vectorMake();
+        for i from 0 until spanLength(ps) do push(&!visuals, visualHash(all, ps, gs, i, state)); end for;
+        if not shown->valid then setFull(&~d);
+        else
+            let oldCount: Index := length(readVector(&(shown->idents)));
+            let same: Bool := oldCount = spanLength(ps);
+            var oldIndex: HashMap[Nat64, Index] := mapMake();
+            if not same then
+                for o from 1 until oldCount do mapInsert(&!oldIndex, get(readVector(&(shown->idents)), o), o); end for;
+            end if;
+            var newIndex: HashMap[Nat64, Index] := mapMake();
+            if not same then for i from 1 until spanLength(ps) do mapInsert(&!newIndex, ps[i].ident, i); end for; end if;
+            for i from 1 until spanLength(ps) do
+                var o: Index := 0;
+                if same and get(readVector(&(shown->idents)), i) = ps[i].ident then o := i;
+                else case mapGet(&oldIndex, ps[i].ident) of when Some(value as at: Index) do o := at; when None do o := 0; end case; end if;
+                if o = 0 then addDamage(&~d, visibleRect(ps, gs, i));
+                else if get(readVector(&(shown->visuals)), o) /= get(&visuals, i) then
+                    addDamage(&~d, get(readVector(&(shown->rects)), o)); addDamage(&~d, visibleRect(ps, gs, i));
+                end if;
+            end for;
+            for o from 1 until oldCount do
+                var present: Bool := false;
+                let oldIdent: Nat64 := get(readVector(&(shown->idents)), o);
+                if same and ps[o].ident = oldIdent then present := true;
+                else case mapGet(&newIndex, oldIdent) of when Some(value as at: Index) do present := true; when None do present := false; end case; end if;
+                if not present then addDamage(&~d, get(readVector(&(shown->rects)), o)); end if;
+            end for;
+            mapDestroy(oldIndex); mapDestroy(newIndex);
+        end if;
+        while length(readVector(&(shown->idents))) > 0 do pop(&(shown->idents)); pop(&(shown->rects)); pop(&(shown->visuals)); end while;
+        for i from 0 until spanLength(ps) do
+            push(&(shown->idents), ps[i].ident); push(&(shown->rects), visibleRect(ps, gs, i)); push(&(shown->visuals), get(&visuals, i));
+        end for;
+        shown->valid := true;
+        destroyFree(visuals); return nil;
+    end;
+
+    ------------------------------------------------------------------ text boxes
+
+    constant textInset: Int64 := 4;
+    -- Pixel position of a byte offset (password boxes show one bullet per code point).
+    function caretX(t: Span[Nat8], ps: Span[Node], i: Index, at: Int64): Int64 is
+        let stop: Index := toIndex64(clampInt(at, 0, toInt(spanLength(t))));
+        if has(ps[i].flags, flagSecure) then
+            var n: Int64 := 0; var p: Index := 0;
+            while p < stop do p := following(t, p); n := n + 1; end while;
+            return n * 8;
+        end if;
+        return rangeWidth(t, 0, stop);
+    end;
+    -- The byte offset nearest to a pixel position inside the box.
+    function caretAt(t: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, x: Int64, scroll: Int64): Int64 is
+        let local: Int64 := x - gs[i].x - textInset + scroll;
+        if has(ps[i].flags, flagSecure) then
+            var p: Index := 0; var cells: Int64 := 0;
+            while p < spanLength(t) and cells * 8 + 4 <= local do p := following(t, p); cells := cells + 1; end while;
+            return toInt(p);
+        end if;
+        if local <= 0 then return 0; end if;
+        return toInt(offsetAt(t, local));
+    end;
+    -- Horizontal scroll that keeps the caret inside the box.
+    function visibleScroll(t: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, caret: Int64, scroll: Int64): Int64 is
+        let room: Int64 := maxInt(gs[i].width - 2 * textInset - 1, 8);
+        let x: Int64 := caretX(t, ps, i, caret);
+        var s: Int64 := scroll;
+        if x - s > room then s := x - room; end if;
+        if x < s then s := x; end if;
+        let total: Int64 := caretX(t, ps, i, toInt(spanLength(t)));
+        if total - s < room then s := maxInt(total - room, 0); end if;
+        return maxInt(s, 0);
+    end;
+    function textEdit(start: Int64, finish: Int64, codepoint: Int64, paste: Int64): TextEdit is
+        return TextEdit(start => toIndex64(start), finish => toIndex64(finish), codepoint => codepoint, paste => paste);
+    end;
+    -- Fire an edit and place the caret after what it inserts (a paste's
+    -- length is known only to the App, which moves the caret itself).
+    function editAction(state: &![State], ps: Span[Node], i: Index, start: Int64, finish: Int64, codepoint: Int64, paste: Int64, scroll: Int64): Action is
+        var caret: Int64 := start; if codepoint >= 0 then caret := start + toInt(encodedSize(codepoint)); end if;
+        setEphemeral(&~state, ps[i].ident, Ephemeral(a => caret, b => caret, c => scroll, d => 0));
+        return Action(kind => actFire, node => i, value => 0, aux => 0, edit => textEdit(start, finish, codepoint, paste), list => noList());
+    end;
+    -- Move the caret (and the anchor unless extending the selection).
+    function moveCaret(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, caret: Int64, extend: Bool): Action is
+        let e: Ephemeral := current(&~state, ps[i].ident);
+        var anchor: Int64 := caret; if extend then anchor := e.b; end if;
+        var scroll: Int64 := 0;
+        if ps[i].kind = kindTextView then
+            let lines: Lines := linesOf(all, ps, gs, i);
+            scroll := followLine(&lines, caret, e.c, viewLines(ps, gs, i)); destroyLines(lines);
+        else scroll := visibleScroll(textSpan(all, ps, i), ps, gs, i, caret, e.c); end if;
+        if caret = e.a and anchor = e.b and scroll = e.c then return act(actNone); end if;
+        setEphemeral(&~state, ps[i].ident, Ephemeral(a => caret, b => anchor, c => scroll, d => e.d));
+        return act(actRepaint);
+    end;
+    function selectAll(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, n: Int64): Action is
+        let moved: Action := moveCaret(all, ps, gs, &~state, i, n, false);
+        let e: Ephemeral := current(&~state, ps[i].ident);
+        setEphemeral(&~state, ps[i].ident, Ephemeral(a => n, b => 0, c => e.c, d => e.d));
+        return act(actRepaint);
+    end;
+    -- Keys for a focused text box; kind -1 when the key is not consumed.
+    generic [R: Region]
+    function textKey(all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, code: Int64): Action is
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let n: Int64 := toInt(spanLength(t));
+        let e: Ephemeral := current(&~state, ps[i].ident);
+        let caret: Int64 := clampInt(e.a, 0, n); let anchor: Int64 := clampInt(e.b, 0, n);
+        let low: Int64 := minInt(caret, anchor); let high: Int64 := maxInt(caret, anchor);
+        let base: Int64 := code & keyCodeMask;
+        let ctrl: Bool := (code & keyCtrl) /= 0; let shift: Bool := (code & keyShift) /= 0;
+        let secure: Bool := has(ps[i].flags, flagSecure);
+        if ctrl then
+            if base = 97 then
+                return selectAll(all, ps, gs, state, i, n);
+            end if;
+            if base = 99 then
+                if high > low and not secure then return Action(kind => actCopy, node => i, value => low, aux => high, edit => noEdit(), list => noList()); end if;
+                return act(actNone);
+            end if;
+            if base = 120 then
+                if high > low and not secure then
+                    let a: Action := editAction(&~state, ps, i, low, high, -1, 0, e.c);
+                    return Action(kind => actFire, node => i, value => 0, aux => 1, edit => a.edit, list => noList());
+                end if;
+                return act(actNone);
+            end if;
+            if base = 118 then return editAction(&~state, ps, i, low, high, -1, -1, e.c); end if;
+            if base = keyLeft then
+                var p: Int64 := caret; if p > 0 then p := toInt(wordStart(t, toIndex64(p))); end if;
+                return moveCaret(all, ps, gs, &~state, i, p, shift);
+            end if;
+            if base = keyRight then return moveCaret(all, ps, gs, &~state, i, toInt(wordEnd(t, toIndex64(caret))), shift); end if;
+            return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
+        end if;
+        if (code & keyAlt) /= 0 then return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end if;
+        if base = keyBackspace then
+            if high > low then return editAction(&~state, ps, i, low, high, -1, 0, e.c); end if;
+            if caret > 0 then return editAction(&~state, ps, i, toInt(previous(t, toIndex64(caret))), caret, -1, 0, e.c); end if;
+            return act(actNone);
+        end if;
+        if base = keyDelete then
+            if high > low then return editAction(&~state, ps, i, low, high, -1, 0, e.c); end if;
+            if caret < n then return editAction(&~state, ps, i, caret, toInt(following(t, toIndex64(caret))), -1, 0, e.c); end if;
+            return act(actNone);
+        end if;
+        if base = keyLeft then
+            if high > low and not shift then return moveCaret(all, ps, gs, &~state, i, low, false); end if;
+            return moveCaret(all, ps, gs, &~state, i, toInt(previous(t, toIndex64(caret))), shift);
+        end if;
+        if base = keyRight then
+            if high > low and not shift then return moveCaret(all, ps, gs, &~state, i, high, false); end if;
+            return moveCaret(all, ps, gs, &~state, i, toInt(following(t, toIndex64(caret))), shift);
+        end if;
+        if base = keyHome or base = keyUp then return moveCaret(all, ps, gs, &~state, i, 0, shift); end if;
+        if base = keyEnd or base = keyDown then return moveCaret(all, ps, gs, &~state, i, n, shift); end if;
+        if base >= 32 and base < 1114112 and base /= 127 then return editAction(&~state, ps, i, low, high, base, 0, e.c); end if;
+        return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
+    end;
+
+    ------------------------------------------------------------------ sliders
+
+    -- The slider track runs between the thumb's half widths.
+    constant thumbWidth: Int64 := 11;
+    function sliderValueAt(ps: Span[Node], gs: Span[Geom], i: Index, x: Int64): Int64 is
+        let low: Int64 := ps[i].low; let high: Int64 := ps[i].high;
+        let track: Int64 := maxInt(gs[i].width - thumbWidth, 1);
+        let local: Int64 := clampInt(x - gs[i].x - thumbWidth / 2, 0, track);
+        return stepped(ps, i, low + (high - low) * local / track + 0);
+    end;
+    function sliderThumbX(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        let low: Int64 := ps[i].low; let high: Int64 := ps[i].high;
+        let track: Int64 := maxInt(gs[i].width - thumbWidth, 1);
+        if high <= low then return gs[i].x; end if;
+        return gs[i].x + (clampInt(ps[i].value, low, high) - low) * track / (high - low);
+    end;
+    -- Round to the step (aux) and clamp to the range.
+    function stepped(ps: Span[Node], i: Index, v: Int64): Int64 is
+        let low: Int64 := ps[i].low; let high: Int64 := ps[i].high; let step: Int64 := maxInt(ps[i].aux, 1);
+        var r: Int64 := clampInt(v, low, high);
+        r := low + (r - low + step / 2) / step * step;
+        return clampInt(r, low, high);
+    end;
+    function setSlider(ps: Span[Node], i: Index, v: Int64): Action is
+        let nv: Int64 := stepped(ps, i, v);
+        if nv = ps[i].value then return act(actNone); end if;
+        return fire(i, nv);
+    end;
+    function sliderKey(ps: Span[Node], i: Index, code: Int64): Action is
+        let base: Int64 := code & keyCodeMask; let step: Int64 := maxInt(ps[i].aux, 1);
+        let page: Int64 := maxInt((ps[i].high - ps[i].low) / 10, step);
+        if base = keyLeft or base = keyDown then return setSlider(ps, i, ps[i].value - step); end if;
+        if base = keyRight or base = keyUp then return setSlider(ps, i, ps[i].value + step); end if;
+        if base = keyPageDown then return setSlider(ps, i, ps[i].value - page); end if;
+        if base = keyPageUp then return setSlider(ps, i, ps[i].value + page); end if;
+        if base = keyHome then return setSlider(ps, i, ps[i].low); end if;
+        if base = keyEnd then return setSlider(ps, i, ps[i].high); end if;
+        return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
+    end;
+
+    ------------------------------------------------------------------ lists
+
+    function fire2(i: Index, value: Int64): Action is
+        return Action(kind => actFire2, node => i, value => value, aux => 0, edit => noEdit(), list => noList());
+    end;
+    -- The row node showing index (0 if it is not emitted).
+    function rowNode(ps: Span[Node], i: Index, index: Int64): Index is
+        var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindListRow and ps[c].value = index then return c; end if; c := ps[c].next; end while;
+        return 0;
+    end;
+    function treeToggle(ps: Span[Node], i: Index, index: Int64, wantOpen: Int64): Action is
+        let r: Index := rowNode(ps, i, index);
+        if r = 0 or (ps[r].high & 1) = 0 or ps[i].handler2 < 0 then return act(actNone); end if;
+        let open: Bool := (ps[r].high & 2) /= 0;
+        if wantOpen = 1 and open then return act(actNone); end if;
+        if wantOpen = 0 and not open then return act(actNone); end if;
+        return fire2(i, index);
+    end;
+    function listKey(ps: Span[Node], gs: Span[Geom], i: Index, code: Int64): Action is
+        let base: Int64 := code & keyCodeMask; let sel: Int64 := ps[i].high;
+        let full: Int64 := fullRows(ps, gs, i);
+        if base = keyUp then if sel < 0 then return withSelection(ps, gs, i, 0); end if; return withSelection(ps, gs, i, sel - 1); end if;
+        if base = keyDown then return withSelection(ps, gs, i, sel + 1); end if;
+        if base = keyPageUp then return withSelection(ps, gs, i, maxInt(sel, 0) - full); end if;
+        if base = keyPageDown then return withSelection(ps, gs, i, maxInt(sel, 0) + full); end if;
+        if base = keyHome then return withSelection(ps, gs, i, 0); end if;
+        if base = keyEnd then return withSelection(ps, gs, i, ps[i].low - 1); end if;
+        if ps[i].kind = kindTreeView and base = keyRight then return treeToggle(ps, i, sel, 1); end if;
+        if ps[i].kind = kindTreeView and base = keyLeft then return treeToggle(ps, i, sel, 0); end if;
+        if base = keyEnter and sel >= 0 and ps[i].handler2 >= 0 then
+            if ps[i].kind = kindTreeView then return treeToggle(ps, i, sel, -1); end if;
+            return fire2(i, sel);
+        end if;
+        return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
+    end;
+    -- The nearest list, scroll view or text view containing a node (for the wheel).
+    function scrollable(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do
+            let k: Int64 := ps[p].kind;
+            if listLike(k) or k = kindScroll or k = kindTextView then return p; end if;
+            p := ps[p].parent;
+        end while;
+        return 0;
+    end;
+    function wheelOn(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, wheel: Int64): Action is
+        let k: Int64 := ps[i].kind;
+        if listLike(k) then return withFirst(ps, gs, i, ps[i].value - 3 * wheel); end if;
+        if k = kindScroll then
+            let offset: Int64 := scrollOffset(&~state, ps[i].ident);
+            return scrollTo(ps, gs, &~state, i, offset - 3 * rowHeight * wheel);
+        end if;
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines)); destroyLines(lines);
+        let e: Ephemeral := current(&~state, ps[i].ident);
+        let first: Int64 := clampInt(e.c - 3 * wheel, 0, maxInt(total - viewLines(ps, gs, i), 0));
+        if first = e.c then return act(actNone); end if;
+        setEphemeral(&~state, ps[i].ident, Ephemeral(a => e.a, b => e.b, c => first, d => e.d));
+        return act(actRepaint);
+    end;
+    -- Scroll a list, scroll view or text view to a bar position.
+    function barTo(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, position: Int64): Action is
+        let k: Int64 := ps[i].kind;
+        if listLike(k) then return withFirst(ps, gs, i, position); end if;
+        if k = kindScroll then return scrollTo(ps, gs, &~state, i, position); end if;
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines)); destroyLines(lines);
+        let e: Ephemeral := current(&~state, ps[i].ident);
+        let first: Int64 := clampInt(position, 0, maxInt(total - viewLines(ps, gs, i), 0));
+        if first = e.c then return act(actNone); end if;
+        setEphemeral(&~state, ps[i].ident, Ephemeral(a => e.a, b => e.b, c => first, d => e.d));
+        return act(actRepaint);
+    end;
+    function barPosition(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index): Int64 is
+        let k: Int64 := ps[i].kind;
+        if listLike(k) then return ps[i].value; end if;
+        if k = kindScroll then return scrollOffset(&~state, ps[i].ident); end if;
+        return current(&~state, ps[i].ident).c;
+    end;
+    function barMaximum(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index): Int64 is
+        let k: Int64 := ps[i].kind;
+        if listLike(k) then return maxInt(ps[i].low - fullRows(ps, gs, i), 0); end if;
+        if k = kindScroll then return scrollMaximum(ps, gs, i); end if;
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines)); destroyLines(lines);
+        return maxInt(total - viewLines(ps, gs, i), 0);
+    end;
+    function lineCountOf(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        if ps[i].kind /= kindTextView then return 0; end if;
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines)); destroyLines(lines);
+        return total;
+    end;
+    -- A press inside a list, table or tree: header sort/resize, a row, a triangle.
+    function listPress(ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, x: Int64, y: Int64): Action is
+        let area: Rect := listBody(ps, gs, i);
+        if y < area.y then
+            -- Header: a rule within three pixels resizes, elsewhere sorts.
+            var c: Index := ps[i].first; var column: Int64 := 0;
+            while c /= 0 do
+                if ps[c].kind = kindHeader then
+                    let right: Int64 := gs[c].x + gs[c].width;
+                    if x >= right - 3 and x < right + 3 and ps[c].next /= 0 and ps[ps[c].next].kind = kindHeader then
+                        state->drag := dragColumn; state->target := ps[c].ident; state->startX := gs[c].x; state->inside := true;
+                        return act(actNone);
+                    end if;
+                    if x >= gs[c].x and x < right and ps[c].low /= 0 then
+                        let old: ListState := listState(ps, i);
+                        var descending: Bool := false; if old.sort = column then descending := not old.descending; end if;
+                        return stateAction(i, ListState(first => 0, selected => old.selected, fit => rowsThatFit(ps, gs, i), sort => column, descending => descending));
+                    end if;
+                    column := column + 1;
+                end if;
+                c := ps[c].next;
+            end while;
+            return act(actNone);
+        end if;
+        if x >= area.x + area.width or y >= area.y + area.height then return act(actNone); end if;
+        let index: Int64 := ps[i].value + (y - area.y) / rowHeight;
+        if index >= ps[i].low then return act(actNone); end if;
+        -- A tree's disclosure triangle toggles without selecting.
+        if ps[i].kind = kindTreeView then
+            let r: Index := rowNode(ps, i, index);
+            if r /= 0 and (ps[r].high & 1) /= 0 then
+                let tx: Int64 := area.x + 2 + ps[r].low * 16;
+                if x >= tx and x < tx + 16 and ps[i].handler2 >= 0 then return fire2(i, index); end if;
+            end if;
+        end if;
+        if state->clickTarget = ps[i].ident and state->now - state->clickTime < 400000 and state->clickCount = 1 and ps[i].high = index then
+            state->clickCount := 2; state->clickTime := state->now;
+            if ps[i].handler2 >= 0 then return fire2(i, index); end if;
+            return act(actNone);
+        end if;
+        state->clickCount := 1; state->clickTime := state->now; state->clickTarget := ps[i].ident;
+        let a: Action := withSelection(ps, gs, i, index);
+        if a.kind = actNone then return act(actRepaint); end if;
+        return a;
+    end;
+
+    ------------------------------------------------------------------ menus, tabs, drag and drop
+
+    -- A pop-up button or context menu opens its list (the App asks the kernel).
+    function popupAction(ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, x: Int64, y: Int64): Action is
+        state->popup := ps[i].ident;
+        return Action(kind => actPopup, node => i, value => x, aux => y, edit => noEdit(), list => noList());
+    end;
+    -- The context menu of a node: a context kindMenu child of it or of an ancestor.
+    function contextMenu(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do
+            var c: Index := ps[p].first;
+            while c /= 0 do
+                if ps[c].kind = kindMenu and has(ps[c].flags, flagContext) then return c; end if;
+                c := ps[c].next;
+            end while;
+            p := ps[p].parent;
+        end while;
+        return 0;
+    end;
+    -- The tab under x in a tab strip (-1 none), counting hidden pages too.
+    function tabAt(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], i: Index, x: Int64): Int64 is
+        var tx: Int64 := gs[i].x + 4; var c: Index := ps[i].first; var index: Int64 := 0;
+        while c /= 0 do
+            if ps[c].kind = kindTabPage then
+                let w: Int64 := textWidth(sliceSpan(all, ps[c].text, ps[c].textEnd)) + 20;
+                if x >= tx and x < tx + w then return index; end if;
+                tx := tx + w; index := index + 1;
+            end if;
+            c := ps[c].next;
+        end while;
+        return -1;
+    end;
+    function tabCount(ps: Span[Node], i: Index): Int64 is
+        var n: Int64 := 0; var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindTabPage then n := n + 1; end if; c := ps[c].next; end while;
+        return n;
+    end;
+    function draggableAt(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do if has(ps[p].flags, flagDraggable) and enabled(ps, p) then return p; end if; p := ps[p].parent; end while;
+        return 0;
+    end;
+    function dropTargetAt(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do if has(ps[p].flags, flagDropTarget) and enabled(ps, p) then return p; end if; p := ps[p].parent; end while;
+        return 0;
+    end;
+    -- A drop: the target's handler with the dragged payload and the pointer relative to the target.
+    function dropAction(ps: Span[Node], gs: Span[Geom], target: Index, payload: Int64, x: Int64, y: Int64): Action is
+        let lx: Int64 := clampInt(x - gs[target].x, 0, 65535); let ly: Int64 := clampInt(y - gs[target].y, 0, 65535);
+        return Action(kind => actFire, node => target, value => payload, aux => lx * 65536 + ly, edit => noEdit(), list => noList());
+    end;
+
+    ------------------------------------------------------------------ input
+
+    constant actNone: Int64 := 0;      -- nothing changed
+    constant actRepaint: Int64 := 1;   -- framework state changed: compare and repaint
+    constant actRelayout: Int64 := 2;  -- geometry changed (split moved, resize)
+    constant actFire: Int64 := 3;      -- the node's first handler, with value / edit
+    constant actFire2: Int64 := 4;     -- the node's second handler
+    constant actClose: Int64 := 5;     -- the window was closed
+    constant actResize: Int64 := 6;    -- new window size in value (width) and aux (height)
+    constant actMenu: Int64 := 7;      -- a kernel menu item id in value
+    constant actCopy: Int64 := 8;      -- copy bytes [value, aux) of the node's text
+    constant actPopup: Int64 := 9;     -- open the list of a pop-up button / context menu at (value, aux)
+
+    -- The model's view of a list, table or tree: first visible row, selected
+    -- row (-1: none), rows that fit, sort column (-1: none) and direction.
+    record ListState: Free is first: Int64; selected: Int64; fit: Int64; sort: Int64; descending: Bool; end;
+    record Action: Free is kind: Int64; node: Index; value: Int64; aux: Int64; edit: TextEdit; list: ListState; end;
+    function noList(): ListState is return ListState(first => 0, selected => -1, fit => 0, sort => -1, descending => false); end;
+    -- A list node carries its state: value first, high selected, fit, aux sort (column * 2 + descending).
+    function listState(ps: Span[Node], i: Index): ListState is
+        var sort: Int64 := -1; var descending: Bool := false;
+        if ps[i].aux >= 0 then sort := ps[i].aux / 2; descending := ps[i].aux % 2 = 1; end if;
+        return ListState(first => ps[i].value, selected => ps[i].high, fit => ps[i].fit, sort => sort, descending => descending);
+    end;
+    function stateAction(i: Index, state: ListState): Action is
+        return Action(kind => actFire, node => i, value => 0, aux => 0, edit => noEdit(), list => state);
+    end;
+    -- Keep first within the rows, and the selection visible when asked.
+    function clampFirst(ps: Span[Node], i: Index, first: Int64, fit: Int64): Int64 is
+        return clampInt(first, 0, maxInt(ps[i].low - fit, 0));
+    end;
+    function withFirst(ps: Span[Node], gs: Span[Geom], i: Index, first: Int64): Action is
+        let fit: Int64 := rowsThatFit(ps, gs, i);
+        let old: ListState := listState(ps, i);
+        let f: Int64 := clampFirst(ps, i, first, fullRows(ps, gs, i));
+        if f = old.first and fit = old.fit then return act(actNone); end if;
+        return stateAction(i, ListState(first => f, selected => old.selected, fit => fit, sort => old.sort, descending => old.descending));
+    end;
+    function fullRows(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        return maxInt(listBody(ps, gs, i).height / rowHeight, 1);
+    end;
+    function withSelection(ps: Span[Node], gs: Span[Geom], i: Index, selected: Int64): Action is
+        let old: ListState := listState(ps, i);
+        let fit: Int64 := rowsThatFit(ps, gs, i);
+        let full: Int64 := fullRows(ps, gs, i);
+        if ps[i].low <= 0 then return act(actNone); end if;
+        let sel: Int64 := clampInt(selected, 0, ps[i].low - 1);
+        var first: Int64 := old.first;
+        if sel < first then first := sel; end if;
+        if sel >= first + full then first := sel - full + 1; end if;
+        first := clampFirst(ps, i, first, full);
+        if sel = old.selected and first = old.first then return act(actNone); end if;
+        return stateAction(i, ListState(first => first, selected => sel, fit => fit, sort => old.sort, descending => old.descending));
+    end;
+    -- A list whose emitted state does not match its layout (rows that fit, or
+    -- first beyond the end) gets a corrected state before it is painted; at
+    -- most once per size, so a view that ignores fit cannot loop.
+    function listFix(ps: Span[Node], gs: Span[Geom], state: &![State]): Action is
+        for i from 1 until spanLength(ps) do
+            if listLike(ps[i].kind) and ps[i].handler >= 0 and visible(ps, i) then
+                let fit: Int64 := rowsThatFit(ps, gs, i);
+                let first: Int64 := clampFirst(ps, i, ps[i].value, fullRows(ps, gs, i));
+                let e: Ephemeral := current(&~state, ps[i].ident);
+                if (fit /= ps[i].fit or first /= ps[i].value) and e.d /= fit * 1000003 + first + 1 then
+                    setEphemeral(&~state, ps[i].ident, Ephemeral(a => e.a, b => e.b, c => e.c, d => fit * 1000003 + first + 1));
+                    let old: ListState := listState(ps, i);
+                    return stateAction(i, ListState(first => first, selected => old.selected, fit => fit, sort => old.sort, descending => old.descending));
+                end if;
+            end if;
+        end for;
+        return act(actNone);
+    end;
+
+    ------------------------------------------------------------------ scroll bars
+
+    -- Classic scroll bar: arrow boxes at both ends, a gray track and a square
+    -- thumb whose position shows the fraction scrolled.
+    record Bar: Free is x: Int64; y: Int64; length: Int64; thumb: Int64; active: Bool; end;
+    function scrollBar(x: Int64, y: Int64, extent: Int64, position: Int64, maximum: Int64): Bar is
+        let track: Int64 := maxInt(extent - 3 * scrollBarWidth, 0);
+        var thumb: Int64 := y + scrollBarWidth;
+        if maximum > 0 then thumb := thumb + clampInt(position, 0, maximum) * track / maximum; end if;
+        return Bar(x => x, y => y, length => extent, thumb => thumb, active => maximum > 0 and track > 0);
+    end;
+    -- The scroll bar of a list, scroll view or text view.
+    function barOf(ps: Span[Node], gs: Span[Geom], i: Index, state: &[State], textLines: Int64): Bar is
+        if listLike(ps[i].kind) then
+            let area: Rect := listBody(ps, gs, i);
+            return scrollBar(area.x + area.width, area.y, area.height, ps[i].value, maxInt(ps[i].low - fullRows(ps, gs, i), 0));
+        end if;
+        let e: Ephemeral := ephemeral(state, ps[i].ident);
+        if ps[i].kind = kindTextView then
+            let visibleLines: Int64 := maxInt((gs[i].height - 2 * listInset) / lineHeight, 1);
+            return scrollBar(gs[i].x + gs[i].width - listInset - scrollBarWidth, gs[i].y + listInset, gs[i].height - 2 * listInset,
+                e.c, maxInt(textLines - visibleLines, 0));
+        end if;
+        -- Scroll view: offsets in pixels.
+        let content: Index := ps[i].first;
+        let viewport: Int64 := maxInt(gs[i].height - 2, 0);
+        var offset: Int64 := 0;
+        case mapGet(&(state->splits), ps[i].ident) of when Some(value as kept: Int64) do offset := kept; when None do skip; end case;
+        var full: Int64 := viewport; if content /= 0 then full := maxInt(gs[content].height, viewport); end if;
+        return scrollBar(gs[i].x + gs[i].width - 1 - scrollBarWidth, gs[i].y + 1, gs[i].height - 2, offset, maxInt(full - viewport, 0));
+    end;
+    -- What a press at y on a bar means: -2 page up, -1 line up, 1 line down, 2 page down, 0 thumb.
+    function barPart(b: Bar, y: Int64): Int64 is
+        if y < b.y + scrollBarWidth then return -1; end if;
+        if y >= b.y + b.length - scrollBarWidth then return 1; end if;
+        if not b.active then return 0; end if;
+        if y < b.thumb then return -2; end if;
+        if y >= b.thumb + scrollBarWidth then return 2; end if;
+        return 0;
+    end;
+    -- Position for a thumb dragged to y (grab: pointer offset inside the thumb).
+    function barValue(b: Bar, y: Int64, grab: Int64, maximum: Int64): Int64 is
+        let track: Int64 := maxInt(b.length - 3 * scrollBarWidth, 1);
+        return clampInt((y - grab - b.y - scrollBarWidth) * maximum / track, 0, maximum);
+    end;
+    function onBar(b: Bar, x: Int64, y: Int64): Bool is
+        return x >= b.x and x < b.x + scrollBarWidth and y >= b.y and y < b.y + b.length;
+    end;
+
+    ------------------------------------------------------------------ scroll views and text views
+
+    function scrollOffset(state: &![State], ident: Nat64): Int64 is
+        case mapGet(readMap(&(state->splits)), ident) of when Some(value as kept: Int64) do return kept; when None do return 0; end case;
+    end;
+    function scrollMaximum(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        let content: Index := ps[i].first;
+        let viewport: Int64 := maxInt(gs[i].height - 2, 0);
+        if content = 0 then return 0; end if;
+        return maxInt(gs[content].height - viewport, 0);
+    end;
+    function scrollTo(ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, offset: Int64): Action is
+        let o: Int64 := clampInt(offset, 0, scrollMaximum(ps, gs, i));
+        if o = scrollOffset(&~state, ps[i].ident) then return act(actNone); end if;
+        mapInsert(&(state->splits), ps[i].ident, o);
+        return act(actRelayout);
+    end;
+    -- Text view geometry: lines of the text inside the frame and scroll bar.
+    function viewWidth(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        return maxInt(gs[i].width - 2 * listInset - scrollBarWidth - 2 * textInset, 8);
+    end;
+    function viewLines(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        return maxInt((gs[i].height - 2 * listInset) / lineHeight, 1);
+    end;
+    generic [R: Region]
+    function linesOf(all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index): Lines is
+        return layoutLines(textSpan(all, ps, i), viewWidth(ps, gs, i), has(ps[i].flags, flagWrap));
+    end;
+    -- First visible line that keeps the caret's line on screen.
+    function followLine(lines: &[Lines], caret: Int64, first: Int64, shown: Int64): Int64 is
+        let k: Int64 := toInt(lineOf(lines, toIndex64(maxInt(caret, 0))));
+        var f: Int64 := first;
+        if k < f then f := k; end if;
+        if k >= f + shown then f := k - shown + 1; end if;
+        return clampInt(f, 0, maxInt(toInt(lineTotal(lines)) - shown, 0));
+    end;
+    -- The byte offset under a point in a text view.
+    generic [R: Region]
+    function viewCaretAt(all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, lines: &[Lines], x: Int64, y: Int64, first: Int64, shift: Int64): Int64 is
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let k: Int64 := clampInt(first + (y - gs[i].y - listInset) / lineHeight, 0, toInt(lineTotal(lines)) - 1);
+        let start: Index := lineStart(lines, toIndex64(k)); let stop: Index := lineEnd(lines, toIndex64(k));
+        let local: Int64 := x - gs[i].x - listInset - textInset + shift;
+        if local <= 0 then return toInt(start); end if;
+        return toInt(start + offsetAt(sliceSpan(t, start, stop), local));
+    end;
+    -- Text view keys beyond the text box set: lines, pages, Return; -1 when not consumed.
+    generic [R: Region]
+    function viewKey(all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], state: &![State], i: Index, code: Int64): Action is
+        let base: Int64 := code & keyCodeMask; let shift: Bool := (code & keyShift) /= 0;
+        if (code & (keyCtrl | keyAlt)) /= 0 then return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end if;
+        let e: Ephemeral := current(&~state, ps[i].ident);
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        if base = keyEnter then
+            let low: Int64 := minInt(e.a, e.b); let high: Int64 := maxInt(e.a, e.b);
+            return editAction(&~state, ps, i, low, high, 10, 0, e.c);
+        end if;
+        if not (base = keyUp or base = keyDown or base = keyPageUp or base = keyPageDown or base = keyHome or base = keyEnd) then
+            return Action(kind => -1, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList());
+        end if;
+        let lines: Lines := linesOf(all, ps, gs, i);
+        let shown: Int64 := viewLines(ps, gs, i);
+        let total: Int64 := toInt(lineTotal(&lines));
+        let k: Int64 := toInt(lineOf(&lines, toIndex64(clampInt(e.a, 0, toInt(spanLength(t))))));
+        let start: Index := lineStart(&lines, toIndex64(k));
+        let x: Int64 := rangeWidth(t, start, toIndex64(clampInt(e.a, toInt(start), toInt(spanLength(t)))));
+        var target: Int64 := k;
+        if base = keyUp then target := k - 1; else if base = keyDown then target := k + 1;
+        else if base = keyPageUp then target := k - shown; else if base = keyPageDown then target := k + shown; end if;
+        var caret: Int64 := e.a;
+        if base = keyHome then caret := toInt(start);
+        else if base = keyEnd then caret := toInt(lineEnd(&lines, toIndex64(k)));
+        else
+            target := clampInt(target, 0, total - 1);
+            let ts: Index := lineStart(&lines, toIndex64(target)); let te: Index := lineEnd(&lines, toIndex64(target));
+            caret := toInt(ts + offsetAt(sliceSpan(t, ts, te), x));
+            if base = keyUp and k = 0 then caret := 0; end if;
+            if base = keyDown and k = total - 1 then caret := toInt(spanLength(t)); end if;
+        end if;
+        var anchor: Int64 := caret; if shift then anchor := e.b; end if;
+        let first: Int64 := followLine(&lines, caret, e.c, shown);
+        destroyLines(lines);
+        if caret = e.a and anchor = e.b and first = e.c then return act(actNone); end if;
+        setEphemeral(&~state, ps[i].ident, Ephemeral(a => caret, b => anchor, c => first, d => e.d));
+        return act(actRepaint);
+    end;
+
+    ------------------------------------------------------------------ input
+
+    function noEdit(): TextEdit is return TextEdit(start => 0, finish => 0, codepoint => -1, paste => 0); end;
+    function act(kind: Int64): Action is return Action(kind => kind, node => 0, value => 0, aux => 0, edit => noEdit(), list => noList()); end;
+    function fire(node: Index, value: Int64): Action is return Action(kind => actFire, node => node, value => value, aux => 0, edit => noEdit(), list => noList()); end;
+
+    -- Kinds that react to a click and a release inside (classic tracking).
+    function pressable(kind: Int64): Bool is return kind = kindButton or kind = kindCheckbox or kind = kindRadio; end;
+    -- The nearest enabled ancestor-or-self that handles the mouse.
+    function interactive(ps: Span[Node], i: Index): Index is
+        var p: Index := i;
+        while p /= 0 do
+            let k: Int64 := ps[p].kind;
+            if pressable(k) or k = kindSlider or k = kindTextBox or k = kindSplit or k = kindList or k = kindTable or k = kindPopup
+                or k = kindTreeView or k = kindTextView or k = kindTabs or k = kindScroll then
+                if enabled(ps, p) then return p; end if; return 0;
+            end if;
+            p := ps[p].parent;
+        end while;
+        return 0;
+    end;
+    -- The split whose bar is under the point, if any.
+    function splitAt(ps: Span[Node], gs: Span[Geom], x: Int64, y: Int64): Index is
+        var found: Index := 0;
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindSplit and visible(ps, i) and contains(gs, i, x, y) then
+                let first: Index := ps[i].first;
+                if first /= 0 then
+                    if ps[i].value = 0 and x >= gs[first].x + gs[first].width and x < gs[first].x + gs[first].width + splitBar then found := i; end if;
+                    if ps[i].value /= 0 and y >= gs[first].y + gs[first].height and y < gs[first].y + gs[first].height + splitBar then found := i; end if;
+                end if;
+            end if;
+        end for;
+        return found;
+    end;
+    -- Handle one input event against the current laid-out tree.
+    function handle(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], event: Event): Action is
+        case event of
+            when Idle do return act(actNone);
+            when Close do return act(actClose);
+            when Menu(id as id: Int64) do return Action(kind => actMenu, node => 0, value => id, aux => 0, edit => noEdit(), list => noList());
+            when Resize(width as w: Int64, height as h: Int64) do return Action(kind => actResize, node => 0, value => w, aux => h, edit => noEdit(), list => noList());
+            when Key(code as code: Int64) do return key(all, ps, gs, state, code);
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                return mouse(all, ps, gs, state, x, y, buttons, wheel);
+        end case;
+    end;
+    generic [R: Region]
+    function mouse(all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], state: &![State], x: Int64, y: Int64, buttons: Int64, wheel: Int64): Action is
+        let held: Int64 := state->buttons;
+        state->buttons := buttons; state->mouseX := x; state->mouseY := y;
+        let down: Bool := (buttons & 1) /= 0 and (held & 1) = 0;
+        let up: Bool := (buttons & 1) = 0 and (held & 1) /= 0;
+        if buttons = 0 and state->drag = dragNone then
+            -- Hover: the I-beam over editable text.
+            let over: Index := interactive(ps, hit(ps, gs, x, y));
+            var shape: Int64 := 0; if over /= 0 and (ps[over].kind = kindTextBox or ps[over].kind = kindTextView) then shape := 1; end if;
+            state->pointer := shape;
+        end if;
+        if wheel /= 0 and state->drag = dragNone then
+            let target: Index := scrollable(ps, hit(ps, gs, x, y));
+            if target /= 0 and enabled(ps, target) then return wheelOn(all, ps, gs, &~state, target, wheel); end if;
+        end if;
+        let rightDown: Bool := (buttons & 2) /= 0 and (held & 2) = 0;
+        if rightDown and state->drag = dragNone then
+            let menu: Index := contextMenu(ps, hit(ps, gs, x, y));
+            if menu /= 0 and enabled(ps, menu) and ps[menu].first /= 0 then return popupAction(ps, gs, &~state, menu, x, y); end if;
+        end if;
+        if down then
+            -- Scroll bars of lists, scroll views and text views.
+            let over: Index := scrollable(ps, hit(ps, gs, x, y));
+            if over /= 0 and enabled(ps, over) then
+                let b: Bar := barOf(ps, gs, over, readState(&~state), lineCountOf(all, ps, gs, over));
+                if onBar(b, x, y) then
+                    let part: Int64 := barPart(b, y);
+                    let position: Int64 := barPosition(all, ps, gs, &~state, over);
+                    var step: Int64 := 1; var page: Int64 := 10;
+                    if listLike(ps[over].kind) then page := fullRows(ps, gs, over); end if;
+                    if ps[over].kind = kindScroll then step := rowHeight; page := maxInt(gs[over].height - rowHeight, rowHeight); end if;
+                    if ps[over].kind = kindTextView then page := viewLines(ps, gs, over); end if;
+                    if part = 0 then
+                        if not b.active then return act(actNone); end if;
+                        state->drag := dragScroll; state->target := ps[over].ident; state->startY := y - b.thumb; state->inside := true;
+                        return act(actRepaint);
+                    end if;
+                    if part = -1 then return barTo(all, ps, gs, &~state, over, position - step); end if;
+                    if part = 1 then return barTo(all, ps, gs, &~state, over, position + step); end if;
+                    if part = -2 then return barTo(all, ps, gs, &~state, over, position - page); end if;
+                    return barTo(all, ps, gs, &~state, over, position + page);
+                end if;
+            end if;
+            let s: Index := splitAt(ps, gs, x, y);
+            if s /= 0 then
+                state->drag := dragSplit; state->target := ps[s].ident; state->inside := true;
+                let first: Index := ps[s].first;
+                if ps[s].value = 0 then state->startValue := gs[first].width - x; else state->startValue := gs[first].height - y; end if;
+                return act(actRepaint);
+            end if;
+            let h: Index := hit(ps, gs, x, y);
+            let target: Index := interactive(ps, h);
+            -- Drag and drop starts on a draggable node that is not a control (it may sit
+            -- inside one, such as a tab page or a scroll view).
+            if draggableAt(ps, h) /= 0 and (target = 0 or (draggableAt(ps, h) /= target and within(ps, draggableAt(ps, h), target))) then
+                let d: Index := draggableAt(ps, h);
+                state->drag := dragItem; state->target := ps[d].ident; state->inside := false;
+                state->startX := x; state->startY := y; state->dropOver := 0;
+                return act(actNone);
+            end if;
+            if target = 0 then return act(actNone); end if;
+            if ps[target].kind = kindPopup then return popupAction(ps, gs, &~state, target, gs[target].x, gs[target].y); end if;
+            if ps[target].kind = kindTabs then
+                if y < gs[target].y + tabStrip then
+                    let index: Int64 := tabAt(all, ps, gs, target, x);
+                    if index >= 0 and index /= ps[target].value then return fire(target, index); end if;
+                end if;
+                if has(ps[target].flags, flagFocusable) and state->focus /= ps[target].ident and y < gs[target].y + tabStrip then
+                    state->focus := ps[target].ident; state->keyboard := false; return act(actRepaint);
+                end if;
+                return act(actNone);
+            end if;
+            var changed: Bool := false;
+            if has(ps[target].flags, flagClickFocus) and has(ps[target].flags, flagFocusable) and state->focus /= ps[target].ident then
+                state->focus := ps[target].ident; state->keyboard := false; changed := true;
+            end if;
+            if pressable(ps[target].kind) then
+                state->drag := dragPress; state->target := ps[target].ident; state->inside := true;
+                return act(actRepaint);
+            end if;
+            if ps[target].kind = kindSlider then
+                let thumb: Int64 := sliderThumbX(ps, gs, target);
+                state->target := ps[target].ident;
+                if x >= thumb and x < thumb + thumbWidth then
+                    state->drag := dragValue; state->startX := x - thumb; state->inside := true; return act(actRepaint);
+                end if;
+                -- Clicking the track moves one page towards the click.
+                let page: Int64 := maxInt((ps[target].high - ps[target].low) / 10, maxInt(ps[target].aux, 1));
+                if x < thumb then return setSlider(ps, target, ps[target].value - page); end if;
+                return setSlider(ps, target, ps[target].value + page);
+            end if;
+            if ps[target].kind = kindTextBox then
+                let t: Span[Nat8, R] := textSpan(all, ps, target);
+                let e: Ephemeral := current(&~state, ps[target].ident);
+                let at: Int64 := caretAt(t, ps, gs, target, x, e.c);
+                -- Count clicks: a second/third press soon after selects a word/everything.
+                if state->clickTarget = ps[target].ident and state->now - state->clickTime < 400000 and state->clickCount < 3 then
+                    state->clickCount := state->clickCount + 1;
+                else state->clickCount := 1; end if;
+                state->clickTime := state->now; state->clickTarget := ps[target].ident;
+                var caret: Int64 := at; var anchor: Int64 := at;
+                if state->clickCount = 2 and not has(ps[target].flags, flagSecure) then
+                    anchor := toInt(wordStart(t, toIndex64(at)));
+                    caret := toInt(wordEnd(t, toIndex64(anchor)));
+                    if caret < at then anchor := at; caret := toInt(wordEnd(t, toIndex64(at))); end if;
+                else if state->clickCount = 3 then anchor := 0; caret := toInt(spanLength(t)); end if;
+                state->drag := dragText; state->target := ps[target].ident; state->startValue := anchor;
+                setEphemeral(&~state, ps[target].ident, Ephemeral(a => caret, b => anchor, c => visibleScroll(t, ps, gs, target, caret, e.c), d => e.d));
+                return act(actRepaint);
+            end if;
+            if listLike(ps[target].kind) then
+                let a: Action := listPress(ps, gs, &~state, target, x, y);
+                if a.kind = actNone and changed then return act(actRepaint); end if;
+                return a;
+            end if;
+            if ps[target].kind = kindTextView then
+                let lines: Lines := linesOf(all, ps, gs, target);
+                let e: Ephemeral := current(&~state, ps[target].ident);
+                let at: Int64 := viewCaretAt(all, ps, gs, target, &lines, x, y, e.c, 0);
+                destroyLines(lines);
+                state->drag := dragText; state->target := ps[target].ident; state->clickCount := 1;
+                setEphemeral(&~state, ps[target].ident, Ephemeral(a => at, b => at, c => e.c, d => e.d));
+                return act(actRepaint);
+            end if;
+            if changed then return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        if state->drag = dragNone then return act(actNone); end if;
+        let t: Index := find(ps, state->target);
+        if t = 0 then state->drag := dragNone; return act(actRepaint); end if;
+        if state->drag = dragSplit then
+            let first: Index := ps[t].first;
+            var size: Int64 := 0;
+            if ps[t].value = 0 then size := x + state->startValue; else size := y + state->startValue; end if;
+            var room: Int64 := gs[t].width; if ps[t].value /= 0 then room := gs[t].height; end if;
+            size := clampInt(size, 16, maxInt(16, room - 2 * ps[t].padding - splitBar - 16));
+            if up then state->drag := dragNone; end if;
+            var old: Int64 := -1;
+            case mapGet(readMap(&(state->splits)), ps[t].ident) of when Some(value as v: Int64) do old := v; when None do skip; end case;
+            mapInsert(&(state->splits), ps[t].ident, size);
+            if old /= size then return act(actRelayout); end if;
+            return act(actRepaint);
+        end if;
+        if state->drag = dragPress then
+            let inside: Bool := contains(gs, t, x, y);
+            if up then
+                state->drag := dragNone;
+                if inside then return activate(ps, state, t); end if;
+                return act(actRepaint);
+            end if;
+            if inside /= state->inside then state->inside := inside; return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        if state->drag = dragItem then
+            if not state->inside then
+                if up then state->drag := dragNone; return act(actNone); end if;
+                let dx: Int64 := x - state->startX; let dy: Int64 := y - state->startY;
+                if dx * dx + dy * dy < 16 then return act(actNone); end if;
+                state->inside := true;
+            end if;
+            let over: Index := dropTargetAt(ps, hit(ps, gs, x, y));
+            var overId: Nat64 := 0; if over /= 0 then overId := ps[over].ident; end if;
+            if up then
+                state->drag := dragNone; state->dropOver := 0;
+                if over /= 0 and ps[over].handler >= 0 then return dropAction(ps, gs, over, ps[t].payload, x, y); end if;
+                return act(actRepaint);
+            end if;
+            state->dropOver := overId;
+            return act(actRepaint);
+        end if;
+        if state->drag = dragScroll then
+            if up then state->drag := dragNone; end if;
+            let b: Bar := barOf(ps, gs, t, readState(&~state), lineCountOf(all, ps, gs, t));
+            let grab: Int64 := state->startY;
+            let maximum: Int64 := barMaximum(all, ps, gs, &~state, t);
+            let r: Action := barTo(all, ps, gs, &~state, t, barValue(b, y, grab, maximum));
+            if r.kind /= actNone then return r; end if;
+            if up then return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        if state->drag = dragColumn then
+            if up then state->drag := dragNone; end if;
+            let width: Int64 := maxInt(x - state->startX, 16);
+            var old: Int64 := -1;
+            case mapGet(readMap(&(state->splits)), ps[t].ident) of when Some(value as v: Int64) do old := v; when None do skip; end case;
+            if old = width then return act(actNone); end if;
+            mapInsert(&(state->splits), ps[t].ident, width);
+            return act(actRelayout);
+        end if;
+        if state->drag = dragValue then
+            if up then state->drag := dragNone; end if;
+            let v: Action := setSlider(ps, t, sliderValueAt(ps, gs, t, x - state->startX + thumbWidth / 2));
+            if v.kind /= actNone then return v; end if;
+            if up then return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        if state->drag = dragText and ps[t].kind = kindTextView then
+            if up then state->drag := dragNone; end if;
+            let lines: Lines := linesOf(all, ps, gs, t);
+            let e: Ephemeral := current(&~state, ps[t].ident);
+            let at: Int64 := viewCaretAt(all, ps, gs, t, &lines, x, y, e.c, 0);
+            let first: Int64 := followLine(&lines, at, e.c, viewLines(ps, gs, t));
+            destroyLines(lines);
+            if at = e.a and first = e.c then return act(actNone); end if;
+            setEphemeral(&~state, ps[t].ident, Ephemeral(a => at, b => e.b, c => first, d => e.d));
+            return act(actRepaint);
+        end if;
+        if state->drag = dragText then
+            if up then state->drag := dragNone; end if;
+            let e: Ephemeral := current(&~state, ps[t].ident);
+            if state->clickCount > 1 then return act(actNone); end if;
+            let at: Int64 := caretAt(textSpan(all, ps, t), ps, gs, t, x, e.c);
+            return moveCaret(all, ps, gs, &~state, t, at, true);
+        end if;
+        if up then state->drag := dragNone; return act(actRepaint); end if;
+        return act(actNone);
+    end;
+    -- A press-like control fires: buttons send their message, checkboxes
+    -- report the new state, radios their selection.
+    function activate(ps: Span[Node], state: &![State], t: Index): Action is
+        let k: Int64 := ps[t].kind;
+        if k = kindCheckbox then
+            var next: Int64 := 1; if ps[t].value /= 0 then next := 0; end if;
+            return fire(t, next);
+        end if;
+        return fire(t, ps[t].value);
+    end;
+    function key(all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &![State], code: Int64): Action is
+        let base: Int64 := code & keyCodeMask;
+        if base = keyInputLost then return act(actNone); end if;
+        -- Shortcuts are Ctrl/Alt chords (and function keys); they win over controls.
+        if (code & (keyCtrl | keyAlt)) /= 0 or base >= 1114129 then
+            let s: Index := shortcut(ps, code);
+            if s /= 0 then return fire(s, 0); end if;
+        end if;
+        if base = keyTab and (code & (keyCtrl | keyAlt)) = 0 then
+            let n: Index := nextFocus(ps, state->focus, (code & keyShift) /= 0);
+            if n /= 0 then state->focus := ps[n].ident; state->keyboard := true; return act(actRepaint); end if;
+            return act(actNone);
+        end if;
+        let f: Index := find(ps, state->focus);
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindPopup and (base = 32 or base = keyEnter or base = keyDown) and (code & (keyCtrl | keyAlt)) = 0 then
+            return popupAction(ps, gs, &~state, f, gs[f].x, gs[f].y);
+        end if;
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindTabs and (base = keyLeft or base = keyRight) and (code & (keyCtrl | keyAlt)) = 0 then
+            var index: Int64 := ps[f].value; if base = keyLeft then index := index - 1; else index := index + 1; end if;
+            if index >= 0 and index < tabCount(ps, f) then return fire(f, index); end if;
+            return act(actNone);
+        end if;
+        if f /= 0 and enabled(ps, f) and listLike(ps[f].kind) and (code & (keyCtrl | keyAlt)) = 0 then
+            let r: Action := listKey(ps, gs, f, code);
+            if r.kind >= 0 then return r; end if;
+        end if;
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindTextView then
+            let r: Action := viewKey(all, ps, gs, &~state, f, code);
+            if r.kind >= 0 then return r; end if;
+            let edit: Action := textKey(all, ps, gs, &~state, f, code);
+            if edit.kind >= 0 then return edit; end if;
+        end if;
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindTextBox then
+            let r: Action := textKey(all, ps, gs, &~state, f, code);
+            if r.kind >= 0 then return r; end if;
+        end if;
+        if f /= 0 and enabled(ps, f) and ps[f].kind = kindSlider and (code & (keyCtrl | keyAlt)) = 0 then
+            let r: Action := sliderKey(ps, f, code);
+            if r.kind >= 0 then return r; end if;
+        end if;
+        if f /= 0 then
+            let k: Int64 := ps[f].kind;
+            if base = 32 and pressable(k) and (code & (keyCtrl | keyAlt)) = 0 then
+                return activate(ps, state, f);
+            end if;
+        end if;
+        if base = keyEnter and (code & (keyCtrl | keyAlt)) = 0 then
+            let d: Index := special(ps, flagDefault);
+            if d /= 0 then return fire(d, 0); end if;
+        end if;
+        if base = keyEscape then
+            let c: Index := special(ps, flagCancel);
+            if c /= 0 then return fire(c, 0); end if;
+        end if;
+        return act(actNone);
+    end;
+
+    ------------------------------------------------------------------ timers
+
+    -- Register new timers (due one interval from now) and forget gone ones.
+    function syncTimers(ps: Span[Node], state: &![State], now: Int64): Unit is
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTimer and ps[i].value > 0 then
+                case mapGet(readMap(&(state->timers)), ps[i].ident) of
+                    when Some(value as due: Int64) do skip;
+                    when None do mapInsert(&(state->timers), ps[i].ident, now + ps[i].value * 1000);
+                end case;
+            end if;
+        end for;
+        return nil;
+    end;
+    -- The first due timer node (and its next due time), or 0.
+    function dueTimer(ps: Span[Node], state: &![State], now: Int64): Index is
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTimer and ps[i].value > 0 then
+                case mapGet(readMap(&(state->timers)), ps[i].ident) of
+                    when Some(value as due: Int64) do
+                        if due <= now then
+                            var next: Int64 := due + ps[i].value * 1000; if next <= now then next := now + ps[i].value * 1000; end if;
+                            mapInsert(&(state->timers), ps[i].ident, next); return i;
+                        end if;
+                    when None do skip;
+                end case;
+            end if;
+        end for;
+        return 0;
+    end;
+    -- Milliseconds until the next timer (capped), for waiting.
+    function timeout(ps: Span[Node], state: &[State], now: Int64, cap: Int64): Int64 is
+        var best: Int64 := cap;
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindTimer and ps[i].value > 0 then
+                case mapGet(&(state->timers), ps[i].ident) of
+                    when Some(value as due: Int64) do best := minInt(best, maxInt((due - now + 999) / 1000, 0));
+                    when None do skip;
+                end case;
+            end if;
+        end for;
+        return best;
+    end;
+end module body.

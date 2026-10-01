@@ -1,39 +1,74 @@
-import OS.Gui (Gui, Window, Event, Idle, Mouse, Key, Resize, Close, Menu, Rect, Button,
-    present, buttonNeedsRedraw, listNeedsRedraw, textInputNeedsRedraw, acquireGui, releaseGui, close, fill, label, button, addMenu, addMenuItem, setScale, setFont);
-import GuiSupport (openWindow, nextEvent, shouldClose);
-import OS.Task (Tasks, acquireTasks, releaseTasks, sleep);
+import OS.Gui (Gui, acquireGui, releaseGui, setScale, setFont, displayScale, systemMonoFont);
 import OS.Error (IoError);
+import OS.Ui (App, View, openApp, closeApp, next, newView, column, row, group, done, padding, spacing, grow, label, paragraph, radio,
+    image, iconNote, iconCaution, menu, menuItem);
 module body GuiSettings is
+    """Settings: the display scale and the terminal font, as radio groups.
+    Built on OS.Ui. Prints GUI SETTINGS markers for the VM tests."""
+    record Model: Free is scale: Int64; mono: Bool; missing: Bool; end;
+    union Msg: Free is
+        case Scale is factor: Int64;
+        case Font is mono: Bool;
+        case Quit;
+    end;
+    function view(model: Model): View[Msg] is
+        var v: View[Msg] := newView();
+        menu(&!v, "File"); menuItem(&!v, "Close", "Ctrl+W", Quit()); done(&!v);
+        column(&!v); padding(&!v, 12); spacing(&!v, 10);
+        group(&!v, "Display scale");
+        radio(&!v, "1x (800 x 600 points)", model.scale = 1, Scale(factor => 1));
+        radio(&!v, "2x (Retina)", model.scale = 2, Scale(factor => 2));
+        done(&!v);
+        group(&!v, "Terminal font");
+        radio(&!v, "Bitmap (Unifont)", not model.mono, Font(mono => false));
+        radio(&!v, "System Mono", model.mono, Font(mono => true));
+        done(&!v);
+        row(&!v); spacing(&!v, 8); grow(&!v, 1);
+        if model.missing then image(&!v, iconCaution()); paragraph(&!v, "System Mono is unavailable.");
+        else image(&!v, iconNote()); paragraph(&!v, "Window titles and menus keep the bitmap font."); end if;
+        done(&!v);
+        done(&!v);
+        return v;
+    end;
     function main(initial: RootCapability): ExitCode is
-        var root: RootCapability := initial; var gui: Gui := acquireGui(&!root); let tasks: Tasks := acquireTasks(&!root);
-        var w: Window := openWindow(&!gui, "Settings", 320, 220);
-        var one: Button := Button(pressed => false); var two: Button := Button(pressed => false);
-        var bitmap: Button := Button(pressed => false); var mono: Button := Button(pressed => false);
-        case addMenu(&!w, "File") of when Ok(value as menu: Int64) do addMenuItem(&!w, menu, 0, "Close"); when Err(error as e: IoError) do skip; end case;
-        var running: Bool := true; var first: Bool := true; var missing: Bool := false;
-        while running do
-            let e: Event := nextEvent(&!w); running := not shouldClose(e);
-            let draw: Bool := running and (first or buttonNeedsRedraw(&one, Rect(x => 16, y => 44, width => 128, height => 28), e, true)
-                or buttonNeedsRedraw(&two, Rect(x => 168, y => 44, width => 128, height => 28), e, false)
-                or buttonNeedsRedraw(&bitmap, Rect(x => 16, y => 120, width => 128, height => 28), e, false)
-                or buttonNeedsRedraw(&mono, Rect(x => 168, y => 120, width => 128, height => 28), e, false));
-            if draw then
-                fill(&!w, Rect(x => 0, y => 0, width => 320, height => 220), 16777215);
-                label(&!w, Rect(x => 16, y => 16, width => 288, height => 20), "Display scale");
-                case button(&!w, &!one, Rect(x => 16, y => 44, width => 128, height => 28), "1x", e, true) of
-                    when Ok(value as clicked: Bool) do if clicked then setScale(&!gui, 1); printLn("GUI SETTINGS SCALE1"); end if; when Err(error as error: IoError) do skip; end case;
-                case button(&!w, &!two, Rect(x => 168, y => 44, width => 128, height => 28), "2x", e, false) of
-                    when Ok(value as clicked: Bool) do if clicked then setScale(&!gui, 2); printLn("GUI SETTINGS SCALE2"); end if; when Err(error as error: IoError) do skip; end case;
-                label(&!w, Rect(x => 16, y => 92, width => 288, height => 20), "Terminal font");
-                case button(&!w, &!bitmap, Rect(x => 16, y => 120, width => 128, height => 28), "Bitmap", e, false) of
-                    when Ok(value as clicked: Bool) do if clicked then setFont(&!gui, false, 14); missing := false; printLn("GUI SETTINGS BITMAP"); end if; when Err(error as error: IoError) do skip; end case;
-                case button(&!w, &!mono, Rect(x => 168, y => 120, width => 128, height => 28), "System Mono", e, false) of
-                    when Ok(value as clicked: Bool) do if clicked then case setFont(&!gui, true, 14) of when Ok(value as u: Unit) do missing := false; printLn("GUI SETTINGS MONO"); when Err(error as error: IoError) do missing := true; end case; end if;
-                    when Err(error as error: IoError) do skip; end case;
-                var message: Span[Nat8, Static] := "Chrome keeps its bitmap font."; if missing then message := "System Mono is unavailable."; end if;
-                label(&!w, Rect(x => 16, y => 176, width => 288, height => 20), message);
-                present(&!w);
-                if first then first := false; printLn("GUI SETTINGS READY"); end if;
-            end if; sleep(&tasks, 1);
-        end while; close(w); releaseGui(gui); releaseTasks(tasks); surrenderRoot(root); printLn("GUI SETTINGS CLOSED"); return ExitSuccess(); end;
+        var root: RootCapability := initial;
+        var gui: Gui := acquireGui(&!root);
+        var model: Model := Model(scale => displayScale(&gui), mono => systemMonoFont(&gui), missing => false);
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Settings", 320, 250);
+        case opening of
+            when Ok(value as app0: App[Msg]) do
+                var app: App[Msg] := app0;
+                printLn("GUI SETTINGS READY");
+                var running: Bool := true;
+                while running do
+                    case next(&!app, view(model)) of
+                        when Some(value as msg: Msg) do
+                            -- Effects on the system happen here; the model records the outcome.
+                            case msg of
+                                when Scale(factor as f: Int64) do
+                                    case setScale(&!gui, f) of
+                                        when Ok(value as u: Unit) do
+                                            model := Model(scale => f, mono => model.mono, missing => false);
+                                            if f = 1 then printLn("GUI SETTINGS SCALE1"); else printLn("GUI SETTINGS SCALE2"); end if;
+                                        when Err(error as e: IoError) do skip;
+                                    end case;
+                                when Font(mono as m: Bool) do
+                                    case setFont(&!gui, m, 14) of
+                                        when Ok(value as u: Unit) do
+                                            model := Model(scale => model.scale, mono => m, missing => false);
+                                            if m then printLn("GUI SETTINGS MONO"); else printLn("GUI SETTINGS BITMAP"); end if;
+                                        when Err(error as e: IoError) do model := Model(scale => model.scale, mono => model.mono, missing => true);
+                                    end case;
+                                when Quit do running := false;
+                            end case;
+                        when None do running := false;
+                    end case;
+                end while;
+                closeApp(app);
+            when Err(error as e: IoError) do printLn("GUI SETTINGS NO GUI");
+        end case;
+        releaseGui(gui); surrenderRoot(root);
+        printLn("GUI SETTINGS CLOSED");
+        return ExitSuccess();
+    end;
 end module body.

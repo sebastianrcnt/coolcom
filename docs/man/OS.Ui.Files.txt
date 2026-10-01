@@ -1,0 +1,5 @@
+Open and save dialogs for OS.Ui applications.
+
+A FileDialog lives in the model and holds the Dir it may browse. Show it
+with showFileDialog, draw it with fileDialogView, pass its FileEvent
+messages to updateFileDialog, and read fileDialogOutcome and chosenPath.

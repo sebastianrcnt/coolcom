@@ -1,0 +1,1215 @@
+import Standard.Vector (Vector, make as vectorMake, push, pop, get, set, length, slice, sliceMut, destroyFree);
+import Standard.HashMap (HashMap, make as mapMake, get as mapGet, insert as mapInsert, remove as mapRemove, nextKey, destroyFree as mapDestroy);
+import Standard.Eq (Eq);
+import Standard.Hash (Hash);
+import OS.Gui (Rect);
+import OS.Ui.Text (width as textWidth, lineCount, lineHeight);
+module body OS.Ui.Tree is
+    -- The monomorphic engine of OS.Ui: a flat node array filled by the view
+    -- builder, identity, layout, hit testing, focus order and the comparison of
+    -- two frames. It does not draw and has no capabilities, so it is tested on
+    -- the host. Node 0 is the root; index 0 in a link field means "none".
+
+    -- Node kinds.
+    constant kindRoot: Int64 := 0;
+    constant kindColumn: Int64 := 1;
+    constant kindRow: Int64 := 2;
+    constant kindGrid: Int64 := 3;
+    constant kindSplit: Int64 := 4;
+    constant kindSpacer: Int64 := 5;
+    constant kindGroup: Int64 := 6;
+    constant kindLabel: Int64 := 10;
+    constant kindButton: Int64 := 11;
+    constant kindCheckbox: Int64 := 12;
+    constant kindRadio: Int64 := 13;
+    constant kindSlider: Int64 := 14;
+    constant kindProgress: Int64 := 15;
+    constant kindSeparator: Int64 := 16;
+    constant kindImage: Int64 := 17;
+    constant kindTextBox: Int64 := 18;
+    constant kindScroll: Int64 := 20;
+    constant kindList: Int64 := 21;
+    constant kindTable: Int64 := 22;
+    constant kindTreeView: Int64 := 23;
+    constant kindTextView: Int64 := 24;
+    constant kindCell: Int64 := 25;
+    constant kindListRow: Int64 := 26;
+    constant kindHeader: Int64 := 27;
+    constant kindTabs: Int64 := 30;
+    constant kindToolbar: Int64 := 31;
+    constant kindStatus: Int64 := 32;
+    constant kindDialog: Int64 := 33;
+    constant kindPopup: Int64 := 34;
+    constant kindMenuBar: Int64 := 35;
+    constant kindMenu: Int64 := 36;
+    constant kindMenuItem: Int64 := 37;
+    constant kindTabPage: Int64 := 39;
+    constant kindShortcut: Int64 := 40;
+    constant kindTimer: Int64 := 41;
+    constant kindDropTarget: Int64 := 42;
+
+    -- Node flags.
+    constant flagDisabled: Int64 := 1;
+    constant flagDefault: Int64 := 2;
+    constant flagCancel: Int64 := 4;
+    constant flagFocusable: Int64 := 8;
+    constant flagKeyed: Int64 := 16;
+    constant flagWrap: Int64 := 32;
+    constant flagPlain: Int64 := 64;
+    constant flagOverlay: Int64 := 128;
+    constant flagSecure: Int64 := 256;
+    constant flagHidden: Int64 := 512;
+    constant flagClickFocus: Int64 := 1024;
+    constant flagCenter: Int64 := 2048;
+    constant flagDraggable: Int64 := 4096;
+    constant flagSeparator: Int64 := 8192;
+    constant flagDropTarget: Int64 := 16384;
+    constant flagContext: Int64 := 32768;
+    constant flagChecked: Int64 := 65536;
+
+    -- Alignment on a parent's cross axis.
+    constant alignInherit: Int64 := -1;
+    constant alignStart: Int64 := 0;
+    constant alignCenter: Int64 := 1;
+    constant alignEnd: Int64 := 2;
+    constant alignFill: Int64 := 3;
+
+    -- Key codes (OS key events: code | modifiers).
+    constant keyCodeMask: Int64 := 16777215;
+    constant keyShift: Int64 := 16777216;
+    constant keyCtrl: Int64 := 33554432;
+    constant keyAlt: Int64 := 67108864;
+    constant keyBackspace: Int64 := 8;
+    constant keyTab: Int64 := 9;
+    constant keyEnter: Int64 := 10;
+    constant keyEscape: Int64 := 27;
+    constant keyUp: Int64 := 1114113;
+    constant keyDown: Int64 := 1114114;
+    constant keyLeft: Int64 := 1114115;
+    constant keyRight: Int64 := 1114116;
+    constant keyHome: Int64 := 1114117;
+    constant keyEnd: Int64 := 1114118;
+    constant keyPageUp: Int64 := 1114119;
+    constant keyPageDown: Int64 := 1114120;
+    constant keyDelete: Int64 := 1114122;
+    constant keyInputLost: Int64 := 1114124;
+
+    -- Geometry of the classic controls (logical pixels).
+    constant buttonHeight: Int64 := 24;
+    constant defaultRing: Int64 := 4;
+    constant checkSize: Int64 := 12;
+    constant controlHeight: Int64 := 20;
+    constant fieldHeight: Int64 := 24;
+    constant splitBar: Int64 := 6;
+    constant scrollBarWidth: Int64 := 16;
+    constant rowHeight: Int64 := 18;
+    -- Lists keep a two-pixel frame (the second line shows keyboard focus).
+    constant listInset: Int64 := 2;
+
+    record Node: Free is
+        kind: Int64; flags: Int64;
+        parent: Index; first: Index; last: Index; next: Index; count: Int64;
+        ident: Nat64; key: Nat64;
+        text: Index; textEnd: Index; extra: Index; extraEnd: Index;
+        value: Int64; low: Int64; high: Int64; aux: Int64;
+        handler: Int64; handler2: Int64;
+        fixedWidth: Int64; fixedHeight: Int64; minWidth: Int64; minHeight: Int64;
+        grow: Int64; align: Int64; childAlign: Int64; padding: Int64; spacing: Int64; columns: Int64;
+        fit: Int64;
+        payload: Int64;
+    end;
+    -- Layout results, kept apart from the properties the view sets so that
+    -- the layout passes can read properties while writing geometry.
+    record Geom: Free is
+        prefWidth: Int64; prefHeight: Int64;
+        x: Int64; y: Int64; width: Int64; height: Int64;
+        clipX: Int64; clipY: Int64; clipWidth: Int64; clipHeight: Int64;
+        visual: Nat64;
+    end;
+    function emptyGeom(): Geom is
+        return Geom(prefWidth => 0, prefHeight => 0, x => 0, y => 0, width => 0, height => 0,
+            clipX => 0, clipY => 0, clipWidth => 0, clipHeight => 0, visual => 0);
+    end;
+
+    record Tree: Linear is
+        nodes: Vector[Node];
+        geom: Vector[Geom];
+        bytes: Vector[Nat8];
+        current: Index;
+        latest: Index;
+        width: Int64; height: Int64;
+    end;
+
+    function emptyNode(kind: Int64, parent: Index, at: Index): Node is
+        return Node(kind => kind, flags => 0, parent => parent, first => 0, last => 0, next => 0, count => 0,
+            ident => 0, key => 0, text => at, textEnd => at, extra => at, extraEnd => at,
+            value => 0, low => 0, high => 0, aux => 0, handler => -1, handler2 => -1,
+            fixedWidth => -1, fixedHeight => -1, minWidth => 0, minHeight => 0,
+            grow => 0, align => alignInherit, childAlign => alignInherit, padding => 0, spacing => 0, columns => 0, fit => 0, payload => 0);
+    end;
+
+    function makeTree(): Tree is
+        var nodes: Vector[Node] := vectorMake();
+        push(&!nodes, emptyNode(kindRoot, 0, 0));
+        return Tree(nodes => nodes, geom => vectorMake(), bytes => vectorMake(), current => 0, latest => 0, width => 0, height => 0);
+    end;
+    function destroyTree(tree: Tree): Unit is
+        let { nodes as n: Vector[Node], geom as g: Vector[Geom], bytes as b: Vector[Nat8], current as c: Index, latest as l: Index, width as w: Int64, height as h: Int64 } := tree;
+        destroyFree(n); destroyFree(g); destroyFree(b); return nil;
+    end;
+
+    -- Borrow helpers: a mutable vector reference read as an immutable one.
+    generic [T: Type, R: Region]
+    function readVector(v: &![Vector[T], R]): &[Vector[T], R] is return (v: &[Vector[T], R]); end;
+    generic [R: Region]
+    function nodesMut(tree: &![Tree, R]): Span![Node, R] is
+        let v: &![Vector[Node], R] := &(tree->nodes);
+        let n: Index := length(readVector(&~v));
+        return sliceMut(v, 0, n);
+    end;
+    generic [R: Region]
+    function props(tree: &[Tree, R]): Span[Node, R] is
+        return slice(&(tree->nodes), 0, length(&(tree->nodes)));
+    end;
+    generic [R: Region]
+    function textBytes(tree: &[Tree, R]): Span[Nat8, R] is
+        return slice(&(tree->bytes), 0, length(&(tree->bytes)));
+    end;
+    function nodeCount(tree: &[Tree]): Index is return length(&(tree->nodes)); end;
+    generic [R: Region]
+    function nodeText(tree: &[Tree, R], at: Index): Span[Nat8, R] is
+        let all: Span[Nat8, R] := textBytes(tree); let ns: Span[Node, R] := props(tree);
+        return sliceSpan(all, ns[at].text, ns[at].textEnd);
+    end;
+    generic [R: Region]
+    function nodeExtra(tree: &[Tree, R], at: Index): Span[Nat8, R] is
+        let all: Span[Nat8, R] := textBytes(tree); let ns: Span[Node, R] := props(tree);
+        return sliceSpan(all, ns[at].extra, ns[at].extraEnd);
+    end;
+    generic [R: Region]
+    function textSpan(all: Span[Nat8, R], ns: Span[Node], at: Index): Span[Nat8, R] is
+        return sliceSpan(all, ns[at].text, ns[at].textEnd);
+    end;
+
+    function toIndex64(v: Int64): Index is
+        case toIndex(v) of when Some(value as i: Index) do return i; when None do abort("OS.Ui: negative index"); end case;
+    end;
+    function toInt(v: Index): Int64 is
+        case toInt64(v) of when Some(value as i: Int64) do return i; when None do abort("OS.Ui: index overflow"); end case;
+    end;
+    function maxInt(a: Int64, b: Int64): Int64 is if a > b then return a; end if; return b; end;
+    function minInt(a: Int64, b: Int64): Int64 is if a < b then return a; end if; return b; end;
+    function clampInt(v: Int64, low: Int64, high: Int64): Int64 is
+        if v < low then return low; end if; if v > high then return high; end if; return v;
+    end;
+    function has(flags: Int64, flag: Int64): Bool is return (flags & flag) /= 0; end;
+
+    ------------------------------------------------------------------ building
+
+    -- Children of the open container. Focusable kinds are marked here.
+    function defaultFlags(kind: Int64): Int64 is
+        if kind = kindButton or kind = kindCheckbox or kind = kindRadio then return flagFocusable; end if;
+        if kind = kindSlider then return flagFocusable | flagClickFocus; end if;
+        if kind = kindTextBox or kind = kindList or kind = kindTable or kind = kindTreeView or kind = kindTextView then return flagFocusable | flagClickFocus | flagPlain; end if;
+        if kind = kindTabs then return flagFocusable; end if;
+        return 0;
+    end;
+    generic [R: Region]
+    function append(tree: &![Tree, R], kind: Int64): Index is
+        let at: Index := length(readVector(&(tree->nodes)));
+        let parent: Index := tree->current;
+        var node: Node := emptyNode(kind, parent, length(readVector(&(tree->bytes))));
+        node.flags := defaultFlags(kind);
+        push(&(tree->nodes), node);
+        let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        if ns[parent].first = 0 then ns[parent].first := at; else ns[ns[parent].last].next := at; end if;
+        ns[parent].last := at; ns[parent].count := ns[parent].count + 1;
+        tree->latest := at;
+        return at;
+    end;
+    -- Start a container; children follow until close.
+    function open(tree: &![Tree], kind: Int64): Index is
+        let at: Index := append(&~tree, kind); tree->current := at; return at;
+    end;
+    generic [R: Region]
+    function close(tree: &![Tree, R]): Unit is
+        let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        let c: Index := tree->current;
+        if c /= 0 then tree->latest := c; tree->current := ns[c].parent; end if;
+        return nil;
+    end;
+    function add(tree: &![Tree], kind: Int64): Index is return append(&~tree, kind); end;
+    function latest(tree: &[Tree]): Index is return tree->latest; end;
+    -- For tabs: pages already added to the open container, and its selected page.
+    generic [R: Region]
+    function tabIndexOf(tree: &![Tree, R]): Int64 is
+        let c0: Index := tree->current;
+        let ps: Span[Node, R] := slice(readVector(&(tree->nodes)), 0, length(readVector(&(tree->nodes))));
+        var n: Int64 := 0; var c: Index := ps[c0].first;
+        while c /= 0 do if ps[c].kind = kindTabPage then n := n + 1; end if; c := ps[c].next; end while;
+        return n;
+    end;
+    generic [R: Region]
+    function selectedTab(tree: &![Tree, R]): Int64 is
+        let c0: Index := tree->current;
+        let ps: Span[Node, R] := slice(readVector(&(tree->nodes)), 0, length(readVector(&(tree->nodes))));
+        return ps[c0].value;
+    end;
+
+    -- Text belongs to the most recent node; append extends it (numbers, pieces).
+    function pushBytes(tree: &![Tree], value: Span[Nat8]): Unit is
+        for i from 0 until spanLength(value) do push(&(tree->bytes), value[i]); end for;
+        return nil;
+    end;
+    generic [R: Region]
+    function setText(tree: &![Tree, R], value: Span[Nat8]): Unit is
+        let at: Index := length(readVector(&(tree->bytes)));
+        pushBytes(&~tree, value);
+        let finish: Index := length(readVector(&(tree->bytes)));
+        let l: Index := tree->latest;
+        let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].text := at; ns[l].textEnd := finish;
+        return nil;
+    end;
+    -- Append to the latest node's text (copied to the end of the arena first
+    -- when other text was written after it).
+    generic [R: Region]
+    function appendText(tree: &![Tree, R], value: Span[Nat8]): Unit is
+        let l: Index := tree->latest;
+        let size: Index := length(readVector(&(tree->bytes)));
+        let ps: Span[Node, R] := slice(readVector(&(tree->nodes)), 0, length(readVector(&(tree->nodes))));
+        let start: Index := ps[l].text; let stop: Index := ps[l].textEnd;
+        var first: Index := start;
+        if stop /= size then
+            for i from start until stop do
+                let b: Nat8 := get(readVector(&(tree->bytes)), i);
+                push(&(tree->bytes), b);
+            end for;
+            first := size;
+        end if;
+        pushBytes(&~tree, value);
+        let total: Index := length(readVector(&(tree->bytes)));
+        let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].text := first; ns[l].textEnd := total;
+        return nil;
+    end;
+    generic [R: Region]
+    function setExtra(tree: &![Tree, R], value: Span[Nat8]): Unit is
+        let at: Index := length(readVector(&(tree->bytes)));
+        pushBytes(&~tree, value);
+        let finish: Index := length(readVector(&(tree->bytes)));
+        let l: Index := tree->latest;
+        let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].extra := at; ns[l].extraEnd := finish;
+        return nil;
+    end;
+    -- Decimal digits of a signed number.
+    function appendNumber(tree: &![Tree], value: Int64): Unit is
+        var digits: Vector[Nat8] := vectorMake();
+        var v: Int64 := value; let negative: Bool := v < 0;
+        if v = 0 then push(&!digits, 48); end if;
+        while v /= 0 do
+            var d: Int64 := v % 10; if d < 0 then d := 0 - d; end if;
+            push(&!digits, digit(d)); v := v / 10;
+        end while;
+        if negative then push(&!digits, 45); end if;
+        let n: Index := length(&digits);
+        var reversed: Vector[Nat8] := vectorMake();
+        for i from 0 until n do push(&!reversed, get(&digits, n - 1 - i)); end for;
+        appendText(&~tree, slice(&reversed, 0, n));
+        destroyFree(digits); destroyFree(reversed); return nil;
+    end;
+    function digit(d: Int64): Nat8 is
+        case toNat8(48 + d) of when Some(value as b: Nat8) do return b; when None do return 48; end case;
+    end;
+
+    -- Modifiers of the most recent node.
+    generic [R: Region]
+    function setFlag(tree: &![Tree, R], flag: Int64, on: Bool): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        if on then ns[l].flags := ns[l].flags | flag; else ns[l].flags := ns[l].flags & ~flag; end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function setValue(tree: &![Tree, R], value: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].value := value; return nil;
+    end;
+    generic [R: Region]
+    function setRange(tree: &![Tree, R], low: Int64, high: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].low := low; ns[l].high := high; return nil;
+    end;
+    generic [R: Region]
+    function setAux(tree: &![Tree, R], aux: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].aux := aux; return nil;
+    end;
+    generic [R: Region]
+    function setHandler(tree: &![Tree, R], handler: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].handler := handler; return nil;
+    end;
+    generic [R: Region]
+    function setHandler2(tree: &![Tree, R], handler: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].handler2 := handler; return nil;
+    end;
+    generic [R: Region]
+    function setSize(tree: &![Tree, R], width: Int64, height: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        if width >= 0 then ns[l].fixedWidth := width; end if; if height >= 0 then ns[l].fixedHeight := height; end if; return nil;
+    end;
+    generic [R: Region]
+    function setMinSize(tree: &![Tree, R], width: Int64, height: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].minWidth := width; ns[l].minHeight := height; return nil;
+    end;
+    generic [R: Region]
+    function setGrow(tree: &![Tree, R], grow: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].grow := grow; return nil;
+    end;
+    generic [R: Region]
+    function setAlign(tree: &![Tree, R], align: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].align := align; return nil;
+    end;
+    generic [R: Region]
+    function setChildAlign(tree: &![Tree, R], align: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].childAlign := align; return nil;
+    end;
+    generic [R: Region]
+    function setPadding(tree: &![Tree, R], padding: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].padding := padding; return nil;
+    end;
+    generic [R: Region]
+    function setSpacing(tree: &![Tree, R], spacing: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].spacing := spacing; return nil;
+    end;
+    generic [R: Region]
+    function setColumns(tree: &![Tree, R], columns: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes)))); ns[l].columns := columns; return nil;
+    end;
+    generic [R: Region]
+    function setPayload(tree: &![Tree, R], payload: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].payload := payload; return nil;
+    end;
+    generic [R: Region]
+    function setFit(tree: &![Tree, R], fit: Int64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].fit := fit; return nil;
+    end;
+    generic [R: Region]
+    function setKey(tree: &![Tree, R], key: Nat64): Unit is
+        let l: Index := tree->latest; let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, length(readVector(&(tree->nodes))));
+        ns[l].key := key; ns[l].flags := ns[l].flags | flagKeyed; return nil;
+    end;
+
+    ------------------------------------------------------------------ identity
+
+    function mix(h: Nat64, v: Nat64): Nat64 is
+        -- FNV-1a step followed by a multiply; wrapping arithmetic.
+        let x: Nat64 := h ^ v;
+        return modularMultiply(x, 1099511628211) ^ (x >> 29);
+    end;
+    function bits(v: Int64): Nat64 is
+        if v >= 0 then case toNat64(v) of when Some(value as n: Nat64) do return n; when None do return 0; end case; end if;
+        case toNat64(~v) of when Some(value as n: Nat64) do return ~n; when None do return 0; end case;
+    end;
+    function hashBytes(h: Nat64, value: Span[Nat8]): Nat64 is
+        var r: Nat64 := h;
+        for i from 0 until spanLength(value) do r := modularMultiply(r ^ widenToNat64(value[i]), 1099511628211); end for;
+        return mix(r, widenToNat64(spanLength(value) & 255));
+    end;
+    function keyOf(value: Span[Nat8]): Nat64 is return hashBytes(14695981039346656037, value); end;
+    -- Identity: parent identity, kind and ordinal among same-kind siblings,
+    -- or an explicit key.
+    generic [R: Region]
+    function identify(tree: &![Tree, R]): Unit is
+        var ordinal: Vector[Int64] := vectorMake();
+        for k from 0 until 64 do push(&!ordinal, 0); end for;
+        let count: Index := length(readVector(&(tree->nodes)));
+        let ns: Span![Node, R] := sliceMut(&(tree->nodes), 0, count);
+        ns[0].ident := 1469598103934665603;
+        for p from 0 until count do
+            if ns[p].first /= 0 then
+                for k from 0 until 64 do set(&!ordinal, k, 0); end for;
+                var c: Index := ns[p].first;
+                while c /= 0 do
+                    let k: Index := toIndex64(ns[c].kind & 63);
+                    let n: Int64 := get(&ordinal, k); set(&!ordinal, k, n + 1);
+                    var h: Nat64 := mix(ns[p].ident, bits(ns[c].kind));
+                    if has(ns[c].flags, flagKeyed) then h := mix(mix(h, 7), ns[c].key); else h := mix(h, bits(n)); end if;
+                    ns[c].ident := h;
+                    c := ns[c].next;
+                end while;
+            end if;
+        end for;
+        destroyFree(ordinal); return nil;
+    end;
+    -- Close any open containers and compute identities.
+    function finishBuild(tree: &![Tree]): Unit is
+        while tree->current /= 0 do close(&~tree); end while;
+        identify(&~tree); return nil;
+    end;
+    function find(ns: Span[Node], ident: Nat64): Index is
+        if ident = 0 then return 0; end if;
+        for i from 1 until spanLength(ns) do if ns[i].ident = ident then return i; end if; end for;
+        return 0;
+    end;
+
+    ------------------------------------------------------------------ layout
+
+    -- Non-visual nodes (shortcuts, timers, menus) and hidden or overlay nodes take no space.
+    function inFlow(ps: Span[Node], i: Index): Bool is
+        let k: Int64 := ps[i].kind;
+        return not (k = kindShortcut or k = kindTimer or k = kindMenuBar or k = kindMenu or k = kindMenuItem or has(ps[i].flags, flagHidden) or has(ps[i].flags, flagOverlay));
+    end;
+    -- Kinds that stretch across a column by default.
+    function expands(kind: Int64): Bool is
+        return kind = kindTextBox or kind = kindSlider or kind = kindProgress or kind = kindSeparator or kind = kindList
+            or kind = kindTable or kind = kindTreeView or kind = kindTextView or kind = kindScroll or kind = kindTabs
+            or kind = kindGroup or kind = kindToolbar or kind = kindStatus or kind = kindColumn or kind = kindRow or kind = kindGrid or kind = kindSplit
+            or kind = kindTabPage;
+    end;
+    function crossAlign(ps: Span[Node], parent: Index, child: Index): Int64 is
+        if ps[child].align /= alignInherit then return ps[child].align; end if;
+        if ps[parent].childAlign /= alignInherit then return ps[parent].childAlign; end if;
+        let pk: Int64 := ps[parent].kind;
+        if pk = kindRow or pk = kindToolbar or pk = kindStatus or (pk = kindSplit and ps[parent].value = 0) then
+            -- Side by side, panels share the row's height; controls are centered.
+            if ps[child].kind = kindSeparator or pk = kindSplit or panel(ps[child].kind) then return alignFill; end if;
+            return alignCenter;
+        end if;
+        if pk = kindSplit or expands(ps[child].kind) then return alignFill; end if;
+        return alignStart;
+    end;
+    function panel(kind: Int64): Bool is
+        return kind = kindGroup or kind = kindTabPage or kind = kindColumn or kind = kindGrid or kind = kindScroll or kind = kindTabs or kind = kindList
+            or kind = kindTable or kind = kindTreeView or kind = kindTextView;
+    end;
+    -- Lists, tables and trees: rows placed by index under an optional header.
+    function listLike(kind: Int64): Bool is return kind = kindList or kind = kindTable or kind = kindTreeView; end;
+    -- Containers whose children are placed by the container itself.
+    function selfPlaced(kind: Int64): Bool is return listLike(kind) or kind = kindScroll or kind = kindListRow or kind = kindHeader; end;
+    function headerHeight(ps: Span[Node], i: Index): Int64 is
+        let c: Index := ps[i].first;
+        if c /= 0 and ps[c].kind = kindHeader then return 20; end if; return 0;
+    end;
+    -- The body of a list: inside the frame, below the header, left of the scroll bar.
+    function listBody(ps: Span[Node], gs: Span[Geom], i: Index): Rect is
+        let top: Int64 := gs[i].y + listInset + headerHeight(ps, i);
+        return Rect(x => gs[i].x + listInset, y => top, width => maxInt(gs[i].width - 2 * listInset - scrollBarWidth, 0),
+            height => maxInt(gs[i].y + gs[i].height - listInset - top, 0));
+    end;
+    -- Rows that fit in a list's body (a partly visible last row counts).
+    function rowsThatFit(ps: Span[Node], gs: Span[Geom], i: Index): Int64 is
+        return (listBody(ps, gs, i).height + rowHeight - 1) / rowHeight;
+    end;
+    function horizontal(ps: Span[Node], i: Index): Bool is
+        let k: Int64 := ps[i].kind;
+        if k = kindSplit then return ps[i].value = 0; end if;
+        return k = kindRow or k = kindToolbar or k = kindStatus;
+    end;
+    -- Extra space a container reserves above its children (a group's title).
+    constant tabStrip: Int64 := 24;
+    function insetTop(ps: Span[Node], i: Index): Int64 is
+        if ps[i].kind = kindGroup then return ps[i].padding + 10; end if;
+        if ps[i].kind = kindTabs then return ps[i].padding + tabStrip; end if;
+        return ps[i].padding;
+    end;
+    -- Each tab is its title plus 20 pixels.
+    function tabStripWidth(all: Span[Nat8], ps: Span[Node], i: Index): Int64 is
+        var w: Int64 := 8; var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindTabPage then w := w + textWidth(textSpan(all, ps, c)) + 20; end if; c := ps[c].next; end while;
+        return w;
+    end;
+    -- A pop-up button is as wide as its longest choice plus the triangle.
+    function popupWidth(all: Span[Nat8], ps: Span[Node], i: Index): Int64 is
+        var w: Int64 := 40; var c: Index := ps[i].first;
+        while c /= 0 do if ps[c].kind = kindMenuItem then w := maxInt(w, textWidth(textSpan(all, ps, c)) + 34); end if; c := ps[c].next; end while;
+        return w;
+    end;
+    function intrinsicWidth(all: Span[Nat8], ps: Span[Node], i: Index): Int64 is
+        let k: Int64 := ps[i].kind; let t: Int64 := textWidth(textSpan(all, ps, i));
+        if k = kindLabel then return t + 1; end if;
+        if k = kindButton then
+            var w: Int64 := maxInt(t + 24, 64); if has(ps[i].flags, flagDefault) then w := w + 2 * defaultRing; end if; return w;
+        end if;
+        if k = kindCheckbox or k = kindRadio then return checkSize + 6 + t + 2; end if;
+        if k = kindSlider or k = kindProgress then return 120; end if;
+        if k = kindSeparator then return 7; end if;
+        if k = kindTextBox then return 160; end if;
+        if k = kindImage then return ps[i].low; end if;
+        if k = kindList or k = kindTable or k = kindTreeView or k = kindTextView or k = kindScroll then return 160; end if;
+        if k = kindGroup then return t + 16; end if;
+        if k = kindCell or k = kindHeader then return t + 12; end if;
+        if k = kindPopup then return popupWidth(all, ps, i); end if;
+        return 0;
+    end;
+    function intrinsicHeight(all: Span[Nat8], ps: Span[Node], i: Index, width: Int64): Int64 is
+        let k: Int64 := ps[i].kind;
+        if k = kindLabel then
+            if has(ps[i].flags, flagWrap) then return lineCount(textSpan(all, ps, i), maxInt(width - 1, 8)) * lineHeight; end if;
+            return lineHeight;
+        end if;
+        if k = kindButton then if has(ps[i].flags, flagDefault) then return buttonHeight + 2 * defaultRing; end if; return buttonHeight; end if;
+        if k = kindCheckbox or k = kindRadio or k = kindSlider then return controlHeight; end if;
+        if k = kindProgress then return 14; end if;
+        if k = kindSeparator then return 7; end if;
+        if k = kindTextBox then return fieldHeight; end if;
+        if k = kindImage then return ps[i].high; end if;
+        if k = kindList or k = kindTable or k = kindTreeView or k = kindTextView or k = kindScroll then return 100; end if;
+        if k = kindCell or k = kindListRow then return rowHeight; end if;
+        if k = kindHeader then return 19; end if;
+        if k = kindPopup then return 22; end if;
+        if k = kindGroup then return 26; end if;
+        return 0;
+    end;
+    function constrain(fixed: Int64, minimum: Int64, size: Int64): Int64 is
+        if fixed >= 0 then return fixed; end if; return maxInt(size, minimum);
+    end;
+    -- Placement of a child on its parent's cross axis.
+    record Place: Free is pos: Int64; size: Int64; end;
+    function crossPlace(align: Int64, pref: Int64, fixed: Int64, start: Int64, room: Int64): Place is
+        var size: Int64 := minInt(pref, room);
+        if align = alignFill then size := room; end if;
+        if fixed >= 0 then size := fixed; end if;
+        var pos: Int64 := start;
+        if align = alignCenter then pos := start + (room - size) / 2; else if align = alignEnd then pos := start + room - size; end if;
+        return Place(pos => pos, size => size);
+    end;
+    -- Pass 1: preferred widths, children (higher indices) before parents.
+    generic [R: Region]
+    function preferWidths(all: Span[Nat8], ps: Span[Node], gs: Span![Geom, R]): Span![Geom, R] is
+        var columnWidths: Vector[Int64] := vectorMake();
+        var g: Span![Geom, R] := gs;
+        var i: Index := spanLength(ps);
+        while i > 0 do
+            i := i - 1;
+            let k: Int64 := ps[i].kind; var w: Int64 := 0;
+            if ps[i].first = 0 or listLike(k) or k = kindScroll or k = kindPopup then w := intrinsicWidth(all, ps, i);
+            else if k = kindGrid then
+                g := gridColumns(ps, g, i, &!columnWidths);
+                for c from 0 until length(&columnWidths) do w := w + get(&columnWidths, c); end for;
+                if length(&columnWidths) > 1 then w := w + ps[i].spacing * (toInt(length(&columnWidths)) - 1); end if;
+            else
+                var c: Index := ps[i].first; var n: Int64 := 0;
+                while c /= 0 do
+                    if inFlow(ps, c) then
+                        if horizontal(ps, i) then w := w + g[c].prefWidth; else w := maxInt(w, g[c].prefWidth); end if;
+                        n := n + 1;
+                    end if;
+                    c := ps[c].next;
+                end while;
+                if horizontal(ps, i) and n > 1 then
+                    if k = kindSplit then w := w + splitBar; else w := w + ps[i].spacing * (n - 1); end if;
+                end if;
+                if k = kindGroup then w := maxInt(w, intrinsicWidth(all, ps, i)); end if;
+                if k = kindTabs then w := maxInt(w, tabStripWidth(all, ps, i)); end if;
+            end if;
+            if k /= kindRoot then w := w + 2 * ps[i].padding; end if;
+            g[i].prefWidth := constrain(ps[i].fixedWidth, ps[i].minWidth, w);
+        end while;
+        destroyFree(columnWidths); return g;
+    end;
+    -- Column widths of a grid: the widest preferred child of each column.
+    generic [R: Region]
+    function gridColumns(ps: Span[Node], gs: Span![Geom, R], grid: Index, widths: &![Vector[Int64]]): Span![Geom, R] is
+        while length(readVector(&~widths)) > 0 do pop(&~widths); end while;
+        let columns: Int64 := maxInt(ps[grid].columns, 1);
+        for c from 0 until toIndex64(columns) do push(&~widths, 0); end for;
+        var child: Index := ps[grid].first; var at: Int64 := 0;
+        while child /= 0 do
+            if inFlow(ps, child) then
+                let col: Index := toIndex64(at % columns);
+                let widest: Int64 := maxInt(get(readVector(&~widths), col), gs[child].prefWidth);
+                set(&~widths, col, widest); at := at + 1;
+            end if;
+            child := ps[child].next;
+        end while;
+        return gs;
+    end;
+    -- Pass 2: widths and x, parents (lower indices) before children.
+    generic [R: Region]
+    function assignWidths(ps: Span[Node], gs: Span![Geom, R], splits: &[HashMap[Nat64, Int64]]): Span![Geom, R] is
+        var columnWidths: Vector[Int64] := vectorMake();
+        var g: Span![Geom, R] := gs;
+        for i from 0 until spanLength(ps) do
+            if ps[i].first /= 0 then
+                let k: Int64 := ps[i].kind; let pad: Int64 := ps[i].padding;
+                let innerX: Int64 := g[i].x + pad; let inner: Int64 := maxInt(g[i].width - 2 * pad, 0);
+                if k = kindListRow or k = kindHeader then skip;
+                else if listLike(k) then g := placeListWidths(ps, g, i, splits);
+                else if k = kindScroll then
+                    -- The content gets the viewport width (a scroll bar is always reserved).
+                    let content: Index := ps[i].first;
+                    g[content].x := g[i].x + 1; g[content].width := maxInt(g[i].width - 2 - scrollBarWidth, 0);
+                else if k = kindRoot then
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if has(ps[c].flags, flagOverlay) then g[c].width := minInt(g[c].prefWidth, inner); g[c].x := innerX + (inner - g[c].width) / 2;
+                        else g[c].width := inner; g[c].x := innerX; end if;
+                        c := ps[c].next;
+                    end while;
+                else if k = kindGrid then
+                    g := gridColumns(ps, g, i, &!columnWidths);
+                    let columns: Int64 := toInt(length(&columnWidths));
+                    var used: Int64 := ps[i].spacing * (columns - 1); var growing: Int64 := 0;
+                    for c from 0 until length(&columnWidths) do used := used + get(&columnWidths, c); end for;
+                    -- A column grows when any of its children grows.
+                    var growCol: Vector[Int64] := vectorMake();
+                    for c from 0 until length(&columnWidths) do push(&!growCol, 0); end for;
+                    var child: Index := ps[i].first; var at: Int64 := 0;
+                    while child /= 0 do
+                        if inFlow(ps, child) then
+                            let col: Index := toIndex64(at % columns);
+                            if ps[child].grow > get(&growCol, col) then set(&!growCol, col, ps[child].grow); end if; at := at + 1;
+                        end if;
+                        child := ps[child].next;
+                    end while;
+                    for c from 0 until length(&growCol) do growing := growing + get(&growCol, c); end for;
+                    let extra: Int64 := inner - used;
+                    if growing > 0 and extra > 0 then
+                        var given: Int64 := 0; var seenGrow: Int64 := 0;
+                        for c from 0 until length(&growCol) do
+                            if get(&growCol, c) > 0 then
+                                seenGrow := seenGrow + get(&growCol, c);
+                                let share: Int64 := extra * seenGrow / growing - given;
+                                let grown: Int64 := get(&columnWidths, c) + share;
+                                set(&!columnWidths, c, grown); given := given + share;
+                            end if;
+                        end for;
+                    end if;
+                    child := ps[i].first; at := 0;
+                    while child /= 0 do
+                        if inFlow(ps, child) then
+                            let col: Index := toIndex64(at % columns);
+                            var cx: Int64 := innerX;
+                            for c from 0 until col do cx := cx + get(&columnWidths, c) + ps[i].spacing; end for;
+                            let p: Place := crossPlace(crossAlign(ps, i, child), g[child].prefWidth, ps[child].fixedWidth, cx, get(&columnWidths, col));
+                            g[child].x := p.pos; g[child].width := p.size;
+                            at := at + 1;
+                        end if;
+                        child := ps[child].next;
+                    end while;
+                    destroyFree(growCol);
+                else if horizontal(ps, i) then
+                    g := distributeMain(ps, g, i, innerX, inner, true, splits);
+                else
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if inFlow(ps, c) then
+                            let p: Place := crossPlace(crossAlign(ps, i, c), g[c].prefWidth, ps[c].fixedWidth, innerX, inner);
+                            g[c].x := p.pos; g[c].width := p.size;
+                        end if;
+                        c := ps[c].next;
+                    end while;
+                end if;
+                -- Overlays of other containers (popups) are centered over them.
+                if k /= kindRoot then
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if has(ps[c].flags, flagOverlay) then g[c].width := g[c].prefWidth; g[c].x := g[i].x + (g[i].width - g[c].width) / 2; end if;
+                        c := ps[c].next;
+                    end while;
+                end if;
+            end if;
+        end for;
+        destroyFree(columnWidths); return g;
+    end;
+    -- Column widths come from the framework (resized headers) or the view; the
+    -- last column takes the rest of the body. Cells line up under their header.
+    generic [R: Region]
+    function placeListWidths(ps: Span[Node], gs: Span![Geom, R], i: Index, sizes: &[HashMap[Nat64, Int64]]): Span![Geom, R] is
+        var g: Span![Geom, R] := gs;
+        let bodyX: Int64 := g[i].x + listInset; let bodyWidth: Int64 := maxInt(g[i].width - 2 * listInset - scrollBarWidth, 0);
+        var starts: Vector[Int64] := vectorMake(); var widths: Vector[Int64] := vectorMake();
+        var x: Int64 := bodyX; var c: Index := ps[i].first;
+        while c /= 0 do
+            if ps[c].kind = kindHeader then
+                var w: Int64 := ps[c].value;
+                case mapGet(sizes, ps[c].ident) of when Some(value as kept: Int64) do w := kept; when None do skip; end case;
+                w := maxInt(w, 16);
+                push(&!starts, x); push(&!widths, w); x := x + w;
+            end if;
+            c := ps[c].next;
+        end while;
+        let columns: Index := length(&starts);
+        -- The last column reaches the scroll bar.
+        if columns > 0 then
+            let lastStart: Int64 := get(&starts, columns - 1);
+            if lastStart + get(&widths, columns - 1) < bodyX + bodyWidth then set(&!widths, columns - 1, bodyX + bodyWidth - lastStart); end if;
+        end if;
+        var col: Index := 0;
+        c := ps[i].first;
+        while c /= 0 do
+            if ps[c].kind = kindHeader then
+                g[c].x := get(&starts, col); g[c].width := get(&widths, col); col := col + 1;
+            else
+                g[c].x := bodyX; g[c].width := bodyWidth;
+                var cell: Index := ps[c].first; var at: Index := 0;
+                while cell /= 0 do
+                    if at < columns then g[cell].x := get(&starts, at); g[cell].width := get(&widths, at);
+                    else g[cell].x := bodyX; g[cell].width := bodyWidth; end if;
+                    at := at + 1; cell := ps[cell].next;
+                end while;
+            end if;
+            c := ps[c].next;
+        end while;
+        destroyFree(starts); destroyFree(widths);
+        return g;
+    end;
+    -- Size and place the children along the main axis: preferred sizes, then
+    -- extra space shared by grow weight, or a deficit taken proportionally
+    -- from flexible children.
+    generic [R: Region]
+    function distributeMain(ps: Span[Node], gs: Span![Geom, R], i: Index, start: Int64, room: Int64, widths: Bool, splits: &[HashMap[Nat64, Int64]]): Span![Geom, R] is
+        var g: Span![Geom, R] := gs;
+        if ps[i].kind = kindSplit then
+            var first: Int64 := ps[i].low;
+            case mapGet(splits, ps[i].ident) of when Some(value as kept: Int64) do first := kept; when None do skip; end case;
+            if first <= 0 then first := (room - splitBar) / 2; end if;
+            first := clampInt(first, 16, maxInt(16, room - splitBar - 16));
+            var c: Index := ps[i].first; var seen: Int64 := 0;
+            while c /= 0 do
+                if inFlow(ps, c) then
+                    var pos: Int64 := start; var size: Int64 := first;
+                    if seen = 1 then pos := start + first + splitBar; size := maxInt(room - first - splitBar, 0); end if;
+                    if seen > 1 then size := 0; end if;
+                    if widths then g[c].x := pos; g[c].width := size; else g[c].y := pos; g[c].height := size; end if;
+                    seen := seen + 1;
+                end if;
+                c := ps[c].next;
+            end while;
+            return g;
+        end if;
+        var n: Int64 := 0; var used: Int64 := 0; var growing: Int64 := 0; var flexible: Int64 := 0;
+        var c: Index := ps[i].first;
+        while c /= 0 do
+            if inFlow(ps, c) then
+                n := n + 1; growing := growing + ps[c].grow;
+                if widths then used := used + g[c].prefWidth; if ps[c].fixedWidth < 0 then flexible := flexible + g[c].prefWidth; end if;
+                else used := used + g[c].prefHeight; if ps[c].fixedHeight < 0 then flexible := flexible + g[c].prefHeight; end if; end if;
+            end if;
+            c := ps[c].next;
+        end while;
+        if n > 1 then used := used + ps[i].spacing * (n - 1); end if;
+        let extra: Int64 := room - used;
+        var pos: Int64 := start; var given: Int64 := 0; var seenGrow: Int64 := 0;
+        c := ps[i].first;
+        while c /= 0 do
+            if inFlow(ps, c) then
+                var size: Int64 := 0; var fixed: Int64 := 0;
+                if widths then size := g[c].prefWidth; fixed := ps[c].fixedWidth; else size := g[c].prefHeight; fixed := ps[c].fixedHeight; end if;
+                if extra > 0 and ps[c].grow > 0 then
+                    seenGrow := seenGrow + ps[c].grow;
+                    let share: Int64 := extra * seenGrow / growing - given; size := size + share; given := given + share;
+                else if extra < 0 and fixed < 0 and flexible > 0 then
+                    size := maxInt(size - (0 - extra) * size / flexible, 0);
+                end if;
+                if widths then g[c].x := pos; g[c].width := size; else g[c].y := pos; g[c].height := size; end if;
+                pos := pos + size + ps[i].spacing;
+            end if;
+            c := ps[c].next;
+        end while;
+        return g;
+    end;
+    -- Pass 3: preferred heights with known widths, children before parents.
+    generic [R: Region]
+    function preferHeights(all: Span[Nat8], ps: Span[Node], gs: Span![Geom, R]): Span![Geom, R] is
+        var g: Span![Geom, R] := gs;
+        var i: Index := spanLength(ps);
+        while i > 0 do
+            i := i - 1;
+            let k: Int64 := ps[i].kind; var h: Int64 := 0;
+            if ps[i].first = 0 or listLike(k) or k = kindScroll or k = kindPopup then h := intrinsicHeight(all, ps, i, g[i].width);
+            else if k = kindGrid then
+                let columns: Int64 := maxInt(ps[i].columns, 1);
+                var c: Index := ps[i].first; var at: Int64 := 0; var rowMax: Int64 := 0; var rows: Int64 := 0;
+                while c /= 0 do
+                    if inFlow(ps, c) then
+                        rowMax := maxInt(rowMax, g[c].prefHeight); at := at + 1;
+                        if at % columns = 0 then h := h + rowMax; rowMax := 0; rows := rows + 1; end if;
+                    end if;
+                    c := ps[c].next;
+                end while;
+                if at % columns /= 0 then h := h + rowMax; rows := rows + 1; end if;
+                if rows > 1 then h := h + ps[i].spacing * (rows - 1); end if;
+            else
+                var c: Index := ps[i].first; var n: Int64 := 0;
+                while c /= 0 do
+                    if inFlow(ps, c) then
+                        if horizontal(ps, i) then h := maxInt(h, g[c].prefHeight); else h := h + g[c].prefHeight; end if;
+                        n := n + 1;
+                    end if;
+                    c := ps[c].next;
+                end while;
+                if not horizontal(ps, i) and n > 1 then
+                    if k = kindSplit then h := h + splitBar; else h := h + ps[i].spacing * (n - 1); end if;
+                end if;
+            end if;
+            if k /= kindRoot then h := h + ps[i].padding + insetTop(ps, i); end if;
+            g[i].prefHeight := constrain(ps[i].fixedHeight, ps[i].minHeight, h);
+        end while;
+        return g;
+    end;
+    -- Pass 4: heights and y, parents before children; then clip rectangles.
+    generic [R: Region]
+    function assignHeights(ps: Span[Node], gs: Span![Geom, R], splits: &[HashMap[Nat64, Int64]]): Span![Geom, R] is
+        var g: Span![Geom, R] := gs;
+        for i from 0 until spanLength(ps) do
+            if ps[i].first /= 0 then
+                let k: Int64 := ps[i].kind; let top: Int64 := insetTop(ps, i);
+                let innerY: Int64 := g[i].y + top; let inner: Int64 := maxInt(g[i].height - top - ps[i].padding, 0);
+                if k = kindListRow or k = kindHeader then skip;
+                else if listLike(k) then
+                    let header: Int64 := headerHeight(ps, i);
+                    let bodyY: Int64 := g[i].y + listInset + header;
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if ps[c].kind = kindHeader then g[c].y := g[i].y + listInset; g[c].height := header - 1;
+                        else
+                            g[c].y := bodyY + (ps[c].value - ps[i].value) * rowHeight; g[c].height := rowHeight;
+                            var cell: Index := ps[c].first;
+                            while cell /= 0 do g[cell].y := g[c].y; g[cell].height := rowHeight; cell := ps[cell].next; end while;
+                        end if;
+                        c := ps[c].next;
+                    end while;
+                else if k = kindScroll then
+                    let content: Index := ps[i].first;
+                    let viewport: Int64 := maxInt(g[i].height - 2, 0);
+                    let full: Int64 := maxInt(g[content].prefHeight, viewport);
+                    var offset: Int64 := 0;
+                    case mapGet(splits, ps[i].ident) of when Some(value as kept: Int64) do offset := kept; when None do skip; end case;
+                    offset := clampInt(offset, 0, maxInt(full - viewport, 0));
+                    g[content].y := g[i].y + 1 - offset; g[content].height := full;
+                else if k = kindRoot then
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if has(ps[c].flags, flagOverlay) then g[c].height := minInt(g[c].prefHeight, inner); g[c].y := innerY + (inner - g[c].height) / 2;
+                        else g[c].height := inner; g[c].y := innerY; end if;
+                        c := ps[c].next;
+                    end while;
+                else if k = kindGrid then
+                    let columns: Int64 := maxInt(ps[i].columns, 1);
+                    var c: Index := ps[i].first; var rowY: Int64 := innerY;
+                    -- Each row is as tall as its tallest preferred child.
+                    while c /= 0 do
+                        var rowMax: Int64 := 0; var probe: Index := c; var counted: Int64 := 0;
+                        while probe /= 0 and counted < columns do
+                            if inFlow(ps, probe) then rowMax := maxInt(rowMax, g[probe].prefHeight); counted := counted + 1; end if;
+                            probe := ps[probe].next;
+                        end while;
+                        counted := 0;
+                        while c /= 0 and counted < columns do
+                            if inFlow(ps, c) then
+                                let p: Place := crossPlace(rowAlign(ps, i, c), g[c].prefHeight, ps[c].fixedHeight, rowY, rowMax);
+                                g[c].y := p.pos; g[c].height := p.size; counted := counted + 1;
+                            end if;
+                            c := ps[c].next;
+                        end while;
+                        rowY := rowY + rowMax + ps[i].spacing;
+                    end while;
+                else if horizontal(ps, i) then
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if inFlow(ps, c) then
+                            let p: Place := crossPlace(crossAlign(ps, i, c), g[c].prefHeight, ps[c].fixedHeight, innerY, inner);
+                            g[c].y := p.pos; g[c].height := p.size;
+                        end if;
+                        c := ps[c].next;
+                    end while;
+                else
+                    g := distributeMain(ps, g, i, innerY, inner, false, splits);
+                end if;
+                if k /= kindRoot then
+                    var c: Index := ps[i].first;
+                    while c /= 0 do
+                        if has(ps[c].flags, flagOverlay) then g[c].height := g[c].prefHeight; g[c].y := g[i].y + (g[i].height - g[c].height) / 2; end if;
+                        c := ps[c].next;
+                    end while;
+                end if;
+            end if;
+        end for;
+        -- Clip rectangles: the parent's clip, narrowed by clipping containers.
+        g[0].clipX := g[0].x; g[0].clipY := g[0].y; g[0].clipWidth := g[0].width; g[0].clipHeight := g[0].height;
+        for i from 1 until spanLength(ps) do
+            let p: Index := ps[i].parent;
+            var x0: Int64 := g[p].clipX; var y0: Int64 := g[p].clipY;
+            var x1: Int64 := x0 + g[p].clipWidth; var y1: Int64 := y0 + g[p].clipHeight;
+            if has(ps[i].flags, flagOverlay) then x0 := g[0].x; y0 := g[0].y; x1 := g[0].width; y1 := g[0].height; end if;
+            if clips(ps[i].kind) then
+                x0 := maxInt(x0, g[i].x); y0 := maxInt(y0, g[i].y);
+                x1 := minInt(x1, g[i].x + g[i].width); y1 := minInt(y1, g[i].y + g[i].height);
+            end if;
+            -- Rows draw only in a list's body, headers only in the header strip,
+            -- scroll content only in the viewport.
+            if listLike(ps[p].kind) then
+                let header: Int64 := headerHeight(ps, p);
+                var top: Int64 := g[p].y + listInset + header; var bottom: Int64 := g[p].y + g[p].height - listInset;
+                if ps[i].kind = kindHeader then top := g[p].y + listInset; bottom := g[p].y + listInset + header - 1; end if;
+                x0 := maxInt(x0, g[p].x + listInset); x1 := minInt(x1, g[p].x + g[p].width - listInset - scrollBarWidth);
+                y0 := maxInt(y0, top); y1 := minInt(y1, bottom);
+            end if;
+            if ps[p].kind = kindScroll then
+                x0 := maxInt(x0, g[p].x + 1); x1 := minInt(x1, g[p].x + g[p].width - 1 - scrollBarWidth);
+                y0 := maxInt(y0, g[p].y + 1); y1 := minInt(y1, g[p].y + g[p].height - 1);
+            end if;
+            g[i].clipX := x0; g[i].clipY := y0; g[i].clipWidth := maxInt(x1 - x0, 0); g[i].clipHeight := maxInt(y1 - y0, 0);
+        end for;
+        return g;
+    end;
+    -- Grid cells are vertically centered unless they fill.
+    function rowAlign(ps: Span[Node], grid: Index, c: Index): Int64 is
+        if ps[c].align /= alignInherit then return ps[c].align; end if;
+        return alignCenter;
+    end;
+    function clips(kind: Int64): Bool is
+        return kind = kindScroll or kind = kindSplit or kind = kindTabs or kind = kindList or kind = kindTable or kind = kindTreeView or kind = kindTextView;
+    end;
+    -- Lay the tree out in a window of the given logical size. Split positions
+    -- kept by the framework are looked up by identity.
+    generic [R: Region]
+    function layout(tree: &![Tree, R], width: Int64, height: Int64, splits: &[HashMap[Nat64, Int64]]): Unit is
+        tree->width := width; tree->height := height;
+        let n: Index := length(readVector(&(tree->nodes)));
+        -- Geometry is rebuilt from scratch for the current node count.
+        while length(readVector(&(tree->geom))) < n do push(&(tree->geom), emptyGeom()); end while;
+        let ps: Span[Node, R] := slice(readVector(&(tree->nodes)), 0, n);
+        let all: Span[Nat8, R] := slice(readVector(&(tree->bytes)), 0, length(readVector(&(tree->bytes))));
+        var g: Span![Geom, R] := sliceMut(&(tree->geom), 0, n);
+        g := preferWidths(all, ps, g);
+        g[0].x := 0; g[0].y := 0; g[0].width := width; g[0].height := height;
+        g := assignWidths(ps, g, splits);
+        g := preferHeights(all, ps, g);
+        g := assignHeights(ps, g, splits);
+        return nil;
+    end;
+    generic [R: Region]
+    function geometry(tree: &[Tree, R]): Span[Geom, R] is
+        return slice(&(tree->geom), 0, length(&(tree->geom)));
+    end;
+
+    ------------------------------------------------------------------ queries
+
+    function contains(gs: Span[Geom], i: Index, x: Int64, y: Int64): Bool is
+        return x >= gs[i].x and x < gs[i].x + gs[i].width and y >= gs[i].y and y < gs[i].y + gs[i].height
+            and x >= gs[i].clipX and x < gs[i].clipX + gs[i].clipWidth and y >= gs[i].clipY and y < gs[i].clipY + gs[i].clipHeight;
+    end;
+    -- The topmost overlay (modal dialog or popup), or 0.
+    function topOverlay(ps: Span[Node]): Index is
+        var found: Index := 0;
+        for i from 1 until spanLength(ps) do if has(ps[i].flags, flagOverlay) and visible(ps, i) then found := i; end if; end for;
+        return found;
+    end;
+    function within(ps: Span[Node], i: Index, ancestor: Index): Bool is
+        if ancestor = 0 then return true; end if;
+        var p: Index := i;
+        while p /= 0 do if p = ancestor then return true; end if; p := ps[p].parent; end while;
+        return false;
+    end;
+    -- The deepest visible node under a point, later siblings above earlier
+    -- ones; restricted to the topmost overlay while one is open.
+    function hit(ps: Span[Node], gs: Span[Geom], x: Int64, y: Int64): Index is
+        let scope: Index := topOverlay(ps);
+        var found: Index := 0;
+        for i from 1 until spanLength(ps) do
+            if visible(ps, i) and contains(gs, i, x, y) and within(ps, i, scope) then found := i; end if;
+        end for;
+        return found;
+    end;
+    function visible(ps: Span[Node], i: Index): Bool is
+        var p: Index := i;
+        while p /= 0 do
+            let k: Int64 := ps[p].kind;
+            if has(ps[p].flags, flagHidden) or k = kindShortcut or k = kindTimer or k = kindMenuBar or k = kindMenu or k = kindMenuItem then return false; end if;
+            p := ps[p].parent;
+        end while;
+        return true;
+    end;
+    function enabled(ps: Span[Node], i: Index): Bool is
+        var p: Index := i;
+        while p /= 0 do if has(ps[p].flags, flagDisabled) then return false; end if; p := ps[p].parent; end while;
+        return true;
+    end;
+    function focusable(ps: Span[Node], i: Index): Bool is
+        return has(ps[i].flags, flagFocusable) and enabled(ps, i) and visible(ps, i) and within(ps, i, topOverlay(ps));
+    end;
+    -- The next focusable node after the given identity in tree order (wrapping);
+    -- backwards for Shift+Tab. 0 when nothing can take focus.
+    function nextFocus(ps: Span[Node], current: Nat64, backwards: Bool): Index is
+        let n: Index := spanLength(ps);
+        if n <= 1 then return 0; end if;
+        var i: Index := find(ps, current);
+        for step from 0 until n do
+            if backwards and i <= 1 then i := n - 1;
+            else if backwards then i := i - 1;
+            else if i + 1 >= n then i := 1;
+            else i := i + 1; end if;
+            if focusable(ps, i) then return i; end if;
+        end for;
+        return 0;
+    end;
+    -- The default (Return) or cancel (Escape) button, enabled and in scope.
+    function special(ps: Span[Node], flag: Int64): Index is
+        let scope: Index := topOverlay(ps);
+        for i from 1 until spanLength(ps) do
+            if ps[i].kind = kindButton and has(ps[i].flags, flag) and enabled(ps, i) and visible(ps, i) and within(ps, i, scope) then return i; end if;
+        end for;
+        return 0;
+    end;
+    -- Items of context menus and pop-up buttons are not keyboard shortcuts.
+    function inContext(ps: Span[Node], i: Index): Bool is
+        let p: Index := ps[i].parent;
+        return ps[p].kind = kindPopup or (ps[p].kind = kindMenu and has(ps[p].flags, flagContext));
+    end;
+    -- A declared shortcut or menu item matching a key event (code with modifiers).
+    function shortcut(ps: Span[Node], code: Int64): Index is
+        for i from 1 until spanLength(ps) do
+            if (ps[i].kind = kindShortcut or ps[i].kind = kindMenuItem) and ps[i].value = code and code /= 0 and enabled(ps, i)
+                and within(ps, i, topOverlay(ps)) and not inContext(ps, i) then return i; end if;
+        end for;
+        return 0;
+    end;
+
+    ------------------------------------------------------------------ comparing frames
+
+    record Damage: Linear is rects: Vector[Rect]; full: Bool; end;
+    function makeDamage(): Damage is return Damage(rects => vectorMake(), full => false); end;
+    function destroyDamage(d: Damage): Unit is let { rects as r: Vector[Rect], full as f: Bool } := d; destroyFree(r); return nil; end;
+    function clearDamage(d: &![Damage]): Unit is
+        while length(readVector(&(d->rects))) > 0 do pop(&(d->rects)); end while; d->full := false; return nil;
+    end;
+    function area(r: Rect): Int64 is return r.width * r.height; end;
+    function unite(a: Rect, b: Rect): Rect is
+        let x0: Int64 := minInt(a.x, b.x); let y0: Int64 := minInt(a.y, b.y);
+        let x1: Int64 := maxInt(a.x + a.width, b.x + b.width); let y1: Int64 := maxInt(a.y + a.height, b.y + b.height);
+        return Rect(x => x0, y => y0, width => x1 - x0, height => y1 - y0);
+    end;
+    function intersects(a: Rect, b: Rect): Bool is
+        return a.x < b.x + b.width and b.x < a.x + a.width and a.y < b.y + b.height and b.y < a.y + a.height;
+    end;
+    function intersect(a: Rect, b: Rect): Rect is
+        let x0: Int64 := maxInt(a.x, b.x); let y0: Int64 := maxInt(a.y, b.y);
+        let x1: Int64 := minInt(a.x + a.width, b.x + b.width); let y1: Int64 := minInt(a.y + a.height, b.y + b.height);
+        return Rect(x => x0, y => y0, width => maxInt(x1 - x0, 0), height => maxInt(y1 - y0, 0));
+    end;
+    -- Add a rectangle, merging with others it overlaps or nearly touches
+    -- (merging wastes at most half again the area); at most eight are kept.
+    function addDamage(d: &![Damage], r: Rect): Unit is
+        if r.width <= 0 or r.height <= 0 or d->full then return nil; end if;
+        var current: Rect := r; var merged: Bool := true;
+        while merged do
+            merged := false;
+            var i: Index := 0;
+            while i < length(readVector(&(d->rects))) and not merged do
+                let other: Rect := get(readVector(&(d->rects)), i);
+                let u: Rect := unite(current, other);
+                if intersects(current, other) or area(u) <= (area(current) + area(other)) * 3 / 2 then
+                    let lastIndex: Index := length(readVector(&(d->rects))) - 1;
+                    set(&(d->rects), i, get(readVector(&(d->rects)), lastIndex)); pop(&(d->rects));
+                    current := u; merged := true;
+                end if;
+                i := i + 1;
+            end while;
+        end while;
+        push(&(d->rects), current);
+        if length(readVector(&(d->rects))) > 8 then
+            var all: Rect := current;
+            while length(readVector(&(d->rects))) > 0 do
+                case pop(&(d->rects)) of when Some(value as x: Rect) do all := unite(all, x); when None do skip; end case;
+            end while;
+            push(&(d->rects), all);
+        end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function readDamage(d: &![Damage, R]): &[Damage, R] is return (d: &[Damage, R]); end;
+    function setFull(d: &![Damage]): Unit is d->full := true; return nil; end;
+    function visibleRect(ps: Span[Node], gs: Span[Geom], i: Index): Rect is
+        if not visible(ps, i) then return Rect(x => 0, y => 0, width => 0, height => 0); end if;
+        return intersect(Rect(x => gs[i].x, y => gs[i].y, width => gs[i].width, height => gs[i].height),
+            Rect(x => gs[i].clipX, y => gs[i].clipY, width => gs[i].clipWidth, height => gs[i].clipHeight));
+    end;
+    -- Compare the visual hashes of two laid-out frames, matching nodes by
+    -- identity; changed, new and vanished nodes damage both rectangles.
+    function compare(oldNodes: Span[Node], oldGeom: Span[Geom], newNodes: Span[Node], newGeom: Span[Geom], d: &![Damage]): Unit is
+        let same: Bool := spanLength(oldNodes) = spanLength(newNodes);
+        for i from 1 until spanLength(newNodes) do
+            var o: Index := 0;
+            if same and oldNodes[i].ident = newNodes[i].ident then o := i; else o := find(oldNodes, newNodes[i].ident); end if;
+            if o = 0 then addDamage(&~d, visibleRect(newNodes, newGeom, i));
+            else if oldGeom[o].visual /= newGeom[i].visual then
+                addDamage(&~d, visibleRect(oldNodes, oldGeom, o)); addDamage(&~d, visibleRect(newNodes, newGeom, i));
+            end if;
+        end for;
+        for o from 1 until spanLength(oldNodes) do
+            var present: Bool := false;
+            if same and oldNodes[o].ident = newNodes[o].ident then present := true; else present := find(newNodes, oldNodes[o].ident) /= 0; end if;
+            if not present then addDamage(&~d, visibleRect(oldNodes, oldGeom, o)); end if;
+        end for;
+        return nil;
+    end;
+    generic [R: Region]
+    function damageRects(d: &[Damage, R]): Span[Rect, R] is return slice(&(d->rects), 0, length(&(d->rects))); end;
+    function damageFull(d: &[Damage]): Bool is return d->full; end;
+    ------------------------------------------------------------------ keys
+
+    function lower(b: Nat8): Nat8 is if b >= 65 and b <= 90 then return b + 32; end if; return b; end;
+    -- Case-insensitive comparison of a span with an ASCII name.
+    function named(value: Span[Nat8], name: Span[Nat8]): Bool is
+        if spanLength(value) /= spanLength(name) then return false; end if;
+        for i from 0 until spanLength(value) do if lower(value[i]) /= lower(name[i]) then return false; end if; end for;
+        return true;
+    end;
+    function startsWith(value: Span[Nat8], at: Index, prefix: Span[Nat8]): Bool is
+        if spanLength(value) - at < spanLength(prefix) then return false; end if;
+        for i from 0 until spanLength(prefix) do if lower(value[at + i]) /= lower(prefix[i]) then return false; end if; end for;
+        return true;
+    end;
+    -- The key event code of a description such as "Ctrl+S", "Alt+Left",
+    -- "F5", "Escape" or "Ctrl+Shift+Tab"; 0 when it is not understood.
+    -- Character keys carry no Shift bit (the character is already shifted),
+    -- and Ctrl/Alt letters are lowercase, as the keyboard driver reports them.
+    generic [R: Region]
+    function parseKey(keys: Span[Nat8, R]): Int64 is
+        var mods: Int64 := 0; var at: Index := 0; var more: Bool := true;
+        while more do
+            if startsWith(keys, at, "Ctrl+") then mods := mods | keyCtrl; at := at + 5;
+            else if startsWith(keys, at, "Alt+") then mods := mods | keyAlt; at := at + 4;
+            else if startsWith(keys, at, "Shift+") then mods := mods | keyShift; at := at + 6;
+            else more := false; end if;
+        end while;
+        let rest: Span[Nat8, R] := sliceSpan(keys, at, spanLength(keys));
+        if spanLength(rest) = 1 then
+            var c: Nat8 := rest[0];
+            if (mods & (keyCtrl | keyAlt)) /= 0 then c := lower(c); end if;
+            return widenToInt(c) | (mods & ~keyShift);
+        end if;
+        var code: Int64 := 0;
+        if named(rest, "Enter") or named(rest, "Return") then code := keyEnter;
+        else if named(rest, "Esc") or named(rest, "Escape") then code := keyEscape;
+        else if named(rest, "Tab") then code := keyTab;
+        else if named(rest, "Space") then return 32 | (mods & ~keyShift);
+        else if named(rest, "Backspace") then code := keyBackspace;
+        else if named(rest, "Delete") then code := keyDelete;
+        else if named(rest, "Up") then code := keyUp;
+        else if named(rest, "Down") then code := keyDown;
+        else if named(rest, "Left") then code := keyLeft;
+        else if named(rest, "Right") then code := keyRight;
+        else if named(rest, "Home") then code := keyHome;
+        else if named(rest, "End") then code := keyEnd;
+        else if named(rest, "PageUp") then code := keyPageUp;
+        else if named(rest, "PageDown") then code := keyPageDown;
+        else if spanLength(rest) >= 2 and spanLength(rest) <= 3 and lower(rest[0]) = 102 then
+            var n: Int64 := 0;
+            for i from 1 until spanLength(rest) do
+                if rest[i] < 48 or rest[i] > 57 then return 0; end if;
+                n := n * 10 + widenToInt(rest[i]) - 48;
+            end for;
+            if n < 1 or n > 12 then return 0; end if;
+            code := 1114129 + n - 1;
+        end if;
+        if code = 0 then return 0; end if;
+        -- Enter, Tab, Backspace and Escape do not carry Ctrl from a terminal; keep what was asked.
+        return code | mods;
+    end;
+    function widenToInt(b: Nat8): Int64 is
+        case toInt64(widenToNat64(b)) of when Some(value as v: Int64) do return v; when None do return 0; end case;
+    end;
+end module body.

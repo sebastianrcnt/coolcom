@@ -49,6 +49,7 @@
 #include "Fb.cool"
 #include "Key.cool"
 #include "Ime.cool"
+#include "Clip.cool"
 #include "Input.cool"
 #include "DskStrA.cool"
 #include "DskCache.cool"

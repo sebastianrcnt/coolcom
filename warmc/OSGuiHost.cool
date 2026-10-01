@@ -16,3 +16,35 @@ I64 WgScale(I64 scale) {return -1;}
 I64 WgFont(I64 choice, I64 size) {return -1;}
 
 I64 WgTextClip(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 cx, I64 cy, I64 width, I64 height) {return -1;}
+I64 WgClip(I64 handle, I64 x, I64 y, I64 width, I64 height) {return -1;}
+I64 WgPattern(I64 handle, I64 x, I64 y, I64 width, I64 height, I64 pattern, I64 fg, I64 bg) {return -1;}
+I64 WgInvert(I64 handle, I64 x, I64 y, I64 width, I64 height) {return -1;}
+I64 WgTextStyle(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 flags) {return -1;}
+I64 WgBits(I64 handle, I64 x, I64 y, I64 width, I64 height, U8 *bits, U64 size, I64 stride, I64 color) {return -1;}
+I64 WgBlit(I64 handle, I64 x, I64 y, I64 width, I64 height, U8 *pixels, U64 size, I64 stride) {return -1;}
+I64 WgPending(I64 handle) {return -1;}
+I64 WgWait(I64 handle, I64 ms) {return -1;}
+I64 WgTrace() {return 0;}
+I64 WgMicros() {return 0;}
+// The host keeps an in-process clipboard so editing tests run without a desktop.
+U8 *wg_clip_data; I64 wg_clip_size, wg_clip_serial;
+I64 WgClipWrite(I64 handle, U8 *bytes, U64 size)
+{
+    U8 *copy = MAlloc(size + 1); if (!copy) return -1;
+    if (size) MemCpy(copy, bytes, size);
+    Free(wg_clip_data); wg_clip_data = copy; wg_clip_size = size; return ++wg_clip_serial;
+}
+I64 WgClipSerial() {return wg_clip_serial;}
+I64 WgClipSize(I64 serial) {if (serial >= 0 && serial != wg_clip_serial) return -1; return wg_clip_size;}
+I64 WgClipRead(I64 serial, U8 *into, U64 capacity)
+{
+    I64 n;
+    if (serial >= 0 && serial != wg_clip_serial) return -1;
+    n = wg_clip_size; if (n > capacity) n = capacity; if (n) MemCpy(into, wg_clip_data, n); return n;
+}
+I64 WgPointer(I64 handle, I64 shape) {return -1;}
+I64 WgMenuReset(I64 handle) {return -1;}
+I64 WgMenuEntry(I64 handle, I64 menu, I64 id, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags) {return -1;}
+I64 WgPopupClear(I64 handle) {return -1;}
+I64 WgPopupItem(I64 handle, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags) {return -1;}
+I64 WgPopupShow(I64 handle, I64 x, I64 y, I64 current) {return -1;}

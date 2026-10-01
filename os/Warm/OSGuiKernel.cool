@@ -46,7 +46,7 @@ I64 WgDither(I64 handle, I64 x, I64 y, I64 width, I64 height)
     if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
     GrDither(x, y, width, height); return 0;
 }
-I64 WgPresent(I64 handle) {if (!WgWindow(handle)) return -16; if (!GuiPresent) return -1; return 0;}
+I64 WgPresent(I64 handle) {if (!WgWindow(handle)) return -16; if (!GuiPresent(TRUE)) return -1; return 0;}
 I64 WgPoll(I64 handle)
 {
     CGuiWindow *w = WgWindow(handle); if (!w) return -16;
@@ -74,9 +74,11 @@ I64 WgMenuItem(I64 handle, I64 menu, I64 id, U8 *label, U64 size)
     result = GuiAddMenuItem(w, menu, id, s); Free(s); return result;
 }
 
-I64 WgScale(I64 scale) {if (!gui_active || Gs->num) return -1; if (scale != 1 && scale != 2) return -12; if (FontScale(scale) != scale) return -1; return 0;}
+// Scale 0 reads the current scale; font choice -1 reads whether a TrueType font is active.
+I64 WgScale(I64 scale) {if (!scale) return font.scale; if (!gui_active || Gs->num) return -1; if (scale != 1 && scale != 2) return -12; if (FontScale(scale) != scale) return -1; return 0;}
 I64 WgFont(I64 choice, I64 size)
 {
+    if (choice == -1) return font.cfg.face != NULL;
     if (!gui_active || Gs->num) return -1; if (choice < 0 || choice > 1 || size < 6 || size > 96) return -12;
     U8 *path = NULL; if (choice) path = "C:/Fonts/SarasaMonoK-Regular.ttf";
     if (!FontSet(path, size)) return -10; return 0;
@@ -87,4 +89,87 @@ I64 WgTextClip(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 cx, 
     U8 *s; if (!WgWindow(handle)) return -16;
     if (x < -32768 || x > 32767 || y < -32768 || y > 32767 || cx < -32768 || cx > 32767 || cy < -32768 || cy > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
     s = WkString(text, size); if (!s) return -12; GrTextClip(x, y, s, color, cx, cy, width, height); Free(s); return 0;
+}
+
+// OS.Ui support. Coordinates are logical client pixels; every operation is clipped.
+I64 WgCoord(I64 v) {return -32768 <= v <= 32767;}
+I64 WgClip(I64 handle, I64 x, I64 y, I64 width, I64 height)
+{
+    if (!WgWindow(handle)) return -16;
+    if (!WgCoord(x) || !WgCoord(y) || width > 32767 || height > 32767) return -12;
+    GrClip(x, y, width, height); return 0;
+}
+I64 WgPattern(I64 handle, I64 x, I64 y, I64 width, I64 height, I64 pattern, I64 fg, I64 bg)
+{
+    if (!WgWindow(handle)) return -16;
+    if (!WgCoord(x) || !WgCoord(y) || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
+    GrPattern(x, y, width, height, pattern, fg, bg); return 0;
+}
+I64 WgInvert(I64 handle, I64 x, I64 y, I64 width, I64 height)
+{
+    if (!WgWindow(handle)) return -16;
+    if (!WgCoord(x) || !WgCoord(y) || width < 0 || width > 32767 || height < 0 || height > 32767) return -12;
+    GrInvert(x, y, width, height); return 0;
+}
+I64 WgTextStyle(I64 handle, I64 x, I64 y, U8 *text, U64 size, I64 color, I64 flags)
+{
+    if (!WgWindow(handle)) return -16;
+    if (!WgCoord(x) || !WgCoord(y) || size > 65536 || flags < 0 || flags > 7) return -12;
+    return GrTextStyle(x, y, text, size, color, flags);
+}
+I64 WgBits(I64 handle, I64 x, I64 y, I64 width, I64 height, U8 *bits, U64 size, I64 stride, I64 color)
+{
+    if (!WgWindow(handle)) return -16;
+    if (!WgCoord(x) || !WgCoord(y) || width < 0 || width > 4096 || height < 0 || height > 4096 || stride < (width + 7) / 8 || stride * height > size) return -12;
+    GrBits(x, y, width, height, bits, stride, color); return 0;
+}
+I64 WgBlit(I64 handle, I64 x, I64 y, I64 width, I64 height, U8 *pixels, U64 size, I64 stride)
+{
+    if (!WgWindow(handle)) return -16;
+    if (!WgCoord(x) || !WgCoord(y) || width < 0 || width > 4096 || height < 0 || height > 4096 || stride < width * 4 || stride * height > size) return -12;
+    GrBlit(x, y, width, height, pixels, stride); return 0;
+}
+I64 WgPending(I64 handle) {if (!WgWindow(handle)) return -16; return GuiPending;}
+I64 WgWait(I64 handle, I64 ms) {if (!WgWindow(handle)) return -16; if (ms < 0 || ms > 3600000) return -12; GuiWait(ms); return 0;}
+I64 WgTrace() {return gui.trace;}
+I64 WgMicros() {return ArchCntVct * 1000000 / cnt_freq;}
+
+// System clipboard (Clip.cool) and the pointer shape of the calling task's window.
+I64 WgClipWrite(I64 handle, U8 *bytes, U64 size) {if (!WgWindow(handle)) return -16; if (size > CLIP_MAX) return -12; return ClipboardSet(bytes, size);}
+I64 WgClipSerial() {return ClipboardSerial;}
+I64 WgClipSize(I64 serial) {return ClipboardSize(serial);}
+I64 WgClipRead(I64 serial, U8 *into, U64 capacity) {return ClipboardGet(into, capacity, serial);}
+I64 WgPointer(I64 handle, I64 shape)
+{
+    CGuiWindow *w = WgWindow(handle);
+    if (!w) return -16;
+    if (shape < 0 || shape > 1) return -12;
+    w->pointer_shape = shape;
+    GuiPointerOver(gui.mx, gui.my);
+    return 0;
+}
+
+// Menus with shortcuts, separators and states; pop-up lists (GuiMenu.cool).
+I64 WgMenuReset(I64 handle) {CGuiWindow *w = WgWindow(handle); if (!w) return -16; return GuiMenuReset(w);}
+I64 WgMenuEntry(I64 handle, I64 menu, I64 id, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags)
+{
+    CGuiWindow *w = WgWindow(handle); U8 *l, *k; I64 result;
+    if (!w) return -16;
+    l = WkString(label, lsize); k = WkString(keys, ksize); if (!l || !k) {Free(l); Free(k); return -12;}
+    result = GuiAddMenuItem(w, menu, id, l, k, flags); Free(l); Free(k); return result;
+}
+I64 WgPopupClear(I64 handle) {CGuiWindow *w = WgWindow(handle); if (!w) return -16; return GuiPopupClear(w);}
+I64 WgPopupItem(I64 handle, U8 *label, U64 lsize, U8 *keys, U64 ksize, I64 flags)
+{
+    CGuiWindow *w = WgWindow(handle); U8 *l, *k; I64 result;
+    if (!w) return -16;
+    l = WkString(label, lsize); k = WkString(keys, ksize); if (!l || !k) {Free(l); Free(k); return -12;}
+    result = GuiPopupItem(w, l, k, flags); Free(l); Free(k); return result;
+}
+I64 WgPopupShow(I64 handle, I64 x, I64 y, I64 current)
+{
+    CGuiWindow *w = WgWindow(handle);
+    if (!w) return -16;
+    if (!WgCoord(x) || !WgCoord(y)) return -12;
+    return GuiPopupShow(w, x, y, current);
 }
