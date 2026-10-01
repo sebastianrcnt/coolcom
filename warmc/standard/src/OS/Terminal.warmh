@@ -1,6 +1,7 @@
 import OS.Error (IoError);
 import Standard.String (String);
 module OS.Terminal is
+    record Size: Free is rows: Int64; columns: Int64; end;
     type Output: Linear;
     type Input: Linear;
     union Color: Free is
@@ -24,5 +25,9 @@ module OS.Terminal is
     function readLine(input: &![Input]): Result[String, IoError];
     function decodeKey(event: Int64): Result[Key, IoError];
     function readKey(input: &![Input]): Result[Key, IoError];
+    -- Zero timeout polls; expiration returns IoError.Timeout. Milliseconds must be 0..2147483647.
+    function readKeyTimeout(input: &![Input], timeoutMs: Int64): Result[Key, IoError];
+    -- Current terminal dimensions; CoolOS uses 24x80 when no screen is attached.
+    function terminalSize(output: &[Output]): Result[Size, IoError];
     function setColor(output: &![Output], foreground: Color, background: Color): Result[Unit, IoError];
 end module.

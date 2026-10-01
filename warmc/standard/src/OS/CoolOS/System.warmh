@@ -1,0 +1,32 @@
+import OS.Error (IoError);
+import Standard.String (String);
+module OS.CoolOS.System is
+    type System: Linear;
+    type Snapshot: Linear;
+    record TaskInfo: Free is
+        taskNum: Int64; core: Int64; state: Int64; ticks: Int64; idle: Int64; stackSize: Int64; switches: Int64;
+    end;
+    record HeapInfo: Free is used: Int64; total: Int64; freeBlocks: Int64; largestFree: Int64; usedBlocks: Int64; end;
+    record DriveInfo: Free is freeBytes: Int64; totalBytes: Int64; end;
+    record Clock: Free is
+        ticks: Int64; ticksPerSecond: Int64; uptimeJiffies: Int64; jiffiesPerSecond: Int64; cores: Int64; currentTask: Int64;
+    end;
+    function acquireSystem(root: &![RootCapability]): System;
+    function releaseSystem(system: System): Unit;
+    -- At most maxCount copied rows (0..4096). Resample with a larger capacity if count equals the limit.
+    -- Names and numeric fields remain valid after a task exits; release the snapshot after use.
+    function snapshotTasks(system: &[System], maxCount: Index): Result[Snapshot, IoError];
+    function snapshotCount(snapshot: &[Snapshot]): Index;
+    -- State: 0 running, 1 ready, 2 sleeping, 3 stopped, 4 being killed. idle is 0 or 1.
+    function snapshotTask(snapshot: &[Snapshot], index: Index): Result[TaskInfo, IoError];
+    -- Returns an owned name; destroyString when finished.
+    function snapshotName(snapshot: &[Snapshot], index: Index): Result[String, IoError];
+    function releaseSnapshot(snapshot: Snapshot): Unit;
+    function heapStats(system: &[System]): Result[HeapInfo, IoError];
+    -- ASCII drive letter; freeBytes = -1 means FSInfo has no known free count.
+    function driveFree(system: &[System], letter: Nat8): Result[DriveInfo, IoError];
+    -- Asynchronous request. NotFound for stale numbers, Denied for idle or the calling task.
+    function killTask(system: &![System], taskNum: Int64): Result[Unit, IoError];
+    -- TaskInfo.ticks and Clock.ticks use ticksPerSecond; uptimeJiffies uses jiffiesPerSecond.
+    function clock(system: &[System]): Result[Clock, IoError];
+end module.

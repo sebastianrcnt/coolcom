@@ -1,0 +1,4 @@
+import OS.CoolOS.System (heapStats);
+module body SystemNoCapability is
+    function main(): ExitCode is heapStats(0); return ExitSuccess(); end;
+end module body.

@@ -80,13 +80,13 @@ def stdin_test(OUT):
     print("warm-kernel: Stdin (greet reads the terminal) PASS", flush=True)
 
 def portable_test(OUT, name):
-    """Compile and run a portable file program with WarmRun itself."""
+    """Compile and run an OS program with WarmRun itself."""
     disk = OUT / (name + "-run.img")
     testvm.create_disk(disk, 64 * 1024 * 1024, capture_output=True)
     install(disk)
     files = []
     for pair in os_modules(ROOT):
-        if "/Raw." in pair or "/CoolOS/" in pair or "/Terminal." in pair:
+        if name != "System" and ("/Raw." in pair or "/CoolOS/" in pair or "/Terminal." in pair):
             continue
         files += [Path(path) for path in pair.split(",")]
     files += [ROOT / ("warmc/examples/kernel/" + name + ".warm")]
@@ -98,6 +98,7 @@ def portable_test(OUT, name):
     script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line('#include "C:/Warm/Warm.cool"') +
         testvm.typed_line('Print("WLOAD%d\\n", 1);') + "wait WLOAD1\n" +
         warm_run(modules, name + ":main") +
+        ("wait WARM SYSTEM KEY READY\n" + testvm.keys_of(45) if name == "System" else "") +
         "wait " + marker + "\ndelay 200\nquit\n")
     log = OUT / (name + "Run.log")
     proc = testvm.run_vm(testvm.vm_command(str(ROOT / "build/kernel.Image"), executable=ROOT / "build/coolvm",
@@ -137,14 +138,17 @@ def fmt_test(OUT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "Stdin", "Fmt"))
+    parser.add_argument("--filter", default="", choices=("", "Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "System", "Stdin", "Fmt"))
     args = parser.parse_args()
     OUT = ROOT / "build/warm-kernel"
     if args.filter:
         OUT = OUT / args.filter
     OUT.mkdir(parents=True, exist_ok=True)
     for name, diagnostic in (("Leak", "not consumed"), ("DoubleClose", "consumed"),
-                             ("NoCapability", "Type Error"), ("Forge", "callable named Filesystem")):
+                             ("NoCapability", "Type Error"), ("Forge", "callable named Filesystem"),
+                             ("SystemForge", "callable named System"),
+                             ("SystemNoCapability", "Type Error"),
+                             ("SnapshotLeak", "not consumed")):
         result = subprocess.run([str(ROOT / "build/warmc"), "compile",
             *os_modules(ROOT),
             str(ROOT / "warmc/test-programs/kernel" / (name + ".warm")),
@@ -169,7 +173,7 @@ def main():
     adapter = OUT / "Adapter.cool"
     adapter.write_text("".join((ROOT / "warmc" / n).read_text() for n in ["OSKernel.cool", "OSCommon.cool", "OSDirKernel.cool", "OSNetCommon.cool", "OSNetKernel.cool", "OSTaskKernel.cool"]))
     run("mcopy", "-o", "-i", disk, adapter, "::Adapter.cool")
-    for name in ("Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors"):
+    for name in ("Files", "Streams", "Sockets", "Tasks", "TaskKilled", "Capabilities", "Screen", "Key", "Errors", "System"):
         if args.filter not in name:
             continue
         hc = OUT / (name + ".cool")
@@ -193,7 +197,8 @@ def main():
         marker = "WARM " + name.upper().replace("FILES", "FILE") + " PASS"
         # Type once the shell prompts; stop the VM once the program has passed (coolvm wait/quit).
         script.write_text("wait Cool shell\nwait > \n" + testvm.typed_line('#include "C:/' + name + '.cool"') +
-                          ("wait WARM KEY READY\n" + testvm.keys_of(45) if name == "Key" else "") +
+                          ("wait WARM KEY READY\n" + testvm.keys_of(45) if name == "Key" else
+                           "wait WARM SYSTEM KEY READY\n" + testvm.keys_of(45) if name == "System" else "") +
                           "wait " + marker + "\ndelay 200\nquit\n")
         log = OUT / (name + ".log")
         with log.open("wb") as stream:
@@ -217,7 +222,7 @@ def main():
             assert all(row[10*3:50*3] == bytes([0, 255, 0]) * 40
                        for row in rows[400:420]), "Warm framebuffer rectangle missing"
         print("warm-kernel: " + name + " PASS", flush=True)
-    for name in ("Streams", "Sockets", "Tasks", "Capabilities"):
+    for name in ("Streams", "Sockets", "Tasks", "Capabilities", "System"):
         if not args.filter or args.filter == name:
             portable_test(OUT, name)
     if not args.filter or args.filter == "Stdin":

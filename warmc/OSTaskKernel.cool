@@ -1,3 +1,5 @@
+// Warm job/result pointers use the shared LibC allocator; release them through its API.
+extern U0 free(U8 *data);
 // The completion slot is parent-owned. A task never holds a pointer into a parent's stack.
 class WtJob {WtJob *next; U8 *entry; U8 *data; U8 *result; U8 *message; CTask *task; U8 *compiler_task; I64 tls[2]; I64 state; I64 detached; I64 started;};
 WtJob *wt_jobs;
@@ -7,11 +9,11 @@ U0 WtUnlink(WtJob *j) {
     while (*p && *p != j) p = &(*p)->next;
     if (*p) *p = j->next;
 }
-U0 WtFree(WtJob *j) {Free(j->result - 8); Free(j->compiler_task); Free(j);}
+U0 WtFree(WtJob *j) {free(j->result); Free(j->compiler_task); Free(j);}
 U0 WtKilled(U8 *data) {
     WtJob *j = data; I64 daif = SpinLockIrq(&wt_lock), detached = j->detached;
     j->state = 3;
-    if (!j->started) Free(j->data - 8);
+    if (!j->started) free(j->data);
     if (detached) WtUnlink(j);
     SpinUnlockIrq(&wt_lock, daif);
     if (detached) WtFree(j);

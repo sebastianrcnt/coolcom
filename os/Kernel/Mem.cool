@@ -332,7 +332,7 @@ I64 HeapMSize(CHeapCtrl *hc, U8 *p)
 
 // Walk the whole block chain. Returns TRUE if consistent; optionally reports
 // block counts and the largest free block.
-Bool HeapCheck(CHeapCtrl *hc, I64 *nused = NULL, I64 *nfree = NULL, I64 *largest = NULL)
+Bool HeapCheck(CHeapCtrl *hc, I64 *nused = NULL, I64 *nfree = NULL, I64 *largest = NULL, I64 *used = NULL, I64 *total = NULL)
 {
     CMemBlk *b = hc->start;
     I64 prev = 0, u = 0, f = 0, big = 0, bytes = 0, fbytes = 0;
@@ -361,6 +361,8 @@ Bool HeapCheck(CHeapCtrl *hc, I64 *nused = NULL, I64 *nfree = NULL, I64 *largest
     if (ok && (b(U8 *) != hc->end - HEAP_HDR || bytes != hc->total ||
                bytes - fbytes != hc->used))
         ok = FALSE;
+    if (used) *used = hc->used;
+    if (total) *total = hc->total;
     HeapUnlock(hc);
     if (nused)
         *nused = u;
@@ -440,4 +442,12 @@ U8 *ACAlloc(I64 cnt) {return CAlloc(cnt);}
 U8 *AStrNew(U8 *str) {return StrNew(str);}
 U8 *AMAllocIdent(U8 *ptr) {return MAllocIdent(ptr);}
 
-U0 HeapStats() {HeapStatsCtrl(&sys_heap);}
+Bool HeapStats(I64 *used = NULL, I64 *total = NULL, I64 *nfree = NULL,
+               I64 *largest = NULL, I64 *nused = NULL)
+{//No arguments retain the console report. Output arguments describe one locked sample.
+    if (!used && !total && !nfree && !largest && !nused) {
+        HeapStatsCtrl(&sys_heap);
+        return TRUE;
+    }
+    return HeapCheck(&sys_heap, nused, nfree, largest, used, total);
+}

@@ -1,0 +1,5 @@
+import OS.CoolOS.System (System, releaseSystem);
+module body SystemForge is
+    function main(): ExitCode is
+        let system: System := System(); releaseSystem(system); return ExitSuccess(); end;
+end module body.

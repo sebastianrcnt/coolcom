@@ -1,5 +1,5 @@
 pragma Unsafe_Module;
-import Austral.Memory (Pointer, spanToPointer);
+import Austral.Memory (Address, Pointer, spanToPointer, allocate, nullCheck, load, deallocate);
 import OS.Error (IoError, fromCode, status);
 import Standard.String (String);
 import Standard.StringBuilder (StringBuilder, makeStringBuilder, writeByte, finalize);
@@ -39,6 +39,21 @@ module body OS.Terminal is
         return Ok(value => finalize(builder)); end;
     function readKey(input: &![Input]): Result[Key, IoError] is
         return decodeKey(rawKey()); end;
+    pragma Foreign_Import(External_Name => "WkreadKeyTimeout");
+    private function rawKeyTimeout(timeoutMs: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WkterminalSize");
+    private function rawSize(info: Pointer[Size]): Int64 is end;
+    function readKeyTimeout(input: &![Input], timeoutMs: Int64): Result[Key, IoError] is
+        return decodeKey(rawKeyTimeout(timeoutMs)); end;
+    function terminalSize(output: &[Output]): Result[Size, IoError] is
+        let address: Address[Size] := allocate();
+        case nullCheck(address) of
+            when None do abort("Terminal size allocation failed");
+            when Some(value as info: Pointer[Size]) do
+                let code: Int64 := rawSize(info);
+                if code < 0 then deallocate(info); return Err(error => fromCode(code)); end if;
+                let value: Size := load(info); deallocate(info); return Ok(value => value);
+        end case; end;
     function decodeKey(event: Int64): Result[Key, IoError] is
         if event < 0 then return Err(error => fromCode(event)); end if;
         let code: Int64 := event & 16777215;
