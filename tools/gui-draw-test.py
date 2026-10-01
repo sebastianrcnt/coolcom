@@ -21,7 +21,7 @@ def boot(mode):
     testvm.install_disk_files(disk, stdout=subprocess.DEVNULL)
     if mode == 'venus':
         subprocess.run([ROOT / 'tools/venus/install.sh', disk], check=True, stdout=subprocess.DEVNULL)
-    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n'
+    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     fixture = d / 'Burst.cool'
     fixture.write_text('''U0 GuiDrawBurst()
 {

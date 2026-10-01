@@ -506,3 +506,12 @@ gui-redraw-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN
 	python3 tools/gui-redraw-test.py $< $(if $(RUN_VENUS),--venus)
 
 test: gui-redraw-test
+
+.PHONY: gui-files-test host-scroll-test
+host-scroll-test:
+	mkdir -p build
+	clang -Wall -Wextra tools/coolvm/test/scroll-test.c -o build/host-scroll-test
+	build/host-scroll-test
+gui-files-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-files-test.py $< $(if $(RUN_VENUS),--venus)
+test: host-scroll-test gui-files-test

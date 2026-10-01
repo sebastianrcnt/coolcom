@@ -63,7 +63,7 @@ def boot(mode):
     fixture = d / 'Redraw.cool'
     fixture.write_text(FIXTURE)
     subprocess.run(['mcopy', '-o', '-i', disk, fixture, '::Redraw.cool'], check=True)
-    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n'
+    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script += testvm.typed('#include "C:/Redraw.cool"\nRedrawAll;\n')
     script += ''.join(f'wait REDRAW{i} PASS\n' for i in range(4)) + 'quit\n'
     (d / 'input.txt').write_text(script)

@@ -378,3 +378,149 @@ Vulkan, cursor, scale, Warm, kernel and QEMU tests. Full log:
 (CPU 63/12 ms and Venus 54/13 ms for the host/queued bursts). Each new
 1x/2x CPU/Venus frame run inspected 57 complete client frames with no cleared
 intermediate scene.
+
+### Files latency, normalized wheel input, and one initial shell
+
+Measured and fixed on top of main's Stage 7 plus small-function inlining / callee-first emission merge (`c11ce30`), using the same
+Warm/Cool compiler for both versions. No compiler source or vendor file was
+edited. `Gui;` now opens one shell; Ctrl+Alt+N and the System menu still open
+more. Existing GUI scenarios explicitly call `GuiShell;` for their second
+shell, retaining geometry, five-window, pixel, cursor and lifecycle assertions.
+The QEMU cursor probe also explicitly creates its second shell.
+
+**Host input.** `scrollWheel:` previously truncated every event separately.
+The shared native/test accumulator now sends signed **lines** in REL_WHEEL
+(code 8) and REL_HWHEEL (code 6). One line is 20 AppKit view points: precise
+input and the line height are converted to backing pixels together, so Retina
+scale does not change speed. Ordinary mouse-wheel deltas already use lines.
+Both axes retain signed fractional remainders. Ended events do not discard the
+remainder before momentum begins; momentum changes/end are accumulated normally,
+and cancellation clears the remainder. Switching between precise/nonprecise
+units also clears it. The SDK NSEvent.h documents precise deltas in points and nonprecise deltas
+scaled by row height. No zero wheel/SYN records are sent. OS.Gui's current
+Mouse event exposes the vertical axis; horizontal REL_HWHEEL is emitted by the
+host but is not yet exposed as a toolkit horizontal scrolling control.
+
+`make host-scroll-test` reproduces the loss: 100 deltas of 0.2 points, half in
+momentum, produced **0** using the old cast and **1 line** with accumulation.
+It also checks backing scales 1/2, positive/negative wheel lines, horizontal
+remainders, cancellation and nonfinite synthetic input.
+
+**Files and toolkit.** FAT directory enumeration dominated input handling;
+the old path reread the directory twice on every repaint and rebuilt titles.
+Files now owns cached names, directory flags and display titles, reads a
+new path once, and filters an index array in memory. Failed navigation and Up
+at the root do not reread unchanged content. Only the eleven visible rows are
+visited on a scroll. Scroll/selection redraw the list rectangle; buttons, input,
+item count and preview redraw independently. Navigation/resize repaint the
+complete client. The unconditional 10 ms sleep after every event is gone;
+only Idle sleeps (1 ms, interruptible by task wake).
+
+OS.Gui folds queued consecutive mouse motion and same-direction wheel records
+into the last position and summed wheel delta. It preserves button edges,
+keys, resize, menu/close events and wheel direction changes, including reversal
+at a clamped list boundary. Thumb hit mapping uses the same travel as thumb
+painting; held-motion bursts reach the last drag position. Selection uses the
+post-scroll first row when a record contains both button and wheel input.
+
+Cold opening also parsed/emitted unrelated modules. The installer now generates
+`GuiFilesModules.txt` with Files' transitive imports; older disks fall back to
+`GuiModules.txt`. Compiler implementations remain unchanged.
+
+**Method.** `tools/gui-files-test.py` installs an isolated disk with 160 tiny
+files plus the production directory tree, bitmap font, 800x600 at 1x. Cold
+launch uses the real `GuiFiles`/guest WarmRun path. A test-only copy of the
+generated compiler package times parse/file loading, checking and emission.
+For event measurements, the same host Warm compiler emits instrumented copies
+of Files/OS.Gui to Cool, run by the guest shell with the production kernel
+adapters. CNTVCT brackets app work, widget bodies, Gr operations/text, directory
+listing/stat/file reads and present; a `gui.compose_ticks` counter brackets the
+CPU/Venus compositor. A sentinel key acknowledged at the end of the app loop
+ensures that the whole burst, including prefetched events, has finished.
+End-to-end time waits for the committed revision to be composited. These are
+elapsed times, not host CPU time or physical display scanout latency. Profile reports
+are outside measured work. Existing app markers remain in the Warm residual.
+Widget timing subtracts nested Gr calls; Warm app/string time is the residual
+after IO, widgets, drawing, poll and present. Cold startup and event work are separated
+so shell/compiler setup cannot be mistaken for row rendering.
+
+CPU measurements in milliseconds (before → after):
+
+| Operation | App + poll + present | Input → composed | Directory listings |
+| --- | ---: | ---: | ---: |
+| First app frame (excluding compiler setup) | 9.883 → 5.255 | 373.021 → 378.056 | 2 → 1 |
+| One wheel line | 8.461 → 0.088 | 18.662 → 7.782 | 2 → 0 |
+| 100 queued wheel ticks | 874.986 → 0.085 | 1801.679 → 8.675 | 200 → 0 |
+| List click | 8.421 → 0.164 | 28.607 → 8.698 | 2 → 0 |
+| One filter key | 8.704 → 0.170 | 19.002 → 9.081 | 2 → 0 |
+| Open Kernel directory (press/release) | 37.051 → 12.053 | 61.238 → 17.109 | 6 → 1 |
+| Up to root (press/release) | 40.813 → 4.212 | 64.685 → 8.676 | 6 → 1 |
+| 32 held drag motions | 279.153 → 0.157 | 596.446 → 8.539 | 64 → 0 |
+| Open file preview (press/release) | 22.817 → 5.906 | 42.999 → 8.993 | 4 → 0 |
+
+The first-frame “input → composed” column includes the instrumented Cool
+package's shell/JIT setup; use the cold-launch table below for actual GuiFiles
+startup. Layer breakdown after the fix (CPU, ms; exclusive widget timing,
+Warm/string residual estimates; composition is a separate task):
+
+| Operation | Warm app / strings | OS.Gui widgets | Gr shapes / adapters | Gr text / measure | Directory / file IO | Present | Poll / coalesce | Compose |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| One wheel line | 0.003 | 0.004 | 0.042 | 0.029 | 0.000 | 0.008 | 0.003 | 0.128 |
+| 100 queued wheel ticks | <0.002 | 0.002 | 0.042 | 0.026 | 0.000 | 0.007 | 0.009 | 0.098 |
+| List click | 0.087 | 0.002 | 0.040 | 0.026 | 0.000 | 0.007 | 0.003 | 0.091 |
+| One filter key | 0.097 | 0.003 | 0.046 | 0.005 | 0.000 | 0.017 | 0.002 | 0.226 |
+| Open Kernel directory (press/release) | 0.157 | 0.003 | 0.109 | 0.038 | 11.720 | 0.024 | 0.002 | 0.265 |
+| Up to root (press/release) | 0.147 | 0.003 | 0.107 | 0.032 | 3.899 | 0.023 | 0.001 | 0.239 |
+| Open file preview (press/release) | 0.098 | 0.001 | 0.017 | 0.005 | 5.773 | 0.010 | 0.001 | 0.126 |
+
+Sub-2 µs residuals are shown as `<0.002`: separate timing brackets can differ
+by about 1 µs.
+
+Before, one wheel line spent 8.198 ms in IO out of 8.461 ms total; shapes/text/present were 0.090/0.032/0.028 ms. The costly repeated FAT work and sleep were the primary bottlenecks.
+
+| Cold real GuiFiles launch | Before CPU / Venus | After CPU / Venus |
+| --- | ---: | ---: |
+| Launch → first composed app frame | 859.792 / 872.409 | 618.731 / 639.991 |
+| Warm parse + input file loading | 476.392 / 477.369 | 230.552 / 230.610 |
+| Warm resolution / type / linearity checks | 13.810 / 12.382 | 10.018 / 14.102 |
+| Warm code emission | 7.452 / 9.918 | 11.123 / 23.528 |
+
+Cold launch still costs about 0.6 seconds for shell/compiler setup and parsing;
+the compiler startup cost remains visible. Cached clicks/keys/wheel react
+within one frame; directory navigation needs its one FAT read. The measured
+Open operation was about 17–18 ms end to end, with about 12 ms app/IO work.
+Compiler optimizations beyond the merged main were outside this change.
+
+Venus confirms the same behavior: one wheel line and the 100-tick burst use
+about 0.08–0.09 ms of app/poll/present work and about 9 ms input-to-compose;
+click/filter stay around one frame. Its per-layer JSON is recorded alongside
+CPU results in `build/gui-files-test/{before-merged,after-merged}/{cpu,venus}/`, with logs and
+screenshots; cold timings have separate `cold.json` files. Reproduction:
+
+```
+python3 tools/gui-files-test.py build/kernel.Image --label before-merged --baseline --venus
+python3 tools/gui-files-test.py build/kernel.Image --label after-merged --venus
+make host-scroll-test gui-files-test
+```
+
+Regression assertions check first row 1 after a single negative line and 101
+after the following 100 ticks, exactly one burst paint, zero directory reads
+for cached input, exact list-only damage `(12,78)-(256,300)`, final scrollbar
+position after 32 motions, ordered reversal at the bottom boundary, all filter
+keys, folder/parent navigation and file preview. CPU and Venus have strict
+16 ms app-processing and 50 ms input-to-compose bounds for cached events.
+For navigation/file reads the test separately bounds non-IO work to 16 ms and
+allows a 1 s load bound: disk IO can be descheduled by concurrent VMs during
+`make -j test` (one run observed 128 ms in the disk read). This allowance does
+not relax the wheel burst or cached click/key bounds.
+
+Validation (2026-10-01), after merging main `c11ce30`: `make -j test`
+exited **0**; full log:
+`build/gui-scroll-main-full-test.log`. CPU/Venus Files, G1–G5, cursor/QEMU,
+Warm Stage 7, Cool inlining, terminal apps and kernel rebuild tests all passed. The unchanged
+G2 bounds passed with CPU 31/20 ms and Venus 51/12 ms for the host/queued
+key bursts. Earlier runs exposed the QEMU probe's two-shell assumption (fixed by
+explicit GuiShell) and existing loaded-suite G2/Tmux timing failures; the final
+full run passed all assertions. Isolated before/after logs:
+`build/gui-files-before-merged.log`, `build/gui-files-after-merged.log`.
+No changes were pushed.

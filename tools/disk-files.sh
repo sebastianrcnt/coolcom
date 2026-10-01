@@ -37,6 +37,8 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 python3 tools/warm-man.py --output "$stage/Man"
 python3 tools/gui-modules.py >"$stage/GuiModules.txt"
 put "" "$stage/GuiModules.txt"
+python3 tools/gui-modules.py --files >"$stage/GuiFilesModules.txt"
+put "" "$stage/GuiFilesModules.txt"
 sed 's|#include "\.\./\.\./coolc/|#include "C:/Cool/|g' os/Kernel/Kernel.cool >"$stage/Kernel.cool"
 for f in os/Kernel/*; do
     [ "$f" != os/Kernel/Kernel.cool ] || f=$stage/Kernel.cool

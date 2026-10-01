@@ -19,7 +19,8 @@ probe.write_text('''U0 CursorQemu()
     shape[0]=0xFF000000;shape[1]=0xFFFFFFFF;shape[2]=0;shape[3]=0xFFFFFFFF;
     FontSet(NULL);FontScale(1);
     if(!fb.gpu || !Gui) throw(5);
-    while(gui.count!=2) Sleep(1);
+    while(gui.count!=1) Sleep(1);
+    GuiShell; while(gui.count!=2) Sleep(1);
     if(!GuiPointerSet(shape,2,2,1,1)) throw(6);
     before=gpu.q[1].last_used; GpuPointerMove(20,30);
     if(gpu.q[1].last_used!=before+1) throw(7);

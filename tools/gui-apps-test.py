@@ -17,7 +17,7 @@ def boot(mode):
     subprocess.run(['mcopy','-o','-i',disk,d / 'GuiFixture.txt','::GuiFixture.txt'],check=True)
     if mode == 'venus':
         subprocess.run([ROOT / 'tools/venus/install.sh',disk],check=True,stdout=subprocess.DEVNULL)
-    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n'
+    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     def click(x,y):
         return testvm.pointer_absolute(x,y,800,600) + 'delay 40\n1 272 1\ndelay 40\n1 272 0\ndelay 40\n'
     script += testvm.typed('GuiTop;\n') + 'wait GUI TOP READY\n'

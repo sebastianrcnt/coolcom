@@ -1,3 +1,4 @@
+#include "scroll.h"
 #import <AppKit/AppKit.h>
 #import <ImageIO/ImageIO.h>
 #import <CoreServices/CoreServices.h>
@@ -99,6 +100,7 @@ static const uint16_t keymap[128] = {
 };
 
 @interface VMView : NSView {
+    struct scroll_accumulator scroll;
     NSCursor *guestCursor;
     uint64_t cursorSerial;
     CGFloat cursorScaleX, cursorScaleY;
@@ -223,7 +225,16 @@ static const uint16_t keymap[128] = {
 }
 - (void)mouseDragged:(NSEvent *)event { [self mouseMoved:event]; }
 - (void)rightMouseDragged:(NSEvent *)event { [self mouseMoved:event]; }
-- (void)scrollWheel:(NSEvent *)event { input_push(2,8,(int)event.scrollingDeltaY); input_push(0,0,0); }
+- (void)scrollWheel:(NSEvent *)event {
+    int x, y;
+    scroll_lines(&scroll, event.scrollingDeltaX, event.scrollingDeltaY,
+                 event.hasPreciseScrollingDeltas, self.window.backingScaleFactor,
+                 (event.phase & NSEventPhaseCancelled) || (event.momentumPhase & NSEventPhaseCancelled),
+                 event.momentumPhase != NSEventPhaseNone && !(event.momentumPhase & NSEventPhaseEnded), &x, &y);
+    if (x) input_push(2,6,x); // Linux REL_HWHEEL, signed lines.
+    if (y) input_push(2,8,y); // Linux REL_WHEEL, signed lines.
+    if (x || y) input_push(0,0,0);
+}
 @end
 
 @interface VMWindowDelegate : NSObject <NSWindowDelegate>

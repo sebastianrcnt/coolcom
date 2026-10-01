@@ -86,7 +86,7 @@ def boot(mode, scale):
     fixture.write_text(FIXTURE.replace('100*(stride/4)+250', '100*w->scale*(stride/4)+250*w->scale')
                       .replace('100*(stride/4)+251', '100*w->scale*(stride/4)+251*w->scale'))
     subprocess.run(['mcopy', '-o', '-i', disk, fixture, '::Present.cool'], check=True)
-    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n'
+    script = testvm.BOOT + testvm.typed('FontSet(NULL); Gui;\n') + 'wait GUI WINDOWS READY\n' + testvm.typed('if(gui.count!=1)throw(90); GuiShell;\n') + 'wait GUI SHELL OPEN\n'
     script += testvm.typed('#include "C:/Present.cool"\nPresentLaunch;\n')
     script += 'wait PRESENT READY\nwait PRESENT PASS\ndelay 40\nquit\n'
     (d / 'input.txt').write_text(script)
