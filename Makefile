@@ -518,10 +518,12 @@ test: host-scroll-test gui-files-test
 
 # OS.Ui declarative framework: gallery/app scenarios, CPU/Venus at 1x/2x (docs/ui-framework.md).
 .PHONY: ui-test
-UI_STAGES ?= U1
-# Order-only: start after the short, timing-sensitive VM suites so the peak number of
-# concurrent VMs under make -j test stays as before (they flake when starved).
-UI_TEST_AFTER := $(if $(filter test,$(MAKECMDGOALS)),kernel-test kernel-test-reloc text-test ansi-test tmux-test vim-test key-test ime-test)
+UI_STAGES ?= U1,U2
+# Order-only: under make -j test, run after every other suite. Its many VM sessions
+# (1x/2x, CPU/Venus) would otherwise starve the timing-sensitive suites running
+# beside them; alone at the end it adds no contention.
+UI_TEST_AFTER := $(if $(filter test,$(MAKECMDGOALS)),$(filter-out ui-test,$(shell sed -n 's/^test: *//p' Makefile | tr ' ' '\n' | grep -v '[$$()]')) \
+    $(if $(RUN_VENUS),gui-cube-test gui-vulkan-test))
 ui-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal) | $(UI_TEST_AFTER)
 	python3 tools/ui-test.py $(word 1,$^) $(if $(RUN_VENUS),--venus) --stage $(UI_STAGES)
 test: ui-test

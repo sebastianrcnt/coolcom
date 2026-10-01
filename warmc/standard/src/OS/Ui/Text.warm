@@ -163,4 +163,22 @@ module body OS.Ui.Text is
     function encodedSize(cp: Int64): Index is
         if cp < 128 then return 1; else if cp < 2048 then return 2; else if cp < 65536 then return 3; end if; return 4;
     end;
+    -- A copy of text with bytes [start, finish) replaced by insert (the range is
+    -- clamped to the text).
+    generic [R: Region]
+    function replaceRange(text: &[String, R], start: Index, finish: Index, insert: Span[Nat8]): String is
+        let n: Index := stringLength(text);
+        var a: Index := start; if a > n then a := n; end if;
+        var b: Index := finish; if b > n then b := n; end if; if b < a then b := a; end if;
+        var builder: StringBuilder := makeStringBuilder();
+        let bytes: Span[Nat8, R] := stringSlice(text, 0, n);
+        for i from 0 until a do writeByte(&!builder, bytes[i]); end for;
+        for i from 0 until spanLength(insert) do writeByte(&!builder, insert[i]); end for;
+        for i from b until n do writeByte(&!builder, bytes[i]); end for;
+        return finalize(builder);
+    end;
+    -- The UTF-8 bytes of one code point.
+    function codepointString(cp: Int64): String is
+        var builder: StringBuilder := makeStringBuilder(); writeCodepoint(&!builder, cp); return finalize(builder);
+    end;
 end module body.

@@ -131,3 +131,18 @@ I64 WgPending(I64 handle) {if (!WgWindow(handle)) return -16; return GuiPending;
 I64 WgWait(I64 handle, I64 ms) {if (!WgWindow(handle)) return -16; if (ms < 0 || ms > 3600000) return -12; GuiWait(ms); return 0;}
 I64 WgTrace() {return gui.trace;}
 I64 WgMicros() {return ArchCntVct * 1000000 / cnt_freq;}
+
+// System clipboard (Clip.cool) and the pointer shape of the calling task's window.
+I64 WgClipWrite(I64 handle, U8 *bytes, U64 size) {if (!WgWindow(handle)) return -16; if (size > CLIP_MAX) return -12; return ClipboardSet(bytes, size);}
+I64 WgClipSerial() {return ClipboardSerial;}
+I64 WgClipSize(I64 serial) {return ClipboardSize(serial);}
+I64 WgClipRead(I64 serial, U8 *into, U64 capacity) {return ClipboardGet(into, capacity, serial);}
+I64 WgPointer(I64 handle, I64 shape)
+{
+    CGuiWindow *w = WgWindow(handle);
+    if (!w) return -16;
+    if (shape < 0 || shape > 1) return -12;
+    w->pointer_shape = shape;
+    GuiPointerOver(gui.mx, gui.my);
+    return 0;
+}

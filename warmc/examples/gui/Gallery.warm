@@ -1,51 +1,103 @@
 import OS.Gui (Gui, acquireGui, releaseGui);
 import OS.Error (IoError);
-import OS.Ui (App, View, openApp, closeApp, next, newView, column, row, grid, split, group, done, spacer, padding, spacing, grow,
-    fixedWidth, label, paragraph, append, appendInt, button, defaultButton, cancelButton, separator, shortcut, every, plain, alignChildren, stretch);
+import Standard.String (String, fromLiteral, length, slice, destroyString);
+import OS.Ui (App, View, Image, TextEdit, openApp, closeApp, next, newView, column, row, grid, split, group, done, spacer, padding,
+    spacing, grow, fixedWidth, label, paragraph, append, appendInt, button, defaultButton, cancelButton, separator, shortcut, every,
+    plain, checkbox, radio, slider, progress, textBox, password, placeholder, image, applyEdit, iconNote, iconCaution, iconStop,
+    iconFolder, iconDocument);
 module body Gallery is
-    """The OS.Ui control gallery: every control and container, driven by
-    messages. Prints GALLERY markers for the VM tests."""
-    record Model: Free is clicks: Int64; ticks: Int64; last: Int64; end;
+    -- The OS.Ui control gallery: every control and container, driven by
+    -- messages. Prints GALLERY markers for the VM tests.
+    record Model: Linear is
+        clicks: Int64; last: Int64; ticks: Int64;
+        bold: Bool; italic: Bool; size: Int64; volume: Int64;
+        name: String; secret: String;
+    end;
     union Msg: Free is
         case Clicked is which: Int64;
         case Tick;
         case Reset;
-        case Quit;
+        case ToggleBold;
+        case ToggleItalic;
+        case Size is choice: Int64;
+        case Volume is value: Int64;
+        case NameEdited is edit: TextEdit;
+        case SecretEdited is edit: TextEdit;
     end;
+    function volume(value: Int64): Msg is return Volume(value => value); end;
+    function nameEdited(edit: TextEdit): Msg is return NameEdited(edit => edit); end;
+    function secretEdited(edit: TextEdit): Msg is return SecretEdited(edit => edit); end;
+    generic [R: Region]
+    function span(s: &[String, R]): Span[Nat8, R] is return slice(s, 0, length(s)); end;
     function update(model: Model, msg: Msg): Model is
-        var m: Model := model;
+        let { clicks as clicks0: Int64, last as last0: Int64, ticks as ticks0: Int64, bold as bold0: Bool, italic as italic0: Bool,
+            size as size0: Int64, volume as volume0: Int64, name as name0: String, secret as secret0: String } := model;
+        var clicks: Int64 := clicks0; var last: Int64 := last0; var ticks: Int64 := ticks0; var bold: Bool := bold0;
+        var italic: Bool := italic0; var size: Int64 := size0; var level: Int64 := volume0;
+        var name: String := name0; var secret: String := secret0;
         case msg of
-            when Clicked(which as w: Int64) do m.clicks := m.clicks + 1; m.last := w; print("GALLERY CLICK "); printLn(w);
-            when Tick do m.ticks := m.ticks + 1; if m.ticks <= 2 then print("GALLERY TICK "); printLn(m.ticks); end if;
-            when Reset do m.clicks := 0; m.last := 0; printLn("GALLERY RESET");
-            when Quit do skip;
+            when Clicked(which as w: Int64) do clicks := clicks + 1; last := w; print("GALLERY CLICK "); printLn(w);
+            when Tick do ticks := ticks + 1; if ticks <= 2 then print("GALLERY TICK "); printLn(ticks); end if;
+            when Reset do clicks := 0; last := 0; printLn("GALLERY RESET");
+            when ToggleBold do bold := not bold; print("GALLERY BOLD "); printLn(bold);
+            when ToggleItalic do italic := not italic; print("GALLERY ITALIC "); printLn(italic);
+            when Size(choice as c: Int64) do size := c; print("GALLERY SIZE "); printLn(c);
+            when Volume(value as v: Int64) do level := v; print("GALLERY VOLUME "); printLn(v);
+            when NameEdited(edit as e: TextEdit) do
+                name := applyEdit(name, e); print("GALLERY NAME ["); print(span(&name)); printLn("]");
+            when SecretEdited(edit as e: TextEdit) do
+                secret := applyEdit(secret, e); print("GALLERY SECRET "); printLn(length(&secret));
         end case;
-        return m;
+        return Model(clicks => clicks, last => last, ticks => ticks, bold => bold, italic => italic, size => size,
+            volume => level, name => name, secret => secret);
     end;
     function view(model: &[Model]): View[Msg] is
         var v: View[Msg] := newView();
         column(&!v); padding(&!v, 12); spacing(&!v, 8);
+        row(&!v); spacing(&!v, 8);
+        image(&!v, iconNote());
+        column(&!v); spacing(&!v, 2);
         label(&!v, "OS.Ui Gallery");
-        paragraph(&!v, "Containers lay out their children; buttons send messages; Tab moves the focus and Return presses the default button.");
+        paragraph(&!v, "Tab moves the focus, Return presses the default button, Escape the cancel button.");
+        done(&!v);
+        done(&!v);
+        row(&!v); spacing(&!v, 8);
+        group(&!v, "Buttons"); grow(&!v, 1);
         row(&!v); spacing(&!v, 8);
         button(&!v, "One", Clicked(which => 1));
         button(&!v, "Two", Clicked(which => 2));
         button(&!v, "Three", Clicked(which => 3));
         done(&!v);
-        separator(&!v);
-        grid(&!v, 2); spacing(&!v, 6);
+        grid(&!v, 2); spacing(&!v, 4);
         label(&!v, "Clicks"); label(&!v, ""); appendInt(&!v, model->clicks); plain(&!v);
         label(&!v, "Last"); label(&!v, "Button "); appendInt(&!v, model->last); plain(&!v);
         done(&!v);
-        split(&!v, false, 150); grow(&!v, 1);
-        group(&!v, "Left pane");
-        label(&!v, "Drag the bar");
         done(&!v);
-        group(&!v, "Right pane");
-        label(&!v, "Shortcut Ctrl+R");
+        group(&!v, "Style");
+        checkbox(&!v, "Bold", model->bold, ToggleBold());
+        checkbox(&!v, "Italic", model->italic, ToggleItalic());
+        separator(&!v);
+        radio(&!v, "Small", model->size = 1, Size(choice => 1));
+        radio(&!v, "Medium", model->size = 2, Size(choice => 2));
+        radio(&!v, "Large", model->size = 3, Size(choice => 3));
+        done(&!v);
+        done(&!v);
+        group(&!v, "Values");
+        grid(&!v, 3); spacing(&!v, 6);
+        label(&!v, "Volume"); slider(&!v, model->volume, 0, 100, 5, volume); grow(&!v, 1);
+        label(&!v, ""); appendInt(&!v, model->volume); plain(&!v); fixedWidth(&!v, 32);
+        label(&!v, "Level"); progress(&!v, model->volume, 100); label(&!v, "");
+        label(&!v, "Busy"); progress(&!v, 0, 0); label(&!v, "");
+        done(&!v);
+        done(&!v);
+        group(&!v, "Text");
+        grid(&!v, 2); spacing(&!v, 6);
+        label(&!v, "Name"); textBox(&!v, span(&(model->name)), nameEdited); placeholder(&!v, "Your name"); grow(&!v, 1);
+        label(&!v, "Password"); password(&!v, span(&(model->secret)), secretEdited);
         done(&!v);
         done(&!v);
         row(&!v); spacing(&!v, 8);
+        image(&!v, iconFolder()); image(&!v, iconDocument()); image(&!v, iconCaution()); image(&!v, iconStop());
         spacer(&!v);
         button(&!v, "Reset", Reset()); cancelButton(&!v);
         button(&!v, "OK", Clicked(which => 9)); defaultButton(&!v);
@@ -59,11 +111,12 @@ module body Gallery is
     function main(initial: RootCapability): ExitCode is
         var root: RootCapability := initial;
         var gui: Gui := acquireGui(&!root);
-        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Gallery", 420, 360);
+        let opening: Result[App[Msg], IoError] := openApp(&!gui, "Gallery", 560, 470);
         case opening of
             when Ok(value as opened: App[Msg]) do
                 var app: App[Msg] := opened;
-                var model: Model := Model(clicks => 0, ticks => 0, last => 0);
+                var model: Model := Model(clicks => 0, last => 0, ticks => 0, bold => true, italic => false, size => 2, volume => 40,
+                    name => fromLiteral(""), secret => fromLiteral(""));
                 printLn("GALLERY READY");
                 var running: Bool := true;
                 while running do
@@ -72,6 +125,9 @@ module body Gallery is
                         when None do running := false;
                     end case;
                 end while;
+                let { clicks as c: Int64, last as l: Int64, ticks as t: Int64, bold as b: Bool, italic as i: Bool, size as s: Int64,
+                    volume as vol: Int64, name as n: String, secret as sec: String } := model;
+                destroyString(n); destroyString(sec);
                 closeApp(app);
             when Err(error as e: IoError) do printLn("GALLERY NO GUI");
         end case;

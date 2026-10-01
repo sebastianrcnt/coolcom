@@ -78,4 +78,14 @@ module OS.Gui is
     -- Kernel test switch (gui_trace) and a monotonic microsecond clock.
     function traceEnabled(): Bool;
     function micros(): Int64;
+    -- The system clipboard, shared with terminal windows (Ctrl+Shift+C/V there).
+    -- copyText replaces it and returns its new serial number; clipboardText
+    -- returns the bytes of one snapshot, None once it has been replaced.
+    function copyText(window: &![Window], value: Span[Nat8]): Result[Int64, IoError];
+    function clipboardSerial(): Int64;
+    function clipboardText(serial: Int64): Option[String];
+    -- Byte size of snapshot serial, or -1 once it has been replaced.
+    function clipboardSize(serial: Int64): Int64;
+    -- The pointer over this window's client area: 0 arrow, 1 I-beam.
+    function setPointer(window: &![Window], shape: Int64): Result[Unit, IoError];
 end module.

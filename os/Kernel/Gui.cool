@@ -41,6 +41,7 @@ class CGuiWindow
     // Input-to-composition latency: counter stamps of the oldest event dequeued
     // since the last present, and of the presented revision awaiting composition.
     I64 input_vct, present_vct;
+    I64 pointer_shape; // 0 arrow, 1 I-beam: the pointer over this pixel window's client
 };
 class CGui
 {
@@ -48,7 +49,8 @@ class CGui
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
     Bool resizing, damage, input_wake;
     I64 x0, y0, x1, y1, clock_minute;
-    U32 *desktop, *canvas, *overlay, pointer[12 * 18], cursor[32 * 32];
+    U32 *desktop, *canvas, *overlay, pointer[12 * 18], ibeam[9 * 16], cursor[32 * 32];
+    I64 shape; // pointer shape last applied for a window (0: the arrow or a custom shape)
     I64 cursor_w, cursor_h, hot_x, hot_y; Bool cursor_visible;
     CTask *task;
     U8 *frame_hook, *stop_hook;
@@ -199,7 +201,9 @@ Bool GuiPresent(Bool explicit = FALSE)
     GuiDamage(w->x + 1 + GUI_PAD + w->dirty_x0, w->y + GUI_TITLE + GUI_PAD + w->dirty_y0,
               w->dirty_x1 - w->dirty_x0, w->dirty_y1 - w->dirty_y0);
     w->pending = FALSE;
-    if (gui.task) TaskWake(gui.task); // compose the new revision promptly
+    // Compose promptly once the app has drained its input; during a burst the
+    // compositor's own cadence batches the frames.
+    if (gui.task && w->event_head == w->event_tail) TaskWake(gui.task);
     return TRUE;
 }
 U0 GuiMove(CGuiWindow *w, I64 x, I64 y)
@@ -450,6 +454,21 @@ Bool GuiPointerSet(U32 *pixels, I64 width, I64 height, I64 hot_x = 0, I64 hot_y 
 }
 U0 GuiPointerHide() {if (gui_active && !Gs->num) {gui.cursor_visible = FALSE; if (fb.gpu) GpuCursorHide;}}
 Bool GuiPointerShow() {if (!gui_active || Gs->num || !gui.cursor_w) return FALSE; gui.cursor_visible = TRUE; return GuiPointerApply;}
+U0 GuiPointerShape(I64 shape)
+{//Show the arrow (0) or the I-beam (1) for the window under the pointer. A shape set
+    //with GuiPointerSet stays until a window asks for another one.
+    if (shape == gui.shape) return;
+    gui.shape = shape;
+    if (shape == 1) GuiPointerSet(gui.ibeam, 9, 16, 4, 8);
+    else GuiPointerSet(gui.pointer, 12, 18);
+}
+U0 GuiPointerOver(I64 x, I64 y)
+{//The focused pixel window chooses the pointer over its client area.
+    CGuiWindow *w = gui.focus; I64 shape = 0;
+    if (w && w->pixel && !w->closed && w->x + 1 + GUI_PAD <= x < w->x + 1 + GUI_PAD + w->w &&
+            w->y + GUI_TITLE + GUI_PAD <= y < w->y + GUI_TITLE + GUI_PAD + w->h) shape = w->pointer_shape;
+    if (shape || gui.shape) GuiPointerShape(shape);
+}
 U0 GuiPointerInit()
 {//The classic arrow, 12 columns a row: B black, W white, space clear.
     U8 *arrow =
@@ -470,7 +489,31 @@ U0 GuiPointerInit()
             "B    BWWB   "
             "     BWWB   "
             "      BB    ";
-    I64 i;
+    // I-beam, 9x16: B black; a white halo keeps it visible on black.
+    U8 *beam =
+            "BB BB    "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "  B      "
+            "BB BB    ";
+    I64 i, x, y, dx, dy;
+    for (i = 0; i < 9 * 16; i++) gui.ibeam[i] = 0;
+    for (y = 0; y < 16; y++) for (x = 0; x < 9; x++) if (beam[y * 9 + x] == 'B')
+                for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++)
+                        if (0 <= x + dx + 2 < 9 && 0 <= y + dy < 16 && !gui.ibeam[(y + dy) * 9 + x + dx + 2]) gui.ibeam[(y + dy) * 9 + x + dx + 2] = 0xFF000000 | GUI_WHITE;
+    for (y = 0; y < 16; y++) for (x = 0; x < 9; x++) if (beam[y * 9 + x] == 'B') gui.ibeam[y * 9 + x + 2] = 0xFF000000;
+    gui.shape = 0;
     for (i = 0; i < 12 * 18; i++) {
         gui.pointer[i] = 0;
         if (i < 12 * 17 && arrow[i] == 'B') gui.pointer[i] = 0xFF000000;
@@ -535,6 +578,7 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
         }
     }
     if (fb.gpu) GpuPointerMove(mx, my);
+    GuiPointerOver(x, y);
     if (GuiMenuMouse(x, y, buttons)) {gui.buttons = buttons; gui.wheel = wheel; return;}
     if ((buttons & 1) && !(gui.buttons & 1)) {
         for (i = gui.count - 1; i >= 0; i--) {

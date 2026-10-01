@@ -35,13 +35,10 @@ fi
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
 python3 tools/warm-man.py --output "$stage/Man"
-python3 tools/gui-modules.py >"$stage/GuiModules.txt"
-put "" "$stage/GuiModules.txt"
-# Per-application library lists (C:/<EntryModule>Modules.txt), walked from imports.
-for app in Files:GuiFiles Top:GuiTop Settings:GuiSettings Widgets:Widgets Gallery:Gallery; do
-    python3 tools/gui-modules.py --app "${app%%:*}" >"$stage/${app#*:}Modules.txt"
-    put "" "$stage/${app#*:}Modules.txt"
-done
+# The whole OS library list and per-application lists (C:/<EntryModule>Modules.txt,
+# walked from each example's imports), written by one process.
+python3 tools/gui-modules.py --all "$stage" Files:GuiFiles Top:GuiTop Settings:GuiSettings Widgets:Widgets Gallery:Gallery UiCheck:UiCheck
+for list in "$stage"/*Modules.txt; do put "" "$list"; done
 sed 's|#include "\.\./\.\./coolc/|#include "C:/Cool/|g' os/Kernel/Kernel.cool >"$stage/Kernel.cool"
 for f in os/Kernel/*; do
     [ "$f" != os/Kernel/Kernel.cool ] || f=$stage/Kernel.cool

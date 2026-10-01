@@ -41,6 +41,17 @@ def closure(app):
     return {file_of(m).with_suffix('.warm').as_posix() for m in names}
 
 
+if '--all' in sys.argv:
+    # One process writes every list (a disk install runs this once per VM test).
+    out = Path(sys.argv[sys.argv.index('--all') + 1])
+    every = [disk_path(p) for pair in pairs for p in pair.split(',')]
+    (out / 'GuiModules.txt').write_text(','.join(every))
+    for spec in sys.argv[sys.argv.index('--all') + 2:]:
+        app, entry = spec.split(':')
+        wanted = closure(app)
+        chosen = [pair for pair in pairs if any(w in pair.split(',') for w in wanted)]
+        (out / f'{entry}Modules.txt').write_text(','.join(disk_path(p) for pair in chosen for p in pair.split(',')))
+    sys.exit(0)
 app = None
 if '--files' in sys.argv:
     app = 'Files'

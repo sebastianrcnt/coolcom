@@ -1,0 +1,70 @@
+// The system clipboard: one byte snapshot and a serial number that grows with every
+// copy. OS.Ui text fields copy and paste through it (a paste names the serial it saw,
+// so it inserts exactly what the user had copied); terminal windows paste it as typed
+// keys (Ctrl+Shift+V) and copy a mouse selection (Ctrl+Shift+C). From the shell:
+// ClipboardCopy("text"); U8 *s = ClipboardText; ... Free(s);
+#define CLIP_MAX (16 << 20)
+U8 *clip_data;
+I64 clip_size, clip_serial, clip_lock;
+
+I64 ClipboardSet(U8 *data, I64 size)
+{//Replace the clipboard with a copy of size bytes; returns the new serial (-1: too large or no memory).
+    U8 *copy, *old;
+    I64 serial;
+    if (size < 0 || size > CLIP_MAX || (size && !data))
+        return -1;
+    copy = MAlloc(size + 1);
+    if (!copy)
+        return -1;
+    if (size)
+        MemCpy(copy, data, size);
+    copy[size] = 0;
+    SpinLock(&clip_lock);
+    old = clip_data;
+    clip_data = copy;
+    clip_size = size;
+    serial = ++clip_serial;
+    SpinUnlock(&clip_lock);
+    Free(old);
+    return serial;
+}
+
+I64 ClipboardSerial() {return clip_serial;}
+
+I64 ClipboardSize(I64 serial = -1)
+{//Bytes on the clipboard; -1 if serial names a snapshot that has been replaced.
+    if (serial >= 0 && serial != clip_serial)
+        return -1;
+    return clip_size;
+}
+
+I64 ClipboardGet(U8 *buf, I64 capacity, I64 serial = -1)
+{//Copy the snapshot into buf (at most capacity bytes): bytes copied, -1 if it was replaced.
+    I64 n = -1;
+    SpinLock(&clip_lock);
+    if (serial < 0 || serial == clip_serial) {
+        n = MinI64(clip_size, MaxI64(capacity, 0));
+        if (n)
+            MemCpy(buf, clip_data, n);
+    }
+    SpinUnlock(&clip_lock);
+    return n;
+}
+
+I64 ClipboardCopy(U8 *text)
+{//Copy a NUL-terminated string (the shell's clipboard command).
+    if (!text)
+        return -1;
+    return ClipboardSet(text, StrLen(text));
+}
+
+U8 *ClipboardText()
+{//A NUL-terminated copy of the clipboard (Free it).
+    I64 n = clip_size, got;
+    U8 *s = MAlloc(n + 1);
+    got = ClipboardGet(s, n, -1);
+    if (got < 0)
+        got = 0;
+    s[got] = 0;
+    return s;
+}

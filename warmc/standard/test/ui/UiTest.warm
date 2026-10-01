@@ -6,10 +6,13 @@ import OS.Ui.Text (width as textWidth, lineCount, wrapLine, Line, previous, foll
 import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open, close, add, setText, appendText, appendNumber, setFlag, setGrow,
     setPadding, setSpacing, setColumns, setChildAlign, setRange, setValue, setKey, setHandler, setSize, keyOf, finishBuild, layout, props,
     geometry, textBytes, nodeText, nextFocus, parseKey, makeDamage, destroyDamage, addDamage, damageRects, damageFull, readDamage,
-    kindColumn, kindRow, kindGrid, kindSplit, kindLabel, kindButton, kindSpacer, kindTextBox, kindShortcut,
-    flagDisabled, flagDefault, flagCancel, alignCenter, keyCtrl, keyAlt, keyShift, keyLeft, keyEscape, keyEnter);
-import OS.Ui.Engine (State, Snapshot, Action, makeState, destroyState, makeSnapshot, destroySnapshot, compareAndRecord, handle, readState,
-    actNone, actRepaint, actFire, actRelayout);
+    kindColumn, kindRow, kindGrid, kindSplit, kindLabel, kindButton, kindSpacer, kindTextBox, kindShortcut, kindSlider, kindCheckbox, setAux,
+    flagDisabled, flagDefault, flagCancel, alignCenter, keyCtrl, keyAlt, keyShift, keyLeft, keyRight, keyEnd, keyEscape, keyEnter);
+import OS.Ui.Engine (State, Snapshot, Action, Ephemeral, makeState, destroyState, makeSnapshot, destroySnapshot, compareAndRecord, handle,
+    readState, prune, current, setNow, actNone, actRepaint, actFire, actRelayout, actCopy);
+import OS.Ui.Text (TextEdit, replaceRange);
+import OS.Ui (applyEdit);
+import Standard.String (String, fromLiteral, length as stringLength, slice as stringSlice, destroyString);
 module body UiTest is
     function check(ok: Bool, what: Span[Nat8, Static]): Unit is
         if not ok then print("UI TEST FAILED: "); printLn(what); abort("UI TEST FAILED"); end if;
@@ -215,7 +218,114 @@ module body UiTest is
         printLn("UI TEXT PASS"); return nil;
     end;
 
+    function sameText(s: &[String], expected: Span[Nat8]): Bool is return sameBytes(stringSlice(s, 0, stringLength(s)), expected); end;
+    function sameBytes(bytes: Span[Nat8], expected: Span[Nat8]): Bool is
+        if spanLength(bytes) /= spanLength(expected) then return false; end if;
+        for i from 0 until spanLength(bytes) do if bytes[i] /= expected[i] then return false; end if; end for;
+        return true;
+    end;
+    function edit(start: Index, finish: Index, cp: Int64): TextEdit is
+        return TextEdit(start => start, finish => finish, codepoint => cp, paste => 0);
+    end;
+    function editTests(): Unit is
+        var t: String := fromLiteral("hello");
+        t := applyEdit(t, edit(1, 3, 65)); check(sameText(&t, "hAlo"), "replace a range with a code point");
+        t := applyEdit(t, edit(4, 4, 44032)); check(sameText(&t, "hAlo\u{AC00}"), "insert Hangul at the end");
+        t := applyEdit(t, edit(4, 7, -1)); check(sameText(&t, "hAlo"), "delete a code point");
+        t := applyEdit(t, edit(9, 20, 33)); check(sameText(&t, "hAlo!"), "ranges are clamped");
+        let r: String := replaceRange(&t, 0, 1, "Oh, h"); check(sameText(&r, "Oh, hAlo!"), "replaceRange");
+        destroyString(r); destroyString(t);
+        printLn("UI EDIT PASS"); return nil;
+    end;
+    -- A text box and a slider, focused by clicks; keys edit and step.
+    function controlTree(text: Span[Nat8]): Tree is
+        var t: Tree := makeTree();
+        open(&!t, kindColumn); setPadding(&!t, 10); setSpacing(&!t, 8);
+        add(&!t, kindTextBox); setText(&!t, text); setHandler(&!t, 0);
+        add(&!t, kindSlider); setValue(&!t, 40); setRange(&!t, 0, 100); setAux(&!t, 5); setHandler(&!t, 1);
+        add(&!t, kindCheckbox); setText(&!t, "Check"); setHandler(&!t, 2);
+        close(&!t);
+        return t;
+    end;
+    function textBoxTests(): Unit is
+        var t: Tree := controlTree("hello world");
+        lay(&!t, 300, 200);
+        var state: State := makeState();
+        borrow r: &[Tree, Q] := &t do
+            let all: Span[Nat8, Q] := textBytes(r); let ps: Span[Node, Q] := props(r); let gs: Span[Geom, Q] := geometry(r);
+            let box: Index := 2;
+            let id: Nat64 := ps[box].ident;
+            -- Click after "hel" (x inset 4, 8 px per character): focus and caret.
+            var a: Action := handle(all, ps, gs, &!state, Mouse(x => gs[box].x + 4 + 24 + 2, y => gs[box].y + 5, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[box].x + 4 + 24 + 2, y => gs[box].y + 5, buttons => 0, wheel => 0));
+            let e1: Ephemeral := current(&!state, id);
+            check(state.focus = id and e1.a = 3, "click focuses and places the caret");
+            a := handle(all, ps, gs, &!state, Key(code => 88));
+            check(a.kind = actFire and a.node = box and a.edit.start = 3 and a.edit.finish = 3 and a.edit.codepoint = 88, "typing inserts");
+            let e2: Ephemeral := current(&!state, id);
+            check(e2.a = 4, "caret after the insertion");
+            a := handle(all, ps, gs, &!state, Key(code => 8));
+            check(a.kind = actFire and a.edit.start = 3 and a.edit.finish = 4 and a.edit.codepoint = -1, "Backspace deletes before the caret");
+            -- (The model has not changed the text in this test: the caret is at 3.)
+            a := handle(all, ps, gs, &!state, Key(code => keyLeft | keyShift));
+            a := handle(all, ps, gs, &!state, Key(code => keyLeft | keyShift));
+            let e3: Ephemeral := current(&!state, id);
+            check(e3.a = 1 and e3.b = 3, "Shift+Left extends the selection");
+            a := handle(all, ps, gs, &!state, Key(code => 99 | keyCtrl));
+            check(a.kind = actCopy and a.value = 1 and a.aux = 3, "Ctrl+C copies the selection");
+            a := handle(all, ps, gs, &!state, Key(code => 120 | keyCtrl));
+            check(a.kind = actFire and a.aux = 1 and a.edit.start = 1 and a.edit.finish = 3, "Ctrl+X copies and deletes");
+            a := handle(all, ps, gs, &!state, Key(code => 97 | keyCtrl));
+            let e4: Ephemeral := current(&!state, id);
+            check(e4.a = 11 and e4.b = 0, "Ctrl+A selects everything");
+            a := handle(all, ps, gs, &!state, Key(code => 118 | keyCtrl));
+            check(a.kind = actFire and a.edit.start = 0 and a.edit.finish = 11 and a.edit.paste = -1, "Ctrl+V pastes over the selection");
+            a := handle(all, ps, gs, &!state, Key(code => keyEnter));
+            check(a.kind = actNone, "Return is not consumed by a text box without a default button");
+            a := handle(all, ps, gs, &!state, Key(code => keyLeft | keyCtrl));
+            let e5: Ephemeral := current(&!state, id);
+            check(e5.a = 0, "Ctrl+Left moves by words");
+            -- Double click selects the word under the pointer.
+            setNow(&!state, 1000000);
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[box].x + 4 + 8 * 7, y => gs[box].y + 5, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[box].x + 4 + 8 * 7, y => gs[box].y + 5, buttons => 0, wheel => 0));
+            setNow(&!state, 1100000);
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[box].x + 4 + 8 * 7, y => gs[box].y + 5, buttons => 1, wheel => 0));
+            let e6: Ephemeral := current(&!state, id);
+            check(e6.b = 6 and e6.a = 11, "double click selects a word");
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[box].x + 4 + 8 * 7, y => gs[box].y + 5, buttons => 0, wheel => 0));
+            -- Slider: click on the thumb focuses; keys step and clamp.
+            let sl: Index := 3;
+            let thumb: Int64 := gs[sl].x + (gs[sl].width - 11) * 40 / 100 + 5;
+            a := handle(all, ps, gs, &!state, Mouse(x => thumb, y => gs[sl].y + 10, buttons => 1, wheel => 0));
+            check(state.focus = ps[sl].ident, "clicking the slider focuses it");
+            a := handle(all, ps, gs, &!state, Mouse(x => thumb + (gs[sl].width - 11) / 2, y => gs[sl].y + 10, buttons => 1, wheel => 0));
+            check(a.kind = actFire and a.value = 90, "dragging the thumb by half the track adds half the range");
+            a := handle(all, ps, gs, &!state, Mouse(x => thumb + (gs[sl].width - 11) / 2, y => gs[sl].y + 10, buttons => 0, wheel => 0));
+            a := handle(all, ps, gs, &!state, Key(code => keyRight));
+            check(a.kind = actFire and a.value = 45, "Right steps by the step");
+            a := handle(all, ps, gs, &!state, Key(code => keyEnd));
+            check(a.kind = actFire and a.value = 100, "End goes to the maximum");
+            -- Checkbox: release inside reports the toggled state.
+            let cb: Index := 4;
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[cb].x + 3, y => gs[cb].y + 3, buttons => 1, wheel => 0));
+            a := handle(all, ps, gs, &!state, Mouse(x => gs[cb].x + 3, y => gs[cb].y + 3, buttons => 0, wheel => 0));
+            check(a.kind = actFire and a.node = cb and a.value = 1, "checkbox toggles");
+        end borrow;
+        -- A shorter text from the model clamps the caret.
+        var shorter: Tree := controlTree("hi");
+        lay(&!shorter, 300, 200);
+        borrow r: &[Tree, Q] := &shorter do
+            prune(&!state, textBytes(r), props(r), geometry(r));
+            let e7: Ephemeral := current(&!state, props(r)[2].ident);
+            check(e7.a = 2 and e7.b = 2, "carets are clamped to the model's text");
+        end borrow;
+        destroyTree(shorter); destroyState(state); destroyTree(t);
+        printLn("UI TEXT BOX PASS"); return nil;
+    end;
+
     function main(): ExitCode is
+        editTests(); textBoxTests();
         textTests(); layoutTests(); identityTests(); keyTests(); damageTests(); interactionTests();
         printLn("UI HOST PASS");
         return ExitSuccess();

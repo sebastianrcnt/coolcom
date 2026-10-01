@@ -1,10 +1,12 @@
-import OS.Gui (Window, Rect, fill, line, styledText, pattern, invert, setClip, clearClip, bitmap);
+import Standard.Vector (Vector, length as vectorLength, borrowGet, slice as vectorSlice);
+import OS.Gui (Window, Rect, fill, line, styledText, pattern, invert, setClip, clearClip, bitmap, blit);
 import OS.Error (IoError);
-import OS.Ui.Text (width as textWidth, wrapLine, Line, lineHeight, fit);
+import OS.Ui.Text (width as textWidth, wrapLine, Line, lineHeight, fit, following, rangeWidth);
+import OS.Ui.Engine (Ephemeral, sliderThumbX, caretX, thumbWidth, textInset);
 import OS.Ui.Tree (Node, Geom, textSpan, has, enabled, intersect, maxInt, minInt, clampInt,
     kindRoot, kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindCheckbox, kindRadio,
     kindSlider, kindProgress, kindSeparator, kindImage, kindTextBox, kindToolbar, kindStatus,
-    flagDefault, flagPlain, flagWrap, flagCenter, defaultRing, checkSize, splitBar);
+    flagDefault, flagPlain, flagWrap, flagCenter, flagSecure, defaultRing, checkSize, splitBar, toIndex64);
 module body OS.Ui.Draw is
     -- The classic Macintosh look, one bit: black on white, 50% gray patterns,
     -- rounded buttons with a bold default ring, inverted pressed state. All
@@ -18,6 +20,17 @@ module body OS.Ui.Draw is
     constant styleBold: Int64 := 1;
     constant styleDim: Int64 := 2;
     constant styleUnderline: Int64 := 4;
+    -- Diagonal stripes for indeterminate progress.
+    constant stripes: Nat64 := 9782911238504455695;    -- rows 0F 1E 3C 78 F0 E1 C3 87
+
+    -- A registered image: one-bit (set bits black) or BGRA, logical size.
+    record Picture: Linear is width: Int64; height: Int64; oneBit: Bool; stride: Int64; pixels: Vector[Nat8]; end;
+    -- Built-in one-bit images (negative image ids).
+    constant builtinFolder: Int64 := -1;
+    constant builtinDocument: Int64 := -2;
+    constant builtinNote: Int64 := -3;
+    constant builtinCaution: Int64 := -4;
+    constant builtinStop: Int64 := -5;
 
     function rect(x: Int64, y: Int64, width: Int64, height: Int64): Rect is return Rect(x => x, y => y, width => width, height => height); end;
     function inset(r: Rect, by: Int64): Rect is return Rect(x => r.x + by, y => r.y + by, width => maxInt(r.width - 2 * by, 0), height => maxInt(r.height - 2 * by, 0)); end;
@@ -85,9 +98,41 @@ module body OS.Ui.Draw is
     -- Dotted keyboard focus rectangle.
     function focusRing(w: &![Window], r: Rect): Unit is grayBox(&~w, r); return nil; end;
 
+    function radioRing(): Span[Nat8, Static] is return "\x0f\x00\x30\xc0\x40\x20\x40\x20\x80\x10\x80\x10\x80\x10\x80\x10\x40\x20\x40\x20\x30\xc0\x0f\x00"; end;
+    function radioHeld(): Span[Nat8, Static] is return "\x0f\x00\x3f\xc0\x70\xe0\x60\x60\xc0\x30\xc0\x30\xc0\x30\xc0\x30\x60\x60\x70\xe0\x3f\xc0\x0f\x00"; end;
+    function radioDot(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x00\x0f\x00\x1f\x80\x1f\x80\x1f\x80\x1f\x80\x0f\x00\x00\x00\x00\x00\x00\x00"; end;
+    function iconFolderBits(): Span[Nat8, Static] is return "\x00\x00\x7c\x00\x82\x00\x81\xfc\xff\xfe\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\x80\x02\xff\xfe\x00\x00\x00\x00"; end;
+    function iconDocumentBits(): Span[Nat8, Static] is return "\x3f\x80\x20\xc0\x20\xa0\x20\x90\x20\xf8\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x20\x08\x3f\xf8\x00\x00"; end;
+    function iconCautionBits(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x80\x00\x00\x03\xc0\x00\x00\x03\xc0\x00\x00\x06\x60\x00\x00\x06\x60\x00\x00\x0c\x30\x00\x00\x0c\x30\x00\x00\x18\x18\x00\x00\x19\x98\x00\x00\x31\x8c\x00\x00\x31\x8c\x00\x00\x61\x86\x00\x00\xc1\x83\x00\x00\xc1\x83\x00\x01\x81\x81\x80\x01\x81\x81\x80\x03\x01\x80\xc0\x03\x01\x80\xc0\x06\x01\x80\x60\x06\x01\x80\x60\x0c\x00\x00\x30\x18\x00\x00\x18\x18\x01\x80\x18\x30\x01\x80\x0c\x30\x00\x00\x0c\x7f\xff\xff\xfe\x7f\xff\xff\xfe\x00\x00\x00\x00\x00\x00\x00\x00"; end;
+    function iconStopBits(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x7f\xfe\x00\x00\xff\xff\x00\x01\xff\xff\x80\x03\xff\xff\xc0\x07\xff\xff\xe0\x0f\xff\xff\xf0\x1f\xfc\x3f\xf8\x3f\xfc\x3f\xfc\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xfc\x3f\xfe\x7f\xff\xff\xfe\x7f\xff\xff\xfe\x7f\xfc\x3f\xfe\x3f\xfc\x3f\xfc\x1f\xfc\x3f\xf8\x0f\xff\xff\xf0\x07\xff\xff\xe0\x03\xff\xff\xc0\x01\xff\xff\x80\x00\xff\xff\x00\x00\x7f\xfe\x00\x00\x00\x00\x00"; end;
+    function iconNoteBits(): Span[Nat8, Static] is return "\x00\x00\x00\x00\x00\x00\x00\x00\x03\xff\xff\xc0\x1f\xff\xff\xf8\x30\x00\x00\x0c\x60\x00\x00\x06\x40\x00\x00\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x00\x00\x02\x40\x00\x00\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x01\x80\x02\x40\x03\xc0\x02\x60\x00\x00\x06\x30\x00\x00\x0c\x1f\xff\xff\xf8\x03\xff\xff\xc0\x00\xf0\x00\x00\x01\xc0\x00\x00\x03\x00\x00\x00\x06\x00\x00\x00\x0c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"; end;
+
+    function builtinWidth(id: Int64): Int64 is if id = builtinFolder or id = builtinDocument then return 16; end if; return 32; end;
+    function builtinBits(id: Int64): Span[Nat8, Static] is
+        if id = builtinFolder then return iconFolderBits(); end if;
+        if id = builtinDocument then return iconDocumentBits(); end if;
+        if id = builtinNote then return iconNoteBits(); end if;
+        if id = builtinCaution then return iconCautionBits(); end if;
+        return iconStopBits();
+    end;
+    -- Draw an image: built-in icons in color, registered pictures as stored.
+    generic [R: Region]
+    function picture(w: &![Window], x: Int64, y: Int64, id: Int64, color: Int64, pictures: &[Vector[Picture], R]): Unit is
+        if id < 0 then
+            let size: Int64 := builtinWidth(id);
+            bitmap(&~w, rect(x, y, size, size), builtinBits(id), size / 8, color); return nil;
+        end if;
+        if toIndex64(id) >= vectorLength(pictures) then return nil; end if;
+        let p: &[Picture, R] := borrowGet(pictures, toIndex64(id));
+        if p->oneBit then bitmap(&~w, rect(x, y, p->width, p->height), vectorSlice(&(p->pixels), 0, vectorLength(&(p->pixels))), p->stride, color);
+        else blit(&~w, rect(x, y, p->width, p->height), vectorSlice(&(p->pixels), 0, vectorLength(&(p->pixels))), p->stride); end if;
+        return nil;
+    end;
+
     -- Paint one node clipped to region (already the kernel clip).
     generic [R: Region]
-    function paint(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool): Unit is
+    function paint(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, pressed: Bool, focused: Bool, keyboard: Bool,
+        e: Ephemeral, clip: Rect, pictures: &[Vector[Picture]]): Unit is
         let k: Int64 := ps[i].kind;
         let r: Rect := rect(gs[i].x, gs[i].y, gs[i].width, gs[i].height);
         let on: Bool := enabled(ps, i);
@@ -120,6 +165,21 @@ module body OS.Ui.Draw is
         else if k = kindSeparator then
             if gs[i].width >= gs[i].height then pattern(&~w, rect(r.x, r.y + r.height / 2, r.width, 1), gray, black, -1);
             else pattern(&~w, rect(r.x + r.width / 2, r.y, 1, r.height), gray, black, -1); end if;
+        else if k = kindCheckbox or k = kindRadio then
+            paintChoice(&~w, all, ps, i, r, pressed, focused and keyboard, on, style);
+        else if k = kindSlider then
+            paintSlider(&~w, ps, gs, i, r, pressed, focused and keyboard, on);
+        else if k = kindProgress then
+            box(&~w, r, black);
+            let inner: Rect := inset(r, 1);
+            if ps[i].high > 0 then
+                let filled: Int64 := inner.width * clampInt(ps[i].value, 0, ps[i].high) / ps[i].high;
+                fill(&~w, rect(inner.x, inner.y, filled, inner.height), black);
+            else pattern(&~w, inner, stripes, black, white); end if;
+        else if k = kindTextBox then
+            paintTextBox(&~w, all, ps, gs, i, r, focused, on, e, clip);
+        else if k = kindImage then
+            picture(&~w, r.x + (r.width - ps[i].low) / 2, r.y + (r.height - ps[i].high) / 2, ps[i].value, black, pictures);
         else if k = kindSplit then
             let first: Index := ps[i].first;
             if first /= 0 then
@@ -134,6 +194,76 @@ module body OS.Ui.Draw is
                 end if;
             end if;
         end if;
+        return nil;
+    end;
+    -- Checkbox (box with an X) and radio button (circle with a dot) with title.
+    generic [R: Region]
+    function paintChoice(w: &![Window], all: Span[Nat8, R], ps: Span[Node], i: Index, r: Rect, pressed: Bool, ring: Bool, on: Bool, style: Int64): Unit is
+        let bx: Int64 := r.x; let by: Int64 := r.y + (r.height - checkSize) / 2;
+        if ps[i].kind = kindCheckbox then
+            fill(&~w, rect(bx, by, checkSize, checkSize), white);
+            if on then box(&~w, rect(bx, by, checkSize, checkSize), black); else grayBox(&~w, rect(bx, by, checkSize, checkSize)); end if;
+            if pressed then box(&~w, rect(bx + 1, by + 1, checkSize - 2, checkSize - 2), black); end if;
+            if ps[i].value /= 0 then
+                line(&~w, bx + 1, by + 1, bx + checkSize - 2, by + checkSize - 2, black);
+                line(&~w, bx + checkSize - 2, by + 1, bx + 1, by + checkSize - 2, black);
+            end if;
+        else
+            if pressed then bitmap(&~w, rect(bx, by, 12, 12), radioHeld(), 2, black); else bitmap(&~w, rect(bx, by, 12, 12), radioRing(), 2, black); end if;
+            if ps[i].value /= 0 then bitmap(&~w, rect(bx, by, 12, 12), radioDot(), 2, black); end if;
+        end if;
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let tx: Int64 := bx + checkSize + 6; let ty: Int64 := r.y + (r.height - lineHeight) / 2;
+        fittedText(&~w, tx, ty, t, r.x + r.width - tx, black, style);
+        if ring then focusRing(&~w, rect(tx - 2, ty - 1, minInt(textWidth(t) + 5, r.x + r.width - tx + 2), lineHeight + 2)); end if;
+        return nil;
+    end;
+    function paintSlider(w: &![Window], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, pressed: Bool, ring: Bool, on: Bool): Unit is
+        let cy: Int64 := r.y + r.height / 2;
+        let track: Rect := rect(r.x + thumbWidth / 2 - 2, cy - 2, r.width - thumbWidth + 4, 5);
+        roundFill(&~w, track, 2, black);
+        let inner: Rect := inset(track, 1);
+        if on then pattern(&~w, inner, gray, black, white); else fill(&~w, inner, white); end if;
+        if not on then return nil; end if;
+        let tx: Int64 := sliderThumbX(ps, gs, i);
+        let thumb: Rect := rect(tx, cy - 8, thumbWidth, 16);
+        var face: Int64 := white; if pressed then face := black; end if;
+        roundRect(&~w, thumb, 2, black, face);
+        var mark: Int64 := black; if pressed then mark := white; end if;
+        fill(&~w, rect(tx + thumbWidth / 2, cy - 4, 1, 9), mark);
+        if ring then focusRing(&~w, rect(r.x, r.y, r.width, r.height)); end if;
+        return nil;
+    end;
+    -- Text field: frame, text scrolled to the caret, inverted selection, caret,
+    -- dimmed placeholder; bullets in password fields.
+    generic [R: Region]
+    function paintTextBox(w: &![Window], all: Span[Nat8, R], ps: Span[Node], gs: Span[Geom], i: Index, r: Rect, focused: Bool, on: Bool, e: Ephemeral, clip: Rect): Unit is
+        if on then box(&~w, r, black); else grayBox(&~w, r); end if;
+        let inner: Rect := inset(r, 1);
+        fill(&~w, inner, white);
+        let view: Rect := intersect(clip, rect(r.x + 2, r.y + 1, r.width - 4, r.height - 2));
+        setClip(&~w, view);
+        let t: Span[Nat8, R] := textSpan(all, ps, i);
+        let x: Int64 := r.x + textInset - e.c; let y: Int64 := r.y + (r.height - lineHeight) / 2;
+        var style: Int64 := 0; if not on then style := styleDim; end if;
+        if spanLength(t) = 0 and not focused then
+            -- Dimmed through the 50% pattern like classic gray text: bold strokes stay legible.
+            text(&~w, r.x + textInset, y, sliceSpan(all, ps[i].extra, ps[i].extraEnd), black, styleDim | styleBold);
+        else if has(ps[i].flags, flagSecure) then
+            var at: Index := 0; var cx: Int64 := x;
+            while at < spanLength(t) do text(&~w, cx, y, "\u{2022}", black, style); cx := cx + 8; at := following(t, at); end while;
+        else
+            text(&~w, x, y, t, black, style);
+        end if;
+        if focused and on then
+            let caret: Int64 := x + caretX(t, ps, i, e.a);
+            if e.a = e.b then fill(&~w, rect(caret, y, 1, lineHeight), black);
+            else
+                let other: Int64 := x + caretX(t, ps, i, e.b);
+                invert(&~w, rect(minInt(caret, other), y, maxInt(caret, other) - minInt(caret, other), lineHeight));
+            end if;
+        end if;
+        setClip(&~w, clip);
         return nil;
     end;
     generic [R: Region]

@@ -305,8 +305,8 @@ boundary. Copying a selection needs no message.
   (nothing if the clipboard changed in between).
 
 **Choice: serials.** The user's keystroke authorises the paste, and the edit
-says which content. The kernel service (`ClipSet`, `ClipGet`, `ClipSerial`) is
-shared with terminal windows in U4.
+says which content. The kernel service (`ClipboardSet`, `ClipboardGet`,
+`ClipboardSerial`) is shared with terminal windows in U4.
 
 ### U2.3 Hangul input
 
@@ -338,3 +338,100 @@ Images are registered once with the App (`oneBitImage`, `colorImage` → a Free
 `Image` handle) so views never copy pixel data; built-in one-bit icons
 (`iconFolder`, `iconDocument`, `iconNote`, `iconCaution`, `iconStop`) need no
 registration. The pointer becomes an I-beam over editable text.
+
+### U2 results
+
+Implemented: `checkbox`, `radio`, `slider` (`Fn[Int64, Msg]`, live while
+dragging, stepped, arrows/Home/End/PageUp/PageDown once focused by a click or
+Tab), `progress` (determinate, or striped when the total is unknown),
+`textBox`/`password`/`placeholder` with `applyEdit`, `image` with
+`oneBitImage`/`colorImage` and the built-in `iconFolder`, `iconDocument`,
+`iconNote`, `iconCaution`, `iconStop` (original one-bit art). Text boxes:
+click to place the caret, drag to select, double click selects a word, triple
+click everything; Left/Right (Ctrl: words), Home/End, Shift extends, Backspace/
+Delete, Ctrl+A/C/X/V; the field scrolls horizontally to keep the caret
+visible; password fields draw bullets and refuse copying. Side-by-side panels
+(groups, columns, lists) now share their row's height.
+
+Kernel: the clipboard service `Clip.cool` (`ClipboardSet`/`Get`/`Size`/
+`Serial`, and `ClipboardCopy("text")`/`ClipboardText` for the shell; the
+TempleOS DolDoc names `ClipCopy`/`ClipPaste` stay reserved), Warm adapters
+`copyText`, `clipboardSerial`, `clipboardSize`, `clipboardText`, and a
+per-window pointer shape: the focused window's I-beam over its text fields (a
+shape set with `GuiPointerSet` is left alone). The host runtime keeps an
+in-process clipboard.
+
+The U1 checks moved to `warmc/examples/gui/UiCheck.warm` (a small framework
+check app, launched with `GuiRun`), so the Gallery can grow. Host tests add
+`applyEdit`, caret placement, typing, Backspace, selection, copy/cut/paste
+actions, word selection, caret clamping, slider drag and keys, checkbox
+toggling. The VM scenario (`--stage U2`) clicks a checkbox and a radio, drags
+and steps the slider, types, selects, copies and pastes, types Hangul with
+the kernel IME (Shift+Space, `gksrmf` → 한글), double-clicks a word, pastes
+into the password field and measures typing latency.
+
+| Session | Typing: input → composed p50 / max (ms) |
+| --- | ---: |
+| CPU 1x | 4.2 / 9.7 |
+| CPU 2x | 4.0 / 9.0 |
+| Venus 1x | 5.3 / 12.5 |
+| Venus 2x | 2.9 / 12.3 |
+
+Screenshots: `build/ui-u2/u2-<mode>-<scale>x/shot-000.png` (all controls at
+rest), `shot-001.png` (Italic checked, Large chosen, slider moved),
+`shot-002.png` (text field with an inverted selection), `shot-003.png`
+(Hangul text and password bullets); `screen.png` shows the I-beam pointer.
+
+## U3: data views
+
+### U3.1 Virtual rows
+
+- **Emit every row as nodes.** A 10,000-row table would be 10,000+ nodes to
+  build, lay out and compare on every keystroke.
+- **A row provider callback.** Without closures a provider cannot reach the
+  model; with `Fn[Int64, Row]` it cannot either.
+- **The model owns the scroll window.** A Free `ListState` (first visible row,
+  selected row, rows that fit, sort column and direction) lives in the model.
+  The view emits only the rows `[first, first + fit]`; scrolling, selection,
+  sorting and size changes come back as `onState(ListState)` messages. When a
+  layout leaves the list taller than the rows it was given (a resize), the
+  framework sends the corrected state itself, so the next view fills it.
+
+**Choice: model-owned scroll window.** Work per frame is proportional to the
+visible rows (about 25), not to the row count; the application keeps its rows
+in any structure and sorts an index vector when the sort column changes.
+
+### U3.2 Controls
+
+| Control | API | State | Messages |
+| --- | --- | --- | --- |
+| List | `listView(&!v, state, rowCount, onState)`, `listRow(&!v, index, text)` | `ListState` | `onState`, `onOpen(index)` (double click, Return) |
+| Table | `tableView(...)`, `tableColumn(&!v, title, width, sortable)`, `tableRow(&!v, index)`, `cell(&!v, text)` | `ListState` (+ sort) | `onState`, `onOpen` |
+| Tree | `treeView(...)`, `treeRow(&!v, index, depth, children, expanded, text)` | `ListState` over the visible (flattened) rows | `onState`, `onToggle(index)` |
+| Scroll view | `scrollView(&!v)` … `done` | framework (offsets) | none |
+| Text view | `textView(&!v, text, onEdit)`, `noWrap(&!v)` | framework (caret, selection, scroll) | `onEdit(TextEdit)` |
+
+Rows are 18 pixels. The selected row is inverted; a focused list gets the
+two-pixel System 7 frame. Scroll bars are 16 pixels: arrow boxes at both ends,
+the 50% gray track and a white thumb sized to the visible fraction. The wheel
+scrolls three rows a line; Up/Down/PageUp/PageDown/Home/End move the selection
+and keep it visible. Table headers are a row of titles over one-pixel column
+rules; clicking a sortable title sorts by it (again: reversed, a small
+triangle marks the direction); dragging a rule resizes the column (widths are
+framework state, initialised from the view). Tree rows indent 16 pixels a
+level and show a classic disclosure triangle (right: collapsed, down:
+expanded); clicking it or Right/Left toggles.
+
+Scroll views lay their content out at its preferred height and clip it to the
+viewport; Tab focus scrolls the focused control into view. Text views edit
+like text boxes, plus Up/Down (keeping the column), PageUp/PageDown and
+Return (a newline); lines wrap at the width unless `noWrap` (then a
+horizontal offset follows the caret). Line starts are found by one scan per
+frame, so a 100 KB text stays interactive.
+
+### U3.3 Test application
+
+The Gallery window is full; U3 adds `warmc/examples/gui/UiData.warm` with a
+10,000-row sortable table, a list, a tree and a text view (U4's tabs bring
+them into the Gallery). Its VM test scrolls the table with wheel bursts and
+keys and asserts every frame of a scroll stays within one 16 ms frame.

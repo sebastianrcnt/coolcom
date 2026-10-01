@@ -362,4 +362,34 @@ module body OS.Gui is
         return status(rawWait(window->handle, milliseconds)); end;
     function traceEnabled(): Bool is return rawTrace() /= 0; end;
     function micros(): Int64 is return rawMicros(); end;
+    pragma Foreign_Import(External_Name => "WgClipWrite");
+    private function rawClipWrite(handle: Int64, bytes: Pointer[Nat8], byteCount: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClipSerial");
+    private function rawClipSerial(): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClipSize");
+    private function rawClipSize(serial: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClipRead");
+    private function rawClipRead(serial: Int64, into: Pointer[Nat8], capacity: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPointer");
+    private function rawPointer(handle: Int64, shape: Int64): Int64 is end;
+    function copyText(window: &![Window], value: Span[Nat8]): Result[Int64, IoError] is
+        let serial: Int64 := rawClipWrite(window->handle, spanToPointer(value), spanLength(value));
+        if serial < 0 then return Err(error => fromCode(serial)); end if;
+        return Ok(value => serial); end;
+    function clipboardSerial(): Int64 is return rawClipSerial(); end;
+    function clipboardSize(serial: Int64): Int64 is return rawClipSize(serial); end;
+    function clipboardText(serial: Int64): Option[String] is
+        let bytes: Int64 := rawClipSize(serial);
+        if bytes < 0 then return None(); end if;
+        case toIndex(bytes) of
+            when Some(value as n: Index) do
+                if n = 0 then return Some(value => makeString(0, 0)); end if;
+                var s: String := makeString(n, 0);
+                let got: Int64 := rawClipRead(serial, spanToPointer(getSpan(&s, 0, 0)), n);
+                if got /= bytes then destroyString(s); return None(); end if;
+                return Some(value => s);
+            when None do return None();
+        end case; end;
+    function setPointer(window: &![Window], shape: Int64): Result[Unit, IoError] is
+        return status(rawPointer(window->handle, shape)); end;
 end module body.

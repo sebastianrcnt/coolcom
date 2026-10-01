@@ -1,22 +1,24 @@
 import Standard.Vector (Vector, make as vectorMake, push, pop, get, length, replace, borrowGet, destroyFree, destroyEmpty);
+import Standard.String (String, length as stringLength, slice as stringSlice, destroyString);
 import Standard.HashMap (HashMap);
 import Standard.Eq (Eq);
 import Standard.Hash (Hash);
 import OS.Error (IoError);
 import OS.Gui (Gui, Window, Rect, Size, Event, Idle, Mouse, Key, Resize, Close, Menu, open, close as closeWindow, size, poll, present,
-    fill, setClip, clearClip, queued, wait, traceEnabled, micros);
-import OS.Ui.Text (TextEdit);
+    fill, setClip, clearClip, queued, wait, traceEnabled, micros, copyText, clipboardSerial, clipboardText, clipboardSize, setPointer);
+import OS.Ui.Text (TextEdit, replaceRange, codepointString);
 import OS.Ui.Tree (Tree, Node, Geom, Damage, makeTree, destroyTree, open as openNode, close as closeNode, add, setText, appendText, appendNumber,
     setExtra, setFlag, setValue, setRange, setAux, setHandler, setHandler2, setSize, setMinSize, setGrow, setAlign, setChildAlign,
     setPadding, setSpacing, setColumns, setKey, keyOf, finishBuild, layout, props, geometry, textBytes, readVector,
     makeDamage, destroyDamage, clearDamage, damageRects, damageFull, intersect, intersects, visibleRect, visible, within, topOverlay,
     toIndex64, toInt, parseKey, bits, mix, readDamage,
     kindColumn, kindRow, kindGrid, kindSplit, kindSpacer, kindGroup, kindLabel, kindButton, kindSeparator,
-    kindShortcut, kindTimer, flagDisabled, flagDefault, flagCancel, flagWrap, flagPlain, flagHidden, flagCenter, flagOverlay);
+    kindCheckbox, kindRadio, kindSlider, kindProgress, kindImage, kindTextBox,
+    kindShortcut, kindTimer, flagDisabled, flagDefault, flagCancel, flagWrap, flagPlain, flagHidden, flagCenter, flagOverlay, flagSecure);
 import OS.Ui.Engine (State, Snapshot, Action, makeState, destroyState, makeSnapshot, destroySnapshot, invalidate, compareAndRecord,
-    handle, prune, syncTimers, readState, dueTimer, timeout, splitPositions, focused, ephemeral,
+    handle, prune, syncTimers, readState, setNow, pointerShape, current, setEphemeral, Ephemeral, actCopy, dueTimer, timeout, splitPositions, focused, ephemeral,
     actNone, actRepaint, actRelayout, actFire, actFire2, actClose, actResize, actMenu, dragPress, dragNone);
-import OS.Ui.Draw (paint);
+import OS.Ui.Draw (paint, Picture, builtinFolder, builtinDocument, builtinNote, builtinCaution, builtinStop);
 module body OS.Ui is
     -- Declarative UI: describe the whole window from the model in view,
     -- return messages from next, change the model in update. See
@@ -50,7 +52,12 @@ module body OS.Ui is
         trace: Bool;
         traced: Nat64;
         returned: Int64;
+        pictures: Vector[Picture];
+        pointer: Int64;
     end;
+    -- An image registered with the App (or a built-in icon): views refer to it
+    -- by this handle and never copy pixels.
+    record Image: Free is id: Int64; width: Int64; height: Int64; end;
 
     ------------------------------------------------------------------ application
 
@@ -63,14 +70,24 @@ module body OS.Ui is
                 var trees: Vector[Tree] := vectorMake(); push(&!trees, makeTree());
                 let hs: Vector[Handler[M]] := vectorMake();
                 return Ok(value => App(window => window, state => makeState(), trees => trees, handlers => hs,
-                    shown => makeSnapshot(), damage => makeDamage(), width => w, height => h, running => true, frames => 0, trace => traceEnabled(), traced => 0, returned => 0));
+                    shown => makeSnapshot(), damage => makeDamage(), width => w, height => h, running => true, frames => 0, trace => traceEnabled(), traced => 0, returned => 0, pictures => noPictures(), pointer => 0));
             when Err(error as e: IoError) do return Err(error => e);
         end case;
     end;
     generic [M: Free]
     function closeApp(app: App[M]): Unit is
         let { window as w: Window, state as s: State, trees as ts: Vector[Tree], handlers as h: Vector[Handler[M]], shown as sh: Snapshot,
-            damage as d: Damage, width as width: Int64, height as height: Int64, running as r: Bool, frames as f: Int64, trace as t: Bool, traced as tr: Nat64, returned as rt: Int64 } := app;
+            damage as d: Damage, width as width: Int64, height as height: Int64, running as r: Bool, frames as f: Int64, trace as t: Bool, traced as tr: Nat64, returned as rt: Int64, pictures as ps: Vector[Picture], pointer as pt: Int64 } := app;
+        var pictures: Vector[Picture] := ps;
+        while length(&pictures) > 0 do
+            case pop(&!pictures) of
+                when Some(value as one: Picture) do
+                    let { width as pw: Int64, height as ph: Int64, oneBit as ob: Bool, stride as st: Int64, pixels as px: Vector[Nat8] } := one;
+                    destroyFree(px);
+                when None do skip;
+            end case;
+        end while;
+        destroyEmpty(pictures);
         var trees: Vector[Tree] := ts;
         var more: Bool := true;
         while more do case pop(&!trees) of when Some(value as tree: Tree) do destroyTree(tree); when None do more := false; end case; end while;
@@ -95,7 +112,7 @@ module body OS.Ui is
         finishBuild(&!tree);
         layout(&!tree, app->width, app->height, splitPositions(readState(&(app->state))));
         borrow r: &[Tree, Q] := &tree do
-            prune(&(app->state), props(r));
+            prune(&(app->state), textBytes(r), props(r), geometry(r));
             syncTimers(props(r), &(app->state), micros());
         end borrow;
         let old: Tree := replace(&(app->trees), 0, tree);
@@ -129,6 +146,15 @@ module body OS.Ui is
                 when Close do action := handleEvent(&~app, event);
                 when Menu(id as id: Int64) do action := handleEvent(&~app, event);
             end case;
+            if pointerShape(readState(&(app->state))) /= app->pointer then
+                app->pointer := pointerShape(readState(&(app->state)));
+                setPointer(&(app->window), app->pointer);
+            end if;
+            if action.kind = actCopy then copyRange(&~app, action.node, action.value, action.aux); end if;
+            if action.kind = actFire and action.aux = 1 then
+                copyRange(&~app, action.node, widenIndex(action.edit.start), widenIndex(action.edit.finish));
+            end if;
+            if action.kind = actFire and action.edit.paste < 0 then action := withPaste(&~app, action); end if;
             if action.kind = actFire or action.kind = actFire2 then
                 case messageOf(&~app, action.node, action.kind = actFire2, action.value, action.edit) of
                     when Some(value as m: M) do app->returned := micros(); return Some(value => m);
@@ -156,6 +182,7 @@ module body OS.Ui is
         if node >= spanLength(ps) then return -1; end if;
         if second then return ps[node].handler2; end if; return ps[node].handler;
     end;
+    function noPictures(): Vector[Picture] is let v: Vector[Picture] := vectorMake(); return v; end;
     function noEdit(): TextEdit is return TextEdit(start => 0, finish => 0, codepoint => -1, paste => 0); end;
     generic [M: Free]
     function install(app: &![App[M]], hs: Vector[Handler[M]]): Unit is
@@ -174,8 +201,41 @@ module body OS.Ui is
         end case;
         return nil;
     end;
+    function widenIndex(i: Index): Int64 is return toInt(i); end;
+    -- Copy bytes [start, finish) of a node's text to the clipboard.
+    generic [M: Free]
+    function copyRange(app: &![App[M]], node: Index, start: Int64, finish: Int64): Unit is
+        copySlice(&(app->window), nodeTextOf(treeOf(&(app->trees)), node), start, finish); return nil;
+    end;
+    function copySlice(w: &![Window], bytes: Span[Nat8], start: Int64, finish: Int64): Unit is
+        if start >= 0 and finish <= toInt(spanLength(bytes)) and start < finish then
+            copyText(&~w, sliceSpan(bytes, toIndex64(start), toIndex64(finish)));
+        end if;
+        return nil;
+    end;
+    generic [R: Region]
+    function nodeTextOf(t: &[Tree, R], node: Index): Span[Nat8, R] is
+        let ps: Span[Node, R] := props(t);
+        return sliceSpan(textBytes(t), ps[node].text, ps[node].textEnd);
+    end;
+    -- A paste names the clipboard snapshot of the keystroke; the caret goes
+    -- after the pasted bytes.
+    generic [M: Free]
+    function withPaste(app: &![App[M]], action: Action): Action is
+        let serial: Int64 := clipboardSerial();
+        let pasted: Int64 := clipboardSize(serial);
+        let edit: TextEdit := action.edit;
+        let id: Nat64 := props(treeOf(&(app->trees)))[action.node].ident;
+        let e: Ephemeral := current(&(app->state), id);
+        let caret: Int64 := toInt(edit.start) + maxInt64(pasted, 0);
+        setEphemeral(&(app->state), id, Ephemeral(a => caret, b => caret, c => e.c, d => e.d));
+        return Action(kind => action.kind, node => action.node, value => action.value, aux => action.aux,
+            edit => TextEdit(start => edit.start, finish => edit.finish, codepoint => -1, paste => serial));
+    end;
+    function maxInt64(a: Int64, b: Int64): Int64 is if a > b then return a; end if; return b; end;
     generic [M: Free]
     function handleEvent(app: &![App[M]], event: Event): Action is
+        setNow(&(app->state), micros());
         return handle(textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), &(app->state), event);
     end;
     generic [M: Free]
@@ -195,7 +255,7 @@ module body OS.Ui is
         clearDamage(&(app->damage));
         compareAndRecord(textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), readState(&(app->state)), &(app->shown), &(app->damage));
         let count: Index := spanLength(props(treeOf(&(app->trees))));
-        let painted: Bool := repaint(&(app->window), textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), readState(&(app->state)), readDamage(&(app->damage)), app->width, app->height);
+        let painted: Bool := repaint(&(app->window), textBytes(treeOf(&(app->trees))), props(treeOf(&(app->trees))), geometry(treeOf(&(app->trees))), readState(&(app->state)), readDamage(&(app->damage)), app->width, app->height, readPictures(&(app->pictures)));
         -- Present even when nothing changed: it ends the input latency sample.
         present(&(app->window));
         if painted then
@@ -242,21 +302,21 @@ module body OS.Ui is
     end;
     -- Paint every node intersecting each damaged rectangle; overlays last.
     generic [R: Region]
-    function repaint(w: &![Window], all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &[State], d: &[Damage, R], width: Int64, height: Int64): Bool is
+    function repaint(w: &![Window], all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &[State], d: &[Damage, R], width: Int64, height: Int64, pictures: &[Vector[Picture]]): Bool is
         var any: Bool := false;
         if damageFull(d) then
-            paintRegion(&~w, all, ps, gs, state, Rect(x => 0, y => 0, width => width, height => height)); any := true;
+            paintRegion(&~w, all, ps, gs, state, Rect(x => 0, y => 0, width => width, height => height), pictures); any := true;
         else
             let rs: Span[Rect, R] := damageRects(d);
             for k from 0 until spanLength(rs) do
                 let region: Rect := intersect(rs[k], Rect(x => 0, y => 0, width => width, height => height));
-                if region.width > 0 and region.height > 0 then paintRegion(&~w, all, ps, gs, state, region); any := true; end if;
+                if region.width > 0 and region.height > 0 then paintRegion(&~w, all, ps, gs, state, region, pictures); any := true; end if;
             end for;
         end if;
         clearClip(&~w);
         return any;
     end;
-    function paintRegion(w: &![Window], all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &[State], region: Rect): Unit is
+    function paintRegion(w: &![Window], all: Span[Nat8], ps: Span[Node], gs: Span[Geom], state: &[State], region: Rect, pictures: &[Vector[Picture]]): Unit is
         setClip(&~w, region);
         fill(&~w, region, 16777215);
         for layer from 0 until 2 do
@@ -266,10 +326,11 @@ module body OS.Ui is
                     if visible(ps, i) then
                         let area: Rect := intersect(region, visibleRect(ps, gs, i));
                         if area.width > 0 and area.height > 0 then
-                            setClip(&~w, intersect(region, Rect(x => gs[i].clipX, y => gs[i].clipY, width => gs[i].clipWidth, height => gs[i].clipHeight)));
+                            let clip: Rect := intersect(region, Rect(x => gs[i].clipX, y => gs[i].clipY, width => gs[i].clipWidth, height => gs[i].clipHeight));
+                            setClip(&~w, clip);
                             let id: Nat64 := ps[i].ident;
-                            let pressed: Bool := state->target = id and state->drag = dragPress and state->inside;
-                            paint(&~w, all, ps, gs, i, pressed, focused(state) = id, state->keyboard);
+                            let pressed: Bool := state->target = id and state->drag /= dragNone and state->inside;
+                            paint(&~w, all, ps, gs, i, pressed, focused(state) = id, state->keyboard, ephemeral(state, id), clip, pictures);
                         end if;
                     end if;
                 end if;
@@ -282,6 +343,65 @@ module body OS.Ui is
         while p /= 0 do if (ps[p].flags & flagOverlay) /= 0 then return true; end if; p := ps[p].parent; end while;
         return false;
     end;
+
+    ------------------------------------------------------------------ building a view
+
+    generic [R: Region]
+    function readPictures(v: &![Vector[Picture], R]): &[Vector[Picture], R] is return (v: &[Vector[Picture], R]); end;
+
+    ------------------------------------------------------------------ text values
+
+    -- Apply a text box edit to the model's text (consumes it, returns the new
+    -- text). A paste inserts exactly the clipboard snapshot it names, or nothing
+    -- if the clipboard changed since the keystroke.
+    function applyEdit(text: String, edit: TextEdit): String is
+        if edit.codepoint >= 0 then
+            let insert: String := codepointString(edit.codepoint);
+            let result: String := replaceRange(&text, edit.start, edit.finish, stringSlice(&insert, 0, stringLength(&insert)));
+            destroyString(insert); destroyString(text); return result;
+        end if;
+        if edit.paste > 0 then
+            case clipboardText(edit.paste) of
+                when Some(value as insert: String) do
+                    let result: String := replaceRange(&text, edit.start, edit.finish, stringSlice(&insert, 0, stringLength(&insert)));
+                    destroyString(insert); destroyString(text); return result;
+                when None do return text;
+            end case;
+        end if;
+        let result: String := replaceRange(&text, edit.start, edit.finish, "");
+        destroyString(text); return result;
+    end;
+
+    ------------------------------------------------------------------ images
+
+    -- One-bit image (most significant bit first, stride = ceil(width / 8)); set bits are black.
+    generic [M: Free]
+    function oneBitImage(app: &![App[M]], width: Int64, height: Int64, data: Span[Nat8]): Image is
+        return addPicture(&~app, width, height, true, (width + 7) / 8, data);
+    end;
+    -- BGRA pixels, 4 bytes each, rows of width pixels.
+    generic [M: Free]
+    function colorImage(app: &![App[M]], width: Int64, height: Int64, bgra: Span[Nat8]): Image is
+        return addPicture(&~app, width, height, false, width * 4, bgra);
+    end;
+    generic [M: Free]
+    function addPicture(app: &![App[M]], width: Int64, height: Int64, oneBit: Bool, stride: Int64, data: Span[Nat8]): Image is
+        var pixels: Vector[Nat8] := vectorMake();
+        let needed: Int64 := stride * height;
+        for i from 0 until spanLength(data) do if toInt(i) < needed then push(&!pixels, data[i]); end if; end for;
+        while toInt(length(&pixels)) < needed do push(&!pixels, 0); end while;
+        let id: Int64 := toInt(length(readPictureVector(&(app->pictures))));
+        push(&(app->pictures), Picture(width => width, height => height, oneBit => oneBit, stride => stride, pixels => pixels));
+        return Image(id => id, width => width, height => height);
+    end;
+    generic [R: Region]
+    function readPictureVector(v: &![Vector[Picture], R]): &[Vector[Picture], R] is return (v: &[Vector[Picture], R]); end;
+    -- Built-in classic icons: 16x16 folder and document, 32x32 alert icons.
+    function iconFolder(): Image is return Image(id => builtinFolder, width => 16, height => 16); end;
+    function iconDocument(): Image is return Image(id => builtinDocument, width => 16, height => 16); end;
+    function iconNote(): Image is return Image(id => builtinNote, width => 32, height => 32); end;
+    function iconCaution(): Image is return Image(id => builtinCaution, width => 32, height => 32); end;
+    function iconStop(): Image is return Image(id => builtinStop, width => 32, height => 32); end;
 
     ------------------------------------------------------------------ building a view
 
@@ -371,6 +491,48 @@ module body OS.Ui is
     generic [M: Free]
     function separator(v: &![View[M]]): Unit is add(&(v->tree), kindSeparator); return nil; end;
 
+    -- A checkbox: message is sent when the user toggles it (the model flips its value).
+    generic [M: Free]
+    function checkbox(v: &![View[M]], title: Span[Nat8], checked: Bool, message: M): Unit is
+        add(&(v->tree), kindCheckbox); setText(&(v->tree), title); if checked then setValue(&(v->tree), 1); end if;
+        let h: Int64 := handler(&~v, Send(message => message)); setHandler(&(v->tree), h); return nil;
+    end;
+    -- A radio button: message is sent when it is chosen.
+    generic [M: Free]
+    function radio(v: &![View[M]], title: Span[Nat8], selected: Bool, message: M): Unit is
+        add(&(v->tree), kindRadio); setText(&(v->tree), title); if selected then setValue(&(v->tree), 1); end if;
+        let h: Int64 := handler(&~v, Send(message => message)); setHandler(&(v->tree), h); return nil;
+    end;
+    -- A horizontal slider over [low, high] in steps; onChange gets each new value while dragging.
+    generic [M: Free]
+    function slider(v: &![View[M]], value: Int64, low: Int64, high: Int64, step: Int64, onChange: Fn[Int64, M]): Unit is
+        add(&(v->tree), kindSlider); setValue(&(v->tree), value); setRange(&(v->tree), low, high); setAux(&(v->tree), step);
+        let h: Int64 := handler(&~v, WithValue(make => onChange)); setHandler(&(v->tree), h); return nil;
+    end;
+    -- A progress bar; total <= 0 shows an indeterminate (striped) bar.
+    generic [M: Free]
+    function progress(v: &![View[M]], value: Int64, total: Int64): Unit is
+        add(&(v->tree), kindProgress); setValue(&(v->tree), value); setRange(&(v->tree), 0, total); return nil;
+    end;
+    -- A single-line text field showing text; every change arrives as onEdit(edit),
+    -- to be applied to the model's String with applyEdit.
+    generic [M: Free]
+    function textBox(v: &![View[M]], text: Span[Nat8], onEdit: Fn[TextEdit, M]): Unit is
+        add(&(v->tree), kindTextBox); setText(&(v->tree), text);
+        let h: Int64 := handler(&~v, WithEdit(make => onEdit)); setHandler(&(v->tree), h); return nil;
+    end;
+    -- A text field showing bullets; copying is disabled.
+    generic [M: Free]
+    function password(v: &![View[M]], text: Span[Nat8], onEdit: Fn[TextEdit, M]): Unit is
+        textBox(&~v, text, onEdit); setFlag(&(v->tree), flagSecure, true); return nil;
+    end;
+    -- Dimmed text shown in an empty, unfocused text field.
+    generic [M: Free]
+    function placeholder(v: &![View[M]], text: Span[Nat8]): Unit is setExtra(&(v->tree), text); return nil; end;
+    generic [M: Free]
+    function image(v: &![View[M]], picture: Image): Unit is
+        add(&(v->tree), kindImage); setValue(&(v->tree), picture.id); setRange(&(v->tree), picture.width, picture.height); return nil;
+    end;
     -- A keyboard shortcut such as "Ctrl+S", "Alt+Left", "F5" or "Ctrl+Shift+Z".
     generic [M: Free]
     function shortcut(v: &![View[M]], keys: Span[Nat8], message: M): Unit is

@@ -26,3 +26,20 @@ I64 WgPending(I64 handle) {return -1;}
 I64 WgWait(I64 handle, I64 ms) {return -1;}
 I64 WgTrace() {return 0;}
 I64 WgMicros() {return 0;}
+// The host keeps an in-process clipboard so editing tests run without a desktop.
+U8 *wg_clip_data; I64 wg_clip_size, wg_clip_serial;
+I64 WgClipWrite(I64 handle, U8 *bytes, U64 size)
+{
+    U8 *copy = MAlloc(size + 1); if (!copy) return -1;
+    if (size) MemCpy(copy, bytes, size);
+    Free(wg_clip_data); wg_clip_data = copy; wg_clip_size = size; return ++wg_clip_serial;
+}
+I64 WgClipSerial() {return wg_clip_serial;}
+I64 WgClipSize(I64 serial) {if (serial >= 0 && serial != wg_clip_serial) return -1; return wg_clip_size;}
+I64 WgClipRead(I64 serial, U8 *into, U64 capacity)
+{
+    I64 n;
+    if (serial >= 0 && serial != wg_clip_serial) return -1;
+    n = wg_clip_size; if (n > capacity) n = capacity; if (n) MemCpy(into, wg_clip_data, n); return n;
+}
+I64 WgPointer(I64 handle, I64 shape) {return -1;}

@@ -198,7 +198,8 @@ module body OS.Ui.Tree is
 
     -- Children of the open container. Focusable kinds are marked here.
     function defaultFlags(kind: Int64): Int64 is
-        if kind = kindButton or kind = kindCheckbox or kind = kindRadio or kind = kindSlider then return flagFocusable; end if;
+        if kind = kindButton or kind = kindCheckbox or kind = kindRadio then return flagFocusable; end if;
+        if kind = kindSlider then return flagFocusable | flagClickFocus; end if;
         if kind = kindTextBox or kind = kindList or kind = kindTable or kind = kindTreeView or kind = kindTextView then return flagFocusable | flagClickFocus | flagPlain; end if;
         if kind = kindTabs then return flagFocusable; end if;
         return 0;
@@ -434,11 +435,16 @@ module body OS.Ui.Tree is
         if ps[parent].childAlign /= alignInherit then return ps[parent].childAlign; end if;
         let pk: Int64 := ps[parent].kind;
         if pk = kindRow or pk = kindToolbar or pk = kindStatus or (pk = kindSplit and ps[parent].value = 0) then
-            if ps[child].kind = kindSeparator or pk = kindSplit then return alignFill; end if;
+            -- Side by side, panels share the row's height; controls are centered.
+            if ps[child].kind = kindSeparator or pk = kindSplit or panel(ps[child].kind) then return alignFill; end if;
             return alignCenter;
         end if;
         if pk = kindSplit or expands(ps[child].kind) then return alignFill; end if;
         return alignStart;
+    end;
+    function panel(kind: Int64): Bool is
+        return kind = kindGroup or kind = kindColumn or kind = kindGrid or kind = kindScroll or kind = kindTabs or kind = kindList
+            or kind = kindTable or kind = kindTreeView or kind = kindTextView;
     end;
     function horizontal(ps: Span[Node], i: Index): Bool is
         let k: Int64 := ps[i].kind;

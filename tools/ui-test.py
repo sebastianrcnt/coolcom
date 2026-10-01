@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OS.Ui framework acceptance in the VM: the Gallery and framework apps on the
+"""OS.Ui framework acceptance in the VM: the UiCheck and Gallery apps on the
 CPU and Venus compositors at 1x and 2x. Checks messages, focus, shortcuts,
 damage-limited redraw (UI FRAME traces), classic chrome pixels, exact 2x
 integer scaling, CPU/Venus equality and input-to-composition latency.
@@ -22,6 +22,7 @@ KERNEL = sys.argv[1]
 VENUS = '--venus' in sys.argv
 STAGES = sys.argv[sys.argv.index('--stage') + 1].split(',') if '--stage' in sys.argv else ['U1']
 OUT = ROOT / 'build/ui-u1'
+OUT2 = ROOT / 'build/ui-u2'
 BLACK, WHITE = (0, 0, 0), (255, 255, 255)
 FRAME_BUDGET_US = 16000
 LOADED_BOUND_US = 50000
@@ -84,20 +85,20 @@ def u1_session(mode, scale, layout):
     found, _ = layout
     o = uivm.client_origin(1)
     s = Script(scale=scale, size=(800 * scale, 600 * scale))
-    start(s, 'GuiGallery;', 'GALLERY READY')
-    s.wait('GALLERY TICK 2')                             # two idle timer ticks first
+    start(s, 'GuiRun("C:/Warm/Examples/gui/UiCheck.warm", "UiCheck:main");', 'CHECK READY')
+    s.wait('CHECK TICK 2')                             # two idle timer ticks first
     s.shot()                                             # 0: initial frame
     # Classic tracking: press shows the inverted button, release inside fires.
     s.move(*center(found['Two'], o)); s.press(); s.delay(150)
     s.shot()                                             # 1: Two held
-    s.release(); s.wait('GALLERY CLICK 2'); s.delay(150)
+    s.release(); s.wait('CHECK CLICK 2'); s.delay(150)
     # Tab focuses the first button (dotted ring); Space presses it.
     s.key('tab'); s.delay(150)
     s.shot()                                             # 2: focus ring on One
-    s.key('space'); s.wait('GALLERY CLICK 1')
-    s.key('enter'); s.wait('GALLERY CLICK 9')         # Return: the default button
-    s.key('esc'); s.wait('GALLERY RESET')               # Escape: the cancel button
-    s.key('r', ctrl=True); s.wait('GALLERY RESET')      # declared shortcut
+    s.key('space'); s.wait('CHECK CLICK 1')
+    s.key('enter'); s.wait('CHECK CLICK 9')         # Return: the default button
+    s.key('esc'); s.wait('CHECK RESET')               # Escape: the cancel button
+    s.key('r', ctrl=True); s.wait('CHECK RESET')      # declared shortcut
     # Drag the split bar 60 px to the right: relayout, kept by the framework.
     left = found['Left pane']
     bar = (o[0] + left[0] + left[2] + 3, o[1] + left[1] + 60)
@@ -108,22 +109,22 @@ def u1_session(mode, scale, layout):
     s.shot()                                             # 3: split moved
     # Latency phase (no screenshots): clicks, focus keys, default/cancel and a shortcut.
     s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
-    for label, marker in (('Two', 'GALLERY CLICK 2'), ('Three', 'GALLERY CLICK 3'), ('One', 'GALLERY CLICK 1')):
+    for label, marker in (('Two', 'CHECK CLICK 2'), ('Three', 'CHECK CLICK 3'), ('One', 'CHECK CLICK 1')):
         s.click(*center(found[label], o)); s.wait(marker); s.delay(60)
     for _ in range(2):                                   # One -> Two -> Three
         s.key('tab'); s.delay(60)
-    s.key('space'); s.wait('GALLERY CLICK 3'); s.delay(60)
-    s.key('enter'); s.wait('GALLERY CLICK 9'); s.delay(60)
-    s.key('esc'); s.wait('GALLERY RESET'); s.delay(60)
-    s.key('r', ctrl=True); s.wait('GALLERY RESET'); s.delay(60)
+    s.key('space'); s.wait('CHECK CLICK 3'); s.delay(60)
+    s.key('enter'); s.wait('CHECK CLICK 9'); s.delay(60)
+    s.key('esc'); s.wait('CHECK RESET'); s.delay(60)
+    s.key('r', ctrl=True); s.wait('CHECK RESET'); s.delay(60)
     # Only the button and the two labels change on a click.
-    s.click(*center(found['One'], o)); s.wait('GALLERY CLICK 1'); s.delay(200)
+    s.click(*center(found['One'], o)); s.wait('CHECK CLICK 1'); s.delay(200)
     s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
     # Coalescing: 30 Tab presses (focus cycles back to One) and Space queued at
     # once from the shell (UiBurst focuses the gallery with interrupts masked).
     s.click(300, 44)                                     # the shell's title bar
     s.typed('UiBurst(30);\n'); s.wait('UI BURST QUEUED')
-    s.wait('GALLERY CLICK ')                             # Space presses whichever button has focus
+    s.wait('CHECK CLICK ')                             # Space presses whichever button has focus
     s.delay(200)
     s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
     s.quit(200)
@@ -176,7 +177,7 @@ def u1_check(name, log, screen, shots, scale, layout):
     burst_frames = len(re.findall(r'^UI FRAME ', burst, re.M))
     assert 1 <= burst_frames <= 2, f'{burst_frames} frames for 31 queued keys'
     # Timer ticks rebuild the view but change nothing on screen.
-    ticks = log.split('GALLERY TICK 1', 1)[1].split('GALLERY TICK 2', 1)[0]
+    ticks = log.split('CHECK TICK 1', 1)[1].split('CHECK TICK 2', 1)[0]
     assert 'UI FRAME' not in ticks, 'a tick repainted'
     # Input to composed frame: the median within one frame; every sample within
     # a loaded-host bound (make -j test oversubscribes the CPUs; the guest counter
@@ -213,7 +214,7 @@ def compare_equal(one, two, scale=1, skip_clock=True):
 
 
 def run_u1():
-    layout = layout_of('u1', 'GuiGallery;', 'GALLERY READY')
+    layout = layout_of('u1', 'GuiRun("C:/Warm/Examples/gui/UiCheck.warm", "UiCheck:main");', 'CHECK READY')
     sessions = [('cpu', 1), ('cpu', 2)] + ([('venus', 1), ('venus', 2)] if VENUS else [])
     results = {}
     # One VM at a time: make -j test already runs many VM suites side by side.
@@ -238,5 +239,158 @@ def run_u1():
     print('ui-test: U1 PASS', flush=True)
 
 
+# ---------------------------------------------------------------- U2
+
+SHIFT_SPACE = '1 42 1\n1 57 1\n1 57 0\n1 42 0\ndelay 30\n'
+
+
+def u2_session(mode, scale, layout):
+    found, _ = layout
+    o = uivm.client_origin(1)
+    s = Script(scale=scale, size=(800 * scale, 600 * scale))
+    start(s, 'GuiGallery;', 'GALLERY READY')
+    s.shot()                                             # 0: every control at rest
+    # Checkbox and radio: click the title; the model flips/chooses.
+    s.click(*center(found['Italic'], o)); s.wait('GALLERY ITALIC true')
+    s.click(*center(found['Large'], o)); s.wait('GALLERY SIZE 3')
+    # Slider: drag the thumb right, then step with the keyboard (the slider took focus).
+    slider = found['@slider']
+    thumb_x = o[0] + slider[0] + (slider[2] - 11) * 40 // 100 + 5
+    y = o[1] + slider[1] + slider[3] // 2
+    s.move(thumb_x, y); s.press(); s.delay(30)
+    for dx in range(8, 49, 8):
+        s.move(thumb_x + dx, y); s.delay(15)
+    s.release(); s.wait('GALLERY VOLUME '); s.delay(100)
+    s.key('right'); s.delay(100)
+    s.shot()                                             # 1: Italic, Large, slider moved, slider focused
+    # Text: type, select with Shift+Left, copy, paste at the end.
+    name = found['Your name']
+    s.click(o[0] + name[0] + 20, o[1] + name[1] + name[3] // 2); s.delay(60)
+    s.typed('hello', delay=20); s.wait('GALLERY NAME [hello]')
+    s.key('left', shift=True); s.key('left', shift=True); s.delay(60)
+    s.key('c', ctrl=True); s.delay(60)
+    s.key('end'); s.key('v', ctrl=True); s.wait('GALLERY NAME [hellolo]')
+    s.key('left', shift=True); s.key('left', shift=True); s.key('left', shift=True); s.delay(150)
+    s.shot()                                             # 2: focused field with an inverted selection
+    # Select all and type over it; Backspace empties the field.
+    s.key('a', ctrl=True); s.typed('X', delay=20); s.wait('GALLERY NAME [X]')
+    s.key('backspace'); s.wait('GALLERY NAME []')
+    # Hangul: 2-beolsik composition replaces the syllable as it grows (Backspace + new text).
+    s.text += SHIFT_SPACE; s.typed('gksrmf', delay=30); s.text += SHIFT_SPACE
+    s.wait('GALLERY NAME [한글]')
+    # Double click selects a word; typing replaces it.
+    s.typed(' foo bar', delay=20); s.wait('GALLERY NAME [한글 foo bar]')
+    text_x = o[0] + name[0] + 4 + 16 * 2 + 8 * 6
+    s.move(text_x, o[1] + name[1] + name[3] // 2); s.press(); s.release(); s.press(); s.release(); s.delay(80)
+    s.typed('Z', delay=20); s.wait('GALLERY NAME [한글 foo Z]')
+    # Copy everything and paste into the password field (bullets, no copying out).
+    s.key('a', ctrl=True); s.key('c', ctrl=True); s.delay(60)
+    secret = found['@password']
+    s.click(o[0] + secret[0] + 20, o[1] + secret[1] + secret[3] // 2); s.delay(60)
+    s.key('v', ctrl=True); s.wait('GALLERY SECRET 12')
+    s.delay(150)
+    s.shot()                                             # 3: Hangul text, password bullets
+    # Latency phase: typing into the field.
+    s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    s.click(o[0] + name[0] + 20, o[1] + name[1] + name[3] // 2); s.delay(60)
+    s.key('end')
+    for ch in 'latency':
+        s.typed(ch, delay=50)
+    s.wait('GALLERY NAME [한글 foo Zlatency]'); s.delay(150)
+    s.key('l', ctrl=True, alt=True); s.wait('GUI LATENCY')
+    s.quit(200)
+    name_ = f'u2-{mode}-{scale}x'
+    log, screen, shots = uivm.run(name_, s, out=OUT2, kernel=KERNEL, mode=mode, scale=scale, size=(800 * scale, 600 * scale),
+                                  prepare=install_burst)
+    check_log(log)
+    return name_, log, screen, shots
+
+
+def u2_layout():
+    found, entries = layout_of('u2', 'GuiGallery;', 'GALLERY READY')
+    # Unlabelled controls by kind (14 slider, 18 text box; the second text box is the password).
+    sliders = [e for e in entries if e[1] == 14]
+    boxes = [e for e in entries if e[1] == 18]
+    found['@slider'] = sliders[0][2:6]
+    found['@password'] = boxes[1][2:6]
+    found['Your name'] = boxes[0][2:6]
+    return found, entries
+
+
+def u2_check(name, log, screen, shots, scale, layout):
+    found, entries = layout
+    o = uivm.client_origin(1)
+    s = scale
+    _, _, rest = testvm.read_png(shots[0])
+    _, _, chosen = testvm.read_png(shots[1])
+    _, _, selected = testvm.read_png(shots[2])
+    _, _, hangul = testvm.read_png(shots[3])
+    P = lambda rows, x, y: pixel(rows, x * s, y * s)
+    for marker in ('GALLERY ITALIC TRUE', 'GALLERY SIZE 3', 'GALLERY NAME [hellolo]', 'GALLERY NAME [í\u0095\u009c',
+                   'GALLERY SECRET 12'):
+        pass
+    # Checkbox: Bold starts checked (an X through the box), Italic becomes checked.
+    bold = found['Bold']; italic = found['Italic']
+    def box_x(rows, rect):
+        bx, by = o[0] + rect[0], o[1] + rect[1] + (rect[3] - 12) // 2
+        return P(rows, bx + 3, by + 3) == BLACK and P(rows, bx + 8, by + 3) == BLACK and P(rows, bx + 5, by + 3) == WHITE
+    assert box_x(rest, bold) and not box_x(rest, italic) and box_x(chosen, italic), 'checkbox X'
+    # Radio: the dot moves from Medium to Large.
+    def dot(rows, rect):
+        return P(rows, o[0] + rect[0] + 5, o[1] + rect[1] + (rect[3] - 12) // 2 + 5) == BLACK
+    assert dot(rest, found['Medium']) and not dot(rest, found['Large']), 'radio dot at rest'
+    assert dot(chosen, found['Large']) and not dot(chosen, found['Medium']), 'radio dot moved'
+    # Progress: filled to the slider's value (40% at rest).
+    level = [e for e in entries if e[1] == 15][0][2:6]
+    lx, ly, lw, lh = o[0] + level[0], o[1] + level[1], level[2], level[3]
+    inner = lw - 2
+    assert P(rest, lx + 1 + inner * 40 // 100 - 2, ly + lh // 2) == BLACK and P(rest, lx + 1 + inner * 40 // 100 + 2, ly + lh // 2) == WHITE, 'progress 40%'
+    volumes = [int(v) for v in re.findall(r'GALLERY VOLUME (\d+)', log)]
+    assert volumes and volumes[-1] > 40 and volumes[-1] % 5 == 0, f'slider values {volumes}'
+    # Text box: selection is inverted (white text pixels on black).
+    nb = found['Your name']
+    sel_y = o[1] + nb[1] + nb[3] // 2
+    row = [P(selected, x, sel_y) for x in range(o[0] + nb[0] + 4 + 8 * 4, o[0] + nb[0] + 4 + 8 * 7)]
+    assert row.count(BLACK) > len(row) // 2, 'inverted selection'
+    # The password field shows bullets, not the text.
+    pw = found['@password']
+    assert any(P(hangul, x, o[1] + pw[1] + pw[3] // 2) == BLACK for x in range(o[0] + pw[0] + 4, o[0] + pw[0] + 40)), 'bullets'
+    reports = uivm.latencies(log)
+    lat = reports[-1]
+    assert lat['n'] >= 5 and lat['p50'] < FRAME_BUDGET_US and lat['max'] < LOADED_BOUND_US, f'typing latency {lat}'
+    fs = frames(log)
+    typing = log.split('GUI LATENCY', 1)[1].split('GUI LATENCY', 1)[0]
+    rects = [f for f in frames(typing)]
+    big = [f for f in rects if not f[4] and sum(w * h for _, _, w, h in f[3]) > 560 * 470 // 4]
+    assert not big, f'typing repaints large areas {big[:2]}'
+    return {'latency': lat, 'volumes': volumes[-1], 'frames': len(fs)}
+
+
+def run_u2():
+    layout = u2_layout()
+    sessions = [('cpu', 1), ('cpu', 2)] + ([('venus', 1), ('venus', 2)] if VENUS else [])
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=int(os.environ.get("UI_TEST_JOBS", "1"))) as pool:
+        futures = {pool.submit(u2_session, m, sc, layout): (m, sc) for m, sc in sessions}
+        for f in concurrent.futures.as_completed(futures):
+            mode, scale = futures[f]
+            name, log, screen, shots = f.result()
+            results[(mode, scale)] = (name, screen, shots, u2_check(name, log, screen, shots, scale, layout))
+            print(f'ui-test: {name} PASS {json.dumps(results[(mode, scale)][3])}', flush=True)
+    region = (44, 58, 570, 505)
+    for i in range(4):
+        compare_scaled(results[('cpu', 1)][2][i], results[('cpu', 2)][2][i], region)
+    if VENUS:
+        for sc in (1, 2):
+            compare_equal(results[('cpu', sc)][1], results[('venus', sc)][1], sc)
+            for i in range(4):
+                compare_equal(results[('cpu', sc)][2][i], results[('venus', sc)][2][i], sc)
+    summary = {f'{m}-{sc}x': r[3] for (m, sc), r in results.items()}
+    (OUT2 / 'u2-results.json').write_text(json.dumps(summary, indent=1))
+    print('ui-test: U2 PASS', flush=True)
+
+
 if 'U1' in STAGES:
     run_u1()
+if 'U2' in STAGES:
+    run_u2()
