@@ -6,25 +6,17 @@ built, on the Vulkan terminal:
   it, the cell metrics are sane at 1x and 2x, and a Latin + Hangul line is drawn with
   antialiased (gray) pixels in every glyph.
 Artifacts under build/font-test/."""
-import importlib.util
 import pathlib
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import testvm
+from testvm import ROOT
+
 OUT = ROOT / 'build/font-test'
 KERNEL = sys.argv[1]
 
 
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    obj = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(obj)
-    return obj
-
-
-vim = module('vim_test', ROOT / 'tools/vim-test.py')
-verify = module('kernel_verify', ROOT / 'tools/kernel-verify.py')
 # The Makefile passes --venus when the Venus stack is installed, after rebuilding the
 # monitor and the terminal's shaders (files left over from an older build would be stale).
 VENUS = '--venus' in sys.argv[2:]
@@ -36,10 +28,8 @@ SARASA = pathlib.Path.home() / 'Library/Fonts/SarasaMonoK-Regular.ttf'
 def disk_image(venus, fonts=False):
     disk = OUT / (('venus' if venus else 'disk') + ('-fonts' if fonts else '') + '.img')
     if not disk.exists():
-        with disk.open('wb') as f:
-            f.truncate((160 if fonts else 64) * 1024 * 1024)
-        subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'FONTS', '::'], check=True)
-        subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True, stdout=subprocess.DEVNULL)
+        testvm.create_disk(disk, (160 if fonts else 64) * 1024 * 1024, label='FONTS')
+        testvm.install_disk_files(disk, stdout=subprocess.DEVNULL)
         if fonts:
             subprocess.run([str(ROOT / 'tools/disk-fonts.sh'), str(disk)], check=True, stdout=subprocess.DEVNULL)
         if venus:
@@ -50,23 +40,21 @@ def disk_image(venus, fonts=False):
 def boot(name, venus, script, size, scale, fonts=False):
     d = OUT / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / 'input.txt').write_text(vim.BOOT + script + 'delay 300\nquit\n')
+    (d / 'input.txt').write_text(testvm.BOOT + script + 'delay 300\nquit\n')
     vm = ROOT / ('build/coolvm-venus' if venus else 'build/coolvm')
-    args = [str(vm), '--headless', '--cpus', '2', '--mem', '1024', '--timeout', '60',
-            '--width', str(size[0]), '--height', str(size[1]), '--scale', str(scale),
-            '--input-script', str(d / 'input.txt'), '--screenshot', str(d / 'screen.png'),
-            '--disk', str(disk_image(venus, fonts))]
+    args = testvm.vm_command(executable=vm, timeout=60, scale=scale, input_script=d / 'input.txt',
+        screenshot=d / 'screen.png', disk=disk_image(venus, fonts), size=(size[0], size[1]))
     if not venus:
         args.append('--no-venus')
-    with (d / 'vm.log').open('wb') as out:
-        subprocess.run(args + [KERNEL], stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, check=True)
+    testvm.run_vm(args + [KERNEL], d / 'vm.log',
+        stdin=subprocess.DEVNULL, check=True)
     log = (d / 'vm.log').read_text(errors='replace')
     assert ('VENUS TERMINAL READY' in log) == venus, f'{d}/vm.log: wrong renderer'
     assert 'ERROR:' not in log.split('Cool shell:', 1)[-1], f'{d}/vm.log: guest error'
-    return verify.read_png(d / 'screen.png'), log
+    return testvm.read_png(d / 'screen.png'), log
 
 
-SCENE = vim.typed(
+SCENE = testvm.typed(
     'ConsClear; I64 i; for (i = 0; i < 8; i++) Print("\\e[%dm color %d \\e[0m", 31 + i % 7, i); '
     'Print("\\n\\e[7mreverse\\e[0m \\e[1mbold\\e[0m\\n"); '
     'for (i = 0; i < 60; i++) Print("scroll %d abcdefghijklmnopqrstuvwxyz\\n", i); '
@@ -88,7 +76,7 @@ def hidpi(venus):
 
 
 # Init.cool sets Sarasa 14 when C:/Fonts has it; the line is drawn at the top-left.
-TTF = vim.typed('Print("FONT%d %d %d %d %d\\n", 1, font.cfg.face != NULL, font.cfg.bold != NULL, font.cw, font.ch); '
+TTF = testvm.typed('Print("FONT%d %d %d %d %d\\n", 1, font.cfg.face != NULL, font.cfg.bold != NULL, font.cw, font.ch); '
                 'ConsClear; Print("Hello \\xed\\x95\\x9c\\xea\\xb8\\x80 \\e[1mbold\\e[0m"); FbCursorHide; '
                 'FbFlush; Sleep(100); Print("\\nEND%d\\n", 1);\n') + 'wait END1\n'
 

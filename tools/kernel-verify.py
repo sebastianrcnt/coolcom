@@ -22,16 +22,19 @@ Screen: rows 0..4 of Unifont text (8x16 cells, wide glyphs two cells, white on
 black; row 4 has Hangul and CJK), color bars at y=112, a gray ramp at y=160.
 The glyphs come from os/Kernel/Unifont.BIN (layout in tools/mkfont.py).
 """
+from testvm import keys_of, typed_line as typed
+from testvm import draw_text, load_font, read_png, screen_of, text_row_matches
 import pathlib
 import re
 import struct
 import subprocess
 import sys
-import zlib
+
+import testvm
+from testvm import ROOT
 
 SECTORS = 128
 W, H = 640, 480
-ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 INPUT = """# mouse
 2 0 5
@@ -83,33 +86,10 @@ SHELL += [
     r'Print("MEMSAFE RECOVERED %d\n", Sq(9));',
 ]
 
-# US layout, Linux key codes, as in os/Kernel/Input.cool: char -> (code, shifted).
-KEYS = {" ": (57, False), "`": (41, False), "~": (41, True), "\\": (43, False), "|": (43, True)}
-for first, lo, up in ((2, "1234567890-=", "!@#$%^&*()_+"), (16, "qwertyuiop[]", "QWERTYUIOP{}"),
-                      (30, "asdfghjkl;'", 'ASDFGHJKL:"'), (44, "zxcvbnm,./", "ZXCVBNM<>?")):
-    for i, (a, b) in enumerate(zip(lo, up)):
-        KEYS[a] = (first + i, False)
-        KEYS[b] = (first + i, True)
 LSHIFT, ENTER = 42, 28
 LCTRL, LALT, KEY_C = 29, 56, 46
 SHELL_KO_IN = ('Print("한글 테스트 마\x7f\\n");\r').encode()  # the Hangul 마 is deleted again
 SCREEN_KO = "한글 테스트 漢字 Ünï"  # printed by DevTestScreen
-
-
-def keys_of(code):
-    return f"1 {code} 1\n1 {code} 0\n"
-
-
-def typed(line, enter=True):
-    """Input records that type line, then ENTER."""
-    out = []
-    for ch in line:
-        code, shift = KEYS[ch]
-        keys = [LSHIFT, code] if shift else [code]
-        out += [f"1 {k} 1" for k in keys] + [f"1 {k} 0" for k in reversed(keys)]
-    if enter:
-        out += [f"1 {ENTER} 1", f"1 {ENTER} 0"]
-    return "".join(r + "\n" for r in out)
 
 
 def sector(s):
@@ -134,10 +114,7 @@ def run(*cmd, **kw):
 
 def prepare_fat(d):
     img = d / "fat.img"
-    with open(img, "wb") as f:
-        f.truncate(FAT_SECTORS * 512)
-    run("newfs_msdos", "-F", "32", "-S", "512", "-c", "1", "-s", str(FAT_SECTORS), "-h", "16", "-u", "63",
-        "-v", "COOLFAT", str(img))
+    testvm.create_disk(img, FAT_SECTORS * 512, label='COOLFAT', cluster_size=512, capture_output=True)
     (d / "note.txt").write_bytes(HOST_NOTE)
     run("mcopy", "-i", str(img), str(d / "note.txt"), "::HostNote.txt")
     for name in ("Host-long-name-" + "h" * (251-15) + ".txt", "호스트에서 만든 긴 한글 파일 이름입니다.txt"):
@@ -243,9 +220,7 @@ def fat_directory_names(path):
 def prepare(d):
     (d / "disk.img").write_bytes(b"".join(sector(s) for s in range(SECTORS)))
     prepare_fat(d)
-    with (d / "format.img").open("wb") as f:
-        f.truncate(64 * 1024 * 1024)
-    run("mformat", "-i", str(d / "format.img"), "-F", "::")
+    testvm.create_disk(d / "format.img", 64 * 1024 * 1024, capture_output=True)
     text = INPUT
     for line in SHELL:
         if isinstance(line, tuple) and line[0] == "text":
@@ -261,94 +236,6 @@ def prepare(d):
             last = line
     (d / "input.txt").write_text(text)
     (d / "shell.in").write_bytes(SHELL_KO_IN)
-
-
-def load_font():
-    """{code point: (cells, 16 rows as ints, MSB = leftmost pixel)} from os/Kernel/Unifont.BIN."""
-    blob = (ROOT / "os/Kernel/Unifont.BIN").read_bytes()
-    (nruns,) = struct.unpack_from("<I", blob)
-    font = {}
-    for i in range(nruns):
-        first, count, off = struct.unpack_from("<III", blob, 4 + 12 * i)
-        cells, count = count >> 24, count & 0xFFFFFF
-        for k in range(count):
-            g = blob[off + k * 16 * cells:off + (k + 1) * 16 * cells]
-            font[first + k] = (cells, [int.from_bytes(g[r * cells:(r + 1) * cells], "big") for r in range(16)])
-    return font
-
-
-def draw_text(font, text, cols):
-    """Rows of pixel bits (True = foreground) for one text line, padded with blanks to cols cells."""
-    rows = [[] for _ in range(16)]
-    n = 0
-    for ch in text:
-        cells, g = font[ord(ch)]
-        for r in range(16):
-            rows[r] += [bool(g[r] >> (8 * cells - 1 - x) & 1) for x in range(8 * cells)]
-        n += cells
-    for r in range(16):
-        rows[r] += [False] * (8 * (cols - n))
-    return rows
-
-
-def read_png(path):
-    png = path.read_bytes()
-    assert png.startswith(b"\x89PNG\r\n\x1a\n"), "not a PNG"
-    pos, idat = 8, bytearray()
-    width = height = None
-    while pos < len(png):
-        n = int.from_bytes(png[pos:pos + 4], "big")
-        kind = png[pos + 4:pos + 8]
-        data = png[pos + 8:pos + 8 + n]
-        if kind == b"IHDR":
-            width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", data)
-            assert (depth, color, interlace) == (8, 2, 0), "unexpected PNG format"
-        if kind == b"IDAT":
-            idat.extend(data)
-        pos += 12 + n
-    raw = zlib.decompress(idat)
-    stride = width * 3
-    rows, prev, pos = [], bytearray(stride), 0
-    for _ in range(height):
-        filt = raw[pos]
-        pos += 1
-        row = bytearray(raw[pos:pos + stride])
-        pos += stride
-        for i in range(stride):
-            a = row[i - 3] if i >= 3 else 0
-            b = prev[i]
-            c = prev[i - 3] if i >= 3 else 0
-            if filt == 1:
-                row[i] = (row[i] + a) & 255
-            elif filt == 2:
-                row[i] = (row[i] + b) & 255
-            elif filt == 3:
-                row[i] = (row[i] + (a + b) // 2) & 255
-            elif filt == 4:
-                p = a + b - c
-                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-                row[i] = (row[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-            else:
-                assert filt == 0
-        rows.append(row)
-        prev = row
-    return width, height, rows
-
-
-def screen_of(d, name):
-    width, height, rows = read_png(d / name)
-    assert (width, height) == (W, H), f"screenshot is {width}x{height}"
-
-    def px(x, y):
-        return tuple(rows[y][3 * x:3 * x + 3])
-
-    return px
-
-
-def text_row_matches(px, font, r, text):
-    """Is text row r (16 pixels tall) exactly the Unifont rendering of text, blank after it?"""
-    return all(px(x, r * 16 + y) == ((255, 255, 255) if on else (0, 0, 0))
-               for y, bits in enumerate(draw_text(font, text, W // 8)) for x, on in enumerate(bits))
 
 
 def verify_shell(d):

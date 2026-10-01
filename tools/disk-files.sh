@@ -10,7 +10,7 @@ FLAG=-o
 [ "${2:-}" = "-n" ] && FLAG=-n
 cd "$ROOT"
 # Build once, and refresh only when the compiler or its embedded sources change.
-make build/warmcool/Kernel.cool os/Kernel/NetParse.cool build/lua/LuaRuntime.cool  # (and the kernel's Warm parts)
+make build/warmcool/Kernel.cool os/Kernel/NetParse.cool os/Kernel/KernelA.coolh build/lua/LuaRuntime.cool  # (and the kernel's Warm parts)
 for d in Kernel Cool Cool/Runtime Cool/Fmt Cool/LibC Warm Warm/Standard Warm/Examples; do
     # mmd asks on the terminal when the directory exists, so only make missing ones.
     mdir -i "$IMG" ::$d >/dev/null 2>&1 || mmd -i "$IMG" ::$d </dev/null
