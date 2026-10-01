@@ -236,9 +236,11 @@ VENUS_INSTALLED := $(and $(wildcard vendor/venus/install/lib/libvirglrenderer.dy
 RUN_VENUS := $(if $(filter 1,$(VENUS)),1,$(if $(filter auto,$(VENUS)),$(if $(VENUS_INSTALLED),1)))
 RUN_VM := $(if $(RUN_VENUS),build/coolvm-venus,build/coolvm)
 .PHONY: run-disk
-run-disk: disk-seed $(if $(RUN_VENUS),venus-terminal)
+run-disk: disk-seed $(if $(RUN_VENUS),venus-terminal cube-shaders)
 ifneq ($(RUN_VENUS),)
 	tools/venus/install.sh build/disk.img
+	mcopy -o -i build/disk.img build/venus/cube.vert.spv build/venus/cube.frag.spv ::Vulkan/
+	mcopy -o -i build/disk.img os/Disk/Cube.cool ::Cube.cool
 endif
 run: build/kernel.Image $(if $(RUN_VENUS),build/coolvm-venus,coolvm) run-disk
 	$(RUN_VM) --cpus 2 --mem 1024 --disk build/disk.img $<
@@ -458,3 +460,19 @@ venus-disk: disk-install venus-terminal
 	tools/venus/install.sh build/disk.img
 venus-run: build/kernel.Image build/coolvm-venus venus-disk
 	build/coolvm-venus --cpus 2 --mem 1024 --disk build/disk.img $<
+
+# Interactive Cool 3D demo, using the existing Venus API and resident terminal.
+.PHONY: cube-shaders cube-disk cube-run cube-test
+build/venus/cube.vert.spv: tools/venus/shaders/cube.vert
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+build/venus/cube.frag.spv: tools/venus/shaders/cube.frag
+	@mkdir -p $(@D)
+	glslang -V --target-env vulkan1.2 $< -o $@
+cube-shaders: build/venus/cube.vert.spv build/venus/cube.frag.spv
+cube-disk: venus-disk cube-shaders
+	mcopy -o -i build/disk.img build/venus/cube.vert.spv build/venus/cube.frag.spv ::Vulkan/
+cube-run: build/kernel.Image build/coolvm-venus venus-terminal cube-shaders
+	python3 tools/venus/cube_demo.py --run
+cube-test: build/kernel.Image build/coolvm-venus venus-terminal cube-shaders
+	python3 tools/venus/cube_demo.py
