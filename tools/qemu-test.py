@@ -5,10 +5,13 @@ import pathlib
 import re
 import selectors
 import subprocess
+
 import sys
 import time
 
 import qemu
+
+import testvm
 
 ROOT = qemu.ROOT
 
@@ -63,9 +66,7 @@ def run(image, accel, gic, read_size=65536):
     outdir = ROOT / 'build' / f'qemu-test-gic{gic}'
     outdir.mkdir(parents=True, exist_ok=True)
     disk = outdir / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '::'], check=True)
+    testvm.create_disk(disk, 64 * 1024 * 1024)
     fixture = outdir / 'QEMU.TXT'
     fixture.write_text('QEMU-FILE-READ-PASS\n')
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(fixture), '::QEMU.TXT'], check=True)

@@ -3,7 +3,11 @@
 import pathlib
 import re
 import subprocess
+
 import sys
+
+import testvm
+from testvm import ROOT
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/venus-transport-test'
@@ -15,17 +19,13 @@ for name, options, marker in [('stub', ['--gpu-3d-stub'], 'VENUS PASS 1'),
                                ('default', [], 'VENUS SKIP 1'),
                                ('no-gpu', ['--no-gpu'], 'VENUS SKIP 1')]:
     disk = OUT / f'{name}.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '::'], check=True)
+    testvm.create_disk(disk, 64 * 1024 * 1024)
     subprocess.run(['mcopy', '-o', '-i', str(disk), str(ROOT / 'tools/venus/transport-test.cool'), '::Init.cool'], check=True)
     script = OUT / f'{name}.input'
     script.write_text(f'wait {marker}\nwait C:/> \nquit\n')
     logfile = OUT / f'{name}.log'
-    with logfile.open('wb') as out:
-        proc = subprocess.run(['build/coolvm', '--headless', '--cpus', '2', '--mem', '1024',
-                               '--timeout', '25', '--disk', str(disk), '--input-script', str(script),
-                               *options, image], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, timeout=35)
+    proc = testvm.run_vm(testvm.vm_command(image, timeout=25, disk=disk, input_script=script, extra=[*options]), logfile,
+        cwd=ROOT, timeout=35)
     log = logfile.read_text(errors='replace')
     assert proc.returncode == 0 and marker in log, f'{name}: {logfile}\n{log[-4000:]}'
     assert not any(x in log.split('SELFTEST PASS', 1)[-1] for x in ['ERROR:', 'Exception:', 'VENUS FAIL', 'heap overflow', 'Free: bad pointer']), log

@@ -3,29 +3,19 @@
 busy one (Burner: computes, yields) and a sleeping one (Napper); Top must list both with their core,
 show the busy one with a high CPU share and the sleeping one with a low one, list the FAT32 free space
 (compared with mtools' `mdir`), sort by name, and kill the selected task on `k`,`y`."""
-import importlib.util
-import pathlib
 import re
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import testvm
+from testvm import ROOT
 
 
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    obj = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(obj)
-    return obj
-
-
-vim = module('vim_test', ROOT / 'tools/vim-test.py')
-vim.KEYS[' '] = (57, False)
 KEY_DOWN = 108
 
 
 def line(s, wait=500):
-    return vim.typed(s + '\n') + f'delay {wait}\n'
+    return testvm.typed(s + '\n') + f'delay {wait}\n'
 
 
 def strip(s):
@@ -36,29 +26,25 @@ def main():
     d = ROOT / 'build/top-test'
     d.mkdir(parents=True, exist_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'TOPTEST', '::'], check=True)
-    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    testvm.create_disk(disk, 64 * 1024 * 1024, label='TOPTEST')
+    testvm.install_disk_files(disk)
     free_bytes = int(re.search(r'([\d ]+) bytes free', subprocess.run(
         ['mdir', '-i', str(disk), '::'], check=True, capture_output=True, text=True).stdout).group(1).replace(' ', ''))
-    script = vim.BOOT
+    script = testvm.BOOT
     script += line('U0 Napper(U8 *d) {while (TRUE) Sleep(50);}')
     script += line('U0 Burner(U8 *d) {I64 i; while (TRUE) {for (i = 0; i < 5000000; i++) {} Yield;}}')
     script += line('Spawn(&Napper, 0, "Napper", 1); Spawn(&Burner, 0, "Burner", 1);', 800)
     script += line('Top;', 3500)
-    script += vim.typed('n') + 'delay 1500\n'                    # sort by name: Adam Burner Display Napper Seth1 Shell
+    script += testvm.typed('n') + 'delay 1500\n'                    # sort by name: Adam Burner Display Napper Seth1 Shell
     script += f'1 {KEY_DOWN} 1\n1 {KEY_DOWN} 0\ndelay 200\n' * 3   # select Napper (GPU display worker precedes it)
-    script += 'delay 1200\n' + vim.typed('k') + 'delay 300\n' + vim.typed('y') + 'delay 2500\n'
-    script += vim.typed('q') + 'delay 400\n'
-    script += line('Print("\\nTOPDONE%d\\n", 1);') + vim.finish('TOPDONE1')
+    script += 'delay 1200\n' + testvm.typed('k') + 'delay 300\n' + testvm.typed('y') + 'delay 2500\n'
+    script += testvm.typed('q') + 'delay 400\n'
+    script += line('Print("\\nTOPDONE%d\\n", 1);') + testvm.finish('TOPDONE1')
     (d / 'input.txt').write_text(script)
-    with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2', '--mem', '1024',
-                        '--timeout', '45', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
-                        '--disk', str(disk), sys.argv[1]], stdout=out, stderr=subprocess.STDOUT)
+    testvm.run_vm(testvm.vm_command(sys.argv[1], no_venus=True, timeout=45, input_script=d / 'input.txt', disk=disk,
+        size=(640, 480), host_timeout=60), d / 'vm.log')
     raw = (d / 'vm.log').read_text(errors='replace')
-    vim.check_init_log(raw)
+    testvm.check_init_log(raw)
     after = raw.split('Running C:/Init.cool', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
     failures = []

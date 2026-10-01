@@ -7,23 +7,12 @@ strings, numbers, keywords, types, labels, and identifiers colored by the shell 
 symbol table (a kernel function, a kernel global, a call not compiled yet). Warm text: comments,
 multi-line docstrings, keywords, types, constants. Plain text: no colors until :set ft=cool.
 """
-import importlib.util
-import pathlib
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import testvm
+from testvm import ROOT
 
-
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    obj = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(obj)
-    return obj
-
-
-vim = module('vim_test', ROOT / 'tools/vim-test.py')
-verify = module('kernel_verify', ROOT / 'tools/kernel-verify.py')
 
 COOL = '''/* block comment
    spans lines */
@@ -73,7 +62,7 @@ CASES = [
 
 
 def line(s):
-    return vim.typed(s + '\n') + 'delay 300\n'
+    return testvm.typed(s + '\n') + 'delay 300\n'
 
 
 def main():
@@ -81,34 +70,29 @@ def main():
     d.mkdir(parents=True, exist_ok=True)
     (d / 'screen.png').unlink(missing_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'SYNTEST', '::'], check=True)
-    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    testvm.create_disk(disk, 64 * 1024 * 1024, label='SYNTEST')
+    testvm.install_disk_files(disk)
     for name, text in (('Syn.cool', COOL), ('Syn.warm', WARM), ('Syn.txt', TEXT), ('Big.cool', BIG),
                        ('Old.HC', COOL), ('Old.aum', WARM)):
         p = d / name
         p.write_text(text)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
-    script = vim.BOOT
+    script = testvm.BOOT
     for i, (name, keys, _) in enumerate(CASES):
         # CASE%d: the wait matches the output, not the echo of the line.
         script += line(f'Print("\\nCASE%d\\n", {i}); Vim("C:/{name}");')
-        script += vim.wait(f'CASE{i}') + vim.wait(f'NORMAL C:/{name}')
+        script += testvm.wait(f'CASE{i}') + testvm.wait(f'NORMAL C:/{name}')
         if keys:
-            script += vim.typed(keys) + 'delay 300\n'
-        script += vim.typed(':q!\n') + 'delay 300\n'
+            script += testvm.typed(keys) + 'delay 300\n'
+        script += testvm.typed(':q!\n') + 'delay 300\n'
     # Leave the Warm file open for the screenshot.
     script += line('Print("\\nSHOT%d\\n", 1); Vim("C:/Syn.warm");')
-    script += vim.wait('SHOT1') + vim.finish('NORMAL C:/Syn.warm', 500)
+    script += testvm.wait('SHOT1') + testvm.finish('NORMAL C:/Syn.warm', 500)
     (d / 'input.txt').write_text(script)
-    with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '60', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2', '--mem', '1024',
-                        '--timeout', '45', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
-                        '--disk', str(disk), '--screenshot', str(d / 'screen.png'), sys.argv[1]],
-                       stdout=out, stderr=subprocess.STDOUT)
+    testvm.run_vm(testvm.vm_command(sys.argv[1], no_venus=True, timeout=45, input_script=d / 'input.txt', disk=disk,
+        screenshot=d / 'screen.png', size=(640, 480), host_timeout=60), d / 'vm.log')
     log = (d / 'vm.log').read_text(errors='replace')
-    vim.check_init_log(log)
+    testvm.check_init_log(log)
     after = log.split('Running C:/Init.cool', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
     failures = []
@@ -121,7 +105,7 @@ def main():
                 failures.append(f'case {i} ({name} {keys!r}): missing {m!r}')
     if 'Syn.txt' in log and '\x1b[0;35mreturn 42' in log.split('CASE3', 1)[0]:
         failures.append('plain text was colored')
-    px = verify.screen_of(d, 'screen.png')
+    px = testvm.screen_of(d, 'screen.png')
     # "true" of `return true;` on Vim row 5: text starts at column 6 + 8 indent + "return ".
     colors = {px(21 * 8 + x, 5 * 16 + y) for y in range(16) for x in range(8)}
     if colors != {(0, 0, 0), (0xAA, 0x55, 0)}:

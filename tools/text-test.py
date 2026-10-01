@@ -5,25 +5,14 @@ by typed shell statements; results from the UART stream, the disk files and one 
 Man opens Vim at the symbol's file and line, found from the
 compiler's symbol table (Vim.cool's own functions) or the kernel sources on the disk (C:/Kernel).
 """
-import importlib.util
 import pathlib
 import re
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+import testvm
+from testvm import ROOT
 
-
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    obj = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(obj)
-    return obj
-
-
-vim = module('vim_test', ROOT / 'tools/vim-test.py')
-verify = module('kernel_verify', ROOT / 'tools/kernel-verify.py')
-vim.KEYS[' '] = (57, False)
 
 A = 'alpha one\nbeta two\nalpha three\n'
 B = 'alpha one\nBETA two\nnew line\nalpha three\ntail\n'
@@ -31,11 +20,11 @@ LESS = '가' * 45 + '\n' + ''.join(f'line {i:03d} of the pager test file\n' for 
 
 
 def line(s, wait=500):
-    return vim.typed(s + '\n') + f'delay {wait}\n'
+    return testvm.typed(s + '\n') + f'delay {wait}\n'
 
 
 def keys(s, wait=400):
-    return vim.typed(s) + f'delay {wait}\n'
+    return testvm.typed(s) + f'delay {wait}\n'
 
 
 def strip(s):
@@ -47,15 +36,13 @@ def main():
     d.mkdir(parents=True, exist_ok=True)
     (d / 'screen.png').unlink(missing_ok=True)
     disk = d / 'disk.img'
-    with disk.open('wb') as f:
-        f.truncate(64 * 1024 * 1024)
-    subprocess.run(['mformat', '-i', str(disk), '-F', '-v', 'TEXTTEST', '::'], check=True)
-    subprocess.run([str(ROOT / 'tools/disk-files.sh'), str(disk)], check=True)
+    testvm.create_disk(disk, 64 * 1024 * 1024, label='TEXTTEST')
+    testvm.install_disk_files(disk)
     for name, text in (('A.TXT', A), ('B.TXT', B), ('C.TXT', A), ('L.TXT', LESS)):
         p = d / name
         p.write_text(text)
         subprocess.run(['mcopy', '-o', '-i', str(disk), str(p), '::' + name], check=True)
-    script = vim.BOOT
+    script = testvm.BOOT
     script += line('Print("\\nSTEP-FIND\\n"); Find("alpha", "*.TXT");')
     script += line('Find("Utf8Width", "C:/Kernel/*");', 1500)
     script += line('Print("\\nSTEP-HEX\\n"); HexDump("C:/A.TXT");')
@@ -73,13 +60,10 @@ def main():
     script += line('Print("\\nSTEP-LESS\\n"); Less("C:/L.TXT");', 600)
     script += keys(' ') + keys('/line 090\n') + keys('g', 600) + 'quit\n'
     (d / 'input.txt').write_text(script)
-    with (d / 'vm.log').open('wb') as out:
-        subprocess.run(['gtimeout', '-k', '2', '90', 'build/coolvm', '--headless', '--no-venus', '--cpus', '2', '--mem', '1024',
-                        '--timeout', '70', '--width', '640', '--height', '480', '--input-script', str(d / 'input.txt'),
-                        '--disk', str(disk), '--screenshot', str(d / 'screen.png'), sys.argv[1]],
-                       stdout=out, stderr=subprocess.STDOUT)
+    testvm.run_vm(testvm.vm_command(sys.argv[1], no_venus=True, timeout=70, input_script=d / 'input.txt', disk=disk,
+        screenshot=d / 'screen.png', size=(640, 480), host_timeout=90), d / 'vm.log')
     raw = (d / 'vm.log').read_text(errors='replace')
-    vim.check_init_log(raw)
+    testvm.check_init_log(raw)
     after = raw.split('Running C:/Init.cool', 1)[-1]
     assert 'ERROR:' not in after and 'Exception:' not in after, f'guest error; see {d}/vm.log'
 
@@ -148,9 +132,9 @@ def main():
     # The Hangul line wraps at the terminal width: 40 wide characters (80 columns), then 5.
     need(less, '가' * 40 + '\x1b[2;1H\x1b[K' + '가' * 5)
     # The screenshot shows the top of L.TXT again (g): the same wrap in pixels.
-    px, font = verify.screen_of(d, 'screen.png'), verify.load_font()
+    px, font = testvm.screen_of(d, 'screen.png'), testvm.load_font()
     for row, text in ((0, '가' * 40), (1, '가' * 5)):
-        if not verify.text_row_matches(px, font, row, text):
+        if not testvm.text_row_matches(px, font, row, text):
             failures.append(f'screenshot row {row} is not {text!r}')
     if failures:
         raise SystemExit('\n'.join(failures) + f'\nsee {d}/vm.log and screen.png')

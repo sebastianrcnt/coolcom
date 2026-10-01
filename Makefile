@@ -116,7 +116,9 @@ $(B)/BootStub.BIN: $(B)/arch.syms tools/mkbootstub.py
 	python3 tools/mkbootstub.py $(B)/pre/stub.elf $(B)/arch.syms $@
 
 BLOBS := SHELL_PRELUDE=build/ShellPrelude.coolh ARM64_OPS=os/Kernel/Arm64Ops.csv
-$(B)/kernel.raw $(B)/syms.ld: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
+# binlink writes both files; one rule owns them so make -j (3.81 has no grouped targets) runs it once.
+$(B)/syms.ld: $(B)/kernel.raw
+$(B)/kernel.raw: $(B)/Kernel.BIN $(B)/arch.syms tools/binlink.py $(foreach b,$(BLOBS),$(word 2,$(subst =, ,$(b))))
 	python3 tools/binlink.py --org $(MODULE_BASE) $(addprefix --blob ,$(BLOBS)) $< $(B)/kernel.raw $(B)/syms.ld $(B)/arch.syms
 
 # Pass 2: the real link; check the assembly didn't move.
@@ -143,7 +145,7 @@ build/m1n1-payload.bin: build/kernel.Image tools/m1n1-payload.py tools/vendor-m1
 # Image linked 4 MiB higher differs from the first exactly at the table's sites.
 reloc-check: build/kernel.Image
 	python3 tools/reloc-check.py --elf build/cool.elf
-	mkdir -p build/alt
+	rm -rf build/alt; mkdir -p build/alt  # nothing tracks which base build/alt was made for
 	cp build/Kernel.BIN build/alt/Kernel.BIN
 	$(MAKE) B=build/alt IMAGE_BASE=0x800600000 build/alt/kernel.Image
 	python3 tools/reloc-check.py --elf build/alt/cool.elf
@@ -341,14 +343,6 @@ fmt-check:
 hooks:
 	git config core.hooksPath tools/git-hooks
 
-# Apple Virtualization.framework UEFI probe (boot/uefi-probe, tools/vzrun).
-# Needs: brew install mtools gptfdisk llvm@21 lld@21
-.PHONY: vzprobe vzprobe-gui
-vzprobe:
-	tools/vzprobe.sh
-vzprobe-gui:
-	tools/vzprobe.sh --gui --cfg "wait=9 postwait=8"
-
 # coolvm: VM monitor on macOS Hypervisor.framework emulating a subset of the Apple M1 (t8103)
 # for developing the M1 drivers (tools/coolvm). Guests run under a timeout.
 .PHONY: coolvm coolvm-test
@@ -402,12 +396,12 @@ gpu-pixel-test: build/kernel.Image coolvm
 gpu-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool
 	python3 tools/gpu-resize-test.py $<
 
-# Host-only Venus spike; opt-in and independent of the default test suite.
+# Host-only Venus GPU transport test; opt-in and independent of the default suite.
 .PHONY: vendor-venus venus-host-test
 vendor-venus:
 	tools/vendor-venus.sh --host
 venus-host-test:
-	tools/coolvm/test/venus-spike.sh
+	tools/coolvm/test/venus-host.sh
 
 # Kernel Venus wire flow with a deliberately fake, opt-in host backend.
 .PHONY: venus-transport-test
