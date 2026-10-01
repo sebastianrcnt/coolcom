@@ -1,0 +1,57 @@
+-- Unsafe editor support. Addresses refer to caller-owned bytes; syntax handles
+-- are opaque kernel allocations. Applications must release every handle.
+module OS.CoolOS.Editor is
+    function MemCpy(a0: Int64, a1: Int64, a2: Int64): Unit;
+    function MemCmp(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function MAlloc(a0: Int64, a1: Int64): Int64;
+    function freeMemory(a0: Int64): Unit;
+    function ReAlloc(a0: Int64, a1: Int64): Int64;
+    function Utf8Len(a0: Int64): Int64;
+    function Utf8Width(a0: Int64): Int64;
+    function StrLen(a0: Int64): Int64;
+    function FileFind(a0: Int64): Int64;
+    function FileRead(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function CAlloc(a0: Int64, a1: Int64): Int64;
+    function SynLang(a0: Int64): Int64;
+    function StrCpy(a0: Int64, a1: Int64): Unit;
+    function StrCmp(a0: Int64, a1: Int64): Int64;
+    function EditorSynNew(): Int64;
+    function EditorSynStart(a0: Int64, a1: Int64, a2: Int64): Unit;
+    function EditorSynLine(a0: Int64, a1: Int64, a2: Int64, a3: Int64): Unit;
+    function HCTIsId(a0: Int64): Int64;
+    function HCTStrEq(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function HCTIsKwSp(a0: Int64, a1: Int64): Int64;
+    function HCTIsKw2(a0: Int64, a1: Int64): Int64;
+    function EditorDefinition(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function FileWrite(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function EditorFileSize(a0: Int64): Int64;
+    function StrNCmp(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function SynGroupName(a0: Int64): Int64;
+    function Str2I64(a0: Int64): Int64;
+    function EditorSetColor(a0: Int64, a1: Int64): Unit;
+    function Utf8Enc(a0: Int64, a1: Int64): Int64;
+    function AnsiTermSize(a0: Int64, a1: Int64): Unit;
+    function Utf8Cp(a0: Int64, a1: Int64): Int64;
+    function ConsPut(a0: Int64): Unit;
+    function EditorSynCopy(a0: Int64, a1: Int64): Unit;
+    function EditorSynFast(a0: Int64, a1: Int64): Unit;
+    function AnsiCursorHide(): Unit;
+    function AnsiCursor(a0: Int64, a1: Int64): Unit;
+    function AnsiReset(): Unit;
+    function AnsiClearEol(): Unit;
+    function SynColor(a0: Int64): Int64;
+    function AnsiFg(a0: Int64): Unit;
+    function EditorFormat(a0: Int64, a1: Int64, a2: Int64, a3: Int64, a4: Int64, a5: Int64): Unit;
+    function ConsPutS(a0: Int64): Unit;
+    function AnsiSet(a0: Int64, a1: Int64): Unit;
+    function LineWidth(a0: Int64, a1: Int64, a2: Int64): Int64;
+    function StrCat(a0: Int64, a1: Int64): Unit;
+    function EditorIme(): Int64;
+    function AnsiCursorShow(): Unit;
+    function EditorSynFree(a0: Int64): Unit;
+    function AnsiAltScreen(a0: Int64): Unit;
+    function EditorPrint(a0: Int64, a1: Int64): Unit;
+    function GetKey(a0: Int64): Int64;
+    function KeyPending(): Int64;
+    function LinePrev(a0: Int64, a1: Int64): Int64;
+end module.

@@ -1,0 +1,4 @@
+Virtual terminals are opaque kernel handles. newShell creates an independent
+shell and a compositor reference. stopRelease stops that shell and releases
+the reference. Compositors own their layout trees. readPhysical reads the
+physical input queue; pane programs read their own virtual terminal queues.

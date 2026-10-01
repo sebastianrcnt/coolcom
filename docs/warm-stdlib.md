@@ -323,3 +323,99 @@ requires Input and returns typed Key values. No public combined terminal token
 remains. Host/kernel capability fixtures cover attenuation, traversal, rights,
 network allow-list intersection and denied datagrams; host probes include final
 and intermediate symlinks whose outside target remains untouched.
+
+## Lessons from Top/Vim/Tmux
+
+### Top
+
+- `toInt64(Index)` compared the unsigned input against `INT64_MIN` converted to
+  unsigned, rejecting small positive values. Its lower-bound check is unnecessary;
+  only `INT64_MAX` needs checking. The conversion is now fixed.
+- Buffer/String spans and `for` ranges have inclusive end indices. Whole-string
+  output needs `length - 1`, with an explicit empty-string branch. This differs
+  from the half-open ranges normally used by terminal tools.
+- Integer remainder is `rem(a, b)`, not `%`; escape bytes must be literal bytes
+  (`\x1b` is not a Warm string escape). ANSI output and padded numbers currently
+  require application helpers because the terminal library has no formatter.
+- Record fields cannot follow a function call directly. A temporary is required
+  for `clock(...).ticks` and `nth(...).info`.
+- Updating a Buffer from one of its own elements needs a temporary before the
+  mutable borrow; this makes the evaluation and borrow lifetime explicit.
+
+### Vim
+
+- Warm parameters are immutable, so modal command dispatch needs separate mutable
+  cursor/count locals. Warm has no `break`, `continue` or `goto`; the dispatch
+  epilogue is a separate function and journal/search loops use explicit stop flags.
+- Terminal byte output, UTF-8 helpers, incremental syntax state, palette changes
+  and source-location lookup were missing from the Warm boundary.
+  `OS.CoolOS.Editor` supplies them; syntax and compiler hash structures stay
+  behind opaque kernel functions. The low-level module uses addresses of
+  caller-owned buffers, so it is deliberately unsafe rather than a safe IO API.
+- Stack byte arrays and C-string interop are awkward. Editor-owned reusable scratch
+  buffers avoid allocating on every key/paint and are also freed on shell recovery.
+  Austral.Memory allocations carry a runtime header and must use `deallocate`,
+  whereas buffers allocated by kernel `MAlloc`/`CAlloc` must use kernel `Free`.
+- Signed trapping arithmetic currently emits function calls. Byte access in the
+  checked gap-buffer accessor uses explicit embeds; large cursor jumps reposition
+  the viewport by walking backward from the cursor instead of scanning every
+  intervening line. A trial broad arithmetic inliner failed the real editor
+  workload despite passing the number suite, and was discarded.
+- Static C-string pointers are cached at editor creation. Repeated aggregate span
+  temporaries in the large command dispatch produced a null literal pointer in
+  the Cool backend; caching also reduces per-command temporary work.
+- File buffers use ordinary virtual allocations. They are never passed to DMA;
+  the merged large heap may back files above 256 KiB with noncontiguous pages.
+- VM comparison (`tools/program-perf.py build/kernel.Image 90b47e3`, the same
+  kernel and 640x480 framebuffer): Cool/Warm key navigation averaged 0.10/0.35
+  microseconds, insertion 0.02/0.98 microseconds, repaint 3.97/4.40 ms, and a jump
+  in a 330 KB file plus repaint 8.33/8.29 ms. Input work remains below a
+  microsecond and paint remains below one 60 Hz frame in this run. The initial
+  port took about 21 ms for the large jump versus 8 ms in Cool; the gap-byte and
+  newline scans and viewport positioning above removed that visible-risk
+  regression. These are VM measurements, not a hardware latency guarantee.
+
+### Tmux
+
+- Virtual-terminal creation, resize, focus, lifetime, cursor and dirty-state APIs
+  were absent. `OS.CoolOS.VirtualTerminal` now exposes opaque handles and kernel
+  functions; Warm owns only its pane tree and window/session records. Closing a
+  pane stops its task group and releases the compositor reference in the kernel.
+- Free records have no convenient nullable heap-reference/container syntax for
+  a mutable tree. The private unsafe boundary uses typed allocation and explicit
+  casts for application-owned nodes and an eight-slot window table. Record
+  allocations still use `deallocate`; scratch buffers use the kernel allocator.
+- `for` binds an `Index`, even when both endpoints are integer literals. The fixed
+  eight-window loop needs an explicit conversion before signed layout arithmetic.
+  `else if` is a single chain, with just one closing `end if`.
+- WarmRun installs libc symbols in the shell's compiler. libc's `exit(status)`
+  shadowed the shell command `exit`, so a bare command now resolves explicitly to
+  the kernel's `Exit`; explicit `exit(status)` calls retain their C meaning.
+- The unchanged Man source-location checks now point at `WarmPrograms.cool`,
+  which retains `VimOpen` and the shell-visible `VIM_HIST` limit. Only the fixture's
+  relocated source path changed; symbol kinds, line validation, numbered editor
+  output and all other oracles are retained.
+- Session scratch storage survives detach, and recovery restores the invoking
+  terminal's focus/alternate screen. The compositor retains 30 Hz batching and
+  delegates changed-cell drawing to the kernel rather than redrawing per key.
+- Same-kernel VM comparison of two vertical panes: Cool/Warm key forwarding
+  averaged 0.042/0.121 microseconds, and forced compositor repaint 12.69/12.57 ms.
+  Both fit the existing 33 ms refresh budget; no noticeable slowdown appeared
+  in this measurement. The benchmark checks saved Vim edits and restored focus
+  and writes logs plus results under `build/program-perf`.
+
+### GUI window integration (G1)
+
+- The terminal APIs already use the calling task's terminal: size comes from the
+  window's cell grid, input from its virtual-terminal queue, and alternate-screen
+  restoration targets that same grid. Tmux consumes the window queue and forwards
+  events to its active pane; its compositor draws into the parent window.
+- Top's initial 200 ms CPU sample used a timed key read and discarded the result.
+  A quit key queued while WarmRun compiled the program could be consumed by that
+  sample and lost. The first key is now retained and dispatched after the first
+  monitor frame, including resize and navigation events.
+- Eagerly compiling both editors at every shell startup stalled the GUI compositor
+  when Tmux spawned a new pane. Mouse press/move/release transitions could collapse
+  before it polled them. Vim and Tmux now load on first use, once per shell, using
+  the same WarmRun sources. Forward declarations preserve the shell API and bind
+  to Warm's exports when loaded. A new pane no longer compiles unused applications.

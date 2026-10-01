@@ -133,6 +133,12 @@ U8 *ShellUnix(U8 *line)
     while (end > p && ShellBlank(end[-1])) end--;
     while (p < end && ShellBlank(*p)) p++;
     if (p == end) {  // a lone word: only a function named with other capitalization is a command
+        // WarmRun brings libc's exit(status) into the compiler. A bare shell
+        // command still ends the pane; explicit exit(status) remains a C call.
+        if (!StrCmp(word, "exit") && !HashFind(word, ShellCur->hash, HTT_GLBL_VAR | HTT_CLASS | HTT_INTERNAL_TYPE | HTT_DEFINE_STR)) {
+            StrCpy(out, "Exit;");
+            return out;
+        }
         f = ShellCmdFun(word);
         if (!f || !StrCmp(word, f->str)) return line;
         StrPrint(out, "%s;", f->str);

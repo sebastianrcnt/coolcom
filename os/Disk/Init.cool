@@ -1,15 +1,13 @@
 // Startup commands for each independent shell/compiler task.
-#include "C:/Vim.cool"
+#include "C:/Warm/Warm.cool"
+#include "C:/WarmPrograms.cool"
 #include "C:/Nyan.cool"
-#include "C:/Tmux.cool"
 #include "C:/Text.cool"
 #include "C:/Find.cool"
 #include "C:/HexDump.cool"
 #include "C:/Less.cool"
 #include "C:/Man.cool"
 #include "C:/Diff.cool"
-#include "C:/Top.cool"
-#include "C:/Warm/Warm.cool"
 #include "C:/Lua.cool"
 
 // The console font (docs/fonts.md): Sarasa Mono K when make disk-install found it on the
@@ -21,4 +19,16 @@ U0 Cls()
 {//TempleOS's clear screen, as ANSI so the screen and the host terminal both clear.
     AnsiClear;
     AnsiHome;
+}
+
+U0 TopClose()
+{
+    AnsiReset; AnsiCursorShow; AnsiAltScreen(FALSE);
+    shell_stmt_cleanup = NULL;
+}
+U0 Top()
+{
+    shell_stmt_cleanup = &TopClose;
+    WarmRun("C:/Warm/Standard/Buffer.warmh,C:/Warm/Standard/Buffer.warm,C:/Warm/Standard/String.warmh,C:/Warm/Standard/String.warm,C:/Warm/Standard/StringBuilder.warmh,C:/Warm/Standard/StringBuilder.warm,C:/Warm/Standard/OS/Error.warm,C:/Warm/Standard/OS/Terminal.warmh,C:/Warm/Standard/OS/Terminal.warm,C:/Warm/Standard/OS/CoolOS/System.warmh,C:/Warm/Standard/OS/CoolOS/System.warm,C:/Top.warm", "TopApp:main");
+    TopClose;
 }

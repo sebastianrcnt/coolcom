@@ -136,4 +136,19 @@ and 2x checks still pass. Five-window drawing tests preserve every key in an
 80-key burst and check enqueue-to-app latency against a 100 ms ceiling, local
 mouse coordinates, primitive colors and CPU/Venus equality. `make -j test` exited 0 on 2026-10-01 (`build/g2-test.log`).
 
+
+### Warm terminal application integration
+
+The Warm ports use the calling window's terminal size, key queue and alternate
+screen. Top retains keys received during its initial CPU sample; Vim/Tmux are
+loaded through WarmRun on first use rather than compiled in every new pane's
+startup. This also keeps the compositor available for title dragging while a
+pane starts. The original gui-test assertions cover app return, window geometry,
+1x/2x equality and CPU/Venus pixel equality.
+
+Validation after merging GUI main: `make -j gui-test` and `make -j test` both
+returned exit code 0, including the Venus comparison. Logs are
+`build/port/gui-lazy.log` and `build/port/gui-full-test.log`. No gui-test
+assertions or scenarios were changed.
+
 G3–G5 are pending.

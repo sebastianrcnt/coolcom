@@ -1,0 +1,309 @@
+import OS.Error (IoError);
+import OS.Terminal (Output, Input, Size, Key, Char, Escape, Up, Down, PageUp, PageDown, Home, End, Left, Right, Insert, Delete, Enter, Backspace, Tab, Ctrl, FunctionKey, Unknown, acquireOutput, acquireInput, releaseOutput, releaseInput, write, readKey, readKeyTimeout, terminalSize);
+import OS.CoolOS.System (System, Snapshot, TaskInfo, HeapInfo, DriveInfo, Clock, acquireSystem, releaseSystem, snapshotTasks, snapshotCount, snapshotTask, snapshotName, releaseSnapshot, heapStats, driveFree, killTask, clock);
+import Standard.Buffer (Buffer, initialize, nth, storeNth, destroyFree);
+import Standard.String (String, length, nthByte, getSpan, destroyString);
+module body TopApp is
+    record Row: Free is info: TaskInfo; delta: Int64; index: Index; end;
+    function signed(value: Index): Int64 is
+        case toInt64(value) of when Some(value as n: Int64) do return n; when None do abort("index too large"); end case;
+    end;
+    function byteValue(value: Index): Nat8 is
+        case toNat8(value) of when Some(value as n: Nat8) do return n; when None do abort("byte too large"); end case;
+    end;
+    function digitText(value: Int64): Span[Nat8, Static] is
+        if value = 0 then return "0"; end if;
+        if value = 1 then return "1"; end if;
+        if value = 2 then return "2"; end if;
+        if value = 3 then return "3"; end if;
+        if value = 4 then return "4"; end if;
+        if value = 5 then return "5"; end if;
+        if value = 6 then return "6"; end if;
+        if value = 7 then return "7"; end if;
+        if value = 8 then return "8"; end if;
+        if value = 9 then return "9"; end if;
+        return "?";
+    end;
+    function letterText(value: Index): Span[Nat8, Static] is
+        if value = 65 then return "A"; end if;
+        if value = 66 then return "B"; end if;
+        if value = 67 then return "C"; end if;
+        if value = 68 then return "D"; end if;
+        if value = 69 then return "E"; end if;
+        if value = 70 then return "F"; end if;
+        if value = 71 then return "G"; end if;
+        if value = 72 then return "H"; end if;
+        if value = 73 then return "I"; end if;
+        if value = 74 then return "J"; end if;
+        if value = 75 then return "K"; end if;
+        if value = 76 then return "L"; end if;
+        if value = 77 then return "M"; end if;
+        if value = 78 then return "N"; end if;
+        if value = 79 then return "O"; end if;
+        if value = 80 then return "P"; end if;
+        if value = 81 then return "Q"; end if;
+        if value = 82 then return "R"; end if;
+        if value = 83 then return "S"; end if;
+        if value = 84 then return "T"; end if;
+        if value = 85 then return "U"; end if;
+        if value = 86 then return "V"; end if;
+        if value = 87 then return "W"; end if;
+        if value = 88 then return "X"; end if;
+        if value = 89 then return "Y"; end if;
+        if value = 90 then return "Z"; end if;
+        return "?";
+    end;
+    function text(out: &![Output], value: Span[Nat8]): Unit is
+        let result: Result[Unit, IoError] := write(&~out, value);
+        return nil;
+    end;
+    function number(out: &![Output], value: Int64, width: Int64, zero: Bool): Unit is
+        var divisor: Int64 := 1;
+        var digits: Int64 := 1;
+        while value / divisor >= 10 do divisor := divisor * 10; digits := digits + 1; end while;
+        var pad: Int64 := width - digits;
+        while pad > 0 do
+            if zero then text(&~out, "0"); else text(&~out, " "); end if;
+            pad := pad - 1;
+        end while;
+        while divisor > 0 do
+            let digit: Int64 := rem(value / divisor, 10);
+            text(&~out, digitText(digit));
+            divisor := divisor / 10;
+        end while;
+        return nil;
+    end;
+    function toIndexOrAbort(n: Int64): Index is
+        case toIndex(n) of when Some(value as i: Index) do return i; when None do abort("negative index"); end case;
+    end;
+    function cursor(out: &![Output], row: Int64): Unit is
+        text(&~out, "["); number(&~out, row, 0, false); text(&~out, ";1H[K"); return nil;
+    end;
+    function mb(out: &![Output], bytes: Int64): Unit is
+        if bytes >= 1073741824 then
+            number(&~out, bytes / 1073741824, 0, false); text(&~out, "."); number(&~out, rem(bytes, 1073741824) * 10 / 1073741824, 0, false); text(&~out, " GB");
+        else if bytes >= 1048576 then
+            number(&~out, bytes / 1048576, 0, false); text(&~out, "."); number(&~out, rem(bytes, 1048576) * 10 / 1048576, 0, false); text(&~out, " MB");
+        else number(&~out, bytes / 1024, 0, false); text(&~out, " KB"); end if;
+        return nil;
+    end;
+    function percent(delta: Int64, span: Int64): Int64 is
+        if span <= 0 then return 0; end if;
+        return delta * 1000 / span;
+    end;
+    function bar(out: &![Output], tenths: Int64): Unit is
+        text(&~out, "[[32m");
+        if true then var i: Index := 0; while i < 30 do
+                if i < toIndexOrAbort(tenths * 30 / 1000) then text(&~out, "|"); else text(&~out, "[90m."); end if;
+                i := i + 1; end while; end if;
+        text(&~out, "[0m]"); return nil;
+    end;
+    function stateName(state: Int64): Span[Nat8, Static] is
+        if state = 0 then return "RUN    "; end if;
+        if state = 1 then return "READY  "; end if;
+        if state = 2 then return "SLEEP  "; end if;
+        if state = 3 then return "STOP   "; end if;
+        return "KILL   ";
+    end;
+    function sortName(sort: Int64): Span[Nat8, Static] is
+        if sort = 1 then return "task"; end if;
+        if sort = 2 then return "name"; end if;
+        if sort = 3 then return "state"; end if;
+        return "cpu";
+    end;
+    function nameBefore(snapshot: &[Snapshot], a: Index, b: Index): Bool is
+        case snapshotName(snapshot, a) of
+            when Err(error as e: IoError) do return false;
+            when Ok(value as left: String) do
+                case snapshotName(snapshot, b) of
+                    when Err(error as e: IoError) do destroyString(left); return false;
+                    when Ok(value as right: String) do
+                        var result: Bool := length(&left) < length(&right);
+                        var i: Index := 0;
+                        var done: Bool := false;
+                        while i < length(&left) and i < length(&right) and not done do
+                            let l: Nat8 := nthByte(&left, i); let r: Nat8 := nthByte(&right, i);
+                            if l /= r then result := l < r; done := true; end if;
+                            i := i + 1;
+                        end while;
+                        destroyString(left); destroyString(right); return result;
+                end case;
+        end case;
+    end;
+    function before(snapshot: &[Snapshot], a: Row, b: Row, sort: Int64): Bool is
+        if sort = 1 then return a.info.taskNum < b.info.taskNum; end if;
+        if sort = 2 then return nameBefore(snapshot, a.index, b.index); end if;
+        if sort = 3 then
+            if a.info.state /= b.info.state then return a.info.state < b.info.state; end if;
+        else
+            if a.info.idle /= 0 then return false; end if;
+            if b.info.idle /= 0 then return true; end if;
+            if a.delta /= b.delta then return a.delta > b.delta; end if;
+        end if;
+        return a.info.taskNum < b.info.taskNum;
+    end;
+    function name(out: &![Output], snapshot: &[Snapshot], index: Index, columns: Int64): Unit is
+        case snapshotName(snapshot, index) of
+            when Err(error as e: IoError) do skip;
+            when Ok(value as n: String) do
+                var count: Index := length(&n);
+                if columns > 0 and toIndexOrAbort(columns) < count then count := toIndexOrAbort(columns); end if;
+                if count > 0 then text(&~out, getSpan(&n, 0, count - 1)); end if; destroyString(n);
+        end case;
+        return nil;
+    end;
+    function getClock(system: &[System]): Clock is
+        case clock(system) of when Ok(value as c: Clock) do return c; when Err(error as e: IoError) do abort("system clock unavailable"); end case;
+    end;
+    function main(initial: RootCapability): ExitCode is
+        var root: RootCapability := initial;
+        var out: Output := acquireOutput(&!root);
+        var input: Input := acquireInput(&!root);
+        var system: System := acquireSystem(&!root);
+        let empty: TaskInfo := TaskInfo(taskNum => -1, core => 0, state => 0, ticks => 0, idle => 0, stackSize => 0, switches => 0);
+        var previous: Buffer[TaskInfo] := initialize(128, empty);
+        var rows: Buffer[Row] := initialize(128, Row(info => empty, delta => 0, index => 0));
+        var prevCount: Index := 0;
+        let initialClock: Clock := getClock(&system); var prevAt: Int64 := initialClock.ticks;
+        var sort: Int64 := 0; var selected: Int64 := 0; var first: Int64 := 0;
+        var message: Span[Nat8, Static] := "";
+        var running: Bool := true; var baseline: Bool := true;
+        var startupKey: Key := Unknown(event => 0); var hasStartupKey: Bool := false;
+        text(&!out, "[?1049h[?25l[2J");
+        while running do
+            let c: Clock := getClock(&system);
+            case snapshotTasks(&system, 128) of
+                when Err(error as e: IoError) do running := false;
+                when Ok(value as snap: Snapshot) do
+                    let count: Index := snapshotCount(&snap);
+                    var busy: Buffer[Int64] := initialize(toIndexOrAbort(c.cores), 0);
+                    if true then var i: Index := 0; while i < count do
+                            case snapshotTask(&snap, i) of
+                                when Err(error as e: IoError) do skip;
+                                when Ok(value as t: TaskInfo) do
+                                    var prior: Int64 := t.ticks;
+                                    if true then var j: Index := 0; while j < prevCount do
+                                            let p: TaskInfo := nth(&previous, j);
+                                            if p.taskNum = t.taskNum then prior := p.ticks; end if;
+                                            j := j + 1; end while; end if;
+                                    let delta: Int64 := t.ticks - prior;
+                                    storeNth(&!rows, i, Row(info => t, delta => delta, index => i));
+                                    if t.idle = 0 then
+                                        let core: Index := toIndexOrAbort(t.core);
+                                        let total: Int64 := nth(&busy, core) + delta; storeNth(&!busy, core, total);
+                                    end if;
+                            end case;
+                            i := i + 1; end while; end if;
+                    if true then var i: Index := 0; while i < count do let priorRow: Row := nth(&rows, i); storeNth(&!previous, i, priorRow.info); i := i + 1; end while; end if;
+                    prevCount := count;
+                    if true then var i: Index := 1; while i < count do
+                            let row: Row := nth(&rows, i); var j: Index := i; var sorting: Bool := true;
+                            while j > 0 and sorting do
+                                if before(&snap, row, nth(&rows, j - 1), sort) then let moveRow: Row := nth(&rows, j - 1); storeNth(&!rows, j, moveRow); j := j - 1;
+                                else sorting := false; end if;
+                            end while;
+                            storeNth(&!rows, j, row);
+                            i := i + 1; end while; end if;
+                    if baseline then baseline := false; prevAt := c.ticks;
+                        -- Keep input received during the initial CPU sample. A window can
+                        -- queue quit/resize before the first monitor frame is painted.
+                        case readKeyTimeout(&!input, 200) of
+                            when Err(error as e: IoError) do skip;
+                            when Ok(value as key: Key) do startupKey := key; hasStartupKey := true;
+                        end case;
+                    else
+                        var size: Size := Size(rows => 24, columns => 80);
+                        case terminalSize(&out) of when Ok(value as s: Size) do size := s; when Err(error as e: IoError) do skip; end case;
+                        let seconds: Int64 := c.uptimeJiffies / c.jiffiesPerSecond;
+                        cursor(&!out, 1); text(&!out, "[30;47m Top   up ");
+                        number(&!out, seconds / 3600, 2, true); text(&!out, ":"); number(&!out, rem(seconds / 60, 60), 2, true); text(&!out, ":"); number(&!out, rem(seconds, 60), 2, true);
+                        text(&!out, "   "); number(&!out, signed(count), 0, false); text(&!out, " tasks on "); number(&!out, c.cores, 0, false); text(&!out, " cores   sort: "); text(&!out, sortName(sort)); text(&!out, "[0m");
+                        if true then var i: Index := 0; while i < toIndexOrAbort(c.cores) do
+                                cursor(&!out, 2 + signed(i)); text(&!out, "Core "); number(&!out, signed(i), 0, false); text(&!out, " ");
+                                let pct: Int64 := percent(nth(&busy, i), c.ticks - prevAt);
+                                bar(&!out, pct); text(&!out, " "); number(&!out, pct / 10, 3, false); text(&!out, "."); number(&!out, rem(pct, 10), 0, false); text(&!out, "%");
+                                i := i + 1; end while; end if;
+                        case heapStats(&system) of
+                            when Err(error as e: IoError) do skip;
+                            when Ok(value as h: HeapInfo) do
+                                cursor(&!out, 2 + c.cores); text(&!out, "Heap  "); bar(&!out, percent(h.used, h.total)); text(&!out, " "); mb(&!out, h.used); text(&!out, " of "); mb(&!out, h.total);
+                                cursor(&!out, 3 + c.cores); text(&!out, "      "); number(&!out, h.usedBlocks, 0, false); text(&!out, " blocks in use, "); number(&!out, h.freeBlocks, 0, false); text(&!out, " free (largest "); mb(&!out, h.largestFree); text(&!out, ")");
+                        end case;
+                        var driveRow: Int64 := 4 + c.cores;
+                        if true then var letter: Index := 65; while letter < 91 do
+                                case driveFree(&system, byteValue(letter)) of
+                                    when Err(error as e: IoError) do skip;
+                                    when Ok(value as d: DriveInfo) do
+                                        cursor(&!out, driveRow); driveRow := driveRow + 1; text(&!out, "Disk "); text(&!out, letterText(letter)); text(&!out, ": FAT32  free ");
+                                        if d.freeBytes < 0 then text(&!out, "?"); else mb(&!out, d.freeBytes); end if;
+                                        text(&!out, " of "); mb(&!out, d.totalBytes);
+                                end case;
+                                letter := letter + 1; end while; end if;
+                        cursor(&!out, 6 + c.cores); text(&!out, "[30;47m  TASK CORE STATE     CPU%  SWITCHES  STACK  NAME[0m");
+                        var visible: Int64 := size.rows - 7 - c.cores; if visible < 1 then visible := 1; end if;
+                        if selected >= signed(count) then selected := signed(count) - 1; end if;
+                        if selected < 0 then selected := 0; end if;
+                        if selected < first then first := selected; end if;
+                        if selected >= first + visible then first := selected - visible + 1; end if;
+                        var r: Int64 := 0;
+                        while r < visible do
+                            cursor(&!out, 7 + c.cores + r);
+                            if first + r < signed(count) then
+                                let row: Row := nth(&rows, toIndexOrAbort(first + r)); let t: TaskInfo := row.info;
+                                let pct: Int64 := percent(row.delta, c.ticks - prevAt);
+                                if first + r = selected then text(&!out, "[7m"); end if;
+                                number(&!out, t.taskNum, 6, false); text(&!out, " "); number(&!out, t.core, 4, false); text(&!out, " "); text(&!out, stateName(t.state)); text(&!out, " "); number(&!out, pct / 10, 3, false); text(&!out, "."); number(&!out, rem(pct, 10), 0, false); text(&!out, " "); number(&!out, t.switches, 9, false); text(&!out, " "); number(&!out, t.stackSize / 1024, 5, false); text(&!out, "K  "); name(&!out, &snap, row.index, size.columns - 43);
+                                if t.idle /= 0 then text(&!out, " (idle)"); end if;
+                                text(&!out, "[0m");
+                            end if;
+                            r := r + 1;
+                        end while;
+                        cursor(&!out, size.rows); text(&!out, "[30;47m");
+                        if spanLength(message) = 0 then text(&!out, " q quit  k kill  c cpu  p task  n name  s state  arrows select"); else text(&!out, message); end if;
+                        text(&!out, "[0m"); message := ""; prevAt := c.ticks;
+                        let event: Result[Key, IoError] := if hasStartupKey then Ok(value => startupKey) else readKeyTimeout(&!input, 1000);
+                        hasStartupKey := false;
+                        case event of
+                            when Err(error as e: IoError) do skip;
+                            when Ok(value as key: Key) do
+                                case key of
+                                    when Escape do running := false;
+                                    when Up do selected := selected - 1;
+                                    when Down do selected := selected + 1;
+                                    when PageUp do selected := selected - 10;
+                                    when PageDown do selected := selected + 10;
+                                    when Home do selected := 0;
+                                    when End do selected := signed(count) - 1;
+                                    when Char(codepoint as ch: Nat32) do
+                                        if ch = 113 or ch = 81 then running := false;
+                                        else if ch = 99 then sort := 0;
+                                        else if ch = 112 then sort := 1;
+                                        else if ch = 110 then sort := 2;
+                                        else if ch = 115 then sort := 3;
+                                        else if ch = 107 and selected < signed(count) then
+                                            let row: Row := nth(&rows, toIndexOrAbort(selected));
+                                            if row.info.idle /= 0 or row.info.taskNum = c.currentTask then message := " Cannot kill the idle task or Top's own task";
+                                            else
+                                                cursor(&!out, size.rows); text(&!out, "[30;43m Kill task "); number(&!out, row.info.taskNum, 0, false); text(&!out, " "); name(&!out, &snap, row.index, 0); text(&!out, "? (y/n)[0m");
+                                                case readKey(&!input) of
+                                                    when Err(error as e: IoError) do skip;
+                                                    when Ok(value as answer: Key) do
+                                                        case answer of when Char(codepoint as yes: Nat32) do
+                                                                if yes = 121 then let result: Result[Unit, IoError] := killTask(&!system, row.info.taskNum); message := " Kill requested"; end if;
+                                                            when Up do skip; when Down do skip; when Left do skip; when Right do skip; when Home do skip; when End do skip; when PageUp do skip; when PageDown do skip; when Insert do skip; when Delete do skip; when Enter do skip; when Escape do skip; when Backspace do skip; when Tab do skip; when Ctrl(codepoint as cp: Nat32) do skip; when FunctionKey(number as n: Nat8) do skip; when Unknown(event as ev: Int64) do skip;
+                                                        end case;
+                                                end case;
+                                            end if;
+                                        end if;
+                                    when Left do skip; when Right do skip; when Insert do skip; when Delete do skip; when Enter do skip; when Backspace do skip; when Tab do skip; when Ctrl(codepoint as cp: Nat32) do skip; when FunctionKey(number as n: Nat8) do skip; when Unknown(event as ev: Int64) do skip;
+                                end case;
+                        end case;
+                    end if; destroyFree(busy); releaseSnapshot(snap);
+            end case;
+        end while;
+        text(&!out, "[0m[?25h[?1049l");
+        destroyFree(previous); destroyFree(rows); releaseSystem(system); releaseInput(input); releaseOutput(out);
+        surrenderRoot(root);
+        return ExitSuccess();
+    end;
+end module body.

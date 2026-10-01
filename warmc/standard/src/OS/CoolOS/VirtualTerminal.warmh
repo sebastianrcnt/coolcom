@@ -1,0 +1,20 @@
+-- Opaque terminal handles; stopRelease consumes the compositor reference.
+module OS.CoolOS.VirtualTerminal is
+    function VTermNewShell(a0: Int64, a1: Int64): Int64;
+    function VTermResize(a0: Int64, a1: Int64, a2: Int64): Unit;
+    function VTermStopRelease(a0: Int64): Unit;
+    function VTermFocus(a0: Int64): Unit;
+    function VTermGetFocus(): Int64;
+    function VTermAlive(a0: Int64): Bool;
+    function VTermDirty(a0: Int64): Bool;
+    function VTermDraw(a0: Int64, a1: Int64, a2: Int64): Unit;
+    function VTermPushKey(a0: Int64, a1: Int64): Unit;
+    function VTermCursorX(a0: Int64): Int64;
+    function VTermCursorY(a0: Int64): Int64;
+    function VTermCursorHidden(a0: Int64): Bool;
+    function VTermReadPhysical(): Int64;
+    function VTermTime(): Int64;
+    function VTermFrameTicks(): Int64;
+    function VTermWait(): Unit;
+    function VTermYield(): Unit;
+end module.
