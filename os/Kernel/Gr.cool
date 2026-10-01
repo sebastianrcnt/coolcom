@@ -41,7 +41,7 @@ U0 GrLine(I64 x0, I64 y0, I64 x1, I64 y1, I64 color)
     }
     GrDamage(w, minx, miny, width, height);
 }
-U0 GrText(I64 x, I64 y, U8 *text, I64 color = 0)
+U0 GrTextClip(I64 x, I64 y, U8 *text, I64 color, I64 cx, I64 cy, I64 width, I64 height)
 {//UTF-8 Unifont, transparent background, integer physical scale.
     CGuiWindow *w = GrWindow; U8 *glyph; I64 cp, len, cells, row, col, bits, start = x;
     if (!w || !text || x < -32768 || x > 32767 || y < -32768 || y > 32767) return;
@@ -51,12 +51,13 @@ U0 GrText(I64 x, I64 y, U8 *text, I64 color = 0)
         cp = Utf8Cp(text, len); text += len; glyph = FontGlyph(cp, &cells);
         if (glyph) for (row = 0; row < 16; row++) {
                 bits = glyph[row]; if (cells == 2) bits = glyph[row * 2] << 8 | glyph[row * 2 + 1];
-                for (col = 0; col < cells * 8; col++) if (bits & (1 << (cells * 8 - col - 1))) GrPoint(w, x + col, y + row, color);
+                for (col = 0; col < cells * 8; col++) if ((bits & (1 << (cells * 8 - col - 1))) && cx <= x + col < cx + width && cy <= y + row < cy + height) GrPoint(w, x + col, y + row, color);
             }
         if (!glyph) cells = 1; x += cells * 8;
     }
     GrDamage(w, start, y, x - start, 16);
 }
+U0 GrText(I64 x, I64 y, U8 *text, I64 color = 0) {CGuiWindow *w = GrWindow; if (w) GrTextClip(x, y, text, color, 0, 0, w->w, w->h);}
 U0 GrBlit(I64 x, I64 y, I64 width, I64 height, U32 *source, I64 source_stride)
 {//BGRA, source stride in bytes; input is logical-sized, copied at integer scale.
     CGuiWindow *w = GrWindow; I64 i, j;

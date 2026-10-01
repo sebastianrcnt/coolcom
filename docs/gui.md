@@ -61,6 +61,7 @@ without filtering, preserving crisp pixel art at HiDPI.
 | G2 | Pixel surfaces, Gr API, automatic damage, local mouse events | Drawing demo; multiple windows keep input responsive |
 | G3 | Warm OS.Gui widgets and example | Capability checks, regenerated Man pages, example works |
 | G4 | File manager, GUI Top, font/scale settings, windowed Cube | Apps run as desktop windows |
+| Cursor | virtio-gpu cursor queue, native Mac cursor, headless composition | Single native pointer; CPU/Venus, scale, hotspot and hide tests |
 | G5 | Direct Vulkan application surfaces | Venus apps render into their own window |
 
 Each stage runs `make -j test` successfully before its English-language commit.
@@ -180,4 +181,51 @@ sections retained. `make -j test` exited 0 again (`build/g3-main-test.log`),
 including unchanged G1 screenshots with Warm Vim, Tmux and Top, G2 latency,
 G3 widgets, editor/pane tests and the existing suite.
 
-G4–G5 are pending.
+### G4 — complete
+
+The System menu launches `GuiFiles;`, `GuiTop;`, `GuiSettings;`, and `GuiCube;`.
+The three utility apps use Warm OS.Gui and a shared application helper module.
+Files confines read access through OS.Dir/OS.File capabilities, shows directory
+markers and an inverted selection, filters names, navigates folders/parents,
+and retains a text preview/byte count across mouse events. GUI Top displays
+copied task names/ids, core, CPU share and state plus heap use; its Kill action
+uses the checked system capability and stable task id. Settings selects 1x/2x
+and bitmap/optional Sarasa Mono K terminal fonts. Missing fonts report in the
+app. Longer control labels are clipped to their widget rectangles.
+
+Changing scale retains logical geometry, rebuilds physical window backing and
+resident GPU textures, and sends repaint events even if cell counts did not
+change. All monochrome chrome and controls stay exact integer pixel art.
+
+The existing Cube renderer has a task-owned pixel-window mode. It renders at
+physical client dimensions, copies its GPU readback into the pixel surface,
+and handles local keyboard/drag/wheel input, move/resize and clean shutdown.
+The full-screen Cube mode remains available. Without Venus the desktop opens
+a monochrome availability message instead of trying to load Vulkan sources.
+
+`main` absolute-pointer support (`1123eec`) and the classic arrow/paint-color
+assertion correction (`65cff5c`) were merged during G4. New tests and G2 use
+`testvm.pointer_absolute` (EV_ABS with exact integer mapping); G1 retains
+relative input regression coverage. Tests cover folder navigation/filter/read,
+monitor selection/protected-task kill denial, font/scale changes, exact 1x/2x
+pixel enlargement, CPU/Venus app pixels, Cube scene/camera/move/resize and
+repeated GPU buffer reclamation. Man pages were regenerated from the headers.
+Artifacts: `build/gui-apps-test/`, `build/gui-scale-test/`,
+`build/gui-cube-test/`. `make -j test` passed (exit 0; `build/g4-test.log`). The legacy full-screen
+`cube-test` also passed all eight scenarios during the initial acceptance run.
+
+The drawing demo acknowledges completed presentation before its ready/paint
+markers; its input test waits for all 80 responses before VM shutdown. The
+scroll pixel comparison waits for the final drawing/finish and shell prompt,
+rather than taking a screenshot after the last text row but before the rectangle
+has been drawn. Pixel and 100 ms input bounds remain unchanged.
+
+Before G5, implement the user's hardware-cursor integration decision. GUI
+pointers use standard virtio-gpu UPDATE_CURSOR/MOVE_CURSOR with a 64x64 BGRA
+resource and hotspot; shape APIs support future I-beam/wait cursors. GUI exit
+hides that resource. coolvm displays it through NSCursor with physical-to-view
+scaling, uses the default Mac arrow for terminal mode, and composites the guest
+cursor only in exported screenshots/frame dumps. CPU and Venus use the same
+cursor path. Standard QEMU virtio-gpu cursor behavior should also be covered.
+
+G5 is pending.

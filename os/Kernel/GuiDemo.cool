@@ -11,12 +11,19 @@ U0 GuiDrawScene()
     GrBlit(170, 60, 8, 8, image, 32);
     GrText(12, w->h - 26, "Click to draw; Q closes this window.");
 }
+U0 GuiDrawPresent()
+{// Startup and painting markers acknowledge an actual completed frame.
+    CGuiWindow *w = GrWindow; I64 revision;
+    if (!w) return;
+    revision = w->revision;
+    while (gui_active && !w->closed && w->presented < revision) Sleep(1);
+}
 U0 GuiDrawTask(U8 *data)
 {
     CGuiEvent e; U8 *message;
     no_warn data;
     if (!GuiNewPixel("Drawing", 480, 256)) return;
-    GuiDrawScene; message = MStrPrint("GUI DRAW READY%d\n", gui.count); GuiLog(message); Free(message);
+    GuiDrawScene; GuiDrawPresent; message = MStrPrint("GUI DRAW READY%d\n", gui.count); GuiLog(message); Free(message);
     while (TRUE) {
         while (GuiPoll(&e)) {
             if (e.type == GUI_EVENT_CLOSE) return;
@@ -26,7 +33,7 @@ U0 GuiDrawTask(U8 *data)
             }
             if (e.type == GUI_EVENT_RESIZE) GuiDrawScene;
             if (e.type == GUI_EVENT_MOUSE && (e.buttons & 1)) {
-                GrRect(e.x - 2, e.y - 2, 5, 5, 0);
+                GrRect(e.x - 2, e.y - 2, 5, 5, 0); GuiDrawPresent;
                 message = MStrPrint("GUI DRAW MOUSE %d %d\n", e.x, e.y); GuiLog(message); Free(message);
             }
         }
@@ -34,3 +41,16 @@ U0 GuiDrawTask(U8 *data)
     }
 }
 CTask *GuiDraw() {if (!gui_active) return NULL; return Spawn(&GuiDrawTask, NULL, "Drawing", 0, adam_task);}
+
+U0 GuiCubeNoticeTask(U8 *data)
+{
+    no_warn data; CGuiEvent e;
+    if (!GuiNewPixel("Cube", 320, 96)) return;
+    GrText(16, 20, "Cube needs the Venus terminal.");
+    GrText(16, 48, "Use a VM with Venus enabled.");
+    while (TRUE) {
+        while (GuiPoll(&e)) if (e.type == GUI_EVENT_CLOSE || (e.type == GUI_EVENT_KEY && (e.key == 'q' || e.key == KEY_ESC))) return;
+        Sleep(10);
+    }
+}
+CTask *GuiCubeUnavailable() {return Spawn(&GuiCubeNoticeTask, NULL, "Cube", 0, adam_task);}

@@ -28,6 +28,19 @@ def keys_of(code):
     return f'1 {code} 1\n1 {code} 0\n'
 
 
+def pointer_absolute(x, y, width, height):
+    """Place the pointer at physical pixels through Linux ABS_X/ABS_Y.
+
+    Round up so Input.cool's integer conversion maps back to the exact pixel.
+    Coordinates and framebuffer dimensions are explicit for HiDPI scripts.
+    """
+    if not (2 <= width <= 32768 and 2 <= height <= 32768 and 0 <= x < width and 0 <= y < height):
+        raise ValueError('absolute pointer outside framebuffer')
+    ax = (x * 32767 + width - 2) // (width - 1)
+    ay = (y * 32767 + height - 2) // (height - 1)
+    return f'3 0 {ax}\n3 1 {ay}\n'
+
+
 def typed(text, *, delay=3):
     """Type literal text using Linux key codes, with delay ms after each character."""
     result = ''

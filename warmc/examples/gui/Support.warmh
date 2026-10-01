@@ -1,0 +1,14 @@
+import OS.Gui (Gui, Window, Event);
+import Standard.String (String);
+module GuiSupport is
+    function openWindow(gui: &![Gui], title: Span[Nat8], width: Int64, height: Int64): Window;
+    function nextEvent(window: &![Window]): Event;
+    function shouldClose(event: Event): Bool;
+    function drawString(window: &![Window], x: Int64, y: Int64, string: &[String]): Unit;
+    function drawNumber(window: &![Window], x: Int64, y: Int64, value: Int64): Unit;
+    function copy(bytes: Span[Nat8]): String;
+    function joinPath(parent: &[String], name: &[String]): String;
+    function parentPath(path: &[String]): String;
+    function matches(name: &[String], filter: Span[Nat8]): Bool;
+    function index64(value: Index): Int64;
+end module.

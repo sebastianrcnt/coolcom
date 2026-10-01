@@ -23,7 +23,7 @@ class CGuiWindow
     CTask *owner;
     CVTerm *term;
     U32 *pixels;
-    I64 x, y, w, h, pw, ph, scale, serial, revision, lock;
+    I64 x, y, w, h, pw, ph, scale, serial, revision, presented, lock;
     I64 cursor_x, cursor_y, cursor_w;
     Bool closed, dirty, zoomed, pixel;
     CGuiEvent events[GUI_EVENTS];
@@ -57,6 +57,7 @@ extern U0 GuiMenuSelect(I64 item);
 extern U0 GuiMenuPaint();
 extern I64 GuiMenuCount();
 extern CTask *GuiDraw();
+extern CTask *GuiCubeUnavailable();
 U8 *gui_start_hook; // resident Venus renderer, installed by Terminal.cool
 
 U0 GuiDamage(I64 x, I64 y, I64 w, I64 h)
@@ -150,6 +151,9 @@ Bool GuiResize(CGuiWindow *w, I64 width, I64 height)
     w->serial = font.serial; w->cursor_w = 0;
     if (w->term) VtResize(w->term, cols, rows);
     GuiDecorate(w); w->dirty = TRUE;
+    if (w->pixel && w->owner && w->owner->gui_window == w) {
+        CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_RESIZE; GuiEventPush(w, &e);
+    }
     return TRUE;
 }
 U0 GuiMove(CGuiWindow *w, I64 x, I64 y)
@@ -231,6 +235,23 @@ CTask *GuiRun(U8 *program, U8 *entry)
     if (!task) {Free(app->program); Free(app->entry); Free(app);} return task;
 }
 CTask *GuiWidgets() {return GuiRun("C:/Warm/Examples/gui/Widgets.warm", "Widgets:main");}
+CTask *GuiApp(U8 *name, U8 *entry)
+{
+    U8 *paths = MStrPrint("C:/Warm/Examples/gui/Support.warmh,C:/Warm/Examples/gui/Support.warm,C:/Warm/Examples/gui/%s.warm", name);
+    CTask *task = GuiRun(paths, entry); Free(paths); return task;
+}
+CTask *GuiFiles() {return GuiApp("Files", "GuiFiles:main");}
+CTask *GuiTop() {return GuiApp("Top", "GuiTop:main");}
+CTask *GuiSettings() {return GuiApp("Settings", "GuiSettings:main");}
+U0 GuiCubeTask(U8 *data)
+{
+    no_warn data;
+    if (!fb.venus) {GuiLog("Cube needs the Venus terminal.\n"); GuiCubeUnavailable; return;}
+    CVTerm *v = VtNew(80, 24);
+    VtBind(Fs, v); v->owner = Fs; v->sink = &GuiShellSink; VtRelease(v); ShellTask(0);
+    ShellExe("#include \"C:/Cube.cool\"\nCubeWindow;");
+}
+CTask *GuiCube() {if (!gui_active) return NULL; return Spawn(&GuiCubeTask, NULL, "GUI Cube", 0, adam_task, SHELL_STACK);}
 Bool GuiDispatchKey(I64 ev, I64 timestamp)
 {//Called by the compositor in input order, after preceding mouse focus changes.
     Bool shortcut = TRUE;
@@ -382,7 +403,7 @@ U0 GuiPointerInit()
 }
 U0 GuiCompose()
 {
-    I64 x, y, i, sx, s = gui.scale, pw = gui.w * s;
+    I64 x, y, i, sx, s = gui.scale, pw = fb.w;
     I64 x0 = MaxI64(0, gui.x0) * s, y0 = MaxI64(0, gui.y0) * s;
     I64 x1 = MinI64(gui.w, gui.x1) * s, y1 = MinI64(gui.h, gui.y1) * s;
     CGuiWindow *w; U32 p; U0 (*frame)();
@@ -405,6 +426,7 @@ U0 GuiCompose()
         for (y = y0; y < y1; y++) MemCpy(fb.back + y * fb.stride + x0 * 4, gui.canvas + y * pw + x0, (x1 - x0) * 4);
         FbCopyRect(x0, y0, x1 - x0, y1 - y0); FbDamage(y0, y1);
     }
+    for (i = 0; i < gui.count; i++) gui.windows[i]->presented = gui.windows[i]->revision;
     gui.damage = FALSE; gui.frames++;
 }
 U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
@@ -459,11 +481,26 @@ U0 GuiEnd()
     fb.redraw_all = TRUE; fb.pending = TRUE;
     FbRender;
 }
+U0 GuiRescale()
+{// Logical geometry survives; backing buffers and GPU textures change atomically
+    // on the compositor's core. Resize events request pixel-app repaints.
+    I64 i; U0 (*stop)(), (*start)(); CGuiWindow *w;
+    if (stop = gui.stop_hook) (*stop)(); gui.frame_hook = gui.stop_hook = NULL;
+    gui.scale = font.scale; gui.w = fb.w / gui.scale; gui.h = fb.h / gui.scale;
+    gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
+    GuiMenuDismiss;
+    for (i = 0; i < gui.count; i++) {
+        w = gui.windows[i]; GuiResize(w, w->w, w->h); GuiMove(w, w->x, w->y);
+    }
+    GuiDesktop; if (start = gui_start_hook) (*start)();
+    GuiLog("GUI SCALE APPLIED\n");
+}
 U0 GuiTask(U8 *data)
 {
     I64 i, j, action; CGuiWindow *w;
     no_warn data;
     while (gui_active) {
+        if (font.scale != gui.scale) GuiRescale;
         CGuiEvent input;
         while (GuiInputPop(&input)) {
             if (input.type == GUI_EVENT_MOUSE) GuiMouse(input.x, input.y, input.buttons, input.wheel);
@@ -474,6 +511,10 @@ U0 GuiTask(U8 *data)
         if (action == 1) GuiShell;
         else if (action == 7) GuiDraw;
         else if (action == 8) GuiWidgets;
+        else if (action == 9) GuiFiles;
+        else if (action == 10) GuiTop;
+        else if (action == 11) GuiSettings;
+        else if (action == 12) GuiCube;
         else if (action == 2) {GuiEnd; break;}
         else if (action == 6 && gui.count) GuiFocus(gui.windows[0]);
         else if (action >= 3 && action <= 5 && gui.focus) {

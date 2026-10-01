@@ -57,7 +57,7 @@ for width, height in sizes:
                  'FbFlush; e=ArchCntVct-t; Print("BURST%d %d %d\\n",1,e,cnt_freq);')
         pixels = ('ConsClear; FbFlush; for(i=0;i<fb.rows*3+7;i++){'
                   'Print("pixel %04d abcdefghijklmnopqrstuvwxyz\\n",i); FbFlush;} '
-                  'FbFillRect(13,17,21,35,0x123456); FbCursorHide; FbFlush;')
+                  'FbFillRect(13,17,21,35,0x123456); FbCursorHide; FbFlush; FbFinish; UartPutS("PIXEL "); UartPutS("DONE\\n");')
         forced = forced.replace('3000', str(a.lines))
         burst = burst.replace('3000', str(a.lines))
         probe = ''
@@ -69,7 +69,7 @@ for width, height in sizes:
             probe += testvm.typed('Print("VENUS%d %d\\n",1,fb.venus);\n') + 'wait VENUS1 \n'
         script = (testvm.BOOT + probe + testvm.typed(forced+'\n') + 'wait MEASURE1 \n' +
                   testvm.typed(burst+'\n') + 'wait BURST1 \n' + testvm.typed(pixels+'\n') +
-                  f'wait pixel {height//16*3+6:04d}\ndelay 200\nquit\n')
+                  'wait PIXEL DONE\nwait > \ndelay 200\nquit\n')
         (d/'input.txt').write_text(script)
         before = resource.getrusage(resource.RUSAGE_CHILDREN)
         phase_cpu = {}

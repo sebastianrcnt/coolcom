@@ -506,3 +506,13 @@ gui-widgets-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RU
 	python3 tools/gui-widgets-test.py $< $(if $(RUN_VENUS),--venus)
 
 test: gui-widgets-test
+
+.PHONY: gui-apps-test gui-scale-test gui-cube-test
+gui-apps-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-apps-test.py $< $(if $(RUN_VENUS),--venus)
+gui-scale-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-scale-test.py $< $(if $(RUN_VENUS),--venus)
+gui-cube-test: build/kernel.Image coolvm build/coolvm-venus venus-terminal cube-shaders build/warmcool/Kernel.cool
+	python3 tools/gui-cube-test.py $<
+
+test: gui-apps-test gui-scale-test $(if $(RUN_VENUS),gui-cube-test)
