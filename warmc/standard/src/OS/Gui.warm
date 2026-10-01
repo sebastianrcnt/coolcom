@@ -1,0 +1,217 @@
+pragma Unsafe_Module;
+import Austral.Memory (Pointer, spanToPointer, positiveOffset);
+import OS.Error (IoError, fromCode, status);
+import Standard.String (String, makeString, destroyString, getSpan, nthByte, storeNth);
+module body OS.Gui is
+    record Gui: Linear is end;
+    record Window: Linear is handle: Int64; end;
+    record TextInput: Linear is data: String; length: Index; cursor: Index; focused: Bool; end;
+    function acquireGui(root: &![RootCapability]): Gui is return Gui(); end;
+    function releaseGui(gui: Gui): Unit is let {} := gui; return nil; end;
+    pragma Foreign_Import(External_Name => "WgOpen");
+    private function rawOpen(title: Pointer[Nat8], byteCount: Index, width: Int64, height: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgClose");
+    private function rawClose(handle: Int64): Unit is end;
+    pragma Foreign_Import(External_Name => "WgRect");
+    private function rawRect(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64, color: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgLine");
+    private function rawLine(handle: Int64, x0: Int64, y0: Int64, x1: Int64, y1: Int64, color: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgText");
+    private function rawText(handle: Int64, x: Int64, y: Int64, value: Pointer[Nat8], byteCount: Index, color: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgMeasure");
+    private function rawMeasure(value: Pointer[Nat8], byteCount: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgDither");
+    private function rawDither(handle: Int64, x: Int64, y: Int64, width: Int64, height: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgPoll");
+    private function rawPoll(handle: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgField");
+    private function rawField(handle: Int64, field: Int64): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgMenu");
+    private function rawMenu(handle: Int64, title: Pointer[Nat8], byteCount: Index): Int64 is end;
+    pragma Foreign_Import(External_Name => "WgMenuItem");
+    private function rawMenuItem(handle: Int64, menu: Int64, id: Int64, value: Pointer[Nat8], byteCount: Index): Int64 is end;
+
+    function open(gui: &![Gui], title: Span[Nat8], width: Int64, height: Int64): Result[Window, IoError] is
+        let h: Int64 := rawOpen(spanToPointer(title), spanLength(title), width, height);
+        if h < 0 then return Err(error => fromCode(h)); end if;
+        return Ok(value => Window(handle => h)); end;
+    function close(window: Window): Unit is let { handle: Int64 } := window; rawClose(handle); return nil; end;
+    function size(window: &[Window]): Result[Size, IoError] is
+        let w: Int64 := rawField(window->handle, 5); let h: Int64 := rawField(window->handle, 6);
+        if w < 0 then return Err(error => fromCode(w)); end if; return Ok(value => Size(width => w, height => h)); end;
+    function poll(window: &![Window]): Result[Event, IoError] is
+        let h: Int64 := window->handle; let kind: Int64 := rawPoll(h);
+        if kind < 0 then return Err(error => fromCode(kind)); end if;
+        if kind = 1 then return Ok(value => Mouse(x => rawField(h, 1), y => rawField(h, 2), buttons => rawField(h, 3), wheel => rawField(h, 4)));
+        else if kind = 2 then return Ok(value => Key(code => rawField(h, 0)));
+        else if kind = 3 then return Ok(value => Resize(width => rawField(h, 5), height => rawField(h, 6)));
+        else if kind = 4 then return Ok(value => Close());
+        else if kind = 5 then return Ok(value => Menu(id => rawField(h, 0)));
+        end if; return Ok(value => Idle()); end;
+    function fill(window: &![Window], rect: Rect, color: Int64): Result[Unit, IoError] is
+        return status(rawRect(window->handle, rect.x, rect.y, rect.width, rect.height, color)); end;
+    function line(window: &![Window], x0: Int64, y0: Int64, x1: Int64, y1: Int64, color: Int64): Result[Unit, IoError] is
+        return status(rawLine(window->handle, x0, y0, x1, y1, color)); end;
+    function text(window: &![Window], x: Int64, y: Int64, value: Span[Nat8], color: Int64): Result[Unit, IoError] is
+        return status(rawText(window->handle, x, y, spanToPointer(value), spanLength(value), color)); end;
+    function measure(value: Span[Nat8]): Int64 is return rawMeasure(spanToPointer(value), spanLength(value)); end;
+    function label(window: &![Window], rect: Rect, value: Span[Nat8]): Result[Unit, IoError] is return text(&~window, rect.x, rect.y, value, 0); end;
+    function vertical(x: Int64, y: Int64, width: Int64, gap: Int64): Layout is return Layout(x => x, y => y, width => width, gap => gap); end;
+    function nextRow(layout: &![Layout], height: Int64): Rect is
+        let r: Rect := Rect(x => layout->x, y => layout->y, width => layout->width, height => height);
+        layout->y := layout->y + height + layout->gap; return r; end;
+    private function contains(r: Rect, x: Int64, y: Int64): Bool is return x >= r.x and x < r.x + r.width and y >= r.y and y < r.y + r.height; end;
+    private function box(window: &![Window], r: Rect): Unit is
+        fill(&~window, Rect(x => r.x, y => r.y, width => r.width, height => 1), 0);
+        fill(&~window, Rect(x => r.x, y => r.y + r.height - 1, width => r.width, height => 1), 0);
+        fill(&~window, Rect(x => r.x, y => r.y, width => 1, height => r.height), 0);
+        fill(&~window, Rect(x => r.x + r.width - 1, y => r.y, width => 1, height => r.height), 0); return nil; end;
+    private function roundFill(window: &![Window], r: Rect, color: Int64): Unit is
+        if r.width > 4 and r.height > 4 then
+            fill(&~window, Rect(x => r.x + 2, y => r.y, width => r.width - 4, height => r.height), color);
+            fill(&~window, Rect(x => r.x, y => r.y + 2, width => r.width, height => r.height - 4), color);
+        end if; return nil; end;
+    function button(window: &![Window], state: &![Button], rect: Rect, value: Span[Nat8], event: Event, defaultButton: Bool): Result[Bool, IoError] is
+        var clicked: Bool := false;
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                if (buttons & 1) /= 0 then if contains(rect, x, y) then state->pressed := true; end if;
+                else clicked := state->pressed and contains(rect, x, y); state->pressed := false; end if;
+            when Key(code as code: Int64) do if defaultButton and code = 10 then clicked := true; end if;
+            when Idle do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
+            when Close do skip; when Menu(id as id: Int64) do skip;
+        end case;
+        var inset: Int64 := 1; if defaultButton then inset := 3; end if;
+        var fg: Int64 := 0; var bg: Int64 := 16777215;
+        if state->pressed then fg := 16777215; bg := 0; end if;
+        roundFill(&~window, rect, fg);
+        roundFill(&~window, Rect(x => rect.x + inset, y => rect.y + inset, width => rect.width - 2 * inset, height => rect.height - 2 * inset), bg);
+        text(&~window, rect.x + (rect.width - measure(value)) / 2, rect.y + (rect.height - 16) / 2, value, fg);
+        return Ok(value => clicked); end;
+    function scrollBar(window: &![Window], rect: Rect, first: Int64, count: Int64, page: Int64, event: Event): Result[Int64, IoError] is
+        var maximum: Int64 := count - page; if maximum < 0 then maximum := 0; end if;
+        var value: Int64 := first;
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                value := value - wheel;
+                if (buttons & 1) /= 0 and contains(rect, x, y) then
+                    if y < rect.y + 16 then value := value - 1;
+                    else if y >= rect.y + rect.height - 16 then value := value + 1;
+                    else if rect.height > 32 then value := (y - rect.y - 16) * maximum / (rect.height - 32); end if;
+                end if;
+            when Idle do skip; when Key(code as code: Int64) do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
+            when Close do skip; when Menu(id as id: Int64) do skip;
+        end case;
+        if value < 0 then value := 0; end if; if value > maximum then value := maximum; end if;
+        fill(&~window, rect, 16777215); box(&~window, rect);
+        if rect.height > 32 then
+            rawDither(window->handle, rect.x + 1, rect.y + 16, rect.width - 2, rect.height - 32);
+            line(&~window, rect.x, rect.y + 15, rect.x + rect.width - 1, rect.y + 15, 0);
+            line(&~window, rect.x, rect.y + rect.height - 16, rect.x + rect.width - 1, rect.y + rect.height - 16, 0);
+            var thumb: Int64 := rect.y + 17; if maximum > 0 then thumb := thumb + value * (rect.height - 46) / maximum; end if;
+            let tr: Rect := Rect(x => rect.x + 1, y => thumb, width => rect.width - 2, height => 12);
+            fill(&~window, tr, 16777215); box(&~window, tr);
+        end if;
+        line(&~window, rect.x + 4, rect.y + 10, rect.x + 8, rect.y + 5, 0);
+        line(&~window, rect.x + 8, rect.y + 5, rect.x + 12, rect.y + 10, 0);
+        line(&~window, rect.x + 4, rect.y + rect.height - 10, rect.x + 8, rect.y + rect.height - 5, 0);
+        line(&~window, rect.x + 8, rect.y + rect.height - 5, rect.x + 12, rect.y + rect.height - 10, 0);
+        return Ok(value => value); end;
+    function listFrame(window: &![Window], state: &![List], rect: Rect, count: Int64, event: Event): Result[Unit, IoError] is
+        fill(&~window, rect, 16777215); box(&~window, rect);
+        case scrollBar(&~window, Rect(x => rect.x + rect.width - 16, y => rect.y, width => 16, height => rect.height), state->first, count, rect.height / 20, event) of
+            when Ok(value as first: Int64) do state->first := first;
+            when Err(error as e: IoError) do return Err(error => e);
+        end case; return Ok(value => nil); end;
+    function listItem(window: &![Window], state: &![List], rect: Rect, index: Int64, value: Span[Nat8], event: Event): Result[Bool, IoError] is
+        var clicked: Bool := false;
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                if (buttons & 1) /= 0 and contains(rect, x, y) then state->selected := index; clicked := true; end if;
+            when Idle do skip; when Key(code as code: Int64) do skip; when Resize(width as w: Int64, height as h: Int64) do skip;
+            when Close do skip; when Menu(id as id: Int64) do skip;
+        end case;
+        var fg: Int64 := 0; var bg: Int64 := 16777215; if state->selected = index then fg := 16777215; bg := 0; end if;
+        fill(&~window, rect, bg); text(&~window, rect.x + 4, rect.y + 2, value, fg); return Ok(value => clicked); end;
+    function makeTextInput(): TextInput is return TextInput(data => makeString(256, 0), length => 0, cursor => 0, focused => false); end;
+    function destroyTextInput(input: TextInput): Unit is let { data: String, length: Index, cursor: Index, focused: Bool } := input; destroyString(data); return nil; end;
+    generic [R: Region]
+    function inputText(input: &[TextInput, R]): Span[Nat8, R] is return inputRange(input, 0, input->length); end;
+    -- Standard.String.getSpan uses inclusive endpoints. Build a counted range,
+    -- including empty input, while retaining the buffer's borrow region.
+    generic [R: Region]
+    private function inputRange(input: &[TextInput, R], start: Index, final: Index): Span[Nat8, R] is
+        if start > final or final > 256 then abort("Invalid input range"); end if;
+        let p: Pointer[Nat8] := positiveOffset(spanToPointer(getSpan(&(input->data), 0, 0)), start);
+        return @embed(Span[Nat8, R], "au_make_span($1, $2)", p, final - start); end;
+    generic [R: Region]
+    private function readInput(input: &![TextInput, R]): &[TextInput, R] is return (input: &[TextInput, R]); end;
+    private function inputByte(input: &[TextInput], at: Index): Nat8 is return nthByte(&(input->data), at); end;
+    private function prefixWidth(input: &[TextInput], final: Index): Int64 is return measure(inputRange(input, 0, final)); end;
+    private function previous(input: &[TextInput], cursor: Index): Index is
+        var at: Index := cursor; if at > 0 then at := at - 1; end if;
+        while at > 0 and (nthByte(&(input->data), at) & 192) = 128 do at := at - 1; end while; return at; end;
+    private function following(input: &[TextInput], cursor: Index): Index is
+        var at: Index := cursor; if at < input->length then at := at + 1; end if;
+        while at < input->length and (nthByte(&(input->data), at) & 192) = 128 do at := at + 1; end while; return at; end;
+    generic [R: Region]
+    private function erase(input: &![TextInput, R], start: Index, final: Index): Unit is
+        var at: Index := start;
+        while at + final - start < input->length do storeNth(&(input->data), at, inputByte(readInput(&~input), at + final - start)); at := at + 1; end while;
+        input->length := input->length - (final - start); input->cursor := start; return nil; end;
+    private function byte(value: Int64): Nat8 is case toNat8(value) of when Some(value as b: Nat8) do return b; when None do return 0; end case; end;
+    generic [R: Region]
+    private function insertByte(input: &![TextInput, R], value: Nat8): Unit is
+        var at: Index := input->length;
+        while at > input->cursor do storeNth(&(input->data), at, inputByte(readInput(&~input), at - 1)); at := at - 1; end while;
+        storeNth(&(input->data), input->cursor, value); input->length := input->length + 1; input->cursor := input->cursor + 1; return nil; end;
+    generic [R: Region]
+    private function insertCodepoint(input: &![TextInput, R], cp: Int64): Bool is
+        var bytes: Index := 1; if cp >= 65536 then bytes := 4; else if cp >= 2048 then bytes := 3; else if cp >= 128 then bytes := 2; end if;
+        if input->length + bytes > 256 then return false; end if;
+        if bytes = 1 then insertByte(&~input, byte(cp));
+        else if bytes = 2 then insertByte(&~input, byte(192 | cp >> 6)); insertByte(&~input, byte(128 | cp & 63));
+        else if bytes = 3 then insertByte(&~input, byte(224 | cp >> 12)); insertByte(&~input, byte(128 | cp >> 6 & 63)); insertByte(&~input, byte(128 | cp & 63));
+        else insertByte(&~input, byte(240 | cp >> 18)); insertByte(&~input, byte(128 | cp >> 12 & 63)); insertByte(&~input, byte(128 | cp >> 6 & 63)); insertByte(&~input, byte(128 | cp & 63)); end if;
+        return true; end;
+    generic [R: Region]
+    function textInput(window: &![Window], input: &![TextInput, R], rect: Rect, event: Event): Result[Bool, IoError] is
+        var changed: Bool := false;
+        case event of
+            when Mouse(x as x: Int64, y as y: Int64, buttons as buttons: Int64, wheel as wheel: Int64) do
+                if (buttons & 1) /= 0 then input->focused := contains(rect, x, y); if input->focused then input->cursor := input->length; end if; end if;
+            when Key(code as code: Int64) do
+                if input->focused then
+                    let cursor: Index := input->cursor;
+                    if code = 8 and input->cursor > 0 then let start: Index := previous(readInput(&~input), cursor); erase(&~input, start, cursor); changed := true;
+                    else if code = 1114122 and input->cursor < input->length then let final: Index := following(readInput(&~input), cursor); erase(&~input, cursor, final); changed := true;
+                    else if code = 1114115 then input->cursor := previous(readInput(&~input), cursor);
+                    else if code = 1114116 then input->cursor := following(readInput(&~input), cursor);
+                    else if code = 1114117 then input->cursor := 0;
+                    else if code = 1114118 then input->cursor := input->length;
+                    else if code >= 32 and code < 1114112 then changed := insertCodepoint(&~input, code); end if;
+                end if;
+            when Idle do skip; when Resize(width as w: Int64, height as h: Int64) do skip; when Close do skip; when Menu(id as id: Int64) do skip;
+        end case;
+        fill(&~window, rect, 16777215); box(&~window, rect);
+        drawInput(&~window, readInput(&~input), rect); return Ok(value => changed); end;
+    private function drawInput(window: &![Window], input: &[TextInput], rect: Rect): Unit is
+        var start: Index := 0; var final: Index := input->cursor;
+        let cursorWidth: Int64 := prefixWidth(input, input->cursor);
+        while start < input->cursor and cursorWidth - prefixWidth(input, start) > rect.width - 10 do start := following(input, start); end while;
+        var more: Bool := true;
+        while final < input->length and more do
+            let next: Index := following(input, final);
+            if prefixWidth(input, next) - prefixWidth(input, start) <= rect.width - 10 then final := next; else more := false; end if;
+        end while;
+        text(&~window, rect.x + 4, rect.y + 4, inputRange(input, start, final), 0);
+        if input->focused then
+            let caret: Int64 := rect.x + 4 + cursorWidth - prefixWidth(input, start);
+            line(&~window, caret, rect.y + 3, caret, rect.y + rect.height - 4, 0);
+        end if; return nil; end;
+    function addMenu(window: &![Window], title: Span[Nat8]): Result[Int64, IoError] is
+        let menu: Int64 := rawMenu(window->handle, spanToPointer(title), spanLength(title));
+        if menu < 0 then return Err(error => fromCode(menu)); end if; return Ok(value => menu); end;
+    function addMenuItem(window: &![Window], menu: Int64, id: Int64, value: Span[Nat8]): Result[Unit, IoError] is
+        return status(rawMenuItem(window->handle, menu, id, spanToPointer(value), spanLength(value))); end;
+end module body.

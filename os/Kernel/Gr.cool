@@ -66,3 +66,18 @@ U0 GrBlit(I64 x, I64 y, I64 width, I64 height, U32 *source, I64 source_stride)
     GrDamage(w, x, y, width, height);
 }
 U0 GrDirty(I64 x, I64 y, I64 width, I64 height) {CGuiWindow *w = GrWindow; if (w) GrDamage(w, x, y, width, height);}
+
+U0 GrDither(I64 x, I64 y, I64 width, I64 height)
+{
+    CGuiWindow *w = GrWindow; I64 i, j;
+    if (!w || x < -32768 || x > 32767 || y < -32768 || y > 32767 || width < 0 || width > 32767 || height < 0 || height > 32767) return;
+    for (j = MaxI64(0, y); j < MinI64(w->h, y + height); j++)
+        for (i = MaxI64(0, x); i < MinI64(w->w, x + width); i++) GrPoint(w, i, j, ((i ^ j) & 1) * GUI_WHITE);
+    GrDamage(w, x, y, width, height);
+}
+I64 GrMeasure(U8 *text)
+{
+    I64 width = 0, len, cp, i;
+    while (*text) {len = Utf8Len(*text); if (!len) len = 1; for (i = 1; i < len; i++) if (!text[i]) {len = 1; break;} cp = Utf8Cp(text, len); width += Utf8Width(cp) * 8; text += len;}
+    return width;
+}

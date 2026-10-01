@@ -1,0 +1,28 @@
+Task-owned classic GUI windows and immediate-mode Warm widgets.
+
+Acquire Gui from RootCapability, then open a Window on core 0 while Gui; is
+active. Window is a linear capability: drawing, events and menus require its
+borrow. One window belongs to one task; stale or foreign adapter ids are denied.
+The command-line host returns Err(Other) for GUI operations.
+
+Coordinates, layouts and mouse events use logical pixels. The kernel scales
+physical BGRA backing by the display's integer scale. Chrome stays monochrome;
+fill/text/line may use RGB colors. The 3-pixel client inset and all decorations
+belong to the compositor. Applications do not draw into the title or frame.
+
+Widgets are immediate-mode. Keep Button, List and TextInput state in the app and
+call the widgets when handling an event or repainting. Buttons activate on
+release (Enter activates a default button); selected list rows invert. Lists
+use listFrame plus listItem for each visible row. Scrollbars have arrow buttons,
+a dither track and a thumb. TextInput edits UTF-8 with left/right/home/end,
+backspace/delete and a 256-byte capacity. Destroy it before closing the Window.
+
+poll returns Idle when empty; sleep/yield through OS.Task while idle. Close is a
+request: finish cleanup and close the Window promptly (the desktop forces a
+close after one second). Resize requests a repaint. Mouse buttons are bits
+1=left, 2=right, 4=middle; wheel is a signed delta. Key contains Cool key codes
+and modifier bits. Menu contains the application-supplied action id.
+
+Menus belong to the focused application. addMenu adds a menu-bar label and
+addMenuItem adds an action. The System menu opens shells or the drawing demo
+and returns to the terminal. Escape dismisses; arrows/Enter navigate a popup.

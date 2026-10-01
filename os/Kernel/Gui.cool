@@ -12,6 +12,10 @@
 #define GUI_EVENT_CLOSE 4
 #define GUI_EVENT_MENU 5
 #define GUI_INPUT 1024
+#define GUI_MENUS 4
+#define GUI_MENU_ITEMS 8
+class CGuiMenuItem {I64 id; U8 label[64];};
+class CGuiMenu {U8 title[32]; I64 count; CGuiMenuItem items[GUI_MENU_ITEMS];};
 #define GUI_EVENTS 64
 class CGuiEvent {I64 type, key, x, y, buttons, wheel, timestamp;};
 class CGuiWindow
@@ -24,6 +28,8 @@ class CGuiWindow
     Bool closed, dirty, zoomed, pixel;
     CGuiEvent events[GUI_EVENTS];
     I64 event_head, event_tail; Bool event_lost;
+    CGuiEvent last_event;
+    CGuiMenu menus[GUI_MENUS]; I64 menu_count, id, close_deadline; Bool closing;
     I64 restore_x, restore_y, restore_w, restore_h;
     U8 title[64];
 };
@@ -33,15 +39,24 @@ class CGui
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
     Bool resizing, damage;
     I64 x0, y0, x1, y1, clock_minute;
-    U32 *desktop, *canvas, pointer[12 * 18];
+    U32 *desktop, *canvas, *overlay, pointer[12 * 18];
     CTask *task;
     U8 *frame_hook, *stop_hook;
-    I64 frames, raster_rows, desktop_revision, wheel;
+    I64 frames, raster_rows, desktop_revision, overlay_revision, wheel;
+    Bool menu_open; I64 menu_index, menu_hover; CGuiWindow *menu_window;
     CGuiEvent input[GUI_INPUT];
     I64 input_head, input_tail, input_lock; Bool input_lost;
 };
 CGui gui;
+I64 gui_window_id;
 extern U0 GuiEventPush(CGuiWindow *w, CGuiEvent *e);
+extern U0 GuiDesktop();
+extern U0 GuiMenuDismiss();
+extern Bool GuiMenuMouse(I64 x, I64 y, I64 buttons);
+extern U0 GuiMenuSelect(I64 item);
+extern U0 GuiMenuPaint();
+extern I64 GuiMenuCount();
+extern CTask *GuiDraw();
 U8 *gui_start_hook; // resident Venus renderer, installed by Terminal.cool
 
 U0 GuiDamage(I64 x, I64 y, I64 w, I64 h)
@@ -108,6 +123,7 @@ U0 GuiFocus(CGuiWindow *w)
 {
     I64 i, j; CGuiWindow *old = gui.focus;
     if (old == w) return;
+    if (gui.menu_open) GuiMenuDismiss;
     gui.focus = w;
     if (old) GuiDecorate(old);
     if (w) {
@@ -117,6 +133,7 @@ U0 GuiFocus(CGuiWindow *w)
             }
         GuiDecorate(w);
     }
+    GuiDesktop;
 }
 Bool GuiResize(CGuiWindow *w, I64 width, I64 height)
 {
@@ -152,11 +169,18 @@ U0 GuiZoom(CGuiWindow *w)
     }
     w->zoomed = !w->zoomed;
 }
-U0 GuiClose(CGuiWindow *w)
+U0 GuiStopWindow(CGuiWindow *w)
 {
     if (!w || w->closed) return;
     w->closed = TRUE;
     if (w->term) VtStop(w->term);
+}
+U0 GuiClose(CGuiWindow *w)
+{
+    if (!w || w->closed || w->closing) return;
+    if (!w->pixel) {GuiStopWindow(w); return;}
+    CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_CLOSE;
+    w->closing = TRUE; w->close_deadline = TimerJiffies + 1000; GuiEventPush(w, &e);
 }
 U0 GuiTaskGone(CTask *t)
 {
@@ -169,7 +193,7 @@ CGuiWindow *GuiNew(U8 *title, I64 width = 480, I64 height = 256, Bool pixel = FA
     CGuiWindow *w; I64 i;
     if (!gui_active || Gs->num || gui.count >= GUI_WINDOWS || Fs->gui_window) return NULL;
     w = CAlloc(sizeof(CGuiWindow)); if (!w) return NULL;
-    for (i = 0; i < 63 && title[i]; i++) w->title[i] = title[i]; w->owner = Fs; w->pixel = pixel;
+    for (i = 0; i < 63 && title[i]; i++) w->title[i] = title[i]; w->owner = Fs; w->pixel = pixel; w->id = ++gui_window_id;
     w->term = VtNew(1, 1); w->term->owner = Fs; w->term->sink = &GuiShellSink;
     if (!GuiResize(w, width, height)) {VtRelease(w->term); Free(w); return NULL;}
     w->x = 20 + gui.count * 24; w->y = GUI_MENU + 12 + gui.count * 24;
@@ -184,10 +208,42 @@ U0 GuiShellTask(U8 *data)
     if (GuiNew("Shell")) {GuiLog("GUI SHELL OPEN\n"); if (gui.count == 2) GuiLog("GUI WINDOWS READY\n"); ShellTask(-1);}
 }
 CTask *GuiShell() {return Spawn(&GuiShellTask, NULL, "GUI Shell", 0, adam_task, SHELL_STACK);}
+class CGuiProgram {U8 *program, *entry;};
+U0 GuiProgramTask(CGuiProgram *app)
+{// Each JIT compiler and its application live until the task exits.
+    CVTerm *v = VtNew(80, 24); U8 *modules, *paths, *command;
+    VtBind(Fs, v); v->owner = Fs; v->sink = &GuiShellSink; VtRelease(v);
+    ShellTask(0);
+    modules = FileRead("C:/GuiModules.txt");
+    if (modules) {
+        paths = MStrPrint("%s,%s", modules, app->program);
+        command = MStrPrint("WarmRun(\"%s\", \"%s\");", paths, app->entry);
+        ShellExe(command); Free(command); Free(paths); Free(modules);
+    } else GuiLog("GUI APP: missing GuiModules.txt\n");
+    Free(app->program); Free(app->entry); Free(app);
+}
+CTask *GuiRun(U8 *program, U8 *entry)
+{
+    CGuiProgram *app; CTask *task;
+    if (!gui_active || Gs->num || !program || !entry) return NULL;
+    app = CAlloc(sizeof(CGuiProgram)); app->program = StrNew(program); app->entry = StrNew(entry);
+    task = Spawn(&GuiProgramTask, app, "GUI App", 0, adam_task, SHELL_STACK);
+    if (!task) {Free(app->program); Free(app->entry); Free(app);} return task;
+}
+CTask *GuiWidgets() {return GuiRun("C:/Warm/Examples/gui/Widgets.warm", "Widgets:main");}
 Bool GuiDispatchKey(I64 ev, I64 timestamp)
 {//Called by the compositor in input order, after preceding mouse focus changes.
     Bool shortcut = TRUE;
     if (!gui_active) return FALSE;
+    if (gui.menu_open) {
+        if (ev == KEY_ESC) GuiMenuDismiss;
+        else if (ev == KEY_UP || ev == KEY_DOWN) {
+            I64 delta = 1; if (ev == KEY_UP) delta = -1;
+            if (GuiMenuCount) gui.menu_hover = (gui.menu_hover + delta + GuiMenuCount) % GuiMenuCount;
+            GuiMenuPaint;
+        } else if (ev == KEY_ENTER) GuiMenuSelect(gui.menu_hover);
+        return TRUE;
+    }
     if ((ev & (KF_CTRL | KF_ALT)) == (KF_CTRL | KF_ALT)) {
         if ((ev & KEY_CODE) == 'n') gui.action = 1;
         else if ((ev & KEY_CODE) == 'q') gui.action = 2;
@@ -287,11 +343,12 @@ U0 GuiRaster(CGuiWindow *w)
 U0 GuiDesktop()
 {
     I64 x, y, s = gui.scale, pw = gui.w * s, ph = gui.h * s;
-    U8 clock[32];
+    U8 clock[32]; I64 i, left = 68;
     for (y = 0; y < ph; y++) for (x = 0; x < pw; x++) gui.desktop[y * pw + x] = ((x / s ^ y / s) & 1) * GUI_WHITE;
     GuiFill(gui.desktop, pw, ph, s, 0, 0, gui.w, GUI_MENU, GUI_WHITE);
     GuiFill(gui.desktop, pw, ph, s, 0, GUI_MENU - 1, gui.w, 1, 0);
     GuiText(gui.desktop, pw, ph, s, 8, 3, "System");
+    if (gui.focus) for (i = 0; i < gui.focus->menu_count; i++) {GuiText(gui.desktop, pw, ph, s, left + 8, 3, gui.focus->menus[i].title); left += StrLen(gui.focus->menus[i].title) * 8 + 16;}
     StrPrint(clock, "%T", Now); clock[5] = 0;
     GuiText(gui.desktop, pw, ph, s, gui.w - 52, 3, clock);
     gui.desktop_revision++; gui.clock_minute = Now / (60 * CDATE_FREQ); GuiDamage(0, 0, gui.w, gui.h);
@@ -321,6 +378,7 @@ U0 GuiCompose()
             if (sx > x) MemCpy(gui.canvas + y * pw + x, w->pixels + (y - w->y * s) * w->pw + x - w->x * s, (sx - x) * 4);
         }
     }
+    for (y = y0; y < y1; y++) for (x = x0; x < x1; x++) if (gui.overlay[y * pw + x] >> 24) gui.canvas[y * pw + x] = gui.overlay[y * pw + x];
     for (y = MaxI64(y0, gui.my * s); y < MinI64(y1, (gui.my + 18) * s); y++)
         for (x = MaxI64(x0, gui.mx * s); x < MinI64(x1, (gui.mx + 12) * s); x++) {
             p = gui.pointer[(y / s - gui.my) * 12 + x / s - gui.mx];
@@ -345,20 +403,20 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
             else GuiMove(gui.drag, x - gui.dx, y - gui.dy);
         }
     }
+    if (GuiMenuMouse(x, y, buttons)) {gui.buttons = buttons; gui.wheel = wheel; return;}
     if ((buttons & 1) && !(gui.buttons & 1)) {
-        if (y < GUI_MENU && x < 68) GuiShell;
-        else for (i = gui.count - 1; i >= 0; i--) {
-                w = gui.windows[i];
-                if (w->x <= x < w->x + w->w + 2 * GUI_PAD + 2 && w->y <= y < w->y + w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 2) {
-                    active = gui.focus == w; GuiFocus(w); gui.dx = x - w->x; gui.dy = y - w->y;
-                    if (gui.dy < GUI_TITLE) {
-                        if (gui.dx < 20) {if (active) GuiClose(w);}
-                        else if (gui.dx >= w->w + 2 * GUI_PAD - 18) {if (active) GuiZoom(w);}
-                        else {gui.drag = w; gui.resizing = FALSE;}
-                    } else if (active && gui.dx >= w->w + 2 * GUI_PAD - 12 && gui.dy >= w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER - 12) {gui.drag = w; gui.resizing = TRUE;}
-                    break;
-                }
+        for (i = gui.count - 1; i >= 0; i--) {
+            w = gui.windows[i];
+            if (w->x <= x < w->x + w->w + 2 * GUI_PAD + 2 && w->y <= y < w->y + w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 2) {
+                active = gui.focus == w; GuiFocus(w); gui.dx = x - w->x; gui.dy = y - w->y;
+                if (gui.dy < GUI_TITLE) {
+                    if (gui.dx < 20) {if (active) GuiClose(w);}
+                    else if (gui.dx >= w->w + 2 * GUI_PAD - 18) {if (active) GuiZoom(w);}
+                    else {gui.drag = w; gui.resizing = FALSE;}
+                } else if (active && gui.dx >= w->w + 2 * GUI_PAD - 12 && gui.dy >= w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER - 12) {gui.drag = w; gui.resizing = TRUE;}
+                break;
             }
+        }
     }
     if (!(buttons & 1)) gui.drag = NULL;
     w = gui.capture;
@@ -380,7 +438,7 @@ U0 GuiEnd()
     I64 i; U0 (*stop)();
     if (stop = gui.stop_hook) (*stop)();
     gui.frame_hook = gui.stop_hook = NULL;
-    for (i = 0; i < gui.count; i++) GuiClose(gui.windows[i]);
+    for (i = 0; i < gui.count; i++) GuiStopWindow(gui.windows[i]);
     gui.focus = gui.drag = gui.capture = NULL; gui_active = FALSE; gui_key_hook = gui_mouse_hook = NULL;
     fb.redraw_all = TRUE; fb.pending = TRUE;
     FbRender;
@@ -398,6 +456,8 @@ U0 GuiTask(U8 *data)
         if (gui.input_lost) {gui.input_lost = FALSE; if (gui.focus) VtKeyPush(gui.focus->term, KEY_INPUT_LOST);}
         action = gui.action; gui.action = 0;
         if (action == 1) GuiShell;
+        else if (action == 7) GuiDraw;
+        else if (action == 8) GuiWidgets;
         else if (action == 2) {GuiEnd; break;}
         else if (action == 6 && gui.count) GuiFocus(gui.windows[0]);
         else if (action >= 3 && action <= 5 && gui.focus) {
@@ -409,13 +469,15 @@ U0 GuiTask(U8 *data)
         }
         for (i = 0; i < gui.count; i++) {
             w = gui.windows[i];
+            if (w->closing && TimerJiffies >= w->close_deadline) GuiStopWindow(w);
             if (w->closed) {
+                if (gui.menu_window == w) GuiMenuDismiss;
                 GuiWinDamage(w); if (gui.focus == w) gui.focus = NULL; if (gui.drag == w) gui.drag = NULL; if (gui.capture == w) gui.capture = NULL;
                 // Terminal refs keep data alive until inherited tasks are reaped.
                 if (w->owner) w->owner->gui_window = NULL;
                 for (j = i; j < gui.count - 1; j++) gui.windows[j] = gui.windows[j + 1];
                 gui.count--; VtRelease(w->term); Free(w->pixels); Free(w); i--;
-                if (!gui.focus && gui.count) GuiFocus(gui.windows[gui.count - 1]);
+                if (!gui.focus && gui.count) GuiFocus(gui.windows[gui.count - 1]); else if (!gui.count) GuiDesktop;
             } else {
                 if (w->serial != font.serial) GuiResize(w, w->w, w->h);
                 GuiRaster(w);
@@ -430,7 +492,7 @@ U0 GuiTask(U8 *data)
         w = gui.windows[i]; if (w->owner) w->owner->gui_window = NULL;
         VtRelease(w->term); Free(w->pixels); Free(w);
     }
-    gui.count = 0; Free(gui.desktop); Free(gui.canvas); gui.desktop = gui.canvas = NULL; gui.task = NULL;
+    gui.count = 0; Free(gui.desktop); Free(gui.canvas); Free(gui.overlay); gui.desktop = gui.canvas = gui.overlay = NULL; gui.task = NULL;
 }
 Bool Gui()
 {
@@ -438,8 +500,8 @@ Bool Gui()
     if (!fb.base || Gs->num || gui_active || gui.task) return FALSE;
     daif = FbRenderLock;
     gui.scale = font.scale; gui.w = fb.w / gui.scale; gui.h = fb.h / gui.scale;
-    gui.desktop = CAlloc(fb.w * fb.h * 4); gui.canvas = CAlloc(fb.w * fb.h * 4);
-    if (!gui.desktop || !gui.canvas) {Free(gui.desktop); Free(gui.canvas); FbRenderUnlock(daif); return FALSE;}
+    gui.desktop = CAlloc(fb.w * fb.h * 4); gui.canvas = CAlloc(fb.w * fb.h * 4); gui.overlay = CAlloc(fb.w * fb.h * 4);
+    if (!gui.desktop || !gui.canvas || !gui.overlay) {Free(gui.desktop); Free(gui.canvas); Free(gui.overlay); FbRenderUnlock(daif); return FALSE;}
     fb.top = 0; fb.cur_w = 0;
     if (fb.scanout) ArchMmioWrite32(fb.scanout, 0);
     if (fb.gpu) GpuCursorHide;
@@ -447,6 +509,7 @@ Bool Gui()
     gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
     gui.input_head = gui.input_tail = 0; gui.input_lost = FALSE;
     gui_active = TRUE; gui_key_hook = &GuiKey; gui_mouse_hook = &GuiMouseInput;
+    gui.menu_open = FALSE; gui.menu_window = NULL; gui.overlay_revision++;
     GuiPointerInit; GuiDesktop;
     FbRenderUnlock(daif);
     if (fb.venus && (start = gui_start_hook)) (*start)();
