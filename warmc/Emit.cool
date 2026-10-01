@@ -3,7 +3,7 @@ class CWBuffer {U8 *data; I64 size, capacity;};
 class CWGen {
     CWUnit *unit;
     CWBuffer *types_text, *body;
-    CWNode *types, *names, *functions, *last_function, *current, *bindings, *address_dependencies, *scratch;
+    CWNode *types, *names, *functions, *last_function, *current, *bindings, *address_dependencies, *scratch, *ranges;
     I64 serial; Bool native;
 };
 U0 WGPut(CWUnit *u, CWBuffer *b, U8 *text)
@@ -251,6 +251,94 @@ string_next:
     }
     return out;
 }
+// Recognize library declarations, never a same-named application function.
+Bool WGLibrary(CWNode *d, U8 *module)
+{
+    CWNode *m = WDeclModule(d); U8 *path, *tail; I64 n, k;
+    if (!m || !WEq(m->name, module) || !d->token || !d->token->source) return FALSE;
+    path = d->token->source->path;
+    if (WEq(module, "Austral.Pervasive")) return WEq(path, "builtin/Pervasive.warm") || WEq(path, "builtin/Pervasive.warmh");
+    if (!WEq(module, "Standard.Buffer")) return FALSE;
+    n = StrLen(path); tail = "standard/src/Buffer.warm"; k = StrLen(tail);
+    if (n >= k && WEq(path + n - k, tail)) return TRUE;
+    tail = "standard/src/Buffer.warmh"; k = StrLen(tail);
+    if (n >= k && WEq(path + n - k, tail)) return TRUE;
+    return WEq(path, "C:/Warm/Standard/Buffer.warm") || WEq(path, "C:/Warm/Standard/Buffer.warmh");
+}
+CWNode *WGRoot(CWNode *n)
+{
+    if (!n) return NULL;
+    if (WEq(n->tag, "argument") || WEq(n->tag, "cast") || WEq(n->tag, "borrow-expression")) return WGRoot(WChild(n, "value"));
+    if (WEq(n->tag, "variable")) return n->resolved;
+    return NULL;
+}
+Bool WGAccess(CWNode *d)
+{
+    return d && ((WGLibrary(d, "Standard.Buffer") && (WEq(d->name, "length") || WEq(d->name, "nth") || WEq(d->name, "storeNth"))) ||
+                 (WGLibrary(d, "Austral.Pervasive") && (WEq(d->name, "spanLength") || WEq(d->name, "spanWriteLength"))));
+}
+// A descriptor may occur only as a direct argument to a known accessor, or as
+// the base of span indexing. Aliases, descriptor assignments and arbitrary
+// calls/embeds invalidate the proof. The checked linear/borrow rules exclude
+// concurrent safe aliases to an owned Buffer or an immutable Buffer loan.
+Bool WGStable(CWNode *n, CWNode *root, CWNode *index)
+{
+    CWNode *c, *v, *d;
+    if (!n) return TRUE;
+    if (WEq(n->tag, "embed")) return FALSE;
+    if (WEq(n->tag, "variable") && n->resolved == root) return FALSE;
+    if (WEq(n->tag, "borrow-expression") && (WGRoot(n) == root || WGRoot(n) == index)) return FALSE;
+    if (WEq(n->tag, "assign")) {
+        v = WChild(n, "target");
+        if (v->resolved == index || WGRoot(v) == root) return FALSE;
+    }
+    if ((WEq(n->tag, "path") || WEq(n->tag, "ref-path")) && n->resolved == root) {
+        // Only span element reads/writes, never descriptor fields.
+        if (!WDeclType(root) || (!WEq(WDeclType(root)->name, "Span") && !WEq(WDeclType(root)->name, "Span!"))) return FALSE;
+        for (c = n->first; c; c = c->next) if (WEq(c->role, "path") && !WEq(c->tag, "index")) return FALSE;
+    }
+    d = n->resolved;
+    for (c = n->first; c; c = c->next) {
+        if (!WEq(c->role, "type") && !(WEq(n->tag, "call") && WGAccess(d) && WEq(c->role, "argument") && WGRoot(c) == root))
+            if (!WGStable(c, root, index)) return FALSE;
+    }
+    return TRUE;
+}
+Bool WGInBounds(CWGen *g, CWNode *base, CWNode *index)
+{
+    CWNode *r, *root = WGRoot(base);
+    if (!root && base && WEq(base->tag, "path")) root = base->resolved;
+    if (!root || !index || !WEq(index->tag, "variable")) return FALSE;
+    for (r = g->ranges; r; r = r->next) if (r->resolved == root && r->pair == index->resolved) return TRUE;
+    return FALSE;
+}
+Bool WGUnsafeFunction(CWGen *g)
+{
+    CWNode *m = WDeclModule(g->current->resolved), *p;
+    for (p = m->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Unsafe_Module")) return TRUE;
+    return FALSE;
+}
+CWNode *WGRange(CWGen *g, CWNode *loop)
+{
+    CWNode *bound = WChild(loop, "to"), *arg, *root, *r, *p;
+    // Unsafe modules can manufacture aliases invisible to the borrow checker.
+    if (WGUnsafeFunction(g)) return NULL;
+    if (!(loop->flags & 16384)) {
+        if (!WEq(bound->tag, "binary") || !WEq(bound->name, "-")) return NULL;
+        p = WChild(bound, "right");
+        if (!WEq(p->tag, "literal") || !WEq(p->name, "1")) return NULL;
+        bound = WChild(bound, "left");
+    }
+    if (!WEq(bound->tag, "call") || !WGAccess(bound->resolved)) return NULL;
+    if (!WEq(bound->resolved->name, "length") && !WEq(bound->resolved->name, "spanLength") && !WEq(bound->resolved->name, "spanWriteLength")) return NULL;
+    arg = WChild(bound, "argument"); root = WGRoot(arg); if (!root) return NULL;
+    p = WGConcrete(g, WDeclType(root));
+    // Mutable Buffer references could have been aliased before the loop.
+    if (WEq(p->name, "&!")) return NULL;
+    if (!WGStable(WChild(loop, "body"), root, loop->resolved)) return NULL;
+    r = WNode(g->unit, "range-proof", loop->token); r->resolved = root; r->pair = loop->resolved;
+    r->next = g->ranges; return r;
+}
 U8 *WGPath(CWGen *g, CWNode *n)
 {
     CWUnit *u = g->unit;
@@ -258,7 +346,7 @@ U8 *WGPath(CWGen *g, CWNode *n)
     U8 *result, *idx, *ptr, *ix, *size;
     if (base) {ty = WGConcrete(g, base->ty); result = WGExpr(g, base);}
     else {ty = WGConcrete(g, WDeclType(n->resolved)); result = WGName(g, n->resolved);}
-    Bool transform = WEq(n->tag, "ref-path");
+    Bool transform = WEq(n->tag, "ref-path"), initial = TRUE;
     for (p = n->first; p; p = p->next) if (WEq(p->role, "path")) {
             if (WEq(p->tag, "index")) {
                 idx = WGExpr(g, WChild(p, "value")); inner = ty;
@@ -266,7 +354,8 @@ U8 *WGPath(CWGen *g, CWNode *n)
                 // au_array_index's checks, open-coded (U64 variables, as its parameters are).
                 // Bytes cannot overflow the multiplication.
                 ix = WGFresh(g, "wt"); WGLine(g, WG3(u, "U64 ", ix, ";")); WGLine(g, WG3(u, ix, " = ", WGCat(u, idx, ";")));
-                WGLine(g, WG3(u, "if (", ix, WG3(u, " >= (", result, ").wh_size) wh_abort(\"Array index out of bounds.\");")));
+                if (!initial || (!WGInBounds(g, base, WChild(p, "value")) && !(n->resolved && WGInBounds(g, n, WChild(p, "value")))))
+                    WGLine(g, WG3(u, "if (", ix, WG3(u, " >= (", result, ").wh_size) wh_abort(\"Array index out of bounds.\");")));
                 if (WEq(WGType(g, inner->first), "U8") || WEq(WGType(g, inner->first), "I8")) ptr = WG3(u, "((", result, WG3(u, ").wh_data + ", ix, ")"));
                 else {
                     size = WGFresh(g, "wt"); WGLine(g, WG3(u, "U64 ", size, ";"));
@@ -281,7 +370,7 @@ U8 *WGPath(CWGen *g, CWNode *n)
                 else result = WG3(u, "(", result, WGCat(u, ").", WGName(g, p->resolved)));
                 if (transform) result = WG3(u, "(&(", result, "))");
             }
-            ty = WGConcrete(g, p->ty);
+            ty = WGConcrete(g, p->ty); initial = FALSE;
         }
     return result;
 }
@@ -418,7 +507,7 @@ CWNode *WGArguments(CWGen *g, CWNode *n)
     CWNode *args = NULL, *last = NULL, *a, *v, *expr;
     for (a = n->first; a; a = a->next) if (WEq(a->role, "argument")) {
             expr = a; if (WEq(a->tag, "argument")) expr = WChild(a, "value");
-            v = WNode(g->unit, "value", a->token); v->name = WGExpr(g, expr); v->ty = WGConcrete(g, expr->ty); v->resolved = a->resolved;
+            v = WNode(g->unit, "value", a->token); v->name = WGExpr(g, expr); v->ty = WGConcrete(g, expr->ty); v->resolved = a->resolved; v->pair = expr;
             if (last) last->next = v; else args = v; last = v;
         }
     return args;
@@ -486,7 +575,7 @@ U8 *WGOpenCode(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
     if (WPrefix(ty->name, "Int")) return WGOpenSigned(g, d, vals[0], vals[1], ty);
     // Operands in variables of their type, as in the Pervasive bodies: HolyC folds constant
     // operands as signed I64 (0xffffffffffffffff / 256 would be 0).
-    for (n = 0; n < 2; n++) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[n]->name, ty); vals[n]->name = tmp;}
+    for (n = 0; n < 2; n++) if (!vals[n]->pair || !WEq(vals[n]->pair->tag, "variable") || !WTypeEq(vals[n]->ty, ty) || !vals[1 - n]->pair || (!WEq(vals[1 - n]->pair->tag, "variable") && !WEq(vals[1 - n]->pair->tag, "literal"))) {tmp = WGTemp(g, ty); WGCopy(g, tmp, vals[n]->name, ty); vals[n]->name = tmp;}
     if (WEq(name, "bitwiseAnd")) op = " & "; else if (WEq(name, "bitwiseOr")) op = " | "; else if (WEq(name, "bitwiseXor")) op = " ^ ";
     max = "0xffffffffffffffff"; if (bits == 8) max = "255"; else if (bits == 16) max = "65535"; else if (bits == 32) max = "4294967295";
     if (WEq(name, "bitwiseShiftLeft") || WEq(name, "bitwiseShiftRight")) {
@@ -504,6 +593,44 @@ U8 *WGOpenCode(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
         WGLine(g, WG3(u, "if (", flag, WG3(u, ") wh_abort(\"Overflow in ", name, WG3(u, " (", ty->name, ")\");"))));
     }
     tmp = WGTemp(g, ty); WGCopy(g, tmp, WG3(u, "(", vals[0]->name, WG3(u, op, vals[1]->name, ")")), ty); return tmp;
+}
+// Emit the exact simple library operations with their original checks/messages.
+U8 *WGOpenAccess(CWGen *g, CWNode *d, CWNode *args, CWNode *ty)
+{
+    CWUnit *u = g->unit; CWNode *p, *v, *vals[3], *record, *slot;
+    U8 *expr = NULL, *tmp, *size = NULL, *array = NULL, *name = d->name; I64 n = 0;
+    for (p = d->first; p; p = p->next) if (WEq(p->role, "parameter")) {
+            if (n == 3) return NULL;
+            for (v = args; v; v = v->next) if (v->resolved == p) break;
+            if (!v) return NULL; vals[n++] = v;
+        }
+    if (WGLibrary(d, "Standard.Buffer") && (WEq(name, "length") || WEq(name, "nth") || WEq(name, "storeNth"))) {
+        if (!n || !vals[0]->ty->first) return NULL;
+        record = WCanon(vals[0]->ty->first->resolved);
+        for (slot = record->first; slot; slot = slot->next) if (WEq(slot->role, "slot")) {
+                if (WEq(slot->name, "size")) size = WG3(u, "(", vals[0]->name, WGCat(u, ")->", WGName(g, slot)));
+                if (WEq(slot->name, "array")) array = WG3(u, "(", vals[0]->name, WGCat(u, ")->", WGName(g, slot)));
+            }
+        if (!size || !array) return NULL;
+        if (WEq(name, "length") && n == 1) expr = size;
+        else if (n >= 2) {
+            if (!WGInBounds(g, vals[0]->pair, vals[1]->pair))
+                WGLine(g, WG3(u, "if (", vals[1]->name, WG3(u, " >= ", size, WG3(u, ") wh_abort(\"", name, ": index out of range\");"))));
+            expr = WG3(u, "(", array, WG3(u, ")[", vals[1]->name, "]"));
+            if (WEq(name, "storeNth") && n == 3) {WGCopy(g, expr, vals[2]->name, vals[2]->ty); return "0";}
+        }
+    } else if (WGLibrary(d, "Austral.Pervasive") && n == 1 && (WEq(name, "spanLength") || WEq(name, "spanWriteLength"))) expr = WGCat(u, vals[0]->name, ".wh_size");
+    else if (d->token && WEq(d->token->source->path, "builtin/Memory.warm")) {
+        if (n == 1 && (WEq(name, "load") || WEq(name, "loadRead") || WEq(name, "loadWrite"))) expr = WG3(u, "(*(", vals[0]->name, "))");
+        else if (n == 2 && WEq(name, "store")) {WGCopy(g, WG3(u, "(*(", vals[0]->name, "))"), vals[1]->name, vals[1]->ty); return "0";}
+        else if (n == 2 && (WEq(name, "positiveOffset") || WEq(name, "negativeOffset"))) {
+            tmp = " + "; if (WEq(name, "negativeOffset")) tmp = " - ";
+            expr = WG3(u, "(", vals[0]->name, WG3(u, tmp, vals[1]->name, ")"));
+        } else if (n == 1 && (WEq(name, "pointerCast") || WEq(name, "refToPointer") || WEq(name, "refMutToPointer") || WEq(name, "sizeToIndex"))) expr = WG3(u, "(", vals[0]->name, WG3(u, ")(", WGType(g, ty), ")"));
+        else if (n == 1 && (WEq(name, "spanToPointer") || WEq(name, "spanWriteToPointer"))) expr = WG3(u, "(", vals[0]->name, WG3(u, ".wh_data)(", WGType(g, ty), ")"));
+    }
+    if (!expr) return NULL;
+    tmp = WGTemp(g, ty); WGCopy(g, tmp, expr, ty); return tmp;
 }
 U8 *WGCallExpr(CWGen *g, CWNode *n)
 {
@@ -577,6 +704,7 @@ U8 *WGCallExpr(CWGen *g, CWNode *n)
         d = d->pair;
     }
     if (!WChild(d, "body")) {WFail(u, n->token, "Unsupported Feature", "No function implementation for output"); return "0";}
+    tmp = WGOpenAccess(g, d, args, ty); if (tmp) return tmp;
     tmp = WGOpenCode(g, d, args, ty); if (tmp) return tmp;
     for (p = d->first; p; p = p->next) if (WEq(p->tag, "pragma") && WEq(p->name, "Foreign_Import")) {
             q = WChild(p, "argument"); if (q) foreign = WChild(q, "value")->name;
@@ -693,7 +821,7 @@ U0 WGBindLocal(CWGen *g, CWNode *binding, U8 *value)
 }
 U0 WGStmt(CWGen *g, CWNode *n)
 {
-    CWUnit *u = g->unit; CWNode *c, *b, *v, *ty, *ref, *rt;
+    CWUnit *u = g->unit; CWNode *c, *b, *v, *ty, *ref, *rt, *saved_ranges;
     U8 *a, *value, *name, *dest, *limit;
     if (!n || u->error_kind) return;
     if (WEq(n->tag, "block")) {for (c = n->first; c && !u->error_kind; c = c->next) WGStmt(g, c);}
@@ -733,8 +861,11 @@ U0 WGStmt(CWGen *g, CWNode *n)
         if (!(n->flags & 16384)) limit = WGExpr(g, WChild(n, "to"));
         a = " > "; if (n->flags & 16384) a = " >= ";
         WGLine(g, WG3(u, "if (", name, WG3(u, a, limit, ") break;")));
-        WGStmt(g, WChild(n, "body")); WGLine(g, WGCat(u, n->pair->tag, ":;"));
-        WGLine(g, WG3(u, "if (", name, " == 0xffffffffffffffff) break;"));
+        saved_ranges = g->ranges; c = WGRange(g, n); if (c) g->ranges = c;
+        WGStmt(g, WChild(n, "body")); g->ranges = saved_ranges; WGLine(g, WGCat(u, n->pair->tag, ":;"));
+        // A safe until loop enters only with index < its snapshotted U64 bound.
+        // Its immutable Index therefore cannot wrap on the increment.
+        if (!(n->flags & 16384) || WGUnsafeFunction(g)) WGLine(g, WG3(u, "if (", name, " == 0xffffffffffffffff) break;"));
         WGLine(g, WGCat(u, name, "++;")); WGLine(g, "}"); WGLine(g, WGCat(u, n->pair->name, ":;"));
     } else if (WEq(n->tag, "borrow")) {
         v = WChild(n, "original"); value = WGName(g, v->resolved); c = WChild(n, "mode");

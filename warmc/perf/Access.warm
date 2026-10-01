@@ -1,0 +1,45 @@
+import Standard.Buffer (Buffer, initialize, destroyFree, nth, length);
+module body Access is
+    pragma Foreign_Import(External_Name => "__GetTicks");
+    private function ticks(): Nat64 is end;
+    function sum(buf: &[Buffer[Nat64]]): Nat64 is
+        var total: Nat64 := 0;
+        for pass from 0 until 1024 do
+            for i from 0 until length(buf) do
+                total := total + nth(buf, i);
+            end for;
+        end for;
+        return total;
+    end;
+    function scan(bytes: Span[Nat8]): Nat64 is
+        var total: Nat64 := 0;
+        for pass from 0 until 1024 do
+            for i from 0 until spanLength(bytes) do
+                if bytes[i] = 'x' then total := total + 1; end if;
+            end for;
+        end for;
+        return total;
+    end;
+    function matrix(buf: &[Buffer[Nat64]]): Nat64 is
+        var total: Nat64 := 0;
+        for pass from 0 until 1024 do
+            for row from 0 until 128 do
+                for col from 0 until 128 do
+                    total := total + nth(buf, row * 128 + col);
+                end for;
+            end for;
+        end for;
+        return total;
+    end;
+    function main(): ExitCode is
+        let buf: Buffer[Nat64] := initialize(16384, 1);
+        let start: Nat64 := ticks(); let a: Nat64 := sum(&buf); let endA: Nat64 := ticks();
+        let b: Nat64 := scan("BYTE_SCAN_INPUT"); let endB: Nat64 := ticks();
+        let c: Nat64 := matrix(&buf); let endC: Nat64 := ticks();
+        printLn(a); printLn(endA - start);
+        printLn(b); printLn(endB - endA);
+        printLn(c); printLn(endC - endB);
+        destroyFree(buf);
+        return ExitSuccess();
+    end;
+end module body.

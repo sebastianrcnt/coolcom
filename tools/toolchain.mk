@@ -54,6 +54,7 @@ warm-test: warm-host
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_semantics.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_numbers.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_language.py
+	WARM_TOOLCHAIN_READY=1 python3 warmc/test_generated.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_cli.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_standard.py
 	WARM_TOOLCHAIN_READY=1 python3 warmc/test_os.py
