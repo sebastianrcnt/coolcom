@@ -564,3 +564,97 @@ VMs (two CPU and one Venus) and four CPU workers passed without retries: all
 80 CPU/Venus, 1x/2x pixel/desktop scenarios. The background processes stayed
 alive throughout every run. Load driver and per-run logs:
 `build/gui-resize-load.py`, `build/gui-resize-load/`, `build/gui-resize-load.log`.
+
+### Responsive app loading and Drawing
+
+Warm GUI applications still execute on core 0. Window structure, event queues,
+back/front pixel buffers and synchronous Venus submissions rely on cooperative
+execution there; moving the complete application to another core would violate
+those assumptions. Each shell owns its compiler tables and TLS, and context
+switches preserve x28. `ShellCompileYield` therefore yields at completed Cool
+statements and before compiler allocation/free callbacks acquire any kernel heap
+lock. The guest Warm package also polls this safe point during arena allocation
+and AST comparisons. A 2 ms budget avoids yielding on every allocation; masked
+interrupts, other cores and non-GUI sessions skip the checkpoint. The menu bar
+shows `Loading...` until a loader opens its window, fails, or exits.
+
+Drawing uses `GuiPoll(event, FALSE)` to drain queued events without the legacy
+implicit present. It joins consecutive pressed points with `GrLine`, resets the
+stroke on release/resize/input loss, and commits once after draining the queue.
+Completed-frame acknowledgements are asynchronous and mouse UART markers are
+batched to the latest point; the existing READY/MOUSE/PONG/PRESENTED markers
+remain available.
+
+`gui-loading-test` exercises the System action dispatcher for cold Top, Settings
+and Files launches. A second core feeds the ordinary compositor input queue
+while an existing pixel app processes keys, paints and acknowledges completed
+composition; it also drags that window during compilation. All sent keys must
+arrive and at least five must be painted during loading. Actual
+input-to-composition samples must have a median at most 20 ms; parallel suite
+runs also require a maximum at most 150 ms. Standalone maximums are diagnostic.
+The shared testvm harness runs both CPU and Venus when available. `gui-draw-test` additionally
+queues 82 pressed points in two strokes and requires one present, one latency
+sample, continuous screenshot pixels and a release gap within a 100 ms bound. Outputs are isolated under `build/gui-loading-test/` and
+`build/gui-draw-test/`.
+
+Validation (2026-10-02): `codexctl test` ran `make -j test` and exited 0,
+including CPU/Venus and OS.Ui U1–U5. During cold loading, the measured maximum
+was 48.048 ms on CPU and 24.940 ms on Venus; every injected key arrived and the
+probe window moved before loading completed. Drawing's 82-point backlog used
+one present with 1.724 ms CPU / 3.290 ms Venus input-to-composition latency.
+The screenshots also check the line between two distant points and the gap
+between released strokes. Full log: `build/guiperf-full-test.log`.
+
+### Loading latency measurement and failure reporting
+
+The reported shell exception in the merge test was `throw(4)` from the loading
+fixture's latency assertion. The input script waited only for `GUI LOADING
+PASS`, so an assertion failure left the VM idle until its 150-second timeout.
+It was not a compiler fault reported by that log. The revised fixture returns
+failure, emits the measurements and `FAILED`, and always emits `DONE` to release
+the host wait. Unexpected fixture exceptions are caught and also release it.
+`--loaded --latency-limit-us 0` deliberately exercises this failure path.
+`make test` and the stress harness pass `--loaded`, enforcing median ≤20 ms
+and maximum ≤150 ms, using the requested UI-style acceptance criteria.
+Direct standalone runs enforce only the median and log the maximum. Host CPU contention can produce
+maximum outliers during the full parallel suite; one reproduced full-suite
+sample was 112.106 ms. No compiler checkpoint changes were needed: standalone
+normal and continuous-input checks stayed below 50 ms.
+
+The original fixture timed the observer's eventual acknowledgement of a
+revision. That charges observer scheduling after composition to the frame,
+and processing more input before checking the previous revision can extend
+that observation interval across several frames. The revised test reads the
+existing `GuiCompose` counter samples on core 0, continuously drains the ring,
+and retains the old acknowledgement maximum separately as `ack_max` for
+diagnosis. The old failure log alone cannot separate those two timings.
+
+Concurrent foreground `ShellExe` calls now verify a private compiler global
+(`warm_kernel_serial`) retains its sentinel value while each loader defines
+and updates its own copy of the same name. The shell's compiler tables and TLS
+are task-owned; `ArchCtxSwitch` saves/restores x28. This exercises compiler
+isolation during loading rather than inferring corruption from an intentional
+assertion exception. `--input-interval-ms 1` also exercises continuous input
+backlogs; the regular test uses 20 ms input periods.
+
+A repeatable stress harness runs ten sequential loading tests while four
+existing tests run in parallel: GUI apps, completed pixel frames, Drawing and
+Warm standard-library kernel integration. Each foreground run has separate
+artifacts, and every background result is checked. Run it under the shared
+machine lock:
+
+```
+LC_ALL=C.UTF-8 /Users/coolguy/.local/bin/python3 /Users/coolguy/.claude/skills/codex/codexctl.py locked -- python3 tools/gui-loading-stress.py build/kernel.Image --runs 10 --venus
+```
+
+Stress validation (2026-10-02): ten consecutive CPU+Venus loaded runs passed,
+with all four parallel workers passing (10 GUI apps, 24 present, 56 Drawing
+and 67 Warm standard-library invocations). The 60 cold launches delivered all
+23,020 injected keys; 16,992 concurrent compiler checks retained the private
+sentinel. Highest per-launch median was 4.023 ms CPU / 4.906 ms Venus; maximum
+was 26.042 ms CPU / 27.106 ms Venus. Standalone maxima were 22.045 ms CPU /
+29.658 ms Venus; continuous 1 ms input maxima were 29.069 / 30.120 ms. A forced
+zero-limit failure exited nonzero with `FAILED`/`DONE`, without an uncaught
+shell exception or VM timeout. Artifacts: `build/gui-loading-stress-final/`,
+`build/gui-loading-standalone-final/`, `build/gui-loading-continuous-final/`,
+`build/gui-loading-failure-final/`.

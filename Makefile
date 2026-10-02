@@ -536,3 +536,9 @@ UI_TEST_AFTER := $(if $(filter test,$(MAKECMDGOALS)),$(filter-out ui-test,$(shel
 ui-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal) | $(UI_TEST_AFTER)
 	python3 tools/ui-test.py $(word 1,$^) $(if $(RUN_VENUS),--venus) --stage $(UI_STAGES)
 test: ui-test
+
+.PHONY: gui-loading-test
+gui-loading-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
+	python3 tools/gui-loading-test.py $< $(if $(RUN_VENUS),--venus) $(if $(filter test,$(MAKECMDGOALS)),--loaded)
+
+test: gui-loading-test
