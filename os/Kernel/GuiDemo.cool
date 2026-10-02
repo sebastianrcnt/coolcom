@@ -20,27 +20,44 @@ U0 GuiDrawPresent()
 }
 U0 GuiDrawTask(U8 *data)
 {
-    CGuiEvent e; U8 *message; Bool replied;
+    CGuiEvent e; U8 *message; Bool replied, painted, drawing = FALSE, mouse;
+    I64 x = 0, y = 0, revision = 0, mouse_x = 0, mouse_y = 0; Bool ack = FALSE, pong = FALSE;
     no_warn data;
-    if (!GuiNewPixel("Drawing", 480, 256)) return;
+    CGuiWindow *w = GuiNewPixel("Drawing", 480, 256);
+    if (!w) return;
     GuiDrawScene; GuiDrawPresent; message = MStrPrint("GUI DRAW READY%d\n", gui.count); GuiLog(message); Free(message);
     while (TRUE) {
-        replied = FALSE;
-        while (GuiPoll(&e)) {
+        replied = painted = mouse = FALSE;
+        // GuiPoll's legacy auto-present would commit each individual point.
+        // Drain the complete backlog into the back buffer before one present.
+        while (GuiPoll(&e, FALSE)) {
             if (e.type == GUI_EVENT_CLOSE) return;
             if (e.type == GUI_EVENT_KEY && e.key == 'q') return;
-            if (e.type == GUI_EVENT_KEY && e.key == KEY_INPUT_LOST) GuiLog("GUI DRAW INPUT LOST\n");
+            if (e.type == GUI_EVENT_KEY && e.key == KEY_INPUT_LOST) {drawing = FALSE; GuiLog("GUI DRAW INPUT LOST\n");}
             if (e.type == GUI_EVENT_KEY && e.key == 'p') {
                 replied = TRUE;
                 message = MStrPrint("GUI DRAW PONG %d %d\n", TimerJiffies, TimerJiffies - e.timestamp); GuiLog(message); Free(message);
             }
-            if (e.type == GUI_EVENT_RESIZE) GuiDrawScene;
-            if (e.type == GUI_EVENT_MOUSE && (e.buttons & 1)) {
-                GrRect(e.x - 2, e.y - 2, 5, 5, 0); GuiDrawPresent;
-                message = MStrPrint("GUI DRAW MOUSE %d %d\n", e.x, e.y); GuiLog(message); Free(message);
+            if (e.type == GUI_EVENT_RESIZE) {GuiDrawScene; painted = TRUE; drawing = FALSE;}
+            if (e.type == GUI_EVENT_MOUSE) {
+                if (e.buttons & 1) {
+                    if (drawing) GrLine(x, y, e.x, e.y, 0);
+                    GrRect(e.x - 2, e.y - 2, 5, 5, 0);
+                    x = e.x; y = e.y; drawing = painted = mouse = TRUE;
+                } else drawing = FALSE;
             }
         }
-        if (replied) {GuiDrawPresent; GuiLog("GUI DRAW PRESENTED\n");}
+        if (painted || replied) {
+            GuiPresent(TRUE); revision = w->revision;
+            if (mouse) {mouse_x = x; mouse_y = y; ack = TRUE;}
+            if (replied) pong = TRUE;
+        }
+        // Acknowledge completed frames without waiting inside the input loop.
+        // UART mouse traces are batched too: one marker for the newest point.
+        if (w->presented >= revision) {
+            if (ack) {message = MStrPrint("GUI DRAW MOUSE %d %d\n", mouse_x, mouse_y); GuiLog(message); Free(message); ack = FALSE;}
+            if (pong) {GuiLog("GUI DRAW PRESENTED\n"); pong = FALSE;}
+        }
         Sleep(1);
     }
 }

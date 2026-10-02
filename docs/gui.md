@@ -534,3 +534,43 @@ model, describes the window from it, and changes it with messages. The menus,
 dialogs, tables, text fields, Files, Top, Settings and the Gallery are built on
 it. Its design, measurements and screenshots are in
 [ui-framework.md](ui-framework.md); `tools/ui-test.py` is its VM acceptance test.
+
+### Responsive app loading and Drawing
+
+Warm GUI applications still execute on core 0. Window structure, event queues,
+back/front pixel buffers and synchronous Venus submissions rely on cooperative
+execution there; moving the complete application to another core would violate
+those assumptions. Each shell owns its compiler tables and TLS, and context
+switches preserve x28. `ShellCompileYield` therefore yields at completed Cool
+statements and before compiler allocation/free callbacks acquire any kernel heap
+lock. The guest Warm package also polls this safe point during arena allocation
+and AST comparisons. A 2 ms budget avoids yielding on every allocation; masked
+interrupts, other cores and non-GUI sessions skip the checkpoint. The menu bar
+shows `Loading...` until a loader opens its window, fails, or exits.
+
+Drawing uses `GuiPoll(event, FALSE)` to drain queued events without the legacy
+implicit present. It joins consecutive pressed points with `GrLine`, resets the
+stroke on release/resize/input loss, and commits once after draining the queue.
+Completed-frame acknowledgements are asynchronous and mouse UART markers are
+batched to the latest point; the existing READY/MOUSE/PONG/PRESENTED markers
+remain available.
+
+`gui-loading-test` exercises the System action dispatcher for cold Top, Settings
+and Files launches. A second core feeds the ordinary compositor input queue
+while an existing pixel app processes keys, paints and acknowledges completed
+composition; it also drags that window during compilation. All sent keys must
+arrive, at least five must be painted during loading, and the oldest outstanding
+input-to-composition acknowledgement must stay below 100 ms. The shared testvm
+harness runs both CPU and Venus when available. `gui-draw-test` additionally
+queues 82 pressed points in two strokes and requires one present, one latency
+sample, continuous screenshot pixels and a release gap within the same 100 ms
+bound. Outputs are isolated under `build/gui-loading-test/` and
+`build/gui-draw-test/`.
+
+Validation (2026-10-02): `codexctl test` ran `make -j test` and exited 0,
+including CPU/Venus and OS.Ui U1–U5. During cold loading, the measured maximum
+was 48.048 ms on CPU and 24.940 ms on Venus; every injected key arrived and the
+probe window moved before loading completed. Drawing's 82-point backlog used
+one present with 1.724 ms CPU / 3.290 ms Venus input-to-composition latency.
+The screenshots also check the line between two distant points and the gap
+between released strokes. Full log: `build/guiperf-full-test.log`.

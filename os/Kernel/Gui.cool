@@ -50,6 +50,7 @@ class CGui
 {
     CGuiWindow *windows[GUI_WINDOWS], *focus, *drag, *capture;
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
+    CTask *loading[GUI_WINDOWS]; // core-0 app loaders, until their first window opens
     Bool resizing, damage, input_wake;
     Bool present_wake; // a present arrived while the compositor was running: compose again before sleeping
     I64 x0, y0, x1, y1, clock_minute;
@@ -247,8 +248,18 @@ U0 GuiClose(CGuiWindow *w)
     CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_CLOSE;
     w->closing = TRUE; w->close_deadline = TimerJiffies + 1000; GuiEventPush(w, &e);
 }
+U0 GuiLoading(CTask *t, Bool loading)
+{
+    I64 i;
+    for (i = 0; i < GUI_WINDOWS; i++) if (gui.loading[i] == t) {gui.loading[i] = NULL; break;}
+    if (!loading && i == GUI_WINDOWS) return;
+    if (loading) for (i = 0; i < GUI_WINDOWS; i++) if (!gui.loading[i]) {gui.loading[i] = t; break;}
+    if (gui_active) {GuiDesktop; if (gui.task) TaskWake(gui.task);}
+}
 U0 GuiTaskGone(CTask *t)
 {
+    I64 i;
+    for (i = 0; i < GUI_WINDOWS; i++) if (gui.loading[i] == t) {GuiLoading(t, FALSE); break;}
     CGuiWindow *w = t->gui_window;
     if (w) {GuiVulkanDetach(w); w->owner = NULL; w->closed = TRUE; t->gui_window = NULL;}
 }
@@ -264,6 +275,7 @@ CGuiWindow *GuiNew(U8 *title, I64 width = 480, I64 height = 256, Bool pixel = FA
     w->x = 20 + gui.count * 24; w->y = GUI_MENU + 12 + gui.count * 24;
     VtBind(Fs, w->term); Fs->gui_window = w;
     gui.windows[gui.count++] = w; GuiFocus(w);
+    GuiLoading(Fs, FALSE);
     return w;
 }
 U0 GuiLog(U8 *text) {while (*text) UartPut(*text++);}
@@ -293,6 +305,7 @@ U0 GuiProgramTask(CGuiProgram *app)
         command = MStrPrint("WarmRun(\"%s\", \"%s\");", paths, app->entry);
         ShellExe(command); Free(command); Free(paths); Free(modules);
     } else GuiLog("GUI APP: missing GuiModules.txt\n");
+    GuiLoading(Fs, FALSE);
     Free(app->program); Free(app->entry); Free(app);
 }
 CTask *GuiRun(U8 *program, U8 *entry)
@@ -301,7 +314,9 @@ CTask *GuiRun(U8 *program, U8 *entry)
     if (!gui_active || Gs->num || !program || !entry) return NULL;
     app = CAlloc(sizeof(CGuiProgram)); app->program = StrNew(program); app->entry = StrNew(entry);
     task = Spawn(&GuiProgramTask, app, "GUI App", 0, adam_task, SHELL_STACK);
-    if (!task) {Free(app->program); Free(app->entry); Free(app);} return task;
+    if (!task) {Free(app->program); Free(app->entry); Free(app);}
+    else GuiLoading(task, TRUE);
+    return task;
 }
 CTask *GuiWidgets() {return GuiRun("C:/Warm/Examples/gui/Widgets.warm", "Widgets:main");}
 CTask *GuiFiles() {return GuiRun("C:/Warm/Examples/gui/Files.warm", "GuiFiles:main");}
@@ -384,11 +399,11 @@ U0 GuiMouseInput(I64 x, I64 y, I64 buttons, I64 wheel)
     CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_MOUSE;
     e.x = x; e.y = y; e.buttons = buttons; e.wheel = wheel; GuiInputPush(&e);
 }
-Bool GuiPoll(CGuiEvent *e)
+Bool GuiPoll(CGuiEvent *e, Bool present = TRUE)
 {
     CGuiWindow *w = Fs->gui_window; I64 key;
     if (!w || !e || Gs->num) return FALSE;
-    GuiPresent; // Legacy event loops commit the preceding drawing before polling.
+    if (present) GuiPresent; // Legacy loops commit before polling; batched producers opt out.
     MemSet(e, 0, sizeof(CGuiEvent));
     if (w->event_lost) {w->event_lost = FALSE; e->type = GUI_EVENT_KEY; e->key = KEY_INPUT_LOST; return TRUE;}
     if (w->event_head != w->event_tail) {
@@ -509,6 +524,7 @@ U0 GuiDesktop()
     GuiFill(gui.desktop, pw, ph, s, 0, GUI_MENU - 1, gui.w, 1, 0);
     GuiText(gui.desktop, pw, ph, s, 8, 3, "System");
     if (gui.focus) for (i = 0; i < gui.focus->menu_count; i++) {GuiText(gui.desktop, pw, ph, s, left + 8, 3, gui.focus->menus[i].title); left += GuiTextWidth(gui.focus->menus[i].title) + 16;}
+    for (i = 0; i < GUI_WINDOWS; i++) if (gui.loading[i]) {GuiText(gui.desktop, pw, ph, s, gui.w - 156, 3, "Loading..."); break;}
     StrPrint(clock, "%T", Now); clock[5] = 0;
     GuiText(gui.desktop, pw, ph, s, gui.w - 52, 3, clock);
     gui.desktop_revision++; gui.clock_minute = Now / (60 * CDATE_FREQ); GuiDamage(0, 0, gui.w, gui.h);

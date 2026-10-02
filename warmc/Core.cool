@@ -23,6 +23,9 @@ class CWUnit {
 };
 U8 *WAlloc(CWUnit *u, I64 size)
 {
+#ifdef WARM_COOPERATIVE
+    ShellCompileYield;
+#endif
     CWArena *a = u->arena;
     U8 *p;
     size = (size + 7) & ~7;
@@ -42,7 +45,14 @@ U8 *WText(CWUnit *u, U8 *s, I64 n)
     MemCpy(p, s, n);
     return p;
 }
-Bool WEq(U8 *a, U8 *b) {return !StrCmp(a, b);}
+Bool WEq(U8 *a, U8 *b)
+{
+#ifdef WARM_COOPERATIVE
+    // AST walks also need safe points when they do not allocate.
+    ShellCompileYield;
+#endif
+    return !StrCmp(a, b);
+}
 Bool WIsInterface(U8 *path)
 {//An interface file: .warmh (or the legacy .aui).
     I64 n = StrLen(path);

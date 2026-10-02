@@ -43,7 +43,7 @@ class CShell
     I64 fault_ctx[32], line_ctx[32], fault_daif, line_daif;
     Bool in_stmt, line_active, resident;
     I64 break_pending; // Ctrl+Alt+C for this line: run no more of it (2: Break printed)
-    I64 next_slice;
+    I64 next_slice, next_compile_slice;
     U8 line[SHELL_LINE_LEN];
     U8 cmd[SHELL_CMD_LEN];
 };
@@ -56,11 +56,21 @@ I64 shell_state, shell_check; // boot self-test only
 
 // ---- Runtime services the compiler imports (see coolc/Host/native.c) ----
 
+extern U0 ShellCompileYield();
+U8 *RtMAlloc(I64 size, CTask *task = NULL)
+{// Compiler allocation callbacks run before acquiring the kernel heap lock.
+    ShellCompileYield; return MAlloc(size, task);
+}
+U8 *RtCAlloc(I64 size, CTask *task = NULL)
+{
+    ShellCompileYield; return CAlloc(size, task);
+}
+
 U8 *RtJitAlloc(I64 size)
 {//NativeJitAlloc: heap and big-region memory are both RWX.
     if (size <= 0)
         size = 1;
-    return MAlloc(size);
+    ShellCompileYield; return MAlloc(size);
 }
 
 U0 RtJitCommit(U8 *code, U8 *src, I64 size)
@@ -78,6 +88,7 @@ U8 *RtWriteProtectMemCpy(U8 *dst, U8 *src, I64 size)
 
 U0 RtFree(U8 *p)
 {//The compiler also frees pointers into module data; ignore what isn't a block.
+    ShellCompileYield;
     if (p && MemOwns(p))
         Free(p);
 }
@@ -93,7 +104,7 @@ U8 *RtStrNew(U8 *s)
 {
     if (!s)
         s = "";
-    return StrNew(s);
+    ShellCompileYield; return StrNew(s);
 }
 
 U8 *RtMAllocIdent(U8 *p)
@@ -408,6 +419,16 @@ U8 *ShellFunSeg(U8 *addr, I64 *_offset)
     return best->str;
 }
 
+U0 ShellCompileYield()
+{// Only yield at compiler-owned safe points, with no kernel lock held. Each
+    // shell owns its compiler/TLS; ArchCtxSwitch preserves x28. Keep GUI pixel
+    // producers on core 0 rather than exposing their buffers to another core.
+    CShell *sh = ShellCur;
+    if (!gui_active || Gs->num || !sh || (ArchDaif & 0x80) || TimerJiffies < sh->next_compile_slice) return;
+    sh->next_compile_slice = TimerJiffies + 2;
+    Yield;
+}
+
 I64 ShellExeCmdLine(U8 *cc)
 {//Compile and run each statement of cc (TempleOS ExeCmdLine); returns the last value.
     I64 res = 0, type, *tok = cc + CC_TOKEN, *flags = cc + CC_FLAGS;
@@ -446,6 +467,8 @@ I64 ShellExeCmdLine(U8 *cc)
             // The statement's code is not freed: a global may still point
             // at a string constant stored in it.
         }
+        // LexStmt2Bin has completed; no partially compiled declaration is shared.
+        ShellCompileYield;
     }
     return res;
 }
@@ -465,8 +488,8 @@ U0 ShellRtInit()
     shell_nrt = 0;
     ShellRt("NativeJitAlloc", &RtJitAlloc);
     ShellRt("NativeJitCommit", &RtJitCommit);
-    ShellRt("MAlloc", &MAlloc);
-    ShellRt("CAlloc", &CAlloc);
+    ShellRt("MAlloc", &RtMAlloc);
+    ShellRt("CAlloc", &RtCAlloc);
     ShellRt("Free", &RtFree);
     ShellRt("MSize", &RtMSize);
     ShellRt("StrNew", &RtStrNew);

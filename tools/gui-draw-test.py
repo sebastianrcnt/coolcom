@@ -33,6 +33,27 @@ def boot(mode):
     for(i=0;i<80;i++)GuiKey('p');
     ArchIntRestore(daif);
 }
+U0 GuiDrawDrag()
+{
+    I64 i,daif,revision,started,elapsed;CGuiWindow *w=NULL;
+    for(i=0;i<gui.count;i++)if(gui.windows[i]->pixel)w=gui.windows[i];
+    GuiFocus(w); Sleep(20); revision=w->revision; GuiLatency(TRUE);
+    // Device input arrives as one compositor backlog. It must become one
+    // completed frame with continuous strokes, rather than 80 waited presents.
+    daif=ArchDaif;ArchIrqOff;started=ArchCntVct;
+    for(i=0;i<80;i++)GuiMouseInput(w->x+4+20+i*3,w->y+25+200,1,0);
+    GuiMouseInput(w->x+4+257,w->y+25+200,0,0);
+    GuiMouseInput(w->x+4+320,w->y+25+180,1,0);
+    GuiMouseInput(w->x+4+380,w->y+25+200,1,0);
+    GuiMouseInput(w->x+4+380,w->y+25+200,0,0);
+    ArchIntRestore(daif);
+    while(w->presented<=revision)Sleep(1);
+    elapsed=(ArchCntVct-started)*1000000/cnt_freq;
+    if(w->revision!=revision+1 || elapsed>100000 || gui.latency_count!=1)throw(91);
+    I64 maximum=GuiLatency(TRUE);
+    if(maximum>100000)throw(92);
+    U8 *s=MStrPrint("GUI DRAW DRAG samples=82 presents=%d elapsed=%d max=%d us\\n",w->revision-revision,elapsed,maximum);GuiLog(s);Free(s);GuiLog("GUI DRAW DRAG PASS\\n");
+}
 ''')
     subprocess.run(['mcopy', '-o', '-i', disk, fixture, '::Burst.cool'], check=True)
     script += testvm.typed('#include "C:/Burst.cool"\n')
@@ -48,7 +69,9 @@ def boot(mode):
     if '--diagnose-burst' in sys.argv:
         script += 'wait GUI DRAW PRESENTED\ndelay 100\nquit\n'
     else:
-        script += 'wait GUI DRAW PONG \n' * 80 + 'wait GUI DRAW PRESENTED\nquit\n'
+        script += 'wait GUI DRAW PONG \n' * 80 + 'wait GUI DRAW PRESENTED\n'
+        script += testvm.pointer_absolute(200, 65, 800, 600) + 'delay 20\n1 272 1\ndelay 20\n1 272 0\ndelay 20\n'
+        script += testvm.typed('GuiDrawDrag;\n') + 'wait GUI DRAW DRAG PASS\nquit\n'
     (d / 'input.txt').write_text(script)
     vm = ROOT / ('build/coolvm-venus' if mode == 'venus' else 'build/coolvm')
     testvm.run_vm(testvm.vm_command(KERNEL, executable=vm, no_venus=mode == 'cpu', size=(800, 600),
@@ -67,12 +90,19 @@ def boot(mode):
     for start in (0,80):
         duration = times[start+79]-times[start]
         assert duration <= 100, f'{mode}: key burst took {duration} ms'
+    drag = re.search(r'GUI DRAW DRAG samples=82 presents=(\d+) elapsed=(\d+) max=(\d+) us', log)
+    assert drag and int(drag[1]) == 1 and max(int(drag[2]), int(drag[3])) <= 100000, log[-3000:]
     w, h, rows = testvm.read_png(d / 'screen.png')
     pixel = lambda x, y: tuple(rows[y][3*x:3*x+3])
     assert pixel(140, 205) == (0, 0, 0), 'mouse painting at local coordinates'
     assert pixel(220, 205) == (0, 170, 255), 'GrRect color'  # clear of the arrow at (140, 205)
     assert pixel(183, 228) == (255, 170, 0), 'overlapping rectangle'
     assert pixel(120, 155) == (255, 255, 255), 'pixel client origin'
+    for x in range(140, 378):
+        assert pixel(x, 355) == (0, 0, 0), f'gap in drag stroke at {x}'
+    assert pixel(470, 345) == (0, 0, 0), 'line must fill the gap between distant points'
+    assert pixel(410, 345) == (255, 255, 255), 'release must break the stroke'
+    print(f'gui-draw-drag: {mode}, 82 points, one present, input-to-compose max {drag[3]} us, completed {drag[2]} us PASS', flush=True)
     print(f'gui-draw-test: {mode}, five windows, local click, 80 host keys / 80 queued keys in {times[79]-times[0]} / {times[159]-times[80]} ms PASS', flush=True)
     return w, h, rows
 

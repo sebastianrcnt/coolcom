@@ -26,6 +26,7 @@ for name, adapter in [('NativeExit', 'WKernelExit'), ('NativeErrPutS', 'WKernelE
 runtime = runtime.replace('"%zu"', '"%u"').replace('"%li"', '"%d"')
 with out.open('w') as f:
     f.write('// Generated standalone kernel-shell Warm compiler. See warmc.\n')
+    f.write('#define WARM_COOPERATIVE 1\n')
     for line in (source / 'Warm.cool').read_text().splitlines():
         if line.startswith('#include '):
             f.write((source / line.split('"')[1]).read_text() + '\n')
