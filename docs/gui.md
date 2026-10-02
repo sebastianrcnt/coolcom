@@ -85,7 +85,9 @@ merged `CAllocDma` paths. No additional heap changes were needed.
 
 Implemented task-owned cell windows and a core-0 compositor task. `Gui;` opens
 two independent shells. Click focuses; title dragging moves; the bottom-right
-box resizes; the left close box stops the terminal's process group; the right
+box previews a resize with a gray patterned outline and commits the size once on
+release. The replacement front and back buffers retain the old committed client
+until the app repaints. The left close box stops the terminal's process group; the right
 zoom box toggles maximized/floating geometry. Ctrl+Alt+N opens a shell,
 Ctrl+Alt+Tab cycles focus, Ctrl+Alt+Left/Right tiles halves, Ctrl+Alt+Up fills the
 screen, and Ctrl+Alt+Q returns to the preserved full-screen terminal.

@@ -55,6 +55,7 @@ class CFb
 
 CFb fb;
 Bool gui_active; // Gui.cool owns scanout while the desktop is active.
+U8 *gui_display_hook; // queue mode changes on the compositor, including while it waits for the GPU
 // The generated Vulkan layer stays on disk, owned by a resident compiler task.
 U8 *venus_frame_hook;  // U0 (*)(Bool all, I64 scroll, I64 cx, I64 cy, I64 cells)
 U8 *venus_fill_hook;   // U0 (*)(I64 x, I64 y, I64 w, I64 h, I64 rgb)
@@ -751,11 +752,12 @@ Bool FbInit()
     return TRUE;
 }
 
-Bool FbResizeCells(I64 w, I64 h)
+Bool FbResizeCells(I64 w, I64 h, U8 *paint = NULL)
 {//Vulkan resize: new cell snapshots; the app replaces its size-dependent resources.
     CVtCell *drawn, *snap;
     U8 *snap_row;
     I64 *x0, *x1, daif, cols = w / font.cw, rows = h / font.ch, i;
+    U0 (*draw)();
     drawn = MAlloc(cols * rows * sizeof(CVtCell)); snap = MAlloc(cols * rows * sizeof(CVtCell));
     snap_row = CAlloc(rows); x0 = MAlloc(rows * sizeof(I64)); x1 = CAlloc(rows * sizeof(I64));
     if (!drawn || !snap || !snap_row || !x0 || !x1) {
@@ -771,6 +773,7 @@ Bool FbResizeCells(I64 w, I64 h)
     fb.redraw_all = TRUE; fb.pending = TRUE;
     FbRenderLocked;  // the Vulkan app gets the new size and every row
     FbRenderUnlock(daif);
+    if (draw = paint) (*draw)();
     return TRUE;
 }
 
@@ -833,14 +836,15 @@ I64 FontScale(I64 scale = 0)
     return font.scale;
 }
 
-Bool FbResize(I64 w, I64 h)
+Bool FbResize(I64 w, I64 h, U8 *paint = NULL)
 {//Prepare a replacement, then switch the grid and renderer under its lock.
     CFb next;
     I64 daif, n, i, id, old_id;
     U8 *old_back;
+    U0 (*draw)();
     if (!fb.gpu || (w == fb.w && h == fb.h)) return FALSE;
     if (fb.venus)
-        return FbResizeCells(w, h);
+        return FbResizeCells(w, h, paint);
     MemSet(&next, 0, sizeof(CFb));
     next.w = w; next.h = h; next.stride = w * 4;
     next.cols = w / font.cw; next.rows = h / font.ch;
@@ -862,7 +866,9 @@ Bool FbResize(I64 w, I64 h)
     fb.top = 0; fb.cur_w = 0; gpu.resource = id;
     VtResize(fb.vt, fb.cols, fb.rows);
     fb.redraw_all = TRUE; fb.pending = TRUE;
-    FbRenderLocked; // transfer/select the replacement before releasing old backing
+    // Select a completed desktop/console before releasing the previous scanout.
+    if (draw = paint) (*draw)();
+    else FbRenderLocked;
     GpuUnref(old_id);
     Free(old_back);
     FbRenderUnlock(daif);
@@ -874,17 +880,18 @@ fb_resize_fail:
 
 U0 FbDisplayTask(U8 *data)
 {//Mode changes allocate in task context, not the rendering timer interrupt.
-    I64 w, h;
+    I64 w, h; U0 (*changed)(I64 w, I64 h);
     CVirtBlk *d = &gpu.q[0];
     no_warn data;
     while (gpu.active) {
         Sleep(50);
-        if (!gui_active && (VioRd(d, VIO_CONFIG) & 1)) {
+        if (VioRd(d, VIO_CONFIG) & 1) {
             // Clear first: changes during GET_DISPLAY_INFO remain pending.
             VioWr(d, VIO_CONFIG + 4, 1); VioWr(d, VIO_ISR_ACK, 2);
             if (GpuDisplayInfo(&w, &h)) {
-                FbResize(w, h);
-                if (FontScaleAuto(fb.w, FbScaleReported) != font.scale)  // the window moved to another screen
+                if (gui_active && (changed = gui_display_hook)) (*changed)(w, h);
+                else FbResize(w, h);
+                if (!gui_active && FontScaleAuto(fb.w, FbScaleReported) != font.scale)  // the window moved to another screen
                     FbRegrid(FontScaleAuto(fb.w, FbScaleReported));
             }
         }
