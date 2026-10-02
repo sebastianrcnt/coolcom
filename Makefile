@@ -529,6 +529,6 @@ test: ui-test
 
 .PHONY: gui-loading-test
 gui-loading-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal)
-	python3 tools/gui-loading-test.py $< $(if $(RUN_VENUS),--venus)
+	python3 tools/gui-loading-test.py $< $(if $(RUN_VENUS),--venus) $(if $(filter test,$(MAKECMDGOALS)),--loaded)
 
 test: gui-loading-test
