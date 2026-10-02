@@ -11,12 +11,35 @@ from testvm import ROOT
 OUT = ROOT / 'build/gui-resize-test'
 KERNEL = sys.argv[1]
 FIXTURE = r'''
-U0 ResizeSettle() {Sleep(40); while(gui.damage) Sleep(1);}
+U0 ResizeFence(I64 n=-1)
+{// Queue the screenshot after mouse input; its counter acknowledges composition
+ // and the completed BMP write, on CPU and Venus alike. No elapsed-time fence.
+    I64 shot=gui.shots,size; U8 *path,*dest,*bmp;
+    GuiKey(KF_CTRL|KF_ALT|'p');
+    while(gui.shots==shot) Sleep(1);
+    path=MStrPrint("C:/Shots/%03d.BMP",shot);
+    if(!FileFind(path)) throw(21);
+    if(n>=0) {
+        // Copy/Move print into the cell fixture; use silent file I/O instead.
+        dest=MStrPrint("C:/R%02d.BMP",n);
+        bmp=FileRead(path,&size);
+        if(!bmp || FileWrite(dest,bmp,size)<=0) throw(22); Free(bmp); Free(dest);
+    }
+    Del(path,FALSE,FALSE,FALSE);
+    Free(path);
+}
+U0 ResizeSettle() {ResizeFence;}
+U0 ResizeUiPainted(CGuiWindow *w)
+{// Gallery's status-bar top rule moves into the newly exposed client area.
+ // This is a visible app-frame completion marker, rather than a repaint delay.
+    I64 off=((GUI_TITLE+GUI_PAD+w->h-22)*w->scale)*w->pw+(1+GUI_PAD+100)*w->scale;
+    while((w->pixels[off]&0xFFFFFF)!=0) Sleep(1);
+    ResizeSettle;
+}
 U0 ResizeShot(I64 n, CGuiWindow *w)
 {
-    ResizeSettle;
-    U8 *path=MStrPrint("C:/R%02d.BMP",n), *msg;
-    if(!GuiShot(path)) throw(10); Free(path);
+    ResizeFence(n);
+    U8 *msg;
     msg=MStrPrint("RESIZE SHOT %d %d %d %d %d\n",n,w->x,w->y,w->w,w->h); GuiLog(msg); Free(msg);
 }
 U0 ResizeMouse(I64 x,I64 y,I64 buttons)
@@ -66,10 +89,10 @@ U0 ResizeDesktop(U8 *data)
     if(w->term->size_seq!=seq+1 || w->term->cells[0].cp!='R') throw(18);
     gui.trace=1; GuiGallery;
     while(gui.focus==w || StrCmp(gui.focus->title,"Gallery")) Sleep(1);
-    ui=gui.focus; ResizeSettle; Sleep(200);
+    ui=gui.focus; ResizeUiPainted(ui);
     GuiMove(ui,40,GUI_MENU+12); ResizeDrag(ui,6);
     // OS.Ui consumes the resize and produces a frame at the new dimensions.
-    Sleep(500);
+    ResizeUiPainted(ui);
     ResizeShot(9,ui); GuiLog("RESIZE DESKTOP READY\n");
     I64 widths[5], heights[5];
     widths[0]=1024; widths[1]=648; widths[2]=901; widths[3]=400; widths[4]=905;
@@ -84,7 +107,12 @@ U0 ResizeDesktop(U8 *data)
     }
     GuiLog("RESIZE DESKTOP PASS\n"); while(TRUE) Sleep(100);
 }
-U0 ResizeLaunch(I64 desktop) {if(desktop) Spawn(&ResizeDesktop,NULL,"Resize desktop",0,adam_task); else Spawn(&ResizePixel,NULL,"Resize pixel",0,adam_task);}
+U0 ResizeLaunch(I64 desktop)
+{// mkdir prints: prepare the directory on the shell before creating the cell fixture.
+    if(!FileFind("C:/Shots")) DirMk("C:/Shots");
+    if(desktop) Spawn(&ResizeDesktop,NULL,"Resize desktop",0,adam_task);
+    else Spawn(&ResizePixel,NULL,"Resize pixel",0,adam_task);
+}
 '''
 
 
@@ -132,7 +160,7 @@ def boot(mode, scale, desktop):
         script += 'wait RESIZE DESKTOP PASS\n'
     else:
         script += 'wait RESIZE PIXEL PASS\n'
-    script += 'delay 100\nquit\n'
+    script += 'quit\n'
     (d / 'input.txt').write_text(script)
     env = dict(os.environ, COOLVM_FRAMES=str(frames))
     testvm.run_vm(testvm.vm_command(KERNEL,
@@ -167,7 +195,8 @@ def boot(mode, scale, desktop):
         w, h, rows = testvm.read_png(d / 'screen.png')
         assert (w, h) == (905*scale, 665*scale)
         px = lambda x, y: bytes(rows[y*scale][x*scale*3:x*scale*3+3])
-        assert px(880, 10) == b'\xff'*3 and px(880, 21) == b'\x00'*3, f'{name}: menu width'
+        # The right margin is outside the clock glyphs (880,10 can be black).
+        assert px(903, 10) == b'\xff'*3 and px(903, 21) == b'\x00'*3, f'{name}: menu width'
         assert px(880, 640) == b'\x00'*3 and px(881, 640) == b'\xff'*3, f'{name}: expanded desktop'
         sizes = [(1024, 768), (648, 496), (901, 657), (400, 300), (905, 665),
                  (650, 490), (1100, 750), (700, 510), (1000, 700)]
