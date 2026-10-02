@@ -507,6 +507,16 @@ gui-redraw-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN
 
 test: gui-redraw-test
 
+.PHONY: gui-resize-test
+# Frame capture writes large CPU/Venus snapshots. Run after the existing suites
+# under make -j test so these VMs do not compete with input-latency checks.
+GUI_RESIZE_AFTER := $(if $(filter test,$(MAKECMDGOALS)),$(filter-out ui-test gui-resize-test,$(shell sed -n 's/^test: *//p' Makefile | tr ' ' '\n' | grep -v '[$$()]')) \
+    $(if $(RUN_VENUS),gui-cube-test gui-vulkan-test))
+gui-resize-test: build/kernel.Image coolvm build/warmcool/Kernel.cool $(if $(RUN_VENUS),build/coolvm-venus venus-terminal) | $(GUI_RESIZE_AFTER)
+	python3 tools/gui-resize-test.py $< $(if $(RUN_VENUS),--venus)
+
+test: gui-resize-test
+
 # (gui-files-test profiled the immediate-mode Files; OS.Ui's Files is measured by ui-test U5.)
 .PHONY: host-scroll-test
 host-scroll-test:

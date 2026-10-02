@@ -82,7 +82,18 @@ U0 GuiGpuRect(CGuiTexture *t, I64 x, I64 y, Bool transparent = FALSE)
 U0 GuiGpuFrame()
 {
     I64 i, j; CGuiWindow *w; CGuiTexture *t;
+    CGfxImage old_target; CGfxBuffer old_readback; Bool resized = ggui.target.w != fb.w || ggui.target.h != fb.h;
     VkRenderingAttachmentInfo attachment; VkRenderingInfo rendering; VkBufferImageCopy copy;
+    if (resized) {
+        // Keep the displayed blob alive until the replacement contains a complete desktop.
+        MemCpy(&old_target, &ggui.target, sizeof(CGfxImage)); MemCpy(&old_readback, &ggui.readback, sizeof(CGfxBuffer));
+        GfxBegin; vn_encode_vkDestroyPipeline(&gfx.enc, 0, gfx.device, ggui.pipeline, NULL);
+        vn_encode_vkDestroyPipelineLayout(&gfx.enc, 0, gfx.device, ggui.layout, NULL); GfxSubmit;
+        GfxPipeline(fb.w, fb.h, ggui.set_layout, ggui.shaders, &ggui.layout, &ggui.pipeline);
+        GfxImageCreate(&ggui.target, fb.w, fb.h, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+        GfxBufferCreate(&ggui.readback, (fb.w * fb.h * 4 + 16383) & ~16383, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        GfxRecord; GfxImageBarrier(&ggui.target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, VK_ACCESS_MEMORY_READ_BIT); GfxExecute;
+    }
     // Texture identity follows the window across focus/Z-order changes.
     for (j = 1; j <= GUI_WINDOWS; j++) {
         t = &ggui.textures[j];
@@ -131,6 +142,7 @@ U0 GuiGpuFrame()
     GfxImageBarrier(&ggui.target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_READ_BIT);
     GfxExecute;
     GfxCheck(GpuScanoutBlob(ggui.readback.blob, fb.w, fb.h, fb.w * 4), "GUI scanout");
+    if (resized) {GfxBufferDestroy(&old_readback); GfxImageDestroy(&old_target);}
 }
 U0 GuiGpuStop()
 {

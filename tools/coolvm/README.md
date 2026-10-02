@@ -333,6 +333,13 @@ The contract follows [Virtio 1.2 §5.7](https://docs.oasis-open.org/virtio/virti
 Window and backing-scale changes update the preferred pixel dimensions, set
 `VIRTIO_GPU_EVENT_DISPLAY`, advance config generation and assert the config IRQ.
 Input scripts can inject the same event with `resize WIDTH HEIGHT` after a `wait`.
+While the GUI is active, the compositor coalesces these events and replaces its
+desktop, canvas, overlay and CPU/Venus scanout at the new physical size. The menu
+bar spans the new width and windows are brought back onto the desktop. The old
+scanout stays visible until a complete replacement frame is ready.
+`make gui-resize-test` verifies this headlessly at 1x/2x, including event bursts,
+gray resize outlines, preserved cell/pixel/OS.Ui content and captured frames with
+no white flash while a pixel app delays repainting.
 `gpu-test.c` exercises the real MMIO queues and uses independent pixel oracles.
 
 The OS consumes display events in a task, replaces the resource/backing and

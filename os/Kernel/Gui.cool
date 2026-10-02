@@ -51,6 +51,8 @@ class CGui
     CGuiWindow *windows[GUI_WINDOWS], *focus, *drag, *capture;
     I64 count, scale, w, h, mx, my, buttons, dx, dy, action;
     Bool resizing, damage, input_wake;
+    I64 resize_w, resize_h, display_w, display_h;
+    U32 *next_desktop, *next_canvas, *next_overlay;
     Bool present_wake; // a present arrived while the compositor was running: compose again before sleeping
     I64 x0, y0, x1, y1, clock_minute;
     U32 *desktop, *canvas, *overlay, pointer[12 * 18], ibeam[9 * 16], cursor[32 * 32];
@@ -172,23 +174,39 @@ U0 GuiVulkanDetach(CGuiWindow *w)
 }
 Bool GuiResize(CGuiWindow *w, I64 width, I64 height)
 {
-    U32 *pixels, *back = NULL; I64 cols, rows, bytes;
+    U32 *pixels, *back = NULL, *src; I64 cols, rows, bytes, pw, ph, x, y, sx, sy, s = gui.scale;
     if (!w || width < 160 || height < 64 || width > 4096 || height > 4096) return FALSE;
     cols = width * gui.scale / font.cw; rows = height * gui.scale / font.ch;
     if (!w->pixel) {width = cols * font.cw / gui.scale; height = rows * font.ch / gui.scale;}
+    if (w->pixels && width == w->w && height == w->h && s == w->scale && w->serial == font.serial) return TRUE;
+    pw = (width + 2 * GUI_PAD + 3) * s; ph = (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * s;
     bytes = (width + 2 * GUI_PAD + 3) * (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * gui.scale * gui.scale * 4;
     // CPU backing needs virtual contiguity only; MAlloc uses the large region.
     pixels = MAlloc(bytes); if (!pixels) return FALSE;
     if (w->pixel) {back = MAlloc(bytes); if (!back) {Free(pixels); return FALSE;}}
     MemSet(pixels, 0xFF, bytes); if (back) MemSet(back, 0xFF, bytes);
+    // Preserve the committed client, never a producer's half-painted back buffer.
+    // Copy logical pixels across scale changes too; newly exposed space stays white.
+    if (w->pixels) for (y = 0; y < MinI64(height, w->h) * s; y++) {
+            sy = (GUI_TITLE + GUI_PAD) * w->scale + y * w->scale / s;
+            src = w->pixels + sy * w->pw + (1 + GUI_PAD) * w->scale;
+            if (s == w->scale) MemCpy(pixels + (y + (GUI_TITLE + GUI_PAD) * s) * pw + (1 + GUI_PAD) * s, src, MinI64(width, w->w) * s * 4);
+            else for (x = 0; x < MinI64(width, w->w) * s; x++) {
+                    sx = x * w->scale / s;
+                    pixels[(y + (GUI_TITLE + GUI_PAD) * s) * pw + (1 + GUI_PAD) * s + x] = src[sx];
+                }
+        }
+    if (back) MemCpy(back, pixels, bytes);
     GuiWinDamage(w); GuiVulkanDetach(w); Free(w->pixels); Free(w->back);
     w->pixels = pixels; w->back = back; w->pending = FALSE;
     w->w = width; w->h = height; w->scale = gui.scale;
-    w->pw = (width + 2 * GUI_PAD + 3) * gui.scale; w->ph = (height + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3) * gui.scale;
+    w->pw = pw; w->ph = ph;
     w->serial = font.serial; w->cursor_w = 0; w->clip_x1 = -1;
     if (w->term) VtResize(w->term, cols, rows);
     GuiDecorate(w); w->dirty = TRUE;
     if (w->pixel && w->owner && w->owner->gui_window == w) {
+        // Pixel apps receive the explicit event below, not a second KEY_RESIZE from their terminal.
+        if (w->owner->terminal == w->term) w->owner->term_size_seq = w->term->size_seq;
         CGuiEvent e; MemSet(&e, 0, sizeof(e)); e.type = GUI_EVENT_RESIZE; GuiEventPush(w, &e);
     }
     return TRUE;
@@ -220,9 +238,14 @@ Bool GuiPresent(Bool explicit = FALSE)
 U0 GuiMove(CGuiWindow *w, I64 x, I64 y)
 {
     if (!w) return;
-    if (x < 0) x = 0; if (x > gui.w - 40) x = gui.w - 40;
-    if (y < GUI_MENU) y = GUI_MENU; if (y > gui.h - GUI_TITLE) y = gui.h - GUI_TITLE;
+    x = ClampI64(x, 0, MaxI64(0, gui.w - 40));
+    y = ClampI64(y, GUI_MENU, MaxI64(GUI_MENU, gui.h - GUI_TITLE));
     GuiWinDamage(w); w->x = x; w->y = y; GuiWinDamage(w);
+}
+U0 GuiFit(CGuiWindow *w)
+{// Fit the whole window when possible; oversized clients keep their title accessible.
+    GuiMove(w, ClampI64(w->x, 0, MaxI64(0, gui.w - w->w - 2 * GUI_PAD - 3)),
+            ClampI64(w->y, GUI_MENU, MaxI64(GUI_MENU, gui.h - w->h - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER - 3)));
 }
 U0 GuiZoom(CGuiWindow *w)
 {
@@ -502,11 +525,11 @@ U0 GuiRaster(CGuiWindow *w)
 }
 U0 GuiDesktop()
 {
-    I64 x, y, s = gui.scale, pw = gui.w * s, ph = gui.h * s;
+    I64 x, y, s = gui.scale, pw = fb.w, ph = fb.h;
     U8 clock[32]; I64 i, left = 68;
     for (y = 0; y < ph; y++) for (x = 0; x < pw; x++) gui.desktop[y * pw + x] = ((x / s ^ y / s) & 1) * GUI_WHITE;
-    GuiFill(gui.desktop, pw, ph, s, 0, 0, gui.w, GUI_MENU, GUI_WHITE);
-    GuiFill(gui.desktop, pw, ph, s, 0, GUI_MENU - 1, gui.w, 1, 0);
+    GuiFill(gui.desktop, pw, ph, s, 0, 0, (pw + s - 1) / s, GUI_MENU, GUI_WHITE);
+    GuiFill(gui.desktop, pw, ph, s, 0, GUI_MENU - 1, (pw + s - 1) / s, 1, 0);
     GuiText(gui.desktop, pw, ph, s, 8, 3, "System");
     if (gui.focus) for (i = 0; i < gui.focus->menu_count; i++) {GuiText(gui.desktop, pw, ph, s, left + 8, 3, gui.focus->menus[i].title); left += GuiTextWidth(gui.focus->menus[i].title) + 16;}
     StrPrint(clock, "%T", Now); clock[5] = 0;
@@ -638,6 +661,28 @@ U0 GuiCompose()
     }
     gui.damage = FALSE; gui.frames++; gui.compose_ticks += ArchCntVct - started;
 }
+U0 GuiResizeOutline(Bool visible)
+{// The overlay owns only the rubber-band border; the window backing never changes.
+    CGuiWindow *w = gui.drag; I64 x, y, bw = gui.resize_w + 2 * GUI_PAD + 3;
+    I64 bh = gui.resize_h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER + 3, color;
+    if (!w || !gui.resizing) return;
+    for (y = 0; y < bh; y++) for (x = 0; x < 2; x++) {
+            color = 0; if (visible) color = 0xFF808080 | (((x * (bw - 1) + y) & 1) * 0x404040);
+            GuiFill(gui.overlay, fb.w, fb.h, gui.scale, w->x + x * (bw - 1), w->y + y, 1, 1, color);
+        }
+    for (x = 1; x < bw - 1; x++) for (y = 0; y < 2; y++) {
+            color = 0; if (visible) color = 0xFF808080 | (((x + y * (bh - 1)) & 1) * 0x404040);
+            GuiFill(gui.overlay, fb.w, fb.h, gui.scale, w->x + x, w->y + y * (bh - 1), 1, 1, color);
+        }
+    gui.overlay_revision++; GuiDamage(w->x, w->y, bw, bh);
+}
+U0 GuiResizeTrack(I64 x, I64 y)
+{
+    GuiResizeOutline(FALSE);
+    gui.resize_w = ClampI64(x - gui.drag->x - 2 * GUI_PAD, 160, 4096);
+    gui.resize_h = ClampI64(y - gui.drag->y - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER, 64, 4096);
+    GuiResizeOutline(TRUE);
+}
 U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
 {
     I64 x = mx / gui.scale, y = my / gui.scale, i;
@@ -645,12 +690,17 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
     if (x != gui.mx || y != gui.my) {
         gui.mx = x; gui.my = y;
         if (gui.drag && (buttons & 1)) {
-            if (gui.resizing) GuiResize(gui.drag, MaxI64(160, x - gui.drag->x - 2 * GUI_PAD), MaxI64(64, y - gui.drag->y - GUI_TITLE - 2 * GUI_PAD - GUI_FOOTER));
+            if (gui.resizing) GuiResizeTrack(x, y);
             else GuiMove(gui.drag, x - gui.dx, y - gui.dy);
         }
     }
     if (fb.gpu) GpuPointerMove(mx, my);
     GuiPointerOver(x, y);
+    if (!(buttons & 1) && gui.drag && gui.resizing) {
+        // Include motion delivered with the release, then commit exactly once.
+        GuiResizeTrack(x, y); GuiResizeOutline(FALSE);
+        GuiResize(gui.drag, gui.resize_w, gui.resize_h); gui.resizing = FALSE;
+    }
     if (GuiMenuMouse(x, y, buttons)) {gui.buttons = buttons; gui.wheel = wheel; return;}
     if ((buttons & 1) && !(gui.buttons & 1)) {
         for (i = gui.count - 1; i >= 0; i--) {
@@ -661,7 +711,10 @@ U0 GuiMouse(I64 mx, I64 my, I64 buttons, I64 wheel)
                     if (gui.dx < 20) {if (active) GuiClose(w);}
                     else if (gui.dx >= w->w + 2 * GUI_PAD - 18) {if (active) GuiZoom(w);}
                     else {gui.drag = w; gui.resizing = FALSE;}
-                } else if (active && gui.dx >= w->w + 2 * GUI_PAD - 12 && gui.dy >= w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER - 12) {gui.drag = w; gui.resizing = TRUE;}
+                } else if (active && gui.dx >= w->w + 2 * GUI_PAD - 12 && gui.dy >= w->h + 2 * GUI_PAD + GUI_TITLE + GUI_FOOTER - 12) {
+                    GuiMenuDismiss; gui.drag = w; gui.resizing = TRUE;
+                    gui.resize_w = w->w; gui.resize_h = w->h; GuiResizeOutline(TRUE);
+                }
                 break;
             }
         }
@@ -689,23 +742,51 @@ U0 GuiEnd()
     if (stop = gui.stop_hook) (*stop)();
     gui.frame_hook = gui.stop_hook = NULL;
     for (i = 0; i < gui.count; i++) GuiStopWindow(gui.windows[i]);
-    gui.focus = gui.drag = gui.capture = NULL; gui_active = FALSE; gui_key_hook = gui_mouse_hook = NULL;
+    gui.focus = gui.drag = gui.capture = NULL; gui_active = FALSE; gui_key_hook = gui_mouse_hook = gui_display_hook = NULL;
     fb.redraw_all = TRUE; fb.pending = TRUE;
     FbRender;
 }
 U0 GuiRescale()
 {// Logical geometry survives; backing buffers and GPU textures change atomically
     // on the compositor's core. Resize events request pixel-app repaints.
-    I64 i; U0 (*stop)(), (*start)(); CGuiWindow *w;
-    if (stop = gui.stop_hook) (*stop)(); gui.frame_hook = gui.stop_hook = NULL;
+    I64 i; CGuiWindow *w;
     gui.scale = font.scale; gui.w = fb.w / gui.scale; gui.h = fb.h / gui.scale;
     gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
-    GuiMenuDismiss;
+    gui.drag = NULL; gui.resizing = FALSE; GuiMenuDismiss;
     for (i = 0; i < gui.count; i++) {
         w = gui.windows[i]; GuiResize(w, w->w, w->h); GuiMove(w, w->x, w->y);
     }
-    GuiDesktop; GuiPointerApply; if (start = gui_start_hook) (*start)();
+    GuiDesktop; GuiPointerApply;
     GuiLog("GUI SCALE APPLIED\n");
+}
+U0 GuiDisplayChanged(I64 w, I64 h)
+{// Coalesce events; only GuiTask may change geometry while a Venus frame yields.
+    gui.display_w = w; gui.display_h = h;
+    if (gui.task) TaskWake(gui.task);
+}
+U0 GuiDisplayPaint()
+{// Fb has installed its replacement; publish a complete frame before old scanout is freed.
+    I64 i; CGuiWindow *w;
+    Free(gui.desktop); Free(gui.canvas); Free(gui.overlay);
+    gui.desktop = gui.next_desktop; gui.canvas = gui.next_canvas; gui.overlay = gui.next_overlay;
+    gui.next_desktop = gui.next_canvas = gui.next_overlay = NULL;
+    gui.w = fb.w / gui.scale; gui.h = fb.h / gui.scale;
+    gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
+    gui.drag = gui.capture = NULL; gui.resizing = FALSE; GuiMenuDismiss;
+    for (i = 0; i < gui.count; i++) {
+        w = gui.windows[i];
+        GuiFit(w);
+    }
+    GuiDesktop; GuiCompose; GuiPointerApply;
+}
+Bool GuiDisplayResize(I64 w, I64 h)
+{
+    if (w == fb.w && h == fb.h) return TRUE;
+    gui.next_desktop = CAlloc(w * h * 4); gui.next_canvas = CAlloc(w * h * 4); gui.next_overlay = CAlloc(w * h * 4);
+    if (gui.next_desktop && gui.next_canvas && gui.next_overlay && FbResize(w, h, &GuiDisplayPaint)) return TRUE;
+    Free(gui.next_desktop); Free(gui.next_canvas); Free(gui.next_overlay);
+    gui.next_desktop = gui.next_canvas = gui.next_overlay = NULL;
+    return FALSE;
 }
 Bool GuiShot(U8 *path)
 {//Save the composed desktop (physical pixels, no pointer) as a 32-bit BMP.
@@ -756,7 +837,19 @@ U0 GuiTask(U8 *data)
     I64 i, j, action; CGuiWindow *w;
     no_warn data;
     while (gui_active) {
-        if (font.scale != gui.scale) GuiRescale;
+        Bool display = FALSE;
+        if (gui.display_w) {
+            i = gui.display_w; j = gui.display_h; gui.display_w = 0;
+            if (GuiDisplayResize(i, j)) {
+                display = TRUE;
+                if (FontScaleAuto(fb.w, FbScaleReported) != font.scale) FbRegrid(FontScaleAuto(fb.w, FbScaleReported));
+                GuiLog("GUI DISPLAY APPLIED\n");
+            }
+        }
+        if (font.scale != gui.scale) {
+            GuiRescale;
+            if (display) for (i = 0; i < gui.count; i++) GuiFit(gui.windows[i]);
+        }
         CGuiEvent input;
         while (GuiInputPop(&input)) {
             gui.input_vct = input.vct;
@@ -791,7 +884,9 @@ U0 GuiTask(U8 *data)
             if (w->closing && TimerJiffies >= w->close_deadline) GuiStopWindow(w);
             if (w->closed && !w->owner) {
                 if (gui.menu_window == w) GuiMenuDismiss;
-                GuiWinDamage(w); if (gui.focus == w) gui.focus = NULL; if (gui.drag == w) gui.drag = NULL; if (gui.capture == w) gui.capture = NULL;
+                GuiWinDamage(w); if (gui.focus == w) gui.focus = NULL;
+                if (gui.drag == w) {GuiResizeOutline(FALSE); gui.drag = NULL; gui.resizing = FALSE;}
+                if (gui.capture == w) gui.capture = NULL;
                 // Terminal refs keep data alive until inherited tasks are reaped.
                 for (j = i; j < gui.count - 1; j++) gui.windows[j] = gui.windows[j + 1];
                 gui.count--; VtRelease(w->term); Free(w->vk_mirror); Free(w->pixels); Free(w->back); Free(w); i--;
@@ -827,7 +922,8 @@ Bool Gui()
     gui.buttons = mouse.buttons; gui.wheel = mouse.wheel;
     gui.mx = mouse.mx / gui.scale; gui.my = mouse.my / gui.scale;
     gui.input_head = gui.input_tail = 0; gui.input_lost = gui.input_wake = FALSE;
-    gui_active = TRUE; gui_key_hook = &GuiKey; gui_mouse_hook = &GuiMouseInput;
+    gui.display_w = 0; gui.resizing = FALSE;
+    gui_active = TRUE; gui_key_hook = &GuiKey; gui_mouse_hook = &GuiMouseInput; gui_display_hook = &GuiDisplayChanged;
     gui.menu_open = FALSE; gui.menu_window = NULL; gui.overlay_revision++;
     GuiPointerInit; GuiPointerSet(gui.pointer, 12, 18); GuiDesktop;
     FbRenderUnlock(daif);

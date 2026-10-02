@@ -85,7 +85,9 @@ merged `CAllocDma` paths. No additional heap changes were needed.
 
 Implemented task-owned cell windows and a core-0 compositor task. `Gui;` opens
 two independent shells. Click focuses; title dragging moves; the bottom-right
-box resizes; the left close box stops the terminal's process group; the right
+box previews a resize with a gray patterned outline and commits the size once on
+release. The replacement front and back buffers retain the old committed client
+until the app repaints. The left close box stops the terminal's process group; the right
 zoom box toggles maximized/floating geometry. Ctrl+Alt+N opens a shell,
 Ctrl+Alt+Tab cycles focus, Ctrl+Alt+Left/Right tiles halves, Ctrl+Alt+Up fills the
 screen, and Ctrl+Alt+Q returns to the preserved full-screen terminal.
@@ -98,7 +100,9 @@ The shared `FbGlyph` cell rasterizer targets window BGRA backing; Venus uploads
 only changed window textures and draws their rectangles. CPU composition clips
 copies to desktop damage. GPU commands have their own command buffer, and GPU
 resources are released when leaving the desktop. Display mode changes are
-currently deferred until returning to the full-screen terminal.
+applied by the compositor while the GUI is active: it rebuilds the desktop,
+canvas, overlay and CPU/Venus scanout, fits windows into the new area, and
+composes the new desktop before selecting the replacement scanout.
 
 Validation (2026-10-01): `make -j test` exited 0. The new `gui-test` runs unchanged
 Vim, Top and Tmux in a window, closes a background shell through the mouse,
@@ -534,3 +538,29 @@ model, describes the window from it, and changes it with messages. The menus,
 dialogs, tables, text fields, Files, Top, Settings and the Gallery are built on
 it. Its design, measurements and screenshots are in
 [ui-framework.md](ui-framework.md); `tools/ui-test.py` is its VM acceptance test.
+
+
+### Resize acceptance under concurrent load
+
+`tools/gui-resize-test.py` captures CPU/Venus frames headlessly at 1x and 2x.
+Each mouse operation queues Ctrl+Alt+P after its input and waits for the
+compositor's screenshot completion counter before checking geometry or saving
+a reference. Display PASS markers follow that completed capture, so the host
+can issue the next mode change or quit without a fixed settling delay. Gallery
+repaint readiness is checked using its status-bar rule in the newly exposed
+client area. The delayed pixel-app repaint and 1 ms display-event burst remain
+intentional test stimuli.
+
+The reported `cpu-1x-desktop: menu width` failure was a clock-dependent oracle,
+not a delayed mode change. The archived host PNG and guest R14.BMP both contain
+the complete 905x665 desktop. Pixel (880,10) intersects the minute digit in the
+13:48 clock and is black; the test now samples the blank right margin (903,10)
+and the menu's bottom rule (903,21). Raw scanout checks still reject incomplete
+menu edges, incomplete desktop pixels, and white or partial client frames.
+
+
+Validation (2026-10-02): ten consecutive runs with three background headless GUI
+VMs (two CPU and one Venus) and four CPU workers passed without retries: all
+80 CPU/Venus, 1x/2x pixel/desktop scenarios. The background processes stayed
+alive throughout every run. Load driver and per-run logs:
+`build/gui-resize-load.py`, `build/gui-resize-load/`, `build/gui-resize-load.log`.
