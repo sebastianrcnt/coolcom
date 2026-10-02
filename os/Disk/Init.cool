@@ -10,10 +10,7 @@
 #include "C:/Diff.cool"
 #include "C:/Lua.cool"
 
-// The console font (docs/fonts.md): Sarasa Mono K when make disk-install found it on the
-// Mac, else the built-in Unifont. Once per boot; FontSet(NULL) goes back to Unifont.
-if (!font.chosen && FileFind("C:/Fonts/SarasaMonoK-Regular.ttf"))
-    FontSet("C:/Fonts/SarasaMonoK-Regular.ttf", 14);
+// The console font is the built-in Unifont (docs/fonts.md); FontSet chooses another.
 
 U0 Cls()
 {//TempleOS's clear screen, as ANSI so the screen and the host terminal both clear.

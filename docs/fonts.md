@@ -50,9 +50,10 @@ copy them from the Mac when present (`tools/disk-fonts.sh`) into `C:/Fonts`:
 - `~/Library/Fonts/SarasaMonoK-Regular.ttf` and `SarasaMonoK-Bold.ttf`;
 - the system's `NanumGothic.ttc`, found under `/System/Library/AssetsV2`.
 
-`C:/Init.cool` sets Sarasa Mono K at 14 when it is there, once per boot: a later
-`FontSet` is kept, even in new Tmux panes. The disks the tests build have no fonts, so
-their screens stay Unifont at 1x.
+Unifont is the default everywhere: the console, the terminal and the GUI. The copied fonts
+are only used when chosen, with `FontSet` in the shell or the font choice in Settings; a
+`FontSet` is kept for the rest of the boot, even in new Tmux panes. The disks the tests
+build have no fonts, so their screens are Unifont at 1x.
 
 ## Tests
 

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Copy the Mac's console fonts into C:/Fonts (docs/fonts.md). Font files are not in the
-# repository: Sarasa Mono K (Regular and Bold, the default console font when present) from
-# ~/Library/Fonts, and the system's NanumGothic.ttc. Missing files are skipped; the console
-# then uses the built-in Unifont.
+# repository: Sarasa Mono K (Regular and Bold, for FontSet and Settings) from
+# ~/Library/Fonts, and the system's NanumGothic.ttc. Missing files are skipped. The console
+# font stays the built-in Unifont until FontSet chooses one of these.
 # Usage: disk-fonts.sh image [-n]   (-n: leave files that are already there alone)
 set -eu
 IMG=$1
@@ -17,4 +17,4 @@ for f in "$HOME/Library/Fonts/SarasaMonoK-Regular.ttf" "$HOME/Library/Fonts/Sara
     fi
     mcopy -o -i "$IMG" "$f" ::Fonts/
 done
-[ -n "$found" ] || echo "disk-fonts: no Sarasa Mono K or NanumGothic on this Mac; the console uses Unifont"
+[ -n "$found" ] || echo "disk-fonts: no Sarasa Mono K or NanumGothic on this Mac"

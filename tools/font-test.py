@@ -75,8 +75,8 @@ def hidpi(venus):
     print(f'font-test: 2x Unifont equals 1x doubled ({mode})', flush=True)
 
 
-# Init.cool sets Sarasa 14 when C:/Fonts has it; the line is drawn at the top-left.
-TTF = testvm.typed('Print("FONT%d %d %d %d %d\\n", 1, font.cfg.face != NULL, font.cfg.bold != NULL, font.cw, font.ch); '
+# Sarasa 14 from C:/Fonts; the line is drawn at the top-left.
+TTF = testvm.typed('FontSet("C:/Fonts/SarasaMonoK-Regular.ttf", 14); Print("FONT%d %d %d %d %d\\n", 1, font.cfg.face != NULL, font.cfg.bold != NULL, font.cw, font.ch); '
                 'ConsClear; Print("Hello \\xed\\x95\\x9c\\xea\\xb8\\x80 \\e[1mbold\\e[0m"); FbCursorHide; '
                 'FbFlush; Sleep(100); Print("\\nEND%d\\n", 1);\n') + 'wait END1\n'
 
